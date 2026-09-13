@@ -1,186 +1,168 @@
-# Debrowser
+# Debrowser — research branch
 
-A web browser built around a single idea: **a tab should hold the least memory
-and CPU it can get away with, and you should never be able to tell.**
+The measurements behind the resource governor on `claude/master-build`.
 
-It is a complete browser application written from scratch - window, tab strip,
-omnibox, session handling, task manager, and a resource governor that decides
-what every tab is allowed to hold - built on Chromium via Electron for the web
-platform itself. Writing a new HTML/CSS/JS engine would not have served the
-goal here: the requirement is that *real websites run properly*, and a
-hand-rolled engine would fail that on the first site you tried.
+This branch exists because the governor's design is not what it would have
+been if it had been reasoned out rather than measured. Every obvious memory
+lever available to an Electron browser turned out to be a loss, and three
+separate features were removed because a run in `experiments/` contradicted
+the assumption behind them. Someone will eventually want to re-add them. These
+are the receipts.
 
-The interesting part is `src/main/governor/`.
+The browser itself is documented on `claude/master-build`. This branch carries
+the same code plus `experiments/`, so every experiment runs against the
+implementation it informed.
 
 ---
 
-## Running it
+## The question
+
+An Electron browser holding twelve tabs uses around 1.5 GB. The obvious way to
+reduce that is to make each renderer give memory back: force a garbage
+collection when a tab goes idle, purge its heap, freeze it so it stops working.
+All three are one DevTools protocol call away.
+
+The question was how much each of them is actually worth. Nothing was measuring
+it — and the first version of the governor did all three.
+
+---
+
+## The answer
+
+It used **90 MB more than no governor at all**, across twelve tabs, entirely in
+renderer processes.
+
+| Lever | Expected | Measured |
+|---|---|---|
+| `Memory.forciblyPurgeJavaScriptMemory` | frees the tab's heap | **0 MB** beyond a normal GC, and it kills the in-page probe |
+| `HeapProfiler.collectGarbage` on idle tabs | reclaims a few MB | **+9 MB** net on an ordinary page — the profiler agent costs ~6 MB and never returns it |
+| Freezing every idle tab | pure win, CPU → 0 | costs a few MB per tab — it **stops** Chromium's own background reclamation |
+| Doing nothing at all | — | **−10 MB** over a minute, unaided, and still falling |
+
+The thing that beat every forced intervention was leaving the tab alone.
+
+---
+
+## Method
+
+Each file in `experiments/` is a standalone Electron app that isolates one
+variable and prints a number. They share `lib.js` for measurement helpers —
+notably `settledRss`, which samples repeatedly before reporting, because a
+single `getAppMetrics()` call catches whatever the allocator happened to be
+doing at that instant and is not trustworthy to the megabyte.
+
+Two habits did most of the work:
+
+- **Controls.** Experiment 02 bisects a segfault across three modes. It is only
+  evidence because the two innocent modes were run too and showed zero crashes;
+  a bisect where everything crashes proves nothing.
+- **Representative samples.** The per-tab measurement and the twelve-tab
+  benchmark disagreed for a while, and both were correct. The per-tab run used
+  a memory-heavy page — the one shape where forcing a collection pays. Most
+  tabs are not that shape.
+
+---
+
+## Running them
+
+From the repo root, with dependencies installed (`npm install`):
 
 ```bash
-npm install
-npm start                  # balanced
-npm run start:economy      # least memory
-npm run start:performance  # most headroom
-
-npm run smoke              # 21-check end-to-end test, headless
-npm run bench              # memory benchmark
+xvfb-run -a npx electron experiments/01-frozen-page-cdp.js --no-sandbox --disable-gpu
 ```
 
-On Linux without a display, prefix with `xvfb-run -a`. Running as root (in a
-container) additionally needs `--no-sandbox`, which the npm scripts already
-pass; a normal desktop install must not use it.
+On a desktop with a display, drop `xvfb-run -a`. Drop `--no-sandbox` unless
+running as root. `--disable-gpu` keeps results comparable on machines without
+a GPU; it is not required.
 
-### Profiles
+Several take arguments:
 
-| | `economy` | `balanced` | `performance` |
+```bash
+for m in views freeze purge-then-ipc; do
+  xvfb-run -a npx electron experiments/02-frozen-ipc-segfault.js --mode=$m --no-sandbox --disable-gpu
+done
+
+for p in heavy idle; do
+  xvfb-run -a npx electron experiments/04-gc-instrumentation-cost.js --page=$p --no-sandbox --disable-gpu
+done
+
+for m in none gc frozen; do
+  xvfb-run -a npx electron experiments/05-background-reclaim.js --mode=$m --no-sandbox --disable-gpu
+done
+```
+
+Experiment 05 watches a tab for 60 seconds per mode, so the full set takes a
+few minutes. The rest finish in seconds.
+
+The end-to-end numbers come from `npm run bench`, which runs the same workload
+with and without the governor and breaks the result down by process type —
+because a governor that saves memory in every renderer can still lose overall
+by spending it in the browser process. That breakdown is what made the 90 MB
+regression visible.
+
+---
+
+## What each experiment established
+
+| # | Question | Answer | Consequence in the browser |
 |---|---|---|---|
-| memory budget | 700 MB | sized to the machine | 3000 MB |
-| renderer sharing | per site | per tab | per tab |
-| spare renderer | no | yes | yes |
-| discard from | moderate pressure | high pressure | critical pressure |
-
-`balanced` sizes its budget from the host's actual RAM (28-45% of total,
-clamped to 512-6144 MB), because a fixed figure strands memory on a
-workstation and thrashes on a netbook. Override with `--budget=1200`, or drag
-the slider in the task manager.
-
-### Keyboard
-
-`Ctrl/Cmd+T` new tab · `+W` close · `+R` reload · `+L` address bar ·
-`+M` task manager
+| 01 | Can a frozen page answer CDP, and unfreeze? | Yes to both, including `Runtime.evaluate` | The `FROZEN` tier is safe to use. The activation hang was our own bug, not a protocol limit |
+| 02 | What is segfaulting tabs on activation? | Only **IPC to a purged renderer**. Freezing, view toggling and the probe are innocent | `Tab#sendToPage` — one gate every message to a page goes through |
+| 03 | What does each trim lever reclaim? | GC −5 MB; forced purge **−0 MB**, and it kills the in-page probe | `forciblyPurgeJavaScriptMemory` removed entirely |
+| 04 | What does *asking* for a GC cost? | Heap profiler agent: **+6 MB per renderer**, never returned. Net −6 MB on a heavy page, **+9 MB on an ordinary one** | Forced collection removed; `COLD` performs no renderer action |
+| 05 | What happens if we just leave a hidden tab alone? | Chromium reclaims further unaided (117→107 MB) than a forced GC achieves (112 MB); freezing **stops** that reclamation | Freezing reserved for tabs still burning CPU while hidden |
+| 06 | What does holding a CDP session cost? | +3 MB/renderer; freeze works without `Page.enable`; page **stays frozen after detach** | `Page.enable` dropped; session detached once frozen, and again when a tab goes active |
 
 ---
 
-## What it actually does
+## The through-line
 
-Every tab sits in one of five tiers. The governor moves tabs between them on a
-2-second tick, driven by how long they have been out of sight and how close the
-browser is to its memory budget.
+Experiments 03, 04 and 05 together overturned the original design. It assumed
+the way to make a browser use less memory is to squeeze live renderers. Every
+measurement said otherwise:
 
-| Tier | What it means | Cost to undo |
-|---|---|---|
-| `ACTIVE` | Visible. Never throttled, never touched. | — |
-| `WARM` | Hidden recently. Chromium throttles its timers. | Nothing |
-| `COLD` | Hidden a while. No renderer action; now a discard candidate. | Nothing |
-| `FROZEN` | Task queues stopped, CPU → ~0, memory and DOM intact. | One CDP round trip |
-| `DISCARDED` | Renderer destroyed. ~0 MB. | A reload |
+- The strongest squeeze available reclaims nothing a normal collection has not
+  already reclaimed, and breaks the page's instrumentation doing it.
+- Asking for that collection costs more in instrumentation than the collection
+  returns, on any page without an unusually large collectable heap.
+- Chromium already reclaims backgrounded renderers on its own, and goes further
+  than a forced collection does — so the correct action on an idle tab is **no
+  action at all**.
+- Freezing, which looks like a pure win, has a memory cost precisely because it
+  stops that background reclamation.
 
-Against that sit the protections, which always win:
+What survived, and what the shipped browser does: memory savings come from
+**discarding tabs** and the **process configuration** (one renderer per site,
+no spare renderer, a renderer cap). CPU savings come from **freezing background
+CPU burners**, **priority management**, and the **animation boost**.
 
-- The visible tab is **never** frozen, discarded, or deprioritised.
-- Nothing that stalls a renderer runs while anything is animating.
-- A tab playing audio is never frozen or discarded.
-- A tab holding text you typed is never discarded — it is frozen instead.
-- A tab you left moments ago is never discarded, at any pressure.
-- A tab already near its floor is left alone entirely.
-
-### Animation-aware boosting
-
-A page that is animating gets the CPU it needs to hold its frame rate, and
-gives it back the moment it stops.
-
-- **Engage fast, release slow.** Boost applies on the first tick that sees
-  animation, because being late is a visible stutter at the start of every
-  transition. It releases only after a quiet period long enough to ride through
-  the gap between two bursts, so priority never drops mid-motion.
-- **Two signals, fused.** An in-page probe reports CSS animations, Web
-  Animations and media playback. It runs in an isolated world, so it cannot see
-  a script-driven `requestAnimationFrame` loop — renderer CPU covers that blind
-  spot, and the stronger signal wins.
-- **Everything expensive stands down.** While the foreground tab animates, the
-  governor defers all freezing and discarding anywhere in the browser. This is
-  the difference between a memory saver and a janky one.
-- **Priority actually moves.** Background renderers are niced *down*, which
-  needs no privileges on any platform, so the animating tab wins the CPU by
-  everyone else standing aside.
-
-### Where the savings come from
-
-Deliberately, **not** from squeezing live renderers. The memory savings come
-from discarding tabs and from the process configuration (one renderer per site,
-no spare renderer, a renderer cap); the CPU savings come from freezing
-background CPU burners, priority management, and the animation boost.
-
-That is why a merely-idle tab is left completely alone — Chromium already
-reclaims a backgrounded renderer on its own, and better than forcing it to.
-Freezing is applied only to tabs still burning CPU out of sight, because it
-costs memory rather than saving any.
+Net result on twelve tabs against an 800 MB budget: **1465 MB → 793 MB**.
 
 ---
 
-## Measured results
+## A crash worth recording
 
-All from `npm run bench` on a 4-core, 16 GB Linux host, 12 tabs (a mix of
-memory-heavy, idle, animating and form pages). Reproduce with the commands
-shown.
+Two of these experiments exist because tabs were dying with SIGSEGV the moment
+the user clicked back to them, and the suspects were all plausible: software
+rasterization, page freezing, forced purging, runtime throttling changes, the
+activity probe.
 
-**Holding a memory budget** — `node bench/bench.js --tabs=12 --budget=800`
+It was none of the obvious ones. **Delivering IPC to a renderer whose JS memory
+has been forcibly purged kills it** — the purge tears down the isolated world
+the preload lives in, so the next message dereferences freed state. The page
+keeps rendering perfectly until something talks to it.
 
-| | baseline | governed | delta |
-|---|---|---|---|
-| total resident | 1465 MB | **793 MB** | **−672 MB (−46%)** |
-| per tab | 122.1 MB | 66.1 MB | −56.0 MB |
-| renderer processes | 13 | 5 | −8 |
-
-Final tab states: 1 active, 3 frozen, 8 discarded — all restoring on click,
-with scroll position and unsubmitted input intact.
-
-**Process configuration alone** — `node bench/bench.js --tabs=12 --profile=economy`
-
-The economy profile's Chromium configuration takes the same 12 tabs from
-**1465 MB to 556 MB (−62%)** before the governor does anything at all. This is
-the single largest memory lever in the project.
-
-**Cost when there is nothing to do** — `node bench/bench.js --tabs=12`
-
-With memory far under budget the governor has no work to do, and costs
-**+9 MB (0.6%)** across 12 tabs for its own instrumentation.
+That is a fault you cannot reason your way to, and it is the reason the browser
+routes every message to a page through a single gate rather than trusting call
+sites to remember.
 
 ---
 
-## Cross-platform
+## Note on absolute numbers
 
-Everything OS-specific is confined to `src/main/platform.js`: process priority
-(nice values on Linux/macOS, priority classes on Windows), memory sizing from
-host RAM, and the Chromium switch list. The policy in `governor/` is written
-once and behaves identically everywhere.
-
-The Chromium flag list is deliberately short — nothing goes in it unless it is
-both verifiable and load-bearing.
-
----
-
-## Layout
-
-```
-src/main/
-  governor/     the resource policy: tick loop, tiers, boost, metrics
-  tabs/         tab lifecycle, discard/restore, session capture
-  platform.js   everything OS-specific
-  cdp.js        DevTools protocol wrapper
-  window.js     window layout: chrome, tab views, side panel
-src/preload/    activity probe (pages) and the chrome bridge
-src/renderer/   the browser UI, written from scratch
-test/pages/     benchmark and test fixtures
-bench/          memory benchmark harness
-```
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design in depth.
-
-The measurements behind the design decisions — including the levers that were
-tried, measured and removed — live on the `claude/research-build` branch.
-
----
-
-## Limits worth knowing
-
-- Restoring a discarded tab replays navigation history, scroll offset and
-  unsubmitted form input. It does **not** restore in-page JavaScript state — a
-  half-finished canvas drawing or an open WebSocket does not survive. That is
-  why unsubmitted input is protected from discard rather than restored from it.
-- Form restore keys off element `id`. Fields without one are captured but not
-  replayed, since an index-based path is not stable across a reload.
-- No extensions, no bookmarks, no history UI, no downloads UI. This is a
-  resource-management browser, not a Chrome replacement.
-- Password and payment fields are deliberately never read into the session
-  store, so a discarded tab will not restore them.
+Every figure here was measured on one host (4-core, 16 GB, Linux, Electron
+44.3.0, software rasterization) and will differ elsewhere. The *directions* are
+what the design rests on, and those held across every re-run: purge reclaims
+nothing, the heap profiler costs more than it saves on ordinary pages, unaided
+background reclamation beats a forced collection, and IPC to a purged renderer
+is fatal.
