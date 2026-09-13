@@ -34,23 +34,20 @@ pass; a normal desktop install must not use it.
 
 | | `economy` | `balanced` | `performance` |
 |---|---|---|---|
-| live renderers | 4 | sized to the machine (4-12) | 24 |
+| live renderer cap | 4 | **off** | off |
 | memory budget | 700 MB | sized to the machine | 3000 MB |
 | discard idle tab after | 3 min | 15 min | 2 hrs |
 | simultaneous loads | 2 | 3 | 6 |
 | renderer sharing | per site | per site | per tab |
-| spare renderer | no | no | yes |
+| V8 optimize-for-size | yes | yes | yes |
 
-`balanced` sizes both the live-renderer cap and the budget from the host's
-actual RAM, because fixed figures strand memory on a workstation and thrash on
-a netbook. Override either with `--max-live-tabs=6` / `--budget=1200`, or drag
-the budget slider in the task manager.
+**There is no cap on how many tabs stay live by default.** The goal is to make
+each tab cheap, not to ration them. A cap exists as an opt-in ceiling for small
+machines, or for anyone who would rather spend reload latency than memory —
+`--max-live-tabs=8`, or the economy profile.
 
-**The live-renderer cap is the number that matters if you open tabs in
-bursts.** A memory budget cannot help there: on a 16 GB machine the budget is
-~6 GB, so thirty tabs never reach it and thirty renderers stay resident. The
-cap bounds the footprint by tab count instead, discarding least-recently-used
-first, so the handful you are actually moving between stay instant.
+`balanced` sizes its budget from the host's actual RAM. Override with
+`--budget=1200`, or drag the slider in the task manager.
 
 ### Keyboard
 
@@ -102,71 +99,106 @@ gives it back the moment it stops.
   needs no privileges on any platform, so the animating tab wins the CPU by
   everyone else standing aside.
 
-### Staying compact with many tabs
+### Keeping each tab cheap
 
-Three mechanisms, aimed at the case where tabs arrive faster than they are read:
+The aim is that opening a lot of tabs is affordable, not that you are stopped
+from doing it. What makes a tab cheap:
 
-- **A live-renderer cap.** At most N tabs hold a renderer; past that the
-  least-recently-used is discarded. Bounds memory by tab count rather than
-  hoping a budget is reached.
-- **Load admission.** At most a few tabs load at once. Peak memory is a
-  *loading* phenomenon - a page mid-load holds its parser, network buffers and
-  pre-compaction heap simultaneously - so a burst of thirty tabs otherwise
-  spikes far above where it settles. Queued tabs cost nothing while they wait,
-  and anything you click loads immediately.
+- **One renderer per site.** Fifteen tabs on the same site share one process
+  instead of taking fifteen. This is the largest per-tab lever there is, and it
+  is exactly the case that comes up when you open a lot of tabs at once: 30
+  same-site tabs cost 11.6 MB each, against 19.7 MB each across 30 different
+  sites. Site isolation — the boundary between *different* sites — is untouched;
+  what is traded is crash isolation between tabs of the same site.
+- **V8 biased toward small heaps** (`--optimize-for-size`). A 13% per-tab
+  reduction on a DOM-heavy page, for a modest JIT cost. The only flag of its
+  kind that survived measurement.
+- **No spare renderer.** Chromium keeps one warm to save ~100 ms on the next
+  navigation; it costs a whole process.
 - **Lazy background tabs.** A tab opened in the background gets no renderer at
-  all until first viewed. Twenty middle-clicked links cost one renderer.
+  all until first viewed, so twenty middle-clicked links cost one renderer.
+- **Load admission.** At most a few tabs load at once, because peak memory is a
+  loading-time phenomenon — a page mid-load holds its parser, network buffers
+  and pre-compaction heap simultaneously. Queued tabs cost nothing while they
+  wait, and anything you click loads immediately.
 
 ### Where the savings come from
 
-Deliberately, **not** from squeezing live renderers. The memory savings come
-from discarding tabs and from the process configuration (one renderer per site,
-no spare renderer, a renderer cap); the CPU savings come from freezing
-background CPU burners, priority management, and the animation boost.
+Not from squeezing live renderers — that was measured repeatedly and does not
+work. Forcing a garbage collection on an idle tab costs more in instrumentation
+than it reclaims, and `forciblyPurgeJavaScriptMemory` reclaims nothing at all
+while breaking the page. Chromium already reclaims a backgrounded renderer on
+its own, and goes further than forcing it does, so an idle tab is left alone.
 
-That is why a merely-idle tab is left completely alone — Chromium already
-reclaims a backgrounded renderer on its own, and better than forcing it to.
-Freezing is applied only to tabs still burning CPU out of sight, because it
-costs memory rather than saving any.
+What does work: **not paying for a renderer you do not need** (lazy background
+tabs, no spare renderer, one renderer per site) and **making the renderer you do
+need smaller** (`--optimize-for-size`). Freezing is applied only to tabs still
+burning CPU out of sight, because it costs memory rather than saving any.
 
 ---
 
 ## Measured results
 
-From `npm run bench` on a 4-core, 16 GB Linux host. Every tab is served on its
-**own site** (`t1.test`, `t2.test`, …) rather than as `file://` URLs, because
-all `file://` pages are one site to Chromium's process model - measuring that
-way collapses thirty tabs into two processes and reports a saving nobody would
-actually see.
+From `npm run bench` on a 4-core, 16 GB Linux host, with every tab **live** —
+nothing discarded, no cap.
 
-**Thirty tabs** — `node bench/bench.js --tabs=30`
+### How this is measured
 
-| | baseline | governed | delta |
+In **proportional set size**, not RSS. This matters enough to state plainly:
+every figure this project reported before was summed RSS, which counts pages
+shared between processes — chiefly the Chromium binary, mapped into every
+renderer — once per process. On six tabs of a trivial page:
+
+```
+summed RSS   810 MB        <- what was previously reported
+summed PSS   247 MB        <- actual physical memory
+```
+
+So earlier claims here overstated both the problem and the improvement by
+roughly 3x. PSS divides each shared page by the number of processes mapping it,
+so summing it corresponds to real memory. It is a Linux figure
+(`/proc/pid/smaps_rollup`); on macOS and Windows the code falls back to RSS and
+labels itself as doing so.
+
+### Per tab
+
+| page | PSS per tab | private per tab |
+|---|---|---|
+| trivial page | 19.8 MB | 10.0 MB |
+| DOM-heavy page (4000 nodes, retained arrays) | 33.0 MB | 21.3 MB |
+
+The private figure is the marginal cost of one more tab; the rest is that tab's
+share of one copy of Chromium.
+
+### Thirty tabs, all live
+
+| | total | per tab | renderers |
 |---|---|---|---|
-| total resident | 3081 MB | **1156 MB** | **−1925 MB (−62%)** |
-| peak during load | 3083 MB | **1165 MB** | **−1918 MB** |
-| per tab | 102.7 MB | 38.5 MB | −64.2 MB |
-| renderer processes | 31 | 9 | −22 |
-| live tabs | 30 | 8 | −22 |
+| 30 different sites | **592 MB** | 19.7 MB | 31 |
+| 30 tabs on one site | **348 MB** | 11.6 MB | 2 |
 
-The peak matters as much as the total here: the governed run never spikes on
-the way up, so opening thirty tabs at once does not briefly claim 3 GB before
-settling.
+### What `--optimize-for-size` is worth
 
-**Twelve tabs** — `node bench/bench.js --tabs=12`
+| | per tab | total (30 tabs) |
+|---|---|---|
+| V8 default | 37.9 MB | 614 MB |
+| optimize-for-size | **33.0 MB** | **591 MB** |
 
-1474 MB → **1148 MB (−22%)**. The saving is smaller because twelve tabs is
-close to the cap, so most of them legitimately stay resident.
+13% on a DOM-heavy page; ~4% across a mixed workload, where lighter pages have
+less heap to shrink. Toggle with `--no-optimize-for-size` to re-measure.
 
-**A note on the fixture mix.** The default mix includes a form page holding
-unsubmitted input, which the governor refuses to discard — so a quarter of the
-tabs are immune to reclaim by design, and the governed run sits at 8 live tabs
-even with a cap of 4. That is the protection working. `--mix=noforms` measures
-the cap against tabs that are all reclaimable: 30 tabs → 8 live exactly,
-3122 MB → 1179 MB.
+### Flags that did not survive measurement
 
-**Cost when there is nothing to do.** With few tabs and memory far under
-budget, the governor costs ~9 MB for its own instrumentation.
+Tested per-tab, in PSS, and rejected:
+
+| flag | result |
+|---|---|
+| `--enable-low-end-device-mode` | saves the same as optimize-for-size and does not stack (33.5 MB combined vs 33.0 MB alone), while shrinking image caches and disabling visible features |
+| `--max-semi-space-size` (2 / 16 / unset) | no difference beyond noise; it had been set on an assumption |
+| `--num-raster-threads=1` | **worse** — 40.4 MB against 37.9 MB |
+| `--disable-features=BackForwardCache` | no difference |
+| `webPreferences.spellcheck: false` | no difference (0.1 MB) |
+| `--disable-features=Translate,OptimizationHints,MediaRouter` | no difference, slightly worse |
 
 ---
 
@@ -212,9 +244,12 @@ tried, measured and removed — live on the `claude/research-build` branch.
   why unsubmitted input is protected from discard rather than restored from it.
 - Form restore keys off element `id`. Fields without one are captured but not
   replayed, since an index-based path is not stable across a reload.
-- The live-renderer cap means the N+1th tab you return to reloads. That is the
-  trade the cap exists to make; raise `--max-live-tabs` if you would rather
-  spend the memory.
+- Per-tab memory is close to its floor. About 10 MB of the marginal cost of a
+  light tab is Chromium's own per-renderer baseline, which no flag tested here
+  reduces. Beyond that, the remaining lever is sharing renderers between
+  same-site tabs, which is already on.
+- The live-renderer cap is off by default. If you enable it, the N+1th tab you
+  return to reloads — that is the trade it exists to make.
 - Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web

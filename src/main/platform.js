@@ -201,11 +201,24 @@ function chromiumSwitches(cfg) {
     disabledFeatures.push('SpareRendererForProcessPerSite');
   }
 
-  // Cap V8's young generation. The scavenger's semi-spaces are sized for
-  // throughput on a machine with memory to spare; on a browser holding dozens
-  // of idle tabs the untouched half of each semi-space is pure waste.
-  const semiSpaceMB = cfg.memoryBudgetMB <= 900 ? 8 : 16;
-  switches.push(['js-flags', `--max-semi-space-size=${semiSpaceMB}`]);
+  // Bias V8 towards smaller heaps and smaller generated code rather than peak
+  // throughput. This is the one per-tab memory flag that measured a real win:
+  // on six tabs of a DOM-heavy page it took each tab from 37.9MB to 33.0MB of
+  // proportional set size, a 13% reduction, for a modest JIT cost.
+  //
+  // Two flags that did *not* survive measurement, and are deliberately absent:
+  //
+  //   --max-semi-space-size   an earlier version set this, reasoning that V8's
+  //                           scavenger semi-spaces are sized for throughput.
+  //                           Measured at 2MB, 16MB and unset: no difference
+  //                           beyond noise. It was an assumption, not a finding.
+  //   --enable-low-end-device-mode
+  //                           saves exactly what --optimize-for-size saves and
+  //                           does not stack with it (33.5MB combined, against
+  //                           33.0MB for optimize-for-size alone), while also
+  //                           shrinking image caches and disabling features the
+  //                           user would notice. Same benefit, real cost.
+  if (cfg.optimizeForSize) switches.push(['js-flags', '--optimize-for-size']);
 
   // --- Per-platform ------------------------------------------------------
 

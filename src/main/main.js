@@ -53,14 +53,15 @@ const cfg = loadConfig(argValue('profile') || 'balanced', overrides);
 // to a number chosen on someone else's hardware.
 if (overrides.memoryBudgetMB == null && cfg.profile === 'balanced') {
   cfg.memoryBudgetMB = platform.recommendedBudgetMB();
-  // The live-tab cap matters more than the budget on a big machine, where the
-  // budget is never reached; size it to the host too.
-  cfg.maxLiveTabs = platform.recommendedLiveTabs();
 }
 
 // Note the presence check. `Number(null)` is 0, and 0 is a *meaningful* value
 // here (it disables the cap), so testing the parsed number alone would silently
 // turn the cap off whenever the flag was absent - which is exactly what it did.
+// Benchmark switch: lets the per-tab memory flag be measured rather than
+// assumed. Not something a user needs to touch.
+if (argv.includes('--no-optimize-for-size')) cfg.optimizeForSize = false;
+
 const liveTabsRaw = argValue('max-live-tabs');
 if (liveTabsRaw !== null) {
   const parsed = Number(liveTabsRaw);

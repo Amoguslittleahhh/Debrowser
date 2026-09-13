@@ -13,6 +13,7 @@
  */
 
 const fixtureServer = require('./fixture-server');
+const { footprintMB, accountingMode } = require('./memory');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -106,6 +107,7 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
 
   return {
     governor: Boolean(governor),
+    accounting: accountingMode(),
     profile: cfg.profile,
     distinctOrigins: Boolean(distinctOrigins),
     maxLiveTabs: cfg.maxLiveTabs,
@@ -134,17 +136,24 @@ function byProcessType(app) {
   const out = {};
   for (const proc of app.getAppMetrics()) {
     const key = proc.type || 'unknown';
-    out[key] = (out[key] || 0) + (proc.memory?.workingSetSize || 0) / 1024;
+    out[key] = (out[key] || 0) + footprintMB(proc.pid, (proc.memory?.workingSetSize || 0) / 1024);
   }
   for (const key of Object.keys(out)) out[key] = Math.round(out[key]);
   return out;
 }
 
-/** Total resident memory across every process in this browser. */
+/**
+ * Total memory across every process in this browser.
+ *
+ * Proportional set size where the platform offers it, not RSS. Summing RSS
+ * across processes counts the Chromium binary once per renderer and overstated
+ * this figure by roughly 3x - see ../memory.js.
+ */
 async function measure(app, samples = 8, gapMs = 250) {
   let total = 0;
   for (let i = 0; i < samples; i++) {
-    total = app.getAppMetrics().reduce((sum, p) => sum + (p.memory?.workingSetSize || 0) / 1024, 0);
+    total = app.getAppMetrics().reduce(
+      (sum, p) => sum + footprintMB(p.pid, (p.memory?.workingSetSize || 0) / 1024), 0);
     await sleep(gapMs);
   }
   return Math.round(total);
