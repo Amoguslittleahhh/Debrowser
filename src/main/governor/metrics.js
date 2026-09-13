@@ -21,7 +21,7 @@
  */
 
 const { MB } = require('../config');
-const { footprintMB, privateMB, accountingMode, pageMergingStatus } = require('../memory');
+const { readProcessMemory, accountingMode, pageMergingStatus } = require('../memory');
 
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
@@ -65,8 +65,12 @@ class Metrics {
       // prefer proportional set size where the platform offers it. See
       // ../memory.js.
       const rssMB = (proc.memory?.workingSetSize || 0) / 1024;
-      const footprint = footprintMB(pid, rssMB);
-      const priv = privateMB(pid);
+      // One read per process, not one per figure: smaps_rollup already carries
+      // pss, rss and private together, and taking them from the same read also
+      // means they describe the same instant.
+      const detail = readProcessMemory(pid);
+      const footprint = detail ? detail.pssMB : rssMB;
+      const priv = detail ? detail.privateMB : null;
       const cpu = proc.cpu?.percentCPUUsage || 0;
 
       const prev = this.byPid.get(pid);
@@ -77,7 +81,12 @@ class Metrics {
             type: proc.type
           }
         : { rssMB: footprint, cpu, type: proc.type };
-      smoothed.privateMB = priv == null ? (prev?.privateMB ?? footprint) : priv;
+      // Left null where the platform cannot report it, rather than falling back
+      // to the footprint. Private bytes and PSS are different quantities, and
+      // the one consumer of this field screens on it *because* it is not PSS -
+      // substituting one for the other would have silently reinstated the
+      // threshold that made that screen useless.
+      smoothed.privateMB = priv == null ? (prev?.privateMB ?? null) : priv;
 
       this.byPid.set(pid, smoothed);
       total += smoothed.rssMB;
@@ -132,7 +141,7 @@ class Metrics {
 
       if (tabs.length === 1) {
         tabs[0].rssMB = proc.rssMB;
-        tabs[0].privateMB = proc.privateMB;
+        tabs[0].privateMB = proc.privateMB ?? null;
         tabs[0].cpu = proc.cpu;
         tabs[0].sharesProcess = false;
         continue;
@@ -145,7 +154,7 @@ class Metrics {
       tabs.forEach((tab, i) => {
         const share = weights[i] / weightSum;
         tab.rssMB = proc.rssMB * share;
-        tab.privateMB = (proc.privateMB || 0) * share;
+        tab.privateMB = proc.privateMB == null ? null : proc.privateMB * share;
         tab.sharesProcess = true;
         tab.processTabCount = tabs.length;
 
@@ -163,7 +172,7 @@ class Metrics {
     for (const tab of this.getTabs()) {
       if (!tab.pid) {
         tab.rssMB = 0;
-        tab.privateMB = 0;
+        tab.privateMB = null;
         tab.cpu = 0;
         tab.sharesProcess = false;
       }

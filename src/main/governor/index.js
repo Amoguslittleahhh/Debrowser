@@ -29,7 +29,7 @@
  *     CPU to recover memory the page will immediately allocate again.
  */
 
-const { Tier, Pressure, tierRank, TIER_ORDER } = require('../config');
+const { Tier, Pressure, tierRank, TIER_ORDER, MB } = require('../config');
 const { Metrics } = require('./metrics');
 const { BoostController } = require('./boost');
 const { applyTier, refreshPriority } = require('./tiers');
@@ -93,8 +93,12 @@ class Governor {
       this.boost.update(active, this.tabs.all());
 
       await this.runPostAnimationSettle();
-      await this.runHeapLimits();
       await this.runIdleLadder();
+      // After the ladder deliberately: a tab the ladder is about to freeze or
+      // discard should not first have a debugger session attached and a
+      // collection forced, paying ~2.4MB to reclaim memory that is about to be
+      // thrown away wholesale.
+      await this.runHeapLimits();
       await this.enforceLiveTabCap();
       await this.enforceBudget();
 
@@ -118,16 +122,32 @@ class Governor {
    */
   async samplePerTabMetrics() {
     const now = Date.now();
+    const heapEnabled = this.cfg.heapLimit.enabled;
+
     for (const tab of this.tabs.all()) {
       if (!tab.isLive || !tab.cdp) continue;
-      if (!tab.sharesProcess) continue;
       if (tab.tier === Tier.FROZEN) continue;
       if (tab.boosted) continue; // never add CDP traffic to an animating tab
+
+      // Two consumers want this reading, and it costs a CDP round trip, so it
+      // is taken once here for both: attribution needs a per-tab heap only when
+      // tabs share a process, and the heap limiter needs one for any tab it
+      // might collect. An earlier version had the limiter fetch its own, which
+      // meant two identical Performance.getMetrics calls to the same renderer
+      // in one tick - in the pass whose own comment says to minimise exactly
+      // that traffic.
+      const forAttribution = tab.sharesProcess;
+      const forHeapLimit = heapEnabled && this.heapLimiter.worthMeasuring(tab);
+      if (!forAttribution && !forHeapLimit) continue;
 
       const metrics = await tab.cdp.pageMetrics();
       if (!metrics) continue;
 
-      if (metrics.jsHeapBytes != null) tab.jsHeapMB = metrics.jsHeapBytes / (1024 * 1024);
+      if (forHeapLimit && metrics.jsHeapBytes != null) {
+        this.heapLimiter.observe(tab, metrics.jsHeapBytes, now, metrics.jsHeapTotalBytes);
+      }
+
+      if (metrics.jsHeapBytes != null) tab.jsHeapMB = metrics.jsHeapBytes / MB;
 
       // Differentiate cumulative task time into a percentage of one core.
       if (metrics.taskDurationSec != null) {
@@ -188,46 +208,45 @@ class Governor {
    * Collect the garbage of any hidden tab whose heap has passed the limit the
    * square-root rule sets for it. See governor/heap-limit.js.
    *
-   * Two gates before anything is measured, let alone collected: a tab must be
-   * big enough for a collection to out-earn the debugger session it costs, and
-   * nothing may be animating anywhere - a collection stalls a renderer, and
-   * stalling one while the user watches a transition is how a memory saver
-   * becomes a janky browser.
+   * A decision pass only: the readings it acts on were taken by
+   * `samplePerTabMetrics`, which already pays for a round trip to these tabs.
+   * That also ties this to the same cadence, which the rest of the file treats
+   * as the acceptable rate for per-tab CDP traffic.
+   *
+   * Two things are never done here: collecting the visible tab, whose stall the
+   * user would feel, and collecting while anything is animating anywhere.
    */
   async runHeapLimits() {
     if (!this.cfg.heapLimit.enabled) return;
     if (this.boost.quiesceRequested) return;
 
-    const now = Date.now();
     for (const tab of this.tabs.all()) {
       if (!this.heapLimiter.worthMeasuring(tab)) continue;
       if (this.shouldSkip(tab)) continue;
-
-      const metrics = await tab.cdp.pageMetrics();
-      if (!metrics || metrics.jsHeapBytes == null) continue;
-      this.heapLimiter.observe(tab, metrics.jsHeapBytes, now, metrics.jsHeapTotalBytes);
+      if (tab.heapTotalBytes == null) continue; // not sampled yet
 
       // Either the one-time backlog from loading, or steady-state growth past
-      // the limit the rule sets. See hasLoadBacklog for why both exist.
-      const backlog = this.heapLimiter.hasLoadBacklog(tab);
+      // the limit the rule sets. A page's parse and execute produce a large
+      // one-off backlog that V8 is in no hurry to collect once the tab goes
+      // quiet, and that is not the same event as growing into a heap limit.
+      const backlog = !tab.heapBacklogCollected;
       if (!backlog && !this.heapLimiter.isOverLimit(tab)) continue;
 
-      // Measured on the committed size, which is what a collection actually
-      // returns to the OS.
-      const before = metrics.jsHeapTotalBytes ?? metrics.jsHeapBytes;
+      const beforeTotal = tab.heapTotalBytes;
       const result = await tab.cdp.collectGarbage();
       if (!result) continue;
 
-      // Re-read to learn L exactly, which is only knowable just after a
-      // collection, and to measure what this one actually achieved.
+      // Re-read so L is the live set measured just after collecting. The
+      // limiter owns every heap field on the tab; nothing is assigned here.
       const after = await tab.cdp.pageMetrics();
-      const afterBytes = after?.jsHeapTotalBytes ?? after?.jsHeapBytes ?? before;
-      // L is the live set after collecting, which is the used figure.
-      if (after?.jsHeapBytes != null) tab.liveHeapBytes = after.jsHeapBytes;
-      tab.heapTotalBytes = afterBytes;
-      this.heapLimiter.recordCollection(tab, before, afterBytes, result.ms);
+      this.heapLimiter.recordCollection(tab, {
+        beforeTotal,
+        afterTotal: after?.jsHeapTotalBytes ?? beforeTotal,
+        afterUsed: after?.jsHeapBytes ?? null,
+        durationMs: result.ms
+      });
 
-      this.log(`tab ${tab.id}: heap ${fmtMB(before)} -> ${fmtMB(afterBytes)} ` +
+      this.log(`tab ${tab.id}: heap ${fmtMB(beforeTotal)} -> ${fmtMB(tab.heapTotalBytes)} ` +
                `(${backlog ? 'load backlog' : 'over limit'}, ` +
                `limit now ${fmtMB(this.heapLimiter.limitFor(tab))}, ${result.ms}ms)`);
     }
@@ -528,7 +547,7 @@ class Governor {
   }
 }
 
-const fmtMB = (bytes) => `${Math.round((bytes || 0) / (1024 * 1024))}MB`;
+const fmtMB = (bytes) => `${Math.round((bytes || 0) / MB)}MB`;
 
 const PRESSURE_RANK = {
   [Pressure.NONE]: 0,

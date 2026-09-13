@@ -46,19 +46,42 @@
  * because PSS for one process falls as more processes come to share the binary,
  * so a PSS threshold would qualify the same tab or not depending on how many
  * other tabs happened to be open.
+ *
+ * One known imprecision, left in deliberately. L in the paper is the *live* set,
+ * which we can only read immediately after a collection (`JSHeapUsedSize`), but
+ * M bounds the heap's *committed* size (`JSHeapTotalSize`) because that is what
+ * costs memory and what we can compare against on every tick. V8 keeps committed
+ * well above live, so for a hidden tab - where `backgroundWeight` tightens the
+ * limit further - the comparison is frequently true from the moment the page
+ * settles, and the rule degenerates from "collect when the heap has grown" to
+ * "collect on the collection interval". That is the behaviour the interval floor
+ * exists to bound, and it is also why the rule is off by default: the amount it
+ * has to reclaim in this browser does not justify sharpening this. Fixing it
+ * properly means tracking committed-above-live as its own term, which the paper
+ * does not model.
  */
 
-const { Tier } = require('../config');
+const { Tier, MB } = require('../config');
 
 /**
  * Collection speed to assume before a tab has been observed collecting, in
  * bytes per second. V8 mark-compact throughput on a desktop core is of this
  * order; it is only a starting value and is replaced by measurement.
  */
-const DEFAULT_GC_SPEED = 80 * 1024 * 1024;
+const DEFAULT_GC_SPEED = 80 * MB;
 
 /** Allocation rate below which a tab is treated as not allocating at all. */
 const MIN_ALLOC_RATE = 64 * 1024; // bytes/sec
+
+/**
+ * Smoothing weight for the per-tab estimates. A single interval catches whatever
+ * the page happened to be doing, so both `g` and `s` are averaged.
+ */
+const EMA_ALPHA = 0.3;
+
+/** Exponential moving average, seeded by the first sample. */
+const ema = (prev, sample, alpha = EMA_ALPHA) =>
+  (prev == null ? sample : prev + alpha * (sample - prev));
 
 class HeapLimiter {
   /**
@@ -114,17 +137,24 @@ class HeapLimiter {
    * the policy cannot cost more than it saves on a browser full of light pages.
    */
   worthMeasuring(tab) {
-    if (!this.cfg.heapLimit.enabled) return false;
+    // `heapLimit.enabled` is checked by the caller, which skips the whole pass.
     if (!tab.isLive || !tab.cdp) return false;
     if (tab.visible) return false;              // never stall the foreground tab
     if (tab.tier === Tier.FROZEN) return false; // frozen: no allocation, no point
     if (tab.boosted) return false;
+
     // Private bytes, not the PSS footprint. PSS for one process falls as more
     // processes come to share the binary, so thresholding on it meant the same
     // tab qualified or not depending on how many other tabs were open - and with
     // per-site renderers every tab sat below the threshold, so this pass never
     // ran at all and the whole rule was dead code.
-    return (tab.privateMB || 0) >= this.cfg.heapLimit.minPrivateMB;
+    //
+    // A null reading means the platform cannot report private bytes at all
+    // (anything but Linux). Without a cheap screen there is no way to tell a
+    // tab worth instrumenting from one where the session costs more than the
+    // collection returns, so decline rather than guess.
+    if (tab.privateMB == null) return false;
+    return tab.privateMB >= this.cfg.heapLimit.minPrivateMB;
   }
 
   /**
@@ -145,9 +175,7 @@ class HeapLimiter {
         // Allocation rate. Smoothed, because a single interval catches whatever
         // the page happened to be doing.
         const rate = (grew * 1000) / (now - prevAt);
-        tab.allocRateBytesPerSec = tab.allocRateBytesPerSec
-          ? tab.allocRateBytesPerSec * 0.7 + rate * 0.3
-          : rate;
+        tab.allocRateBytesPerSec = ema(tab.allocRateBytesPerSec, rate);
       }
     }
 
@@ -160,48 +188,36 @@ class HeapLimiter {
   }
 
   /**
-   * Record what a collection achieved, giving us L exactly and s by observation.
+   * Record what a collection achieved: L exactly, and s by observation.
+   *
+   * This is the only writer of a tab's heap estimates, alongside `observe`.
+   * An earlier version had the governor assign `liveHeapBytes` itself and then
+   * call this, which promptly overwrote it - so the assignment was dead and `L`
+   * ended up holding the committed size rather than the live set, contradicting
+   * both call sites' comments. One owner per invariant avoids that.
+   *
+   * @param {object} tab
+   * @param {{beforeTotal:number, afterTotal:number, afterUsed:number|null, durationMs:number}} result
    */
-  recordCollection(tab, beforeBytes, afterBytes, durationMs) {
-    tab.liveHeapBytes = afterBytes;
-    tab.lastHeapBytes = afterBytes;
+  recordCollection(tab, { beforeTotal, afterTotal, afterUsed, durationMs }) {
+    // L is the live set measured immediately after collecting - the *used*
+    // figure, not the committed one.
+    if (afterUsed != null) tab.liveHeapBytes = afterUsed;
+    tab.heapTotalBytes = afterTotal;
+    tab.lastHeapBytes = afterUsed ?? afterTotal;
 
-    const freed = beforeBytes - afterBytes;
+    const freed = beforeTotal - afterTotal;
     if (freed > 0 && durationMs > 0) {
       // Collection speed as bytes handled per second. Using bytes freed rather
       // than bytes traversed understates s for a mostly-live heap, which biases
       // the limit upward - the safe direction, since it means collecting less
       // often rather than more.
-      const speed = (freed * 1000) / durationMs;
-      tab.gcSpeedBytesPerSec = tab.gcSpeedBytesPerSec
-        ? tab.gcSpeedBytesPerSec * 0.7 + speed * 0.3
-        : speed;
+      tab.gcSpeedBytesPerSec = ema(tab.gcSpeedBytesPerSec, (freed * 1000) / durationMs);
     }
 
     tab.heapBacklogCollected = true;
     this.collections += 1;
-    if (freed > 0) this.reclaimedMB += freed / (1024 * 1024);
-  }
-
-  /**
-   * Whether this tab is still holding the garbage it produced while loading.
-   *
-   * This is a separate question from the heap limit, and it is the one that
-   * actually pays on a normal browsing session. The square-root rule governs the
-   * *steady state*: it hands a tab headroom in proportion to how fast it
-   * allocates, and collects when the tab grows into that headroom. A hidden tab
-   * that has finished loading and sits idle allocates nothing, so it is given
-   * ~0.3MB of headroom, never grows into it, and is correctly never collected -
-   * there is no garbage to collect.
-   *
-   * But parsing and executing a page *does* produce a large one-time backlog,
-   * and V8 is in no hurry to collect it once the page goes quiet. That backlog
-   * is what the -6.8MB measurement on a DOM-heavy page was actually reclaiming.
-   * So it gets its own one-shot trigger, fired once per load rather than on a
-   * limit, and reset whenever the tab navigates.
-   */
-  hasLoadBacklog(tab) {
-    return !tab.heapBacklogCollected;
+    if (freed > 0) this.reclaimedMB += freed / MB;
   }
 
   /**
@@ -221,19 +237,8 @@ class HeapLimiter {
     return size > limit;
   }
 
-  /** Human-readable state, for the task manager. */
-  describe(tab) {
-    const limit = this.limitFor(tab);
-    if (!limit) return null;
-    return {
-      heapMB: Math.round((tab.heapTotalBytes || 0) / (1024 * 1024)),
-      limitMB: Math.round(limit / (1024 * 1024)),
-      liveMB: Math.round((tab.liveHeapBytes || 0) / (1024 * 1024))
-    };
-  }
-
   stats() {
-    return { collections: this.collections, heapReclaimedMB: Math.round(this.reclaimedMB) };
+    return { heapCollections: this.collections, heapReclaimedMB: Math.round(this.reclaimedMB) };
   }
 }
 

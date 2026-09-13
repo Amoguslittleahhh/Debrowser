@@ -347,17 +347,26 @@ const PROFILES = {
   }
 };
 
+/**
+ * Settings whose value is an object. A plain spread would replace these
+ * wholesale, so a profile or override that sets one field of `boost` would
+ * silently drop the rest - and, worse, leaving one out entirely would alias
+ * BASE's object, letting a later `cfg.heapLimit.enabled = true` mutate the
+ * module default for every config loaded afterwards.
+ */
+const NESTED = ['pressure', 'pressureAccel', 'boost', 'heapLimit'];
+
 function loadConfig(profileName = 'balanced', overrides = {}) {
   const profile = PROFILES[profileName] || PROFILES.balanced;
   const cfg = {
     ...BASE,
     ...profile,
     ...overrides,
-    profile: PROFILES[profileName] ? profileName : 'balanced',
-    pressure: { ...BASE.pressure, ...(profile.pressure || {}) },
-    pressureAccel: { ...BASE.pressureAccel, ...(profile.pressureAccel || {}) },
-    boost: { ...BASE.boost, ...(profile.boost || {}) }
+    profile: PROFILES[profileName] ? profileName : 'balanced'
   };
+  for (const key of NESTED) {
+    cfg[key] = { ...BASE[key], ...profile[key], ...overrides[key] };
+  }
   return cfg;
 }
 
