@@ -152,6 +152,38 @@ protection for exactly the wrong set of tabs.
 
 Restore is lazy: a discarded tab costs nothing until it is clicked.
 
+## Page merging, and why it is not a default
+
+`tools/ksm-launch.c` calls `prctl(PR_SET_MEMORY_MERGE)` and execs the browser.
+The flag is inherited across fork and exec, so the whole renderer pool enters the
+kernel's same-page-merging scope without patching Chromium — which matters,
+because KSM is otherwise opted into per-region with `madvise(MADV_MERGEABLE)`,
+and there is no way to call that inside someone else's renderer.
+
+This is the reachable form of Mesh's idea. Mesh merges pages *within* a process
+using the allocator's knowledge of which object slots are occupied, so it can
+combine pages that are merely non-overlapping. From outside Chromium that is
+unavailable. KSM merges *across* processes on byte equality instead, which for a
+pool of renderers running identical code over similar structures catches much of
+the same waste: measured at −12% of total footprint and −28% of per-tab private
+memory, corroborated by KSM's own `general_profit` accounting.
+
+It is off by default, and warns on every launch when on, because deduplication is
+a well-known timing side channel. A write to a merged page takes a
+copy-on-write fault and is measurably slower, so code in one page can test
+whether particular content exists elsewhere in memory — and KSM merges
+system-wide, so "elsewhere" includes other applications. A browser executes
+untrusted code from the network as its normal mode of operation, which is the
+worst possible host for that class of attack. The analogous channel is
+demonstrated for memory compression in arXiv:2111.08404.
+
+Two independent conditions have to hold for merging to happen, and the browser
+reports them separately (`pageMergingStatus` in `src/main/memory.js`) because the
+failure modes are indistinguishable otherwise: the process tree must carry the
+`mg` VmFlag, and the kernel scanner must be running system-wide, which needs
+root. If a user asks for merging and only the first holds, the browser says so
+rather than silently running unmerged.
+
 ## Failure modes found by building it
 
 These are the non-obvious constraints this design is shaped around. Each was

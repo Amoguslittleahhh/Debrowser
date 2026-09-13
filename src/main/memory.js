@@ -112,9 +112,65 @@ function privateMB(pid) {
   return detail ? detail.privateMB : null;
 }
 
+/* ------------------------------------------------------------------ */
+/* Page merging (KSM)                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Whether this process tree is eligible for kernel same-page merging, and what
+ * the kernel reckons it has saved.
+ *
+ * Two independent conditions have to hold, and reporting them separately
+ * matters because the failure modes look identical from the outside:
+ *
+ *   processMergeable  this process opted in, via prctl(PR_SET_MEMORY_MERGE)
+ *                     before exec - see tools/ksm-launch.c. Detected by looking
+ *                     for the `mg` VmFlag, since prctl cannot be called from
+ *                     Node and the flag is what KSM actually keys on.
+ *   ksmRunning        the kernel's scanner is enabled system-wide, which needs
+ *                     root and is off by default on essentially every distro.
+ *
+ * `profitMB` is KSM's own accounting of what merging has saved, across the whole
+ * system rather than just this browser - useful as a corroborating signal next
+ * to our own PSS measurement, not as a figure to attribute to ourselves.
+ */
+function pageMergingStatus() {
+  if (!isLinux) return { supported: false, processMergeable: false, ksmRunning: false };
+
+  let processMergeable = false;
+  try {
+    // VmFlags carries `mg` on every region KSM is allowed to consider.
+    processMergeable = /^VmFlags:.*\bmg\b/m.test(fs.readFileSync(`/proc/${process.pid}/smaps`, 'utf8'));
+  } catch { /* no smaps; leave false */ }
+
+  const sysfs = (name) => {
+    try {
+      return Number(fs.readFileSync(`/sys/kernel/mm/ksm/${name}`, 'utf8').trim());
+    } catch {
+      return null;
+    }
+  };
+
+  const run = sysfs('run');
+  const profit = sysfs('general_profit');
+
+  return {
+    supported: run !== null,
+    processMergeable,
+    ksmRunning: run === 1,
+    pagesSharing: sysfs('pages_sharing'),
+    profitMB: profit == null ? null : Math.round(profit / (1024 * 1024)),
+    // Merging only actually happens when both halves are true.
+    active: processMergeable && run === 1
+  };
+}
+
 /** How the numbers on this host should be described. */
 function accountingMode() {
   return detectPss() ? 'pss' : 'rss';
 }
 
-module.exports = { footprintMB, privateMB, readProcessMemory, accountingMode, detectPss };
+module.exports = {
+  footprintMB, privateMB, readProcessMemory, accountingMode, detectPss,
+  pageMergingStatus
+};

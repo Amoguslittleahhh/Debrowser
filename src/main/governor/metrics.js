@@ -21,7 +21,7 @@
  */
 
 const { MB } = require('../config');
-const { footprintMB, privateMB, accountingMode } = require('../memory');
+const { footprintMB, privateMB, accountingMode, pageMergingStatus } = require('../memory');
 
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
@@ -186,6 +186,7 @@ class Metrics {
   snapshot() {
     return {
       accounting: accountingMode(),
+      pageMerging: pageMergingStatus(),
       totalMB: Math.round(this.totalMB),
       overheadMB: Math.round(this.browserOverheadMB),
       reclaimableMB: Math.round(this.reclaimableMB()),

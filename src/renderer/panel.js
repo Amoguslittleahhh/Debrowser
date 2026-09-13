@@ -62,6 +62,12 @@ function render(state) {
 
   renderRows(state.tabs);
 
+  const merging = state.pageMerging;
+  if (merging && merging.active) {
+    el.pressure.textContent += ` Page merging is active (KSM): ~${merging.profitMB} MB saved system-wide. ` +
+      'Deduplication is a known timing side channel - see the README.';
+  }
+
   const s = state.stats;
   el.stats.textContent =
     `${state.profile} profile · ${state.rendererCount} process(es) · ` +
