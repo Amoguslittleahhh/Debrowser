@@ -57,6 +57,13 @@ if (overrides.memoryBudgetMB == null && cfg.profile === 'balanced') {
   cfg.memoryBudgetMB = platform.recommendedBudgetMB();
 }
 
+// Same treatment for the live-renderer cap: a figure fixed in the config would
+// be wrong at both ends of the hardware range. See `maxLiveTabs` in config.js
+// for why this is on at all, and platform.js for how the number is chosen.
+if (overrides.maxLiveTabs == null && cfg.profile === 'balanced') {
+  cfg.maxLiveTabs = platform.recommendedLiveTabs();
+}
+
 // Benchmark switch: lets the per-tab memory flag be measured rather than
 // assumed. Not something a user needs to touch.
 if (argv.includes('--no-optimize-for-size')) cfg.optimizeForSize = false;

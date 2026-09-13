@@ -346,12 +346,24 @@ tried, measured and removed — live on the `claude/research-build` branch.
   why unsubmitted input is protected from discard rather than restored from it.
 - Form restore keys off element `id`. Fields without one are captured but not
   replayed, since an index-based path is not stable across a reload.
-- Per-tab memory is close to its floor. About 10 MB of the marginal cost of a
-  light tab is Chromium's own per-renderer baseline, which no flag tested here
-  reduces. Beyond that, the remaining lever is sharing renderers between
-  same-site tabs, which is already on.
-- The live-renderer cap is off by default. If you enable it, the N+1th tab you
-  return to reloads — that is the trade it exists to make.
+- Per-tab memory is quoted **per open tab**, and that figure depends on how many
+  tabs are open. Roughly 238 MB of browser, GPU, utility and zygote processes
+  exists before the first tab does, and it is amortised across whatever is open,
+  so the per-tab number *improves* as you open more: ~10.4 MB/tab at 30 tabs and
+  ~7.6 MB/tab at 40, at the same live cap. Below about 25 tabs it cannot reach
+  10 MB at any setting, because the fixed cost alone exceeds it. Always read the
+  figure with its tab count.
+- That fixed overhead is Electron's, not this project's. A bare Electron app
+  with one blank view already holds 82 MB in its browser process, and collapsing
+  the GPU, network and zygote processes was measured: every variant either saved
+  nothing or stopped the browser rendering. See `docs/MEASUREMENTS.md`.
+- The live-renderer cap is **on** by default, scaled to the machine. It bounds
+  how many tabs hold a renderer, never how many can be open: past the cap the
+  least-recently-used tab is discarded, and returning to it reloads the page
+  behind a picture of how you left it. `--max-live-tabs=0` turns it off.
+- A restored tab is covered by a thumbnail while it reloads. Pages carrying a
+  password or payment field are never photographed, the images live in the OS
+  temp directory, and they are deleted on close, on quit and again on startup.
 - Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web
