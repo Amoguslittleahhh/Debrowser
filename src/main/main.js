@@ -83,6 +83,27 @@ if (cfg.siteIsolation === false) {
     cfg.profile);
 }
 
+// Page merging is a security-relevant choice, so its state is reported at every
+// launch rather than left to be discovered in a panel.
+{
+  const { pageMergingStatus } = require('./memory');
+  const merging = pageMergingStatus();
+  if (merging.active) {
+    console.warn(
+      '[debrowser] WARNING: kernel same-page merging is ACTIVE for this process tree.\n' +
+      '           Identical memory pages are shared between renderers, and between\n' +
+      '           this browser and other programs. That saves memory (~12% measured)\n' +
+      '           but deduplication is a known timing side channel: a write to a\n' +
+      '           merged page is measurably slower, which lets code running in one\n' +
+      '           page test whether specific content exists elsewhere in memory.\n' +
+      '           A browser runs untrusted code by design. Use this only on a\n' +
+      '           machine and workload where you accept that.');
+  } else if (merging.processMergeable && !merging.ksmRunning) {
+    console.warn('[debrowser] page merging requested, but KSM is not running system-wide ' +
+                 '(root: echo 1 > /sys/kernel/mm/ksm/run). Running unmerged.');
+  }
+}
+
 function log(...args) {
   if (VERBOSE) console.log('[debrowser]', ...args);
 }

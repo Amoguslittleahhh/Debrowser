@@ -155,8 +155,12 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // on where in the worker's duty cycle the sample lands. What matters, and
   // what the freeze decision keys off, is that this tab costs real CPU while
   // hidden and the idle one does not.
+  // The gap is the property, not an absolute figure. The regression this guards
+  // against - sharing a process's CPU out proportionally - made a busy tab and a
+  // quiet one report *identical* CPU, so a margin over the idle tab catches it
+  // while tolerating how much the worker's duty cycle varies between runs.
   check('a still-working hidden tab is distinguishable from a quiet one',
-    busyCpuBefore > heavy.cpu && busyCpuBefore > 0.3,
+    busyCpuBefore > heavy.cpu + 0.1,
     `busy ${busyCpuBefore.toFixed(2)}% vs idle ${heavy.cpu.toFixed(2)}%`);
 
   const busyFroze = await waitFor(() => busy.tier === Tier.FROZEN, { timeoutMs: 12_000 });

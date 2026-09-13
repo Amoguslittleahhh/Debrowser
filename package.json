@@ -10,7 +10,9 @@
     "start:performance": "electron . --profile=performance",
     "bench": "node bench/bench.js",
     "smoke": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu",
-    "start:minimal": "electron . --profile=minimal"
+    "start:minimal": "electron . --profile=minimal",
+    "build:ksm": "cc -O2 -Wall -o tools/ksm-launch tools/ksm-launch.c",
+    "start:merged": "npm run build:ksm && tools/ksm-launch electron ."
   },
   "devDependencies": {
     "electron": "^44.0.0"

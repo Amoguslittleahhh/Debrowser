@@ -21,6 +21,7 @@ npm install
 npm start                  # balanced
 npm run start:economy      # less memory, isolation intact
 npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
+npm run start:merged       # + page merging (KSM) - side-channel risk, read below
 npm run start:performance  # most headroom
 
 npm run smoke              # 21-check end-to-end test, headless
@@ -227,6 +228,48 @@ Tested per-tab, in PSS, and rejected:
 | `--disable-features=BackForwardCache` | no difference |
 | `webPreferences.spellcheck: false` | no difference (0.1 MB) |
 | `--disable-features=Translate,OptimizationHints,MediaRouter` | no difference, slightly worse |
+
+### Page merging across the renderer pool (opt-in)
+
+`tools/ksm-launch.c` marks the browser's process tree eligible for **kernel
+same-page merging**, so identical anonymous pages across renderers collapse onto
+one physical copy.
+
+This is the applicable form of the page-merging idea in
+[Mesh](https://arxiv.org/abs/1902.04738). Mesh merges pages *within* a process by
+finding spans whose occupied slots do not overlap, which needs the allocator's
+knowledge of object layout — unreachable without replacing PartitionAlloc inside
+Chromium. KSM attacks the same waste from the other side: across processes, by
+content equality. A browser runs many renderers over identical code and similar
+structures, so a lot of their pages are byte-identical.
+
+Measured, 8 DOM-heavy tabs on distinct sites, two runs each:
+
+| | per-tab PSS | per-tab private | whole app |
+|---|---|---|---|
+| plain | 30.8 / 30.9 MB | 21.3 / 21.3 MB | 375 / 376 MB |
+| merged | **25.1 / 25.6 MB** | **15.2 / 15.4 MB** | **325 / 332 MB** |
+
+**−12% total, −28% of per-tab private memory.** KSM's own accounting agrees
+independently (`general_profit` ≈ 40 MB, `pages_sharing` ≈ 12 000 pages collapsed
+onto ~1 500), which is why this is stated as causal rather than as a difference
+between two runs.
+
+```bash
+sudo sh -c 'echo 1 > /sys/kernel/mm/ksm/run'   # enable the kernel scanner
+npm run start:merged
+```
+
+> **Why this is opt-in and warns at every launch.** Memory deduplication is a
+> known timing side channel: writing to a merged page triggers copy-on-write and
+> is measurably slower, which lets code in one page test whether specific content
+> exists elsewhere in memory — including in other applications, since KSM merges
+> system-wide. A browser runs untrusted code by design, which is the worst case
+> for this class of attack. The same principle is demonstrated for memory
+> *compression* in [Schwarzl et al.](https://arxiv.org/abs/2111.08404), and
+> remote-timer work shows such channels are exploitable without local access.
+> KSM is off by default on essentially every distribution and needs root to
+> enable — treat that as the design telling you something.
 
 ### Optimal heap limits: implemented, and off by default
 
