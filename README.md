@@ -110,9 +110,9 @@ from doing it. What makes a tab cheap:
   same-site tabs cost 11.6 MB each, against 19.7 MB each across 30 different
   sites. Site isolation — the boundary between *different* sites — is untouched;
   what is traded is crash isolation between tabs of the same site.
-- **V8 biased toward small heaps** (`--optimize-for-size`). A 13% per-tab
-  reduction on a DOM-heavy page, for a modest JIT cost. The only flag of its
-  kind that survived measurement.
+- **V8 biased toward small heaps** (`--optimize-for-size`). A 13-20% per-tab
+  reduction on a DOM-heavy page, depending on the run, for a modest JIT cost.
+  The only flag of its kind that survived measurement - seven others did not.
 - **No spare renderer.** Chromium keeps one warm to save ~100 ms on the next
   navigation; it costs a whole process.
 - **Lazy background tabs.** A tab opened in the background gets no renderer at
@@ -181,11 +181,12 @@ share of one copy of Chromium.
 
 | | per tab | total (30 tabs) |
 |---|---|---|
-| V8 default | 37.9 MB | 614 MB |
+| V8 default | 37.9 - 41.2 MB | 614 MB |
 | optimize-for-size | **33.0 MB** | **591 MB** |
 
-13% on a DOM-heavy page; ~4% across a mixed workload, where lighter pages have
-less heap to shrink. Toggle with `--no-optimize-for-size` to re-measure.
+13-20% on a DOM-heavy page depending on the run; ~4% across a mixed workload,
+where lighter pages have less heap to shrink. Toggle with
+`--no-optimize-for-size` to re-measure.
 
 ### Flags that did not survive measurement
 
@@ -194,7 +195,7 @@ Tested per-tab, in PSS, and rejected:
 | flag | result |
 |---|---|
 | `--enable-low-end-device-mode` | saves the same as optimize-for-size and does not stack (33.5 MB combined vs 33.0 MB alone), while shrinking image caches and disabling visible features |
-| `--max-semi-space-size` (2 / 16 / unset) | no difference beyond noise; it had been set on an assumption |
+| `--max-semi-space-size` (2 / 16 / unset) | no difference at any value; it had been shipping here on an unmeasured assumption, which summed RSS could not have detected |
 | `--num-raster-threads=1` | **worse** — 40.4 MB against 37.9 MB |
 | `--disable-features=BackForwardCache` | no difference |
 | `webPreferences.spellcheck: false` | no difference (0.1 MB) |
