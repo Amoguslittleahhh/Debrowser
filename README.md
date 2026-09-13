@@ -24,7 +24,7 @@ npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
 npm run start:merged       # + page merging (KSM) - side-channel risk, read below
 npm run start:performance  # most headroom
 
-npm run smoke              # 21-check end-to-end test, headless
+npm run smoke              # 31-check end-to-end test, headless
 npm run bench              # memory benchmark
 ```
 
@@ -37,7 +37,7 @@ pass; a normal desktop install must not use it.
 | | `minimal` | `economy` | `balanced` | `performance` |
 |---|---|---|---|---|
 | **site isolation** | **off** | on | on | on |
-| live renderer cap | off | 4 | **off** | off |
+| live renderer cap | off | 4 | **sized to the machine** | 24 |
 | memory budget | 600 MB | 700 MB | sized to the machine | 3000 MB |
 | discard idle tab after | 5 min | 3 min | 15 min | 2 hrs |
 | simultaneous loads | 2 | 2 | 3 | 6 |
@@ -52,10 +52,13 @@ pass; a normal desktop install must not use it.
 > browser will not do it on your behalf; it prints a warning on every launch.
 > Use it for browsing you trust, on a machine where you need the memory.
 
-**There is no cap on how many tabs stay live by default.** The goal is to make
-each tab cheap, not to ration them. A cap exists as an opt-in ceiling for small
-machines, or for anyone who would rather spend reload latency than memory —
-`--max-live-tabs=8`, or the economy profile.
+**The cap is on how many tabs hold a renderer, not on how many you can open.**
+There is no limit on tab count and there never will be — the goal is to make
+each tab cheap, not to ration them. Past the cap the least-recently-used tab is
+discarded: it stays open in the strip, keeps its history, scroll position and
+anything you typed, and returning to it reloads the page behind a picture of how
+you left it. Sized from host RAM (4 live at ≤4 GB, 6 at 8 GB, 8 at 16 GB, 12
+above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 
 `balanced` sizes its budget from the host's actual RAM. Override with
 `--budget=1200`, or drag the slider in the task manager.
@@ -79,7 +82,7 @@ browser is to its memory budget.
 | `WARM` | Hidden recently. Chromium throttles its timers. | Nothing |
 | `COLD` | Hidden a while. No renderer action; now a discard candidate. | Nothing |
 | `FROZEN` | Task queues stopped, CPU → ~0, memory and DOM intact. | One CDP round trip |
-| `DISCARDED` | Renderer destroyed. ~0 MB. | A reload |
+| `DISCARDED` | Renderer destroyed. ~0 MB. | A reload, behind a thumbnail |
 
 Against that sit the protections, which always win:
 
@@ -118,7 +121,7 @@ from doing it. What makes a tab cheap:
 - **One renderer per site.** Fifteen tabs on the same site share one process
   instead of taking fifteen. This is the largest per-tab lever there is, and it
   is exactly the case that comes up when you open a lot of tabs at once: 30
-  same-site tabs cost 11.6 MB each, against 19.7 MB each across 30 different
+  same-site tabs cost ~12.6 MB each, against ~20.8 MB each across 30 different
   sites. Site isolation — the boundary between *different* sites — is untouched;
   what is traded is crash isolation between tabs of the same site.
 - **V8 biased toward small heaps** (`--optimize-for-size`). A 13-20% per-tab
@@ -142,16 +145,23 @@ while breaking the page. Chromium already reclaims a backgrounded renderer on
 its own, and goes further than forcing it does, so an idle tab is left alone.
 
 What does work: **not paying for a renderer you do not need** (lazy background
-tabs, no spare renderer, one renderer per site) and **making the renderer you do
-need smaller** (`--optimize-for-size`). Freezing is applied only to tabs still
-burning CPU out of sight, because it costs memory rather than saving any.
+tabs, no spare renderer, one renderer per site, the live-renderer cap) and
+**making the renderer you do need smaller** (`--optimize-for-size`). Freezing is
+applied only to tabs still burning CPU out of sight, because it costs memory
+rather than saving any — measured again with whole-renderer freezing, which
+changes nothing (`docs/MEASUREMENTS.md`).
+
+The largest single lever turned out to be residency rather than renderer size.
+A hidden tab used to cost almost exactly what a visible one costs, and the
+per-renderer floor is not movable — so what moved the number was discarding more
+of them, once discarding stopped being something you could see.
 
 ---
 
 ## Measured results
 
-From `npm run bench` on a 4-core, 16 GB Linux host, with every tab **live** —
-nothing discarded, no cap.
+From `npm run bench` on a 4-core, 16 GB Linux host. Where a table says "all
+live", nothing was discarded and no cap applied; the governed figures say so.
 
 ### How this is measured
 
@@ -181,12 +191,36 @@ labels itself as doing so.
 The private figure is the marginal cost of one more tab; the rest is that tab's
 share of one copy of Chromium.
 
-### Thirty tabs, all live
+### Thirty tabs
+
+All live, nothing discarded, no cap — one site per tab, which is what real
+browsing looks like to Chromium's process model:
 
 | | total | per tab | renderers |
 |---|---|---|---|
-| 30 different sites | **592 MB** | 19.7 MB | 31 |
-| 30 tabs on one site | **348 MB** | 11.6 MB | 2 |
+| 30 different sites | **624 MB** | 20.8 MB | 31 |
+| 30 tabs on one site | 377 MB | 12.6 MB | 2 |
+
+Then with the governor and the live-renderer cap doing their job:
+
+| | total | per tab | renderers |
+|---|---|---|---|
+| 30 tabs, cap 6 | **330 MB** | 11.0 MB | 7 |
+| 30 tabs, cap 4 | **311 MB** | 10.4 MB | 5 |
+| 30 tabs, cap 3 | **291 MB** | 9.7 MB | 4 |
+| 40 tabs, cap 4 | **304 MB** | **7.6 MB** | 5 |
+
+Read that last row carefully, because it is the most useful thing in this file:
+**forty tabs cost less per tab than thirty do.** About 238 MB exists before the
+first tab does — browser, GPU, network and zygote processes — and it is divided
+across whatever is open, so the per-tab figure falls as you open more. Below
+roughly 25 tabs it cannot reach 10 MB at any setting, because that fixed cost
+alone exceeds it. The number is meaningless without its tab count.
+
+> Figures published before the accounting fix in `docs/MEASUREMENTS.md` are low
+> by about 29 MB: `app.getAppMetrics()` omits Chromium's zygote processes, and
+> everything here went through it. The two all-live rows above are corrected;
+> the same-site row carries the correction rather than a fresh run.
 
 ### What site isolation costs (the `minimal` profile)
 
