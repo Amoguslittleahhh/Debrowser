@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Memory-heavy test page</title>
+  <style>
+    body { margin: 0; padding: 20px; background: #101318; color: #e6e8ee; font: 14px system-ui; }
+    #grid div { padding: 2px 6px; border-bottom: 1px solid #2c303a; }
+  </style>
+</head>
+<body>
+  <!-- Allocates a large, retained JS heap and a sizeable DOM, then goes
+       completely idle. This is the shape the governor is built for: a tab
+       holding tens of megabytes it will not touch again until the user
+       returns to it. -->
+  <h1>Heavy page</h1>
+  <p id="status">allocating…</p>
+  <div id="grid"></div>
+
+  <script>
+    // Two kinds of memory, because the governor treats them differently.
+    //
+    // 1. Garbage: allocated while the page was working, then dropped. A real
+    //    page accumulates a great deal of this and V8 is in no hurry to return
+    //    it to the OS, because on its own it has no idea the tab is about to
+    //    be ignored for an hour. This is what a forced purge reclaims, and it
+    //    is where essentially all of the saving comes from.
+    let churn = [];
+    for (let round = 0; round < 6; round++) {
+      churn = [];
+      for (let i = 0; i < 30; i++) churn.push(new Float64Array(250_000)); // ~2MB each
+      for (const arr of churn) arr[0] = Math.random();
+    }
+    churn = null;
+
+    // 2. Retained: live state the page will need when the user comes back.
+    //    The governor must never cost the page this, and purging cannot.
+    window.__retained = [];
+    for (let i = 0; i < 5; i++) window.__retained.push(new Float64Array(250_000));
+
+    const grid = document.getElementById('grid');
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < 4000; i++) {
+      const row = document.createElement('div');
+      row.textContent = `row ${i} — ${Math.random().toString(36).slice(2)}`;
+      frag.appendChild(row);
+    }
+    grid.appendChild(frag);
+
+    document.getElementById('status').textContent =
+      `churned ~360MB of garbage, retained ~${window.__retained.length * 2}MB ` +
+      `+ 4000 DOM rows; now idle`;
+    document.title = 'Heavy page (idle)';
+  </script>
+</body>
+</html>

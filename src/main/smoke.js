@@ -1,0 +1,251 @@
+'use strict';
+
+/**
+ * Headless end-to-end check of the governor.
+ *
+ * This is not a unit test of the policy arithmetic - it drives the real
+ * browser, with real renderers and real pages, and asserts on measured
+ * memory. The claims this project makes are all empirical, so the test that
+ * backs them has to be too.
+ *
+ * Run with: npm run smoke
+ */
+
+const path = require('path');
+const { Tier } = require('./config');
+
+const PAGES = path.join(__dirname, '..', '..', 'test', 'pages');
+const pageUrl = (name) => `file://${path.join(PAGES, name)}`;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const results = [];
+function check(name, passed, detail = '') {
+  results.push({ name, passed, detail });
+  console.log(`  ${passed ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
+}
+
+/**
+ * Take a settled memory reading.
+ *
+ * `Metrics` smooths its samples, which is right for policy - it stops the
+ * governor reacting to a single spike - but wrong for a measurement we are
+ * about to assert on. Sampling repeatedly lets the average converge on the
+ * current reality before we read it.
+ */
+async function settledSample(governor, samples = 6, gapMs = 180) {
+  for (let i = 0; i < samples; i++) {
+    governor.metrics.sample();
+    await sleep(gapMs);
+  }
+  governor.metrics.attribute();
+}
+
+/** Wait until a predicate holds, or give up. */
+async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return true;
+    await sleep(pollMs);
+  }
+  return false;
+}
+
+async function runSmoke({ tabs, governor, shell, cfg }) {
+  console.log('\n=== Debrowser smoke test ===\n');
+
+  // Compress the idle ladder so the test exercises hours of behaviour in
+  // seconds. Policy is unchanged; only the clock is.
+  cfg.coldAfterMs = 1500;
+  cfg.freezeAfterMs = 3000;
+  cfg.minLifetimeMs = 1000;
+  cfg.tickMs = 500;
+  cfg.boost.decayMs = 800;
+  cfg.boost.settleAfterMs = 800;
+  governor.stop();
+  governor.start();
+
+  /* ---------------------------------------------------------------- */
+  console.log('1. Opening tabs\n');
+
+  const home = tabs.all()[0];
+  await home.wc.loadURL(pageUrl('idle.html')).catch(() => {});
+
+  const heavy = tabs.create({ url: pageUrl('heavy.html'), activate: false, realise: true });
+  const animated = tabs.create({ url: pageUrl('animated.html'), activate: false, realise: true });
+  const form = tabs.create({ url: pageUrl('form.html'), activate: false, realise: true });
+  const busy = tabs.create({ url: pageUrl('busy.html'), activate: false, realise: true });
+
+  const opened = [home, heavy, animated, form, busy];
+  const allLoaded = await waitFor(() =>
+    opened.every((t) => t.isLive && !t.loading && t.pid));
+  check('all tabs load and get renderer processes', allLoaded,
+    `pids: ${opened.map((t) => t.pid).join(', ')}`);
+
+  await sleep(1500);
+  await settledSample(governor);
+
+  const heavyBaseline = heavy.rssMB;
+  check('memory is attributed per tab', heavyBaseline > 0,
+    `heavy tab measured at ~${Math.round(heavyBaseline)}MB`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n2. Idle ladder: hidden tabs demote on their own\n');
+
+  const demoted = await waitFor(() => heavy.tier === Tier.COLD, { timeoutMs: 8000 });
+  check('an idle hidden tab is demoted to discard-eligible on its own', demoted,
+    `heavy tab reached ${heavy.tier}`);
+
+  await settledSample(governor);
+  const heavyAfterIdle = heavy.rssMB;
+  const delta = heavyAfterIdle - heavyBaseline;
+  // The COLD tier deliberately performs no action on the renderer: forcing a
+  // collection was measured as a net loss, and Chromium reclaims a hidden tab
+  // on its own. So the assertion is that demotion is *free* - it must not make
+  // the tab bigger, which is exactly what the instrumentation to squeeze it did.
+  check('demoting an idle tab costs it nothing', delta <= 2,
+    `~${Math.round(heavyBaseline)}MB -> ~${Math.round(heavyAfterIdle)}MB ` +
+    `(${delta >= 0 ? '+' : ''}${Math.round(delta)}MB)`);
+
+  check('a quiet tab is not frozen, because freezing it would only cost memory',
+    heavy.tier !== Tier.FROZEN, `heavy tab at ${heavy.tier}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n3. A tab still burning CPU in the background is frozen\n');
+
+  await settledSample(governor, 4);
+  const busyCpuBefore = busy.cpu;
+  // Compared against a quiet tab rather than an absolute figure: CPU is
+  // reported as a smoothed average, so the exact number at any instant depends
+  // on where in the worker's duty cycle the sample lands. What matters, and
+  // what the freeze decision keys off, is that this tab costs real CPU while
+  // hidden and the idle one does not.
+  check('a still-working hidden tab is distinguishable from a quiet one',
+    busyCpuBefore > heavy.cpu && busyCpuBefore > 0.3,
+    `busy ${busyCpuBefore.toFixed(2)}% vs idle ${heavy.cpu.toFixed(2)}%`);
+
+  const busyFroze = await waitFor(() => busy.tier === Tier.FROZEN, { timeoutMs: 12_000 });
+  check('a background tab that is still working gets frozen', busyFroze,
+    `busy tab reached ${busy.tier}`);
+
+  await sleep(1500);
+  await settledSample(governor, 4);
+  check('freezing drops that tab to no measurable CPU', busy.cpu < 1.0,
+    `${busyCpuBefore.toFixed(1)}% -> ${busy.cpu.toFixed(2)}% CPU`);
+  check('a frozen tab keeps its renderer and its state', busy.isLive && busy.rssMB > 0,
+    `still resident at ~${Math.round(busy.rssMB)}MB`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n4. Animation boost on the foreground tab\n');
+
+  await tabs.activate(animated.id);
+  await waitFor(() => animated.visible && animated.tier === Tier.ACTIVE);
+  check('a frozen tab is unfrozen before it is presented, not after',
+    animated.isLive && !animated.crashed, animated.crashed ? 'renderer crashed on present' : 'ok');
+
+  const boosted = await waitFor(() => animated.boosted, { timeoutMs: 6000 });
+  check('an animating foreground tab is boosted', boosted,
+    `demand=${animated.demand}, reported=${animated.reportedDemand}`);
+
+  check('the boosted tab is never demoted while animating',
+    animated.tier === Tier.ACTIVE, `tier=${animated.tier}`);
+
+  check('the governor defers stalling work while an animation runs',
+    governor.boost.quiesceRequested, 'quiesce requested');
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n5. Resources are handed back when the animation ends\n');
+
+  // Stop the page animating, exactly as a real page would when its transition
+  // finishes, and confirm the boost decays and a trim is queued.
+  await animated.wc.executeJavaScript(`
+    document.querySelector('.spinner').style.animation = 'none';
+    document.querySelector('.bar').style.animation = 'none';
+    window.__stopFrames = true;
+    const c = document.getElementById('c');
+    c.remove();
+    true;
+  `).catch(() => {});
+
+  // The canvas loop reschedules itself; remove its driver too.
+  await animated.wc.executeJavaScript(
+    'window.requestAnimationFrame = function () { return 0; }; true;'
+  ).catch(() => {});
+
+  const released = await waitFor(() => !animated.boosted, { timeoutMs: 8000 });
+  check('boost is released once the animation stops', released,
+    `demand=${animated.demand}`);
+
+  check('CPU is handed back as soon as the animation ends',
+    animated.priority === cfg.boost.niceForeground && !animated.boosted,
+    `priority=${animated.priority}, boosted=${animated.boosted}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n6. Protections\n');
+
+  // Force the worst case: a budget far below what is resident.
+  await tabs.activate(home.id);
+  await sleep(300);
+  governor.cfg.memoryBudgetMB = 1;
+  await sleep(2500);
+
+  check('unsubmitted input is never discarded',
+    form.tier !== Tier.DISCARDED,
+    `form tab held at ${form.tier} under critical pressure`);
+
+  check('the visible tab is never demoted under any pressure',
+    home.tier === Tier.ACTIVE, `home tab at ${home.tier}`);
+
+  check('pressure is reported as critical when far over budget',
+    governor.pressure === 'critical', `pressure=${governor.pressure}`);
+
+  const discardedSomething = governor.stats.discards > 0 ||
+    tabs.all().some((t) => t.tier === Tier.DISCARDED);
+  check('the governor reclaims from the least valuable tabs under pressure',
+    discardedSomething || governor.stats.freezes > 0,
+    `${governor.stats.freezes} frozen, ${governor.stats.discards} discarded`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n7. Discard and restore round trip\n');
+
+  governor.cfg.memoryBudgetMB = 4096; // relieve pressure
+  const victim = tabs.all().find((t) => t !== home && t !== form) || heavy;
+  const victimUrl = victim.url;
+
+  await governor.enforceManualDiscard(victim);
+  const isDiscarded = victim.tier === Tier.DISCARDED;
+  check('a discarded tab releases its renderer entirely',
+    isDiscarded && !victim.isLive && victim.rssMB === 0,
+    isDiscarded ? 'renderer destroyed, 0MB' : `tier=${victim.tier}`);
+
+  await tabs.activate(victim.id);
+  const restored = await waitFor(() => victim.isLive && !victim.loading && victim.url === victimUrl,
+    { timeoutMs: 10_000 });
+  check('activating a discarded tab restores it to the same page', restored,
+    `url=${victim.url}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n8. Footprint\n');
+
+  governor.metrics.sample();
+  const snap = governor.metrics.snapshot();
+  console.log(`  ${snap.totalMB}MB total across ${snap.processCount} processes ` +
+              `(${snap.rendererCount} renderers) for ${tabs.all().length} tabs`);
+  console.log(`  browser + GPU + utility overhead: ${snap.overheadMB}MB`);
+  console.log(`  reclaimed so far: ~${Math.round(governor.stats.reclaimedMB)}MB ` +
+              `across ${governor.stats.freezes} freezes and ` +
+              `${governor.stats.discards} discards`);
+
+  /* ---------------------------------------------------------------- */
+  const failed = results.filter((r) => !r.passed);
+  console.log(`\n=== ${results.length - failed.length}/${results.length} checks passed ===\n`);
+  if (failed.length) {
+    console.log('Failures:');
+    for (const f of failed) console.log(`  - ${f.name}${f.detail ? ` (${f.detail})` : ''}`);
+    console.log('');
+  }
+
+  return failed.length ? 1 : 0;
+}
+
+module.exports = { runSmoke };

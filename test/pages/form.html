@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Form test page</title>
+  <style>
+    body { margin: 0; padding: 24px; background: #101318; color: #e6e8ee; font: 14px system-ui; }
+    textarea, input { display: block; margin: 8px 0; padding: 6px; width: 320px;
+                      background: #1e2128; color: inherit; border: 1px solid #2c303a; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <!-- Used to verify the strongest protection in the governor: a tab holding
+       text the user has typed must never be discarded, whatever the pressure.
+       The value below is set by script to simulate typed-but-unsubmitted
+       input, which is what makes `defaultValue` differ from `value`. -->
+  <h1>Draft</h1>
+  <input id="subject" type="text" placeholder="Subject">
+  <textarea id="body" rows="6" placeholder="Message"></textarea>
+
+  <script>
+    document.getElementById('subject').value = 'unsent draft';
+    document.getElementById('body').value = 'This text must survive memory pressure.';
+  </script>
+</body>
+</html>

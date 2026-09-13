@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self'; script-src 'self';">
+  <title>Resource governor</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header>
+    <h1>Resource governor</h1>
+    <button id="close" class="ghost" aria-label="Close panel">×</button>
+  </header>
+
+  <section class="summary">
+    <div class="stat">
+      <span class="stat-value" id="total">—</span>
+      <span class="stat-label">resident</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="budget">—</span>
+      <span class="stat-label">budget</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="renderers">—</span>
+      <span class="stat-label">processes</span>
+    </div>
+  </section>
+
+  <div class="budget-row">
+    <label for="budget-input">Budget</label>
+    <input id="budget-input" type="range" min="384" max="6144" step="64">
+    <output id="budget-out">—</output>
+  </div>
+
+  <p class="pressure" id="pressure">—</p>
+
+  <ul class="tabs" id="tab-list"></ul>
+
+  <footer id="stats">—</footer>
+
+  <script src="panel.js"></script>
+</body>
+</html>

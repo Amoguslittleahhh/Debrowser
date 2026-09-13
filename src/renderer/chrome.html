@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data: https:;">
+  <title>Debrowser</title>
+  <link rel="stylesheet" href="chrome.css">
+</head>
+<body>
+  <div class="tabstrip" id="tabstrip">
+    <div class="tabs" id="tabs"></div>
+    <button class="icon-btn new-tab" id="new-tab" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
+  </div>
+
+  <div class="toolbar">
+    <div class="nav">
+      <button class="icon-btn" id="back" title="Back" aria-label="Back">&#8249;</button>
+      <button class="icon-btn" id="forward" title="Forward" aria-label="Forward">&#8250;</button>
+      <button class="icon-btn" id="reload" title="Reload" aria-label="Reload">&#10227;</button>
+    </div>
+
+    <div class="omnibox">
+      <span class="scheme" id="scheme" aria-hidden="true"></span>
+      <input id="url" type="text" spellcheck="false" autocomplete="off"
+             placeholder="Search, or enter an address" aria-label="Address and search bar">
+    </div>
+
+    <button class="meter" id="meter" title="Resource governor - click for the task manager">
+      <span class="meter-bar"><span class="meter-fill" id="meter-fill"></span></span>
+      <span class="meter-text" id="meter-text">—</span>
+    </button>
+  </div>
+
+  <script src="chrome.js"></script>
+</body>
+</html>

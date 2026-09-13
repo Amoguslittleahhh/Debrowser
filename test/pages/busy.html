@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Background-busy test page</title>
+  <style>
+    body { margin: 0; padding: 24px; background: #101318; color: #e6e8ee; font: 14px system-ui; }
+  </style>
+</head>
+<body>
+  <!-- The case freezing exists for: a page that keeps burning CPU after the
+       user has moved on. The work runs in a dedicated worker, because
+       Chromium throttles a hidden page's timers but does not stop a worker -
+       which is exactly how a background tab ends up costing real CPU on a
+       machine whose owner thinks that tab is doing nothing. -->
+  <h1>Busy page</h1>
+  <p id="status">starting worker…</p>
+
+  <script>
+    const source = `
+      let n = 0;
+      function spin() {
+        const until = Date.now() + 40;
+        while (Date.now() < until) { n += Math.sqrt(n + 1); }
+        postMessage(n);
+        setTimeout(spin, 10);
+      }
+      spin();
+    `;
+    const blob = new Blob([source], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+    let ticks = 0;
+    worker.onmessage = () => {
+      ticks += 1;
+      if (ticks % 25 === 0) {
+        document.getElementById('status').textContent = `worker still running (${ticks} ticks)`;
+      }
+    };
+  </script>
+</body>
+</html>

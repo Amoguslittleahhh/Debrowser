@@ -1,0 +1,269 @@
+/*
+ * Browser chrome styling.
+ *
+ * One rule governs this file: the chrome itself must be cheap. It is a live
+ * renderer for the entire life of the window, so it uses no web fonts, no
+ * images, no blur or shadow filters that force an offscreen layer, and no
+ * animation that runs when nothing has changed. Everything that does move is
+ * a transform or opacity change on a small element, so it stays on the
+ * compositor and never triggers layout.
+ */
+
+:root {
+  --bg: #16181d;
+  --bg-raised: #1e2128;
+  --bg-input: #24272f;
+  --border: #2c303a;
+  --text: #e6e8ee;
+  --text-dim: #9aa1b1;
+  --accent: #5b8cff;
+  --ok: #49c17d;
+  --warn: #e0a33e;
+  --crit: #e2564a;
+  --radius: 7px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f2f3f6;
+    --bg-raised: #ffffff;
+    --bg-input: #ffffff;
+    --border: #d8dbe2;
+    --text: #1a1d24;
+    --text-dim: #626a7a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- */
+/* Tab strip                                                         */
+/* ---------------------------------------------------------------- */
+
+.tabstrip {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 40px;
+  padding: 6px 8px 0;
+  background: var(--bg);
+  -webkit-app-region: drag;
+}
+
+.tabs {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 44px;
+  max-width: 220px;
+  flex: 1 1 180px;
+  height: 34px;
+  padding: 0 8px 0 10px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  opacity: 0.62;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.tab:hover { opacity: 0.85; }
+
+.tab.active {
+  opacity: 1;
+  background: var(--bg-input);
+}
+
+.tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-favicon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+/*
+ * Tier badge. The whole point of this browser is that it is constantly moving
+ * tabs between resource states, so it says so rather than doing it invisibly:
+ * the user can always see which tabs are asleep and why one took a moment to
+ * come back.
+ */
+.tier {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.tier[data-tier="warm"]      { background: var(--ok); opacity: 0.7; }
+.tier[data-tier="cold"]      { background: var(--warn); opacity: 0.8; }
+.tier[data-tier="frozen"]    { background: var(--accent); }
+.tier[data-tier="discarded"] { background: var(--text-dim); opacity: 0.5; }
+
+.tab.boosted .tier {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.tab-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 15px;
+  cursor: default;
+  opacity: 0;
+}
+
+.tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
+.tab-close:hover { background: var(--border); color: var(--text); }
+
+.audio-dot {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- */
+/* Toolbar                                                           */
+/* ---------------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  background: var(--bg-input);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav { display: flex; gap: 2px; }
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: default;
+}
+
+.icon-btn:hover { background: var(--border); color: var(--text); }
+.icon-btn:disabled { opacity: 0.3; }
+.new-tab { -webkit-app-region: no-drag; font-size: 18px; }
+
+.omnibox {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 15px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.omnibox:focus-within { border-color: var(--accent); }
+
+.scheme {
+  flex: none;
+  margin-right: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+#url {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  user-select: text;
+  cursor: text;
+}
+
+/* ---------------------------------------------------------------- */
+/* Memory meter                                                      */
+/* ---------------------------------------------------------------- */
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+.meter:hover { background: var(--bg-raised); color: var(--text); }
+
+.meter-bar {
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.meter-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: var(--ok);
+  /* Transform-only so the meter never causes layout on the governor tick. */
+  transform-origin: left center;
+  transition: transform 400ms ease, background-color 400ms ease;
+}
+
+.meter[data-pressure="moderate"] .meter-fill { background: var(--ok); }
+.meter[data-pressure="high"]     .meter-fill { background: var(--warn); }
+.meter[data-pressure="critical"] .meter-fill { background: var(--crit); }
+
+.meter-text { font-size: 11px; }

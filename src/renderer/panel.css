@@ -1,0 +1,154 @@
+/* Task manager panel. Same cost discipline as the chrome: no images, no
+   filters, keyed updates, and nothing that animates while idle. */
+
+:root {
+  --bg: #16181d;
+  --bg-raised: #1e2128;
+  --border: #2c303a;
+  --text: #e6e8ee;
+  --text-dim: #9aa1b1;
+  --accent: #5b8cff;
+  --ok: #49c17d;
+  --warn: #e0a33e;
+  --crit: #e2564a;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f8fa;
+    --bg-raised: #ffffff;
+    --border: #d8dbe2;
+    --text: #1a1d24;
+    --text-dim: #626a7a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  border-left: 1px solid var(--border);
+  user-select: none;
+  cursor: default;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+
+h1 { margin: 0; font-size: 13px; font-weight: 600; }
+
+.ghost {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 17px;
+  cursor: default;
+  border-radius: 5px;
+  width: 24px;
+  height: 24px;
+}
+.ghost:hover { background: var(--border); color: var(--text); }
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 0 14px 10px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.stat-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.budget-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 8px;
+  color: var(--text-dim);
+}
+.budget-row input { flex: 1; accent-color: var(--accent); }
+.budget-row output { font-variant-numeric: tabular-nums; min-width: 54px; text-align: right; }
+
+.pressure {
+  margin: 0 14px 10px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.pressure[data-pressure="high"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.pressure[data-pressure="critical"] { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--border)); }
+
+.tabs {
+  flex: 1;
+  margin: 0;
+  padding: 0 8px 8px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+}
+.row:hover { background: var(--bg-raised); }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.dot[data-tier="cold"] { background: var(--warn); }
+.dot[data-tier="frozen"] { background: var(--accent); }
+.dot[data-tier="discarded"] { background: var(--text-dim); opacity: 0.5; }
+
+.row-main { min-width: 0; }
+.row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-sub { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.row-mem { font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.row-mem.boosted { color: var(--accent); }
+
+.row-action {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 5px;
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 10px;
+  cursor: default;
+  opacity: 0;
+}
+.row:hover .row-action { opacity: 1; }
+.row-action:hover { color: var(--text); border-color: var(--text-dim); }
+.row-action:disabled { opacity: 0 !important; }
+
+footer {
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+}

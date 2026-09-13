@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Animated test page</title>
+  <style>
+    body { margin: 0; background: #101318; color: #e6e8ee; font: 14px system-ui; }
+    .spinner {
+      width: 90px; height: 90px; margin: 40px auto;
+      border: 6px solid #2c303a; border-top-color: #5b8cff; border-radius: 50%;
+      animation: spin 900ms linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .bar { height: 8px; background: #5b8cff; animation: slide 1.4s ease-in-out infinite alternate; }
+    @keyframes slide { from { width: 5%; } to { width: 95%; } }
+    canvas { display: block; margin: 20px auto; background: #16181d; }
+  </style>
+</head>
+<body>
+  <!-- Exercises both animation paths the governor detects: CSS/Web Animations,
+       which the in-page probe sees directly, and a script-driven rAF loop,
+       which it cannot see and which must be picked up from renderer CPU. -->
+  <div class="spinner"></div>
+  <div class="bar"></div>
+  <canvas id="c" width="320" height="120"></canvas>
+
+  <script>
+    const ctx = document.getElementById('c').getContext('2d');
+    let t = 0;
+    function frame() {
+      t += 0.05;
+      ctx.fillStyle = '#16181d';
+      ctx.fillRect(0, 0, 320, 120);
+      ctx.strokeStyle = '#49c17d';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let x = 0; x < 320; x++) {
+        const y = 60 + Math.sin(x * 0.05 + t) * 40;
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
