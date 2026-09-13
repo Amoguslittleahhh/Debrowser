@@ -180,11 +180,140 @@ function pageMergingStatus() {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Processes Electron does not report                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Memory held by child processes that `app.getAppMetrics()` leaves out.
+ *
+ * Electron's process list is not the whole browser. On Linux, Chromium forks
+ * two **zygote** processes - a pre-initialised template that every renderer is
+ * forked from, which is why launching a renderer is fast - and neither appears
+ * in `getAppMetrics()`. Measured on a minimal harness (one `about:blank` view):
+ *
+ *     getAppMetrics total   167 MB across 4 processes
+ *     /proc descendant sweep 196 MB across 6 processes
+ *     difference            two zygotes, 14.4 MB + 14.5 MB
+ *
+ * Roughly 29 MB, and it is *fixed* overhead: it does not grow with tab count,
+ * so it lands entirely on the wrong side of a per-tab budget. Every figure this
+ * project has published came through `getAppMetrics()` and is low by that much
+ * - the same shape of error as counting RSS instead of PSS, and corrected here
+ * for the same reason.
+ *
+ * Linux only, deliberately. The zygote is a Linux/Android implementation detail;
+ * on Windows and macOS `getAppMetrics()` is the whole tree, so this returns 0
+ * and the caller's arithmetic is unchanged.
+ *
+ * @param {Set<number>|number[]} knownPids - pids `getAppMetrics()` did report
+ * @returns {{mb:number, processes:Array<{pid:number,type:string,pssMB:number}>}}
+ */
+/**
+ * Discovery is memoised because it is genuinely expensive - it reads every
+ * entry in /proc and parses each one's stat - and the answer is near-static:
+ * the zygotes are forked once at startup and live as long as the browser. The
+ * governor asks for this figure every tick, so a full scan each time would cost
+ * far more than the accounting it corrects.
+ *
+ * The cache holds pids, not megabytes: each call still re-reads those
+ * processes' current memory. It is rebuilt when a cached process has exited, or
+ * every RESCAN_MS in case something new appeared.
+ */
+let unreportedPidCache = null;
+let unreportedScannedAt = 0;
+const RESCAN_MS = 30_000;
+
+function unreportedProcessesMB(knownPids) {
+  const empty = { mb: 0, processes: [] };
+  if (!detectPss()) return empty;
+
+  const known = knownPids instanceof Set ? knownPids : new Set(knownPids);
+  const now = Date.now();
+
+  const stale = unreportedPidCache === null
+    || now - unreportedScannedAt > RESCAN_MS
+    || unreportedPidCache.some((pid) => !fs.existsSync(`/proc/${pid}`));
+
+  if (stale) {
+    unreportedPidCache = scanTreeForUnreported(known);
+    unreportedScannedAt = now;
+  }
+
+  const processes = [];
+  let mb = 0;
+  for (const pid of unreportedPidCache) {
+    // A pid that has since been reported by getAppMetrics must not be counted
+    // twice; the scan excluded the set known at scan time, not at read time.
+    if (known.has(pid)) continue;
+    const detail = readProcessMemory(pid);
+    if (!detail) continue;
+    mb += detail.pssMB;
+    processes.push({ pid, type: processType(pid), pssMB: Math.round(detail.pssMB * 10) / 10 });
+  }
+  return { mb, processes };
+}
+
+/** The expensive half: every descendant of this process not in `known`. */
+function scanTreeForUnreported(known) {
+  let entries;
+  try {
+    entries = fs.readdirSync('/proc');
+  } catch {
+    return [];
+  }
+
+  // Walk parent links to find this process's descendants. Repeated until the
+  // set stops growing, because /proc is not ordered parent-before-child and a
+  // grandchild can otherwise be missed on the first pass.
+  const tree = new Set([process.pid]);
+  for (let pass = 0; pass < 4; pass++) {
+    let grew = false;
+    for (const entry of entries) {
+      const pid = Number(entry);
+      if (!pid || tree.has(pid)) continue;
+      const ppid = parentPid(pid);
+      if (ppid !== null && tree.has(ppid)) {
+        tree.add(pid);
+        grew = true;
+      }
+    }
+    if (!grew) break;
+  }
+
+  return [...tree].filter((pid) => pid !== process.pid && !known.has(pid));
+}
+
+/** Parent pid from /proc/<pid>/stat, skipping past the comm field's parens. */
+function parentPid(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    // comm is the second field and may itself contain spaces or parens, so the
+    // fields after it are found from the *last* ')' rather than by splitting.
+    const after = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const ppid = Number(after[1]);
+    return Number.isFinite(ppid) ? ppid : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Chromium's own name for a process, from its `--type=` switch. */
+function processType(pid) {
+  try {
+    const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    return (/--type=([a-z-]+)/.exec(cmdline) || [, 'untyped'])[1];
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** How the numbers on this host should be described. */
 function accountingMode() {
   return detectPss() ? 'pss' : 'rss';
 }
 
 module.exports = {
-  footprintMB, readProcessMemory, accountingMode, detectPss, pageMergingStatus
+  footprintMB, readProcessMemory, accountingMode, detectPss, pageMergingStatus,
+  unreportedProcessesMB
 };
