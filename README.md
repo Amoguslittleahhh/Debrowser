@@ -43,6 +43,70 @@ The thing that beat every forced intervention was leaving the tab alone.
 
 ---
 
+## A second round: bounding memory by tab count
+
+The first round of measurements was about *how much a live renderer can be made
+to give back*, and the answer was "almost nothing, and asking costs more than
+you get". That left an obvious gap, which a real usage pattern exposed: someone
+who opens tabs in bursts.
+
+For them the memory budget is the wrong instrument entirely. It is sized to the
+host, so on a 16 GB machine it sits near 6 GB — and thirty tabs at ~100 MB each
+never reach it. Every policy in the governor correctly concluded there was
+nothing to do while memory climbed to 3.1 GB.
+
+| | baseline | governed | delta |
+|---|---|---|---|
+| total resident, 30 tabs | 3081 MB | 1156 MB | **−62%** |
+| peak during load | 3083 MB | 1165 MB | **−62%** |
+| renderer processes | 31 | 9 | −22 |
+| live tabs | 30 | 8 | −22 |
+
+What fixed it was a cap on *how many tabs may hold a renderer*, enforced by
+discarding least-recently-used first — bounding the footprint by the thing that
+actually varies. Plus load admission, because peak memory is a loading-time
+phenomenon and a burst otherwise spikes well above where it settles.
+
+### The measurement that was lying
+
+The first honest version of this number was 648 MB, and it was wrong.
+
+Every fixture in `test/pages/` is a `file://` URL, and **all `file://` pages are
+a single site** as far as Chromium's process model is concerned. With
+one-renderer-per-site enabled, thirty fixture tabs collapsed into two processes.
+The benchmark was measuring a configuration nobody browses in, and reporting a
+saving of 79%.
+
+Serving the same fixtures over HTTP on distinct hostnames (`t1.test`, `t2.test`,
+… via `--host-resolver-rules`) put the real number at 1156 MB — still a 62%
+saving, but from the cap rather than from process sharing, which for thirty
+*different* sites does nothing at all. `experiments/` and the smoke suite both
+use distinct origins now, and `--origins=file` keeps the old behaviour available
+for comparison.
+
+The general lesson is the same one that produced experiment 04: a per-tab figure
+measured on one page shape does not generalise. There, a heavy page made forced
+GC look like a win. Here, same-site fixtures made process sharing look like one.
+
+### A regression the fidelity fix exposed
+
+Turning on one-renderer-per-site broke per-tab CPU, and the smoke suite caught
+it: a busy tab and a completely idle tab both reported 0.25%.
+
+Sharing a process's CPU out proportionally asserts that every tab in a shared
+renderer is equally busy. So a single busy tab made the governor freeze its
+quiet neighbours — and freezing costs memory. Per-tab CPU now comes from the
+per-document `TaskDuration` metric, differenced over wall time.
+
+That fix has a known edge: `TaskDuration` covers a page's main thread, not its
+Web Workers. A worker-busy tab in a *shared* renderer is therefore not
+attributable to one tab and does not trigger a freeze. Freezing the wrong page
+is worse than freezing nothing, so the conservative failure mode was chosen
+deliberately — and `busy.html` exists to keep that honest, since it does its
+work in a worker precisely to probe this boundary.
+
+---
+
 ## Method
 
 Each file in `experiments/` is a standalone Electron app that isolates one
@@ -112,6 +176,12 @@ regression visible.
 | 04 | What does *asking* for a GC cost? | Heap profiler agent: **+6 MB per renderer**, never returned. Net −6 MB on a heavy page, **+9 MB on an ordinary one** | Forced collection removed; `COLD` performs no renderer action |
 | 05 | What happens if we just leave a hidden tab alone? | Chromium reclaims further unaided (117→107 MB) than a forced GC achieves (112 MB); freezing **stops** that reclamation | Freezing reserved for tabs still burning CPU while hidden |
 | 06 | What does holding a CDP session cost? | +3 MB/renderer; freeze works without `Page.enable`; page **stays frozen after detach** | `Page.enable` dropped; session detached once frozen, and again when a tab goes active |
+
+Round two was measured with `npm run bench` rather than with a dedicated
+experiment, because the question - what does thirty tabs cost - is exactly what
+the benchmark already asks. Its per-process-type breakdown and its `liveDetail`
+output (which says *why* each surviving renderer survived) were what made the
+answers legible.
 
 ---
 

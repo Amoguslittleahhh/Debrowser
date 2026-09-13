@@ -19,7 +19,7 @@ makes the same call.
 browser process (Electron main)
 ├── chrome renderer         the tab strip + toolbar, our own HTML/CSS/JS
 ├── panel renderer          the task manager; created on open, destroyed on close
-├── tab renderer × N        one per tab, or one per site in economy profile
+├── tab renderer × N        one per *site* by default, capped at maxLiveTabs
 ├── GPU process
 └── utility processes       network, storage, audio
 ```
@@ -42,13 +42,37 @@ until the governor decides otherwise.
 3. **Assess pressure** — total resident vs budget → none / moderate / high / critical.
 4. **Update boost** — engage or decay the animation boost on the active tab.
 5. **Run the idle ladder** — demote tabs by how long they have been hidden.
-6. **Enforce the budget** — demote the least valuable tabs until under target.
+6. **Enforce the live-renderer cap** — discard least-recently-used past N live.
+7. **Enforce the budget** — demote the least valuable tabs until under target.
+
+### Why a count-based cap, not just a budget
+
+The budget is sized to the host, so on a 16 GB machine it sits near 6 GB.
+Thirty tabs at ~100 MB each never reach it: the budget is satisfied, every
+policy correctly concludes there is nothing to do, and the user watches their
+memory climb anyway. A budget answers "are we using too much in total", which
+is the wrong question for someone whose tab count varies by an order of
+magnitude.
+
+The cap answers the right one. Because candidates are ordered
+least-recently-used, the tabs being moved between stay live while the long tail
+costs nothing — which is why the cap is allowed to override the grace period
+that otherwise protects a recently-left tab, but never overrides audio,
+unsubmitted input, or a pinned tab.
+
+Two supporting mechanisms matter for bursts specifically. **Load admission**
+caps simultaneous loads, because peak memory is a loading-time phenomenon and a
+burst otherwise spikes far above where it settles. And a tab that has **never
+been visible** is exempt from the grace period entirely — it has nothing on
+screen to lose, and without that carve-out twenty background links produced
+twenty renderers that were all immune from reclaim for a full minute.
 
 ### Memory attribution across shared processes
 
 Memory is owned by *processes*; policy applies to *tabs*; the mapping is not
-one-to-one. Chromium coalesces same-site tabs into a shared renderer, and the
-economy profile forces far more of that.
+one-to-one. Chromium coalesces same-site tabs into a shared renderer, and
+one-renderer-per-site is enabled by default, so this is the common case rather
+than the exception.
 
 `metrics.js` resolves this by measuring RSS per process and splitting it across
 that process's tabs in proportion to their JS heap sizes, which *are* per-tab
@@ -59,6 +83,16 @@ shared process is never double-counted against the budget.
 Heap sampling only runs for tabs that actually share a process. Elsewhere the
 process figure *is* the tab figure, and asking is not free — enabling the
 Performance domain instantiates instrumentation inside the renderer.
+
+CPU needs the same treatment, and getting it wrong was a real regression.
+Sharing a process's CPU out proportionally says every tab in a shared renderer
+is equally busy, so a single busy tab made the governor freeze its quiet
+neighbours — and freezing costs memory. Per-tab CPU now comes from the
+per-document `TaskDuration` metric, differenced over wall time. The honest
+limit: that covers a page's main thread, not its Web Workers, so worker-driven
+CPU in a *shared* renderer is not attributable to one tab and does not trigger
+a freeze. The conservative failure mode was chosen deliberately — leave it
+alone rather than freeze the wrong page.
 
 ### Victim selection
 
@@ -181,3 +215,13 @@ the difference, broken down by process type — because a governor that saves
 memory in every renderer can still lose overall by spending it in the browser
 process, and only the breakdown makes that visible. It is what caught the
 90 MB regression from forced garbage collection.
+
+Both the benchmark and the smoke suite serve their fixtures over HTTP on
+distinct hostnames (`t1.test`, `t2.test`, … via `--host-resolver-rules`) rather
+than using `file://` URLs. This is not cosmetic. Every `file://` page is the
+same site to Chromium, so with one-renderer-per-site enabled they collapse into
+a couple of processes — which both overstates the saving and means no tab owns
+its renderer, making per-tab CPU an estimate and per-tab memory a share of
+somebody else's. Distinct origins are what real browsing looks like to the
+process model, and the only configuration in which the assertions mean what
+they say.

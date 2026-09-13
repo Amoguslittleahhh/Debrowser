@@ -150,16 +150,31 @@ class CdpSession {
   }
 
   /**
-   * Per-tab JS heap size. Unlike process RSS this is attributable to a single
-   * page even when several tabs share a renderer process, so the governor uses
-   * it to split shared-process memory fairly between its tabs.
+   * Per-page heap size and cumulative CPU time.
+   *
+   * Both matter because a process figure cannot be divided up honestly. When
+   * several tabs share a renderer - the default, since one renderer per *site*
+   * is the largest memory saving available - asking the OS how much memory or
+   * CPU "that tab" used has no answer. These two metrics are per-document, so
+   * they give the governor something real to work from:
+   *
+   *   JSHeapUsedSize  splits the process's memory between its tabs by weight
+   *   TaskDuration    cumulative seconds of main-thread work for this page;
+   *                   differenced over wall time it yields that page's own CPU
+   *
+   * Without the second one, a single busy tab in a shared renderer makes every
+   * tab in that renderer look equally busy, and the governor starts freezing
+   * pages that were doing nothing at all.
    */
-  async jsHeapBytes() {
+  async pageMetrics() {
     if (!(await this.enable('Performance'))) return null;
     const res = await this.send('Performance.getMetrics');
     if (!res || !Array.isArray(res.metrics)) return null;
-    const metric = res.metrics.find((m) => m.name === 'JSHeapUsedSize');
-    return metric ? metric.value : null;
+    const value = (name) => res.metrics.find((m) => m.name === name)?.value;
+    return {
+      jsHeapBytes: value('JSHeapUsedSize') ?? null,
+      taskDurationSec: value('TaskDuration') ?? null
+    };
   }
 }
 

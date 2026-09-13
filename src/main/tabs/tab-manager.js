@@ -25,11 +25,13 @@ class TabManager {
    * @param {object} options - { partition, onEvent, log }
    */
   constructor({
+    cfg,
     partition = 'persist:debrowser',
     onEvent = () => {},
     onPresent = async () => {},
     log = () => {}
   } = {}) {
+    this.cfg = cfg;
     this.session = electronSession.fromPartition(partition);
     this.onEvent = onEvent;
     /**
@@ -43,6 +45,13 @@ class TabManager {
     /** @type {Tab[]} - ordered as shown in the tab strip */
     this.tabs = [];
     this.activeId = null;
+
+    /**
+     * Tabs created with a renderer requested, but held back because too many
+     * were already loading. See `admit`.
+     * @type {Tab[]}
+     */
+    this.loadQueue = [];
 
     this.configureSession();
   }
@@ -79,14 +88,18 @@ class TabManager {
     const tab = new Tab({
       session: this.session,
       url,
-      onEvent: this.onEvent,
+      onEvent: (t, event, payload) => {
+        // Finishing a load frees an admission slot for whatever is queued.
+        if (event === 'updated' && !t.loading) this.pumpLoadQueue();
+        this.onEvent(t, event, payload);
+      },
       log: this.log
     });
 
     if (index == null) this.tabs.push(tab);
     else this.tabs.splice(index, 0, tab);
 
-    if (realise) tab.realise();
+    if (realise) this.admit(tab);
     else tab.tier = Tier.DISCARDED;
 
     this.onEvent(tab, 'created');
@@ -117,6 +130,9 @@ class TabManager {
     }
 
     this.activeId = id;
+    // Bypass the admission queue: the user is waiting on this one.
+    const queued = this.loadQueue.indexOf(tab);
+    if (queued !== -1) this.loadQueue.splice(queued, 1);
     if (!tab.isLive) tab.realise();
 
     try {
@@ -133,11 +149,53 @@ class TabManager {
     return tab;
   }
 
+  /** How many tabs are mid-load right now. */
+  loadingCount() {
+    return this.tabs.reduce((n, tab) => n + (tab.isLive && tab.loading ? 1 : 0), 0);
+  }
+
+  /**
+   * Give a tab a renderer, or queue it if too many are already loading.
+   *
+   * Peak memory is a loading-time phenomenon: a page mid-load holds its parser,
+   * its network buffers and its pre-compaction heap simultaneously, so ten tabs
+   * opened together peak far above the same ten once settled. Admitting them a
+   * few at a time flattens that peak, and costs nothing in total time - the
+   * machine was never going to parse ten pages in parallel anyway.
+   *
+   * Activation always bypasses this: if the user is looking at the tab, it
+   * loads now.
+   */
+  admit(tab) {
+    if (tab.isLive) return;
+    const limit = this.cfg.maxConcurrentLoads;
+    if (limit && this.loadingCount() >= limit && !tab.visible) {
+      if (!this.loadQueue.includes(tab)) this.loadQueue.push(tab);
+      tab.tier = Tier.DISCARDED; // no renderer yet; indistinguishable from discarded
+      return;
+    }
+    tab.realise();
+  }
+
+  /** Admit as many queued tabs as there is now room for. */
+  pumpLoadQueue() {
+    const limit = this.cfg.maxConcurrentLoads;
+    while (this.loadQueue.length) {
+      if (limit && this.loadingCount() >= limit) break;
+      const tab = this.loadQueue.shift();
+      // Skip tabs closed or already realised while they waited.
+      if (!this.tabs.includes(tab) || tab.isLive) continue;
+      tab.realise();
+    }
+  }
+
   close(id) {
     const index = this.tabs.findIndex((tab) => tab.id === id);
     if (index === -1) return false;
 
     const [tab] = this.tabs.splice(index, 1);
+    const queued = this.loadQueue.indexOf(tab);
+    if (queued !== -1) this.loadQueue.splice(queued, 1);
     tab.teardownView();
 
     if (this.activeId === id) {
@@ -160,6 +218,7 @@ class TabManager {
   closeAll() {
     for (const tab of this.tabs) tab.teardownView();
     this.tabs = [];
+    this.loadQueue = [];
     this.activeId = null;
   }
 }

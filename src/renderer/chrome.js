@@ -145,7 +145,7 @@ function tierLabel(tab) {
   switch (tab.tier) {
     case 'active': return tab.boosted ? 'Active - boosted for animation' : 'Active';
     case 'warm': return `Background - ${tab.rssMB}MB`;
-    case 'cold': return `Background, memory trimmed - ${tab.rssMB}MB`;
+    case 'cold': return `Idle, may be discarded to save memory - ${tab.rssMB}MB`;
     case 'frozen': return `Frozen - no CPU, ${tab.rssMB}MB retained`;
     case 'discarded': return 'Discarded - reloads when opened';
     default: return tab.tier;
@@ -186,7 +186,8 @@ function renderMeter(state) {
   el.meterText.textContent = `${state.totalMB} MB`;
   el.meter.title =
     `${state.totalMB} MB of ${state.budgetMB} MB budget\n` +
-    `${state.rendererCount} renderer process(es), ${state.tabs.length} tab(s)\n` +
+    `${state.liveTabs}${state.maxLiveTabs ? `/${state.maxLiveTabs}` : ''} tabs holding a renderer ` +
+    `(${state.rendererCount} process(es)), ${state.tabs.length} tab(s) open\n` +
     `Pressure: ${state.pressure} - click for the task manager`;
 }
 

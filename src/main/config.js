@@ -60,14 +60,38 @@ const BASE = {
   tickMs: 2000,
 
   /**
+   * Hard ceiling on how many tabs may hold a renderer process at once.
+   *
+   * This is the most important number in the file for anyone who opens tabs in
+   * bursts. The memory budget alone cannot help them: on a 16GB machine the
+   * budget is ~6GB, so thirty tabs never come close to it and thirty renderers
+   * stay resident at ~120MB each. A cap bounds the footprint by *tab count*
+   * instead, which is the thing that actually varies.
+   *
+   * Beyond the cap the least-recently-used tabs are discarded, so the N tabs
+   * you are actually moving between stay instant and the long tail costs
+   * nothing. 0 disables the cap.
+   */
+  maxLiveTabs: 8,
+
+  /**
    * Idle ladder: how long a tab must be hidden before each demotion. A tab
    * becomes WARM the moment it is hidden, so that step needs no threshold.
-   * There is deliberately no `discardAfterMs`: discarding is driven by memory
-   * pressure, never by a timer alone, because destroying a quiet tab that
-   * nothing is competing with only costs a reload later.
    */
   coldAfterMs: 45_000,
   freezeAfterMs: 5 * 60_000,
+
+  /**
+   * How long a hidden tab may sit before it is discarded on time alone,
+   * independent of memory pressure.
+   *
+   * An earlier version had no such timer, on the reasoning that destroying a
+   * quiet tab nothing is competing with only buys a reload later. That is true
+   * in isolation and wrong in aggregate: it meant a browser left open all day
+   * accumulated resident tabs indefinitely, and the user never asked for that
+   * memory to be held - they just never closed the tab.
+   */
+  discardAfterMs: 15 * 60_000,
 
   /**
    * Background CPU, as a percentage, above which a hidden tab is worth
@@ -126,14 +150,44 @@ const BASE = {
     niceBackground: 10
   },
 
-  /** Renderer process ceiling. Chromium reuses processes once this is hit. */
-  rendererProcessLimit: 0, // 0 = let Chromium decide
+  /**
+   * Chromium's own renderer process ceiling. Off by default.
+   *
+   * When Chromium hits it, it reuses one process for different sites, which
+   * weakens site isolation. `maxLiveTabs` bounds the renderer count already,
+   * by discarding a tab rather than by collapsing unrelated origins, so this is
+   * left to anyone who explicitly wants the trade.
+   */
+  rendererProcessLimit: 0,
 
-  /** Share one renderer across all tabs of the same site. Big RAM win. */
-  processPerSite: false,
+  /**
+   * Share one renderer across all tabs of the same site.
+   *
+   * On by default, because it is the single largest memory lever available and
+   * the cost is narrow: site isolation - the security boundary between
+   * *different* sites - is untouched; what is given up is crash isolation
+   * between tabs of the *same* site. Twelve tabs on one site become one process
+   * instead of twelve.
+   */
+  processPerSite: true,
 
-  /** Chromium keeps a spare renderer warm; it costs RAM to save nav latency. */
-  spareRenderer: true
+  /**
+   * Chromium keeps a spare renderer warm to make the next navigation feel
+   * instant. Off by default: it costs a whole process (~30-40MB) to save
+   * ~100ms, which is the wrong trade when memory is the constraint.
+   */
+  spareRenderer: false,
+
+  /**
+   * Maximum tabs allowed to load simultaneously.
+   *
+   * Peak memory happens during load, not after it - a loading page holds its
+   * parser, its network buffers and its pre-compaction heap all at once. Ten
+   * tabs opened together therefore spike far higher than the same ten settled.
+   * Admitting them a few at a time flattens that spike without making any
+   * single tab slower to finish.
+   */
+  maxConcurrentLoads: 3
 };
 
 /**
@@ -147,11 +201,13 @@ const PROFILES = {
   economy: {
     memoryBudgetMB: 700,
     tabFloorMB: 35,
+    maxLiveTabs: 4,
     coldAfterMs: 20_000,
     freezeAfterMs: 90_000,
+    discardAfterMs: 3 * 60_000,
     minLifetimeMs: 45_000,
     discardFromPressure: Pressure.MODERATE,
-    rendererProcessLimit: 6,
+    maxConcurrentLoads: 2,
     processPerSite: true,
     spareRenderer: false
   },
@@ -159,10 +215,15 @@ const PROFILES = {
   performance: {
     memoryBudgetMB: 3000,
     tabFloorMB: 80,
+    maxLiveTabs: 24,
     coldAfterMs: 3 * 60_000,
     freezeAfterMs: 20 * 60_000,
+    discardAfterMs: 2 * 60 * 60_000,
     minLifetimeMs: 5 * 60_000,
     discardFromPressure: Pressure.CRITICAL,
+    maxConcurrentLoads: 6,
+    // Crash isolation per tab, at the cost of a process per tab.
+    processPerSite: false,
     spareRenderer: true
   }
 };

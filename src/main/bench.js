@@ -12,17 +12,26 @@
  * Emits a single JSON line on stdout so the parent can parse it unambiguously.
  */
 
-const path = require('path');
-
-const PAGES = path.join(__dirname, '..', '..', 'test', 'pages');
-const pageUrl = (name) => `file://${path.join(PAGES, name)}`;
+const fixtureServer = require('./fixture-server');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Mix of page shapes, cycled to reach the requested tab count. */
-const MIX = ['heavy.html', 'idle.html', 'animated.html', 'form.html'];
+/**
+ * Page shapes, cycled to reach the requested tab count.
+ *
+ * `default` includes a form page holding unsubmitted input, which the governor
+ * refuses to discard - so a quarter of the tabs are deliberately immune to
+ * reclaim. That is the right stress test for the protections, but it sets a
+ * floor on how far any cap can get, so `noforms` exists to measure the cap
+ * itself against tabs that are all actually reclaimable.
+ */
+const MIXES = {
+  default: ['heavy.html', 'idle.html', 'animated.html', 'form.html'],
+  noforms: ['heavy.html', 'idle.html', 'animated.html', 'busy.html']
+};
 
-async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, freezeMs }) {
+async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, freezeMs, distinctOrigins, mix = 'default' }) {
+  const MIX = MIXES[mix] || MIXES.default;
   // Compress the idle ladder so a benchmark run takes seconds rather than the
   // half hour the real timings imply. The policy is identical; only the clock
   // moves, and the no-governor run is unaffected either way.
@@ -39,12 +48,20 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
     governor.start();
   }
 
+  // One distinct site per tab, or plain file:// URLs. See startFixtureServer.
+  let fixtures = null;
+  let urlFor = (i) => fixtureServer.fileUrl(MIX[i % MIX.length]);
+  if (distinctOrigins) {
+    fixtures = await fixtureServer.start();
+    urlFor = (i) => fixtures.url(MIX[i % MIX.length], i);
+  }
+
   // Reuse the tab the browser opened with, then add the rest.
   const first = tabs.all()[0];
-  await first.wc.loadURL(pageUrl(MIX[0])).catch(() => {});
+  await first.wc.loadURL(urlFor(0)).catch(() => {});
 
   for (let i = 1; i < tabCount; i++) {
-    tabs.create({ url: pageUrl(MIX[i % MIX.length]), activate: false, realise: true });
+    tabs.create({ url: urlFor(i), activate: false, realise: true });
     // Stagger slightly so a dozen renderers do not all start at once, which
     // would distort the peak reading without changing the settled one.
     await sleep(250);
@@ -69,9 +86,29 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
   const renderers = new Set();
   for (const proc of app.getAppMetrics()) if (proc.type === 'Tab') renderers.add(proc.pid);
 
+  // Why each surviving renderer survived. Without this, a governed run that
+  // lands above its cap is indistinguishable from a cap that does not work -
+  // the difference is whether the remaining tabs are protected, and by what.
+  const liveDetail = tabs.all()
+    .filter((t) => t.isLive)
+    .map((t) => ({
+      id: t.id,
+      tier: t.tier,
+      visible: t.visible,
+      audible: t.audible,
+      dirty: t.hasDirtyInput,
+      loading: t.loading,
+      cpu: Math.round((t.cpu || 0) * 100) / 100,
+      url: String(t.url).split('/').pop()
+    }));
+
+  if (fixtures) await fixtures.close();
+
   return {
     governor: Boolean(governor),
     profile: cfg.profile,
+    distinctOrigins: Boolean(distinctOrigins),
+    maxLiveTabs: cfg.maxLiveTabs,
     tabCount,
     peakMB: peak,
     settledMB: settled,
@@ -79,6 +116,9 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
     liveRenderers: renderers.size,
     liveTabs: live,
     tiers: byTier,
+    mix,
+    protectedLive: liveDetail.filter((t) => !t.visible && (t.dirty || t.audible)).length,
+    liveDetail,
     breakdown
   };
 }

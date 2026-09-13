@@ -58,6 +58,10 @@ class Tab {
     this.cpu = 0;
     this.jsHeapMB = 0;
     this.sharesProcess = false;
+    /** This page's own CPU, differenced from CDP TaskDuration. Null until sampled. */
+    this.taskCpu = null;
+    this.lastTaskSec = null;
+    this.lastTaskAt = 0;
 
     // Activity, written by the probe and the boost controller.
     this.reportedDemand = 'idle';
@@ -69,6 +73,17 @@ class Tab {
 
     this.lastActiveAt = Date.now();
     this.createdAt = Date.now();
+
+    /**
+     * Whether the user has ever actually looked at this tab.
+     *
+     * A tab opened in the background and never viewed has nothing on screen to
+     * lose, so the grace period that protects a tab you just left does not
+     * apply to it. Without this distinction, opening twenty links in background
+     * tabs created twenty renderers that were all immune from reclaim for a
+     * full minute - the exact memory spike the governor exists to prevent.
+     */
+    this.everVisible = false;
 
     /**
      * Everything needed to resurrect the page after a discard.
@@ -260,6 +275,9 @@ class Tab {
     this.rssMB = 0;
     this.cpu = 0;
     this.jsHeapMB = 0;
+    this.taskCpu = null;
+    this.lastTaskSec = null;
+    this.lastTaskAt = 0;
     this.boosted = false;
     this.pendingSettleAt = 0;
   }
@@ -348,6 +366,7 @@ class Tab {
     this.visible = visible;
     if (visible) {
       this.lastActiveAt = Date.now();
+      this.everVisible = true;
     } else {
       // A hidden tab is idle by definition as far as boosting is concerned.
       // Clearing this here rather than waiting for the page to tell us keeps a
@@ -396,6 +415,7 @@ class Tab {
       favicon: this.favicon,
       tier: this.tier,
       visible: this.visible,
+      everVisible: this.everVisible,
       audible: this.audible,
       loading: this.loading,
       crashed: this.crashed,
