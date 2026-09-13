@@ -15,6 +15,7 @@ const { app, ipcMain, session } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
 const { TabManager } = require('./tabs/tab-manager');
+const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
@@ -174,6 +175,9 @@ function main() {
   };
 
   app.whenReady().then(() => {
+    // Page images must never outlive the session that took them, and a crash
+    // cannot be relied upon to have run the per-tab cleanup.
+    sweepThumbnails();
     log('system', JSON.stringify(platform.systemInfo()));
     log('config', `profile=${cfg.profile} budget=${cfg.memoryBudgetMB}MB`);
 
@@ -185,7 +189,9 @@ function main() {
       onPresent: async (tab) => {
         if (shell) shell.attachTab(tab);
         if (governor) await governor.onTabActivated(tab);
-      }
+      },
+      onCover: (tab) => (shell ? shell.showPlaceholder(tab) : false),
+      onUncover: () => { if (shell) shell.hidePlaceholder(); }
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
@@ -250,6 +256,9 @@ function main() {
   app.on('before-quit', () => {
     if (governor) governor.stop();
     if (tabs) tabs.closeAll();
+    // Synchronous on purpose: quit does not wait for promises, and leaving
+    // page screenshots on disk is the one cleanup that must not be best effort.
+    sweepThumbnailsSync();
   });
 
   // Pages must never be able to open a renderer with elevated privileges.

@@ -42,6 +42,17 @@ class IpcHub {
       tab.reportedDemand = demand;
       tab.reportedAnimations = Number(payload.animations) || 0;
       tab.reportedMedia = Boolean(payload.media);
+      // Gates the restore thumbnail; see Tab#captureThumbnail. Reported by the
+      // probe rather than only by the page-state snapshot, because the snapshot
+      // is taken on demotion - after the user has already switched away, and so
+      // after the screenshot would already have been taken.
+      tab.hasSensitiveFields = Boolean(payload.sensitive);
+      // Defence in depth against the race this signal exists to close. A page
+      // can grow a credential field after it was photographed - a single-page
+      // app routing to a sign-in form, a late-rendering login modal - and the
+      // picture on disk is then of exactly the page that must not have one. So
+      // the report does not merely gate future captures; it revokes past ones.
+      if (tab.hasSensitiveFields) tab.discardThumbnail();
       tab.lastProbeAt = Date.now();
 
       // An animation starting is the one signal worth acting on before the

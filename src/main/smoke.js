@@ -11,6 +11,8 @@
  * Run with: npm run smoke
  */
 
+const fs = require('fs');
+const { app } = require('electron');
 const { Tier } = require('./config');
 const fixtureServer = require('./fixture-server');
 
@@ -280,7 +282,45 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
       : 'no restore samples recorded');
 
   /* ---------------------------------------------------------------- */
-  console.log('\n8. Live renderer cap\n');
+  console.log('\n8. Restore placeholder\n');
+
+  // A discard the user can see is a discard the reclaim policy cannot afford to
+  // make often. These checks cover the mechanism that hides it, and the privacy
+  // rule that mechanism is bounded by.
+  const shot = tabs.create({ url: pageUrl('heavy.html'), activate: true, realise: true });
+  await waitFor(() => shot.isLive && !shot.loading, { timeoutMs: 10_000 });
+  await tabs.activate(home.id);                       // switch away: captures
+  await waitFor(() => shot.thumbPath !== null, { timeoutMs: 5000 });
+
+  const hasThumb = Boolean(shot.thumbPath) && fs.existsSync(shot.thumbPath || '');
+  const thumbKB = hasThumb ? Math.round(fs.statSync(shot.thumbPath).size / 1024) : 0;
+  check('leaving a tab photographs it, cheaply',
+    hasThumb && thumbKB > 0 && thumbKB < 250,
+    hasThumb ? `${thumbKB}KB on disk` : 'no thumbnail written');
+
+  check('the thumbnail lives outside userData, so a crash leaves nothing behind',
+    hasThumb && shot.thumbPath.startsWith(app.getPath('temp')),
+    hasThumb ? shot.thumbPath.replace(app.getPath('temp'), '<temp>') : 'n/a');
+
+  // The privacy rule. A screenshot of a logged-in page on disk would defeat the
+  // existing refusal to read credential fields into the session store at all.
+  const login = tabs.create({ url: pageUrl('login.html'), activate: true, realise: true });
+  await waitFor(() => login.isLive && !login.loading, { timeoutMs: 10_000 });
+  await tabs.activate(home.id);
+  await sleep(1200);
+  check('a page carrying a password field is never photographed',
+    login.hasSensitiveFields && login.thumbPath === null,
+    `sensitive=${login.hasSensitiveFields} thumbnail=${login.thumbPath || 'none'}`);
+
+  // And the placeholder actually goes up on the restore path.
+  await governor.enforceManualDiscard(shot);
+  const covered = shell.showPlaceholder(shot);
+  shell.hidePlaceholder();
+  check('a discarded tab with a thumbnail can be covered while it reloads',
+    covered === true, `placeholder shown=${covered}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n9. Live renderer cap\n');
 
   // The cap is what bounds memory for someone who opens tabs in bursts: the
   // budget cannot help them, because on a large machine thirty tabs never reach
@@ -320,7 +360,7 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `url=${revived.url}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n9. Footprint\n');
+  console.log('\n10. Footprint\n');
 
   governor.metrics.sample();
   const snap = governor.metrics.snapshot();

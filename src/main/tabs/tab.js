@@ -12,13 +12,55 @@
  */
 
 const path = require('path');
-const { WebContentsView } = require('electron');
+const fs = require('fs');
+const { WebContentsView, app } = require('electron');
 const { Tier } = require('../config');
 const { CdpSession } = require('../cdp');
 
 const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload.js');
 
 let nextTabId = 1;
+
+/** Matches the chrome's surface colour, so an unpainted view is not white. */
+const SURFACE_COLOUR = '#16181d';
+
+/**
+ * Thumbnails are shown behind a loading page for a few hundred milliseconds, so
+ * they are sized to be recognisable rather than readable. At this width a JPEG
+ * is roughly 20-40KB, and it lives on disk - never decoded and held in memory,
+ * which would defeat the point.
+ */
+const THUMB_WIDTH = 480;
+const THUMB_QUALITY = 55;
+
+/** Under the OS temp directory: see the privacy note on captureThumbnail. */
+const thumbnailDir = () => path.join(app.getPath('temp'), 'debrowser-thumbs');
+
+/**
+ * Delete every thumbnail left behind by a previous run.
+ *
+ * A crash cannot be relied upon to run the per-tab cleanup, and page images
+ * outliving the session they came from is exactly what the privacy rules are
+ * there to prevent. Called once at startup.
+ */
+async function sweepThumbnails() {
+  try {
+    await fs.promises.rm(thumbnailDir(), { recursive: true, force: true });
+  } catch { /* nothing there, or not ours to remove */ }
+}
+
+/**
+ * The same sweep, synchronously, for `before-quit`.
+ *
+ * Quit does not wait for promises, so the async version would be abandoned
+ * mid-unlink. Of everything this browser does on the way out, removing page
+ * screenshots is the one that must not be best effort.
+ */
+function sweepThumbnailsSync() {
+  try {
+    fs.rmSync(thumbnailDir(), { recursive: true, force: true });
+  } catch { /* nothing there, or not ours to remove */ }
+}
 
 class Tab {
   /**
@@ -99,6 +141,16 @@ class Tab {
      */
     this.suspendedState = null;
     this.hasDirtyInput = false;
+    /**
+     * Whether the page was last seen carrying a credential or payment field.
+     * Set from the page-state snapshot, which reports the presence of such a
+     * field without ever reading it. Used only to refuse to photograph the
+     * page; see captureThumbnail.
+     */
+    this.hasSensitiveFields = false;
+
+    /** Path to this tab's thumbnail on disk, or null. Never the image itself. */
+    this.thumbPath = null;
 
     this.bounds = { x: 0, y: 0, width: 0, height: 0 };
   }
@@ -137,10 +189,15 @@ class Tab {
         // Chromium's own background throttling stays on; the governor layers
         // its harder tiers on top rather than replacing it.
         backgroundThrottling: true,
-        // Avoid a white flash on restore: match the chrome's surface colour.
         transparent: false
       }
     });
+
+    // Avoid a white flash on restore. The webPreferences above do not do this -
+    // an earlier comment there claimed they did - because the flash comes from
+    // the view compositing its own default white before the page paints, and
+    // only the view's background colour governs that.
+    this.view.setBackgroundColor(SURFACE_COLOUR);
 
     this.wc = this.view.webContents;
     this.cdp = new CdpSession(this.wc, this.log);
@@ -358,10 +415,90 @@ class Tab {
     return ipcHub.request(this.wc, timeoutMs).then((state) => {
       if (state) {
         this.hasDirtyInput = Boolean(state.dirty);
+        this.hasSensitiveFields = Boolean(state.sensitive);
         this.suspendedState = { ...(this.suspendedState || {}), state, url: this.url };
       }
       return state;
     });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Thumbnails                                                        */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Photograph the page, so a later restore has something to show instead of a
+   * blank view.
+   *
+   * Taken when the tab is hidden rather than when it is discarded, for the same
+   * reason the page-state snapshot is: by discard time a tab is usually frozen,
+   * and a frozen page cannot paint. A hidden view returns a stale frame at best.
+   * The only moment the content is definitely on screen is as the user leaves.
+   *
+   * **Privacy.** A thumbnail is a picture of the page, and this browser already
+   * refuses to read credentials and payment fields into its own session store.
+   * A screenshot of a logged-in page left on disk would defeat that, so three
+   * rules hold and all of them are load-bearing:
+   *
+   *   - never for a page carrying a password or payment field. The presence of
+   *     one is reported by the page-state snapshot, which is the same signal
+   *     that already exists for that purpose rather than a second detector.
+   *   - written under the OS temp directory, not userData, so a kill -9 leaves
+   *     nothing a normal session would not have cleaned up.
+   *   - deleted when the tab closes, when the browser quits, and swept on
+   *     startup - see `sweepThumbnails`.
+   *
+   * Never awaited by anything on the tab-switch path. A capture that is slow,
+   * or fails, must cost the user nothing: the placeholder simply falls back to
+   * the flat surface colour, which is still better than the white flash this
+   * replaces.
+   */
+  async captureThumbnail() {
+    if (!this.isLive || !this.visible) return null;
+
+    if (this.hasSensitiveFields) {
+      // Deliberately also clears any thumbnail taken before the page grew a
+      // login form, so routing into a sign-in form removes the old picture.
+      this.discardThumbnail();
+      return null;
+    }
+
+    // Fail closed. `hasSensitiveFields` is only meaningful once the probe has
+    // actually looked at this page; before that it is merely still false, which
+    // is not the same as "checked, and safe". A page that has never reported
+    // is not photographed - the cost is a missing placeholder on a fast switch,
+    // against writing a picture of an unexamined page to disk.
+    if (!this.lastProbeAt) return null;
+
+    try {
+      const image = await this.wc.capturePage();
+      if (!image || image.isEmpty()) return null;
+
+      // Downscaled hard. This is shown for a few hundred milliseconds behind a
+      // loading page, so it needs to read as the right page, not to be legible.
+      const buffer = image.resize({ width: THUMB_WIDTH }).toJPEG(THUMB_QUALITY);
+      if (!buffer || !buffer.length) return null;
+
+      const dir = thumbnailDir();
+      await fs.promises.mkdir(dir, { recursive: true });
+      const file = path.join(dir, `tab-${this.id}.jpg`);
+      await fs.promises.writeFile(file, buffer);
+      this.thumbPath = file;
+      return file;
+    } catch (err) {
+      // A renderer that went away mid-capture, a full disk, a page that cannot
+      // be photographed. None of these is worth telling the user about.
+      this.log(`thumbnail failed for tab ${this.id}: ${brief(err.message)}`);
+      return null;
+    }
+  }
+
+  /** Forget and delete this tab's thumbnail. Safe to call repeatedly. */
+  discardThumbnail() {
+    const file = this.thumbPath;
+    this.thumbPath = null;
+    if (!file) return;
+    fs.promises.unlink(file).catch(() => { /* already gone */ });
   }
 
   /** Replay stored navigation history into a freshly realised renderer. */
@@ -484,4 +621,4 @@ function safePid(wc) {
   }
 }
 
-module.exports = { Tab };
+module.exports = { Tab, sweepThumbnails, sweepThumbnailsSync };

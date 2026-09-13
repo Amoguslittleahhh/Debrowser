@@ -30,6 +30,8 @@ class TabManager {
     partition = 'persist:debrowser',
     onEvent = () => {},
     onPresent = async () => {},
+    onCover = () => false,
+    onUncover = () => {},
     log = () => {}
   } = {}) {
     this.cfg = cfg;
@@ -41,6 +43,13 @@ class TabManager {
      * crucially, to unfreeze it - while it is still off screen.
      */
     this.onPresent = onPresent;
+    /**
+     * Show / take away the restore placeholder. The shell owns the view; the
+     * tab manager owns the moment, because only it knows a restore is starting.
+     * `onCover` reports whether a placeholder actually went up.
+     */
+    this.onCover = onCover;
+    this.onUncover = onUncover;
     this.log = log;
 
     /** @type {Tab[]} - ordered as shown in the tab strip */
@@ -132,6 +141,20 @@ class TabManager {
     if (this.activeId === id && tab.isLive && tab.visible) return tab;
 
     const previous = this.activeTab();
+
+    // Photograph the tab being left *before* hiding it. This is the only moment
+    // its content is definitely on screen: a hidden view returns a stale frame
+    // and a frozen one cannot paint at all, so a capture taken any later - at
+    // discard time, say - would be of nothing worth showing.
+    //
+    // Issued but never awaited. The frame request is made against the view as
+    // it stands now, and waiting for the encode would put disk I/O on the
+    // tab-switch path, which is the one path in this browser that must stay
+    // immediate.
+    if (previous && previous.id !== id && previous.isLive) {
+      previous.captureThumbnail().catch(() => {});
+    }
+
     if (previous && previous.id !== id) {
       previous.setVisible(false);
     }
@@ -148,8 +171,13 @@ class TabManager {
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
     if (!tab.isLive) {
+      // Cover the gap before the renderer exists, not after: this is the whole
+      // point, and a placeholder raised after realise() would already be late.
+      const covered = this.onCover(tab);
+      this.latency.record(covered ? 'placeholder' : 'uncovered', 0.1);
       tab.realise();
       this.timeToContent(tab, id);
+      this.uncoverWhenReady(tab, id);
     }
 
     try {
@@ -170,6 +198,36 @@ class TabManager {
     stop(wasLive ? 'switch' : 'restore');
     this.onEvent(tab, 'activated');
     return tab;
+  }
+
+  /**
+   * Take the placeholder away once the restored page has something to show.
+   *
+   * `did-stop-loading` rather than a true first-paint signal. Paint can lag it
+   * slightly, so the theoretical worst case is a brief flash of the view's
+   * background - which is now the chrome's surface colour rather than white, so
+   * it reads as the browser rather than as a broken page. A double-rAF signal
+   * from the probe preload would be exact; it is not worth an IPC round trip on
+   * the tab-switch path until this proves visible.
+   *
+   * The shell's own ceiling is the backstop: every path that raises a
+   * placeholder is guaranteed to lower it, including the ones here that never
+   * fire because the renderer died first.
+   */
+  uncoverWhenReady(tab, id) {
+    const wc = tab.wc;
+    if (!wc) {
+      this.onUncover();
+      return;
+    }
+    const done = () => {
+      // If the user has already moved on, the placeholder belongs to whatever
+      // they moved to; leave it to that activation to clear.
+      if (this.activeId === id) this.onUncover();
+    };
+    wc.once('did-stop-loading', done);
+    wc.once('did-fail-load', done);
+    wc.once('render-process-gone', done);
   }
 
   /**
@@ -252,6 +310,8 @@ class TabManager {
     const [tab] = this.tabs.splice(index, 1);
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
+    // A picture of the page must not outlive the tab it was taken from.
+    tab.discardThumbnail();
     tab.teardownView();
 
     if (this.activeId === id) {

@@ -125,16 +125,56 @@ function sample() {
   else if (interacting) demand = 'light';
   else demand = 'idle';
 
+  // Whether this page is currently showing a credential or payment field. Sent
+  // as a bare boolean - never the field, never its value - so the main process
+  // can decline to photograph the page for a restore placeholder. Reported here
+  // rather than only in the page-state snapshot because that snapshot is taken
+  // on tier demotion, which is far too late: by then the user has already
+  // switched away and the screenshot would already have been written.
+  const sensitive = hasSensitiveField();
+
   // Report only on change. A settled page sends nothing at all.
-  const fingerprint = `${demand}:${media ? 1 : 0}`;
+  const fingerprint = `${demand}:${media ? 1 : 0}:${sensitive ? 1 : 0}`;
   if (fingerprint === lastReport) return;
   lastReport = fingerprint;
 
-  ipcRenderer.send('debrowser:probe', { demand, animations, media, scrolling });
+  ipcRenderer.send('debrowser:probe', { demand, animations, media, scrolling, sensitive });
+}
+
+/**
+ * Does this page show a password or payment field right now?
+ *
+ * Re-queried rather than cached: a single-page app can route from a product
+ * page to a sign-in form without any navigation the main process would see, and
+ * a stale `false` here would authorise a screenshot of the login page.
+ */
+function hasSensitiveField() {
+  try {
+    return document.querySelector(
+      'input[type="password"], input[autocomplete="cc-number"]') !== null;
+  } catch {
+    // Fail closed: if the page cannot be inspected, treat it as sensitive.
+    return true;
+  }
 }
 
 function start() {
   if (timer) return;
+  // Report once straight away rather than waiting out the first interval. Two
+  // things depend on this page having been looked at: the boost controller
+  // wants an animation known at once rather than up to SAMPLE_MS late, and the
+  // restore thumbnail is refused outright for a page that has never reported -
+  // so without this, briefly-visited tabs would never be photographed at all.
+  //
+  // Deferred until the DOM exists. A preload runs at document-start, where
+  // querying for a password field finds nothing because nothing is parsed yet -
+  // which would report a sign-in page as safe to photograph and only correct
+  // itself a sample later, after the screenshot had been taken.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', sample, { once: true });
+  } else {
+    sample();
+  }
   timer = setInterval(sample, SAMPLE_MS);
   if (typeof timer.unref === 'function') timer.unref();
 }
@@ -147,7 +187,8 @@ function onVisibilityChanged(visible) {
     sample();
   } else {
     // Hidden tabs are idle by definition as far as the boost controller cares.
-    ipcRenderer.send('debrowser:probe', { demand: 'idle', animations: 0, media: false, scrolling: false });
+    ipcRenderer.send('debrowser:probe',
+      { demand: 'idle', animations: 0, media: false, scrolling: false, sensitive: hasSensitiveField() });
   }
 }
 
@@ -173,7 +214,13 @@ function captureState() {
   const state = {
     scroll: { x: window.scrollX, y: window.scrollY },
     fields: [],
-    dirty: false
+    dirty: false,
+    /**
+     * Whether this page carries a credential or payment field. Reported as a
+     * bare boolean - never the field, never its value - so the main process can
+     * decline to photograph the page. See Tab#captureThumbnail.
+     */
+    sensitive: false
   };
 
   try {
@@ -183,8 +230,12 @@ function captureState() {
       index += 1;
       const type = (el.getAttribute('type') || '').toLowerCase();
       // Never read back credentials or payment fields, even into our own
-      // in-memory session store.
-      if (type === 'password' || el.autocomplete === 'cc-number') continue;
+      // in-memory session store. Their *presence* is still worth reporting:
+      // a page with a password box is one we should not screenshot either.
+      if (type === 'password' || el.autocomplete === 'cc-number') {
+        state.sensitive = true;
+        continue;
+      }
 
       const path = el.id ? `#${CSS.escape(el.id)}` : `__debrowser_idx_${index}`;
       let value = null;

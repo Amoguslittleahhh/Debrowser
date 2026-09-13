@@ -15,10 +15,17 @@
  */
 
 const path = require('path');
-const { BaseWindow, WebContentsView, shell } = require('electron');
+const { BaseWindow, WebContentsView, ImageView, nativeImage, shell } = require('electron');
 
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
+
+/**
+ * Hard ceiling on how long a restore placeholder may stay up. Generous enough
+ * to cover a slow page, short enough that a page which never paints does not
+ * leave the user looking at a frozen screenshot.
+ */
+const PLACEHOLDER_MAX_MS = 1500;
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
 const CHROME_PRELOAD = path.join(__dirname, '..', 'preload', 'chrome-preload.js');
@@ -44,6 +51,14 @@ class BrowserShell {
 
     this.panelView = null;
     this.panelOpen = false;
+
+    /**
+     * One reused ImageView showing the outgoing tab's thumbnail while a
+     * restored tab loads. See showPlaceholder.
+     * @type {Electron.ImageView|null}
+     */
+    this.placeholderView = null;
+    this.placeholderTimer = null;
 
     this.createChrome();
     this.window.on('resize', () => this.layout());
@@ -101,6 +116,79 @@ class BrowserShell {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Restore placeholder                                               */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Cover a restoring tab with a picture of how the user left it.
+   *
+   * Measured on the smoke fixtures, activation puts a tab on screen in ~4ms but
+   * its content does not arrive for 40-107ms - and those are localhost pages;
+   * over a real network it is far longer. For that whole window the view is
+   * blank, and that blankness is the entire perceived cost of discarding a tab.
+   * Covering it is what makes a discard something the user does not notice,
+   * which in turn is what allows the reclaim policy to be aggressive at all.
+   *
+   * One ImageView, reused. A 480px-wide decoded bitmap is around 0.6MB, and
+   * holding one per tab would spend more memory than the discards save.
+   *
+   * Returns whether a placeholder was actually shown, so the caller can tell
+   * the difference between covered and uncovered restores when reporting.
+   */
+  showPlaceholder(tab) {
+    if (!tab || !tab.thumbPath) return false;
+
+    let image;
+    try {
+      image = nativeImage.createFromPath(tab.thumbPath);
+    } catch {
+      return false;
+    }
+    if (!image || image.isEmpty()) return false;
+
+    try {
+      if (!this.placeholderView) {
+        this.placeholderView = new ImageView();
+        // Above the tab views, below the chrome: the tab strip and toolbar stay
+        // live and clickable while a page is restoring behind them.
+        const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
+        this.window.contentView.addChildView(
+          this.placeholderView, chromeIndex === -1 ? undefined : chromeIndex);
+      }
+      this.placeholderView.setImage(image);
+      this.placeholderView.setBounds(this.contentBounds());
+      this.placeholderView.setVisible(true);
+    } catch (err) {
+      this.log(`placeholder failed: ${err.message}`);
+      return false;
+    }
+
+    // A placeholder that outlives its page is a browser that looks frozen, so
+    // it is never shown without something guaranteed to take it away again.
+    clearTimeout(this.placeholderTimer);
+    this.placeholderTimer = setTimeout(() => this.hidePlaceholder(), PLACEHOLDER_MAX_MS);
+    if (typeof this.placeholderTimer.unref === 'function') this.placeholderTimer.unref();
+    return true;
+  }
+
+  /**
+   * Take the placeholder away. Idempotent, and the single exit for every path
+   * that shows one - the timeout, first paint, a failed load, a dead renderer -
+   * so no path can forget to uncover the page.
+   */
+  hidePlaceholder() {
+    clearTimeout(this.placeholderTimer);
+    this.placeholderTimer = null;
+    if (!this.placeholderView) return;
+    try {
+      this.placeholderView.setVisible(false);
+      // Release the decoded bitmap rather than holding it until the next
+      // restore. The view itself is cheap; the image is not.
+      this.placeholderView.setImage(nativeImage.createEmpty());
+    } catch { /* view already gone */ }
+  }
+
+  /* ---------------------------------------------------------------- */
 
   togglePanel(open = !this.panelOpen) {
     if (open === this.panelOpen) return this.panelOpen;
@@ -154,6 +242,8 @@ class BrowserShell {
     for (const tab of this.tabs.all()) {
       if (tab.view) tab.setBounds(bounds);
     }
+
+    if (this.placeholderView) this.placeholderView.setBounds(bounds);
 
     if (this.panelView) {
       this.panelView.setBounds({
