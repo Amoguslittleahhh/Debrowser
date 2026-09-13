@@ -9,7 +9,11 @@
  * economy profile forces far more of that), so "how much RAM is this tab
  * using" has no direct answer from the OS.
  *
- * This module resolves that by measuring resident memory per process and then
+ * Note also that "resident memory" here means proportional set size where the
+ * platform provides it, not RSS - see ../memory.js for why that distinction is
+ * worth a factor of three.
+ *
+ * This module resolves that by measuring memory per process and then
  * splitting each process's memory across its tabs in proportion to their JS
  * heap sizes, which *are* per-tab and which we read over CDP. Totals are
  * always summed over unique PIDs, so shared processes are never counted twice
@@ -17,6 +21,7 @@
  */
 
 const { MB } = require('../config');
+const { footprintMB, accountingMode } = require('../memory');
 
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
@@ -54,18 +59,23 @@ class Metrics {
       const pid = proc.pid;
       seen.add(pid);
 
-      // `workingSetSize` is reported in kilobytes.
+      // `workingSetSize` is kilobytes of RSS, which counts pages shared with
+      // other processes - chiefly the Chromium binary, mapped into every
+      // renderer. Summing that across processes triple-counts real memory, so
+      // prefer proportional set size where the platform offers it. See
+      // ../memory.js.
       const rssMB = (proc.memory?.workingSetSize || 0) / 1024;
+      const footprint = footprintMB(pid, rssMB);
       const cpu = proc.cpu?.percentCPUUsage || 0;
 
       const prev = this.byPid.get(pid);
       const smoothed = prev
         ? {
-            rssMB: prev.rssMB + EMA_ALPHA * (rssMB - prev.rssMB),
+            rssMB: prev.rssMB + EMA_ALPHA * (footprint - prev.rssMB),
             cpu: prev.cpu + EMA_ALPHA * (cpu - prev.cpu),
             type: proc.type
           }
-        : { rssMB, cpu, type: proc.type };
+        : { rssMB: footprint, cpu, type: proc.type };
 
       this.byPid.set(pid, smoothed);
       total += smoothed.rssMB;
@@ -170,6 +180,7 @@ class Metrics {
 
   snapshot() {
     return {
+      accounting: accountingMode(),
       totalMB: Math.round(this.totalMB),
       overheadMB: Math.round(this.browserOverheadMB),
       reclaimableMB: Math.round(this.reclaimableMB()),

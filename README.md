@@ -107,6 +107,73 @@ work in a worker precisely to probe this boundary.
 
 ---
 
+## A third round: the numbers themselves were wrong
+
+The request changed: make each tab cheaper, rather than limit how many tabs can
+be live. Chasing that found something worse than a missing optimisation.
+
+**Every memory figure this project had produced was summed RSS**, and RSS counts
+pages shared between processes — chiefly the Chromium binary, mapped into every
+renderer. Summing it across processes counts one copy of Chromium once per
+renderer. Six tabs of a trivial page:
+
+```
+summed RSS   810 MB      <- what had been reported
+summed PSS   247 MB      <- actual physical memory
+per tab      85.7 MB RSS  ->  19.8 MB PSS  (10.1 MB private)
+```
+
+Three to four times over-stated, depending on the workload. Two consequences,
+one of them worse than embarrassing:
+
+- Every claim about footprint and saving was inflated by that factor.
+- The governor compared that figure against its memory budget, so it believed
+  it was over budget at a third of the real usage and reclaimed far harder than
+  necessary. The measurement error was *driving policy*.
+
+The browser now reads `/proc/<pid>/smaps_rollup` for proportional set size on
+Linux and falls back to RSS elsewhere, labelling which it used. A smoke check
+asserts the proportional total is well below the naive RSS sum, because this is
+an easy fix to revert by accident and the only symptom is numbers that look big.
+
+### The error was also hiding a bad flag
+
+Under RSS, every flag configuration reads 85–113 MB per tab and the differences
+disappear into shared-page noise. That is precisely how
+`--max-semi-space-size` survived in the codebase: it had been added on a
+plausible argument about V8 scavenger semi-spaces, never measured, and RSS could
+not have detected that it did nothing.
+
+Measured in PSS, on a DOM-heavy page, per tab:
+
+| configuration | per-tab PSS |
+|---|---|
+| none | 37.9 – 41.2 MB |
+| `--js-flags=--optimize-for-size` | **33.0 MB** (−13% to −20%) |
+| `--enable-low-end-device-mode` | 32.9 MB — same saving, does not stack (33.5 MB combined) |
+| `--max-semi-space-size=2` / `=16` | 38.4 MB — no effect at any value |
+| `--num-raster-threads=1` | 40.4 MB — **worse** |
+| `--disable-features=BackForwardCache` | no effect |
+| `spellcheck: false` | no effect (0.1 MB) |
+| `--disable-features=Translate,OptimizationHints,MediaRouter` | no effect |
+
+One flag of eight does anything. Low-end-device-mode reaches the same floor but
+shrinks image caches and disables visible features to get there, so it is not
+worth paying for a saving already obtained.
+
+### Where per-tab memory actually goes
+
+About 10 MB of a light tab's marginal cost is Chromium's own per-renderer
+baseline — no flag tested here reduces it. The remaining lever is **not paying
+for a renderer at all**: one renderer per site (30 same-site tabs cost 11.6 MB
+each against 19.7 MB across 30 different sites), no spare renderer, and lazy
+background tabs.
+
+Thirty tabs, all live, nothing discarded: **592 MB** across 30 sites, **348 MB**
+on one site.
+
+---
+
 ## Method
 
 Each file in `experiments/` is a standalone Electron app that isolates one
@@ -175,6 +242,8 @@ regression visible.
 | 03 | What does each trim lever reclaim? | GC −5 MB; forced purge **−0 MB**, and it kills the in-page probe | `forciblyPurgeJavaScriptMemory` removed entirely |
 | 04 | What does *asking* for a GC cost? | Heap profiler agent: **+6 MB per renderer**, never returned. Net −6 MB on a heavy page, **+9 MB on an ordinary one** | Forced collection removed; `COLD` performs no renderer action |
 | 05 | What happens if we just leave a hidden tab alone? | Chromium reclaims further unaided (117→107 MB) than a forced GC achieves (112 MB); freezing **stops** that reclamation | Freezing reserved for tabs still burning CPU while hidden |
+| 07 | Is summed RSS a truthful footprint? | No — overstates by 3-4x | PSS accounting throughout; budget compared against it |
+| 08 | Which flags reduce what one tab costs? | One of eight: `--optimize-for-size` | Shipped; `--max-semi-space-size` removed |
 | 06 | What does holding a CDP session cost? | +3 MB/renderer; freeze works without `Page.enable`; page **stays frozen after detach** | `Page.enable` dropped; session detached once frozen, and again when a tab goes active |
 
 Round two was measured with `npm run bench` rather than with a dedicated

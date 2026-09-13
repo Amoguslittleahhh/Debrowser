@@ -68,11 +68,16 @@ function totalRss() {
  * itself hosts tabs (a BaseWindow with WebContentsViews, not a BrowserWindow).
  *
  * @param {object} opts
- * @param {boolean} opts.preload - attach the real activity probe
- * @param {boolean} opts.show    - start the view visible
+ * @param {boolean} opts.preload    - attach the real activity probe
+ * @param {boolean} opts.show       - start the view visible
+ * @param {boolean} opts.spellcheck - Electron's spellchecker (a per-WebContents
+ *                                    option rather than a command-line switch,
+ *                                    so experiment 08 varies it through here)
  */
-async function openPage(win, url, { preload = false, show = true } = {}) {
-  const webPreferences = { contextIsolation: true, nodeIntegration: false, sandbox: true };
+async function openPage(win, url, { preload = false, show = true, spellcheck = true } = {}) {
+  const webPreferences = {
+    contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck
+  };
   if (preload) webPreferences.preload = PROBE_PRELOAD;
 
   const view = new WebContentsView({ webPreferences });

@@ -67,6 +67,27 @@ been visible** is exempt from the grace period entirely — it has nothing on
 screen to lose, and without that carve-out twenty background links produced
 twenty renderers that were all immune from reclaim for a full minute.
 
+### What "memory" means here
+
+Proportional set size, not RSS, and the distinction is worth a factor of three.
+
+`getAppMetrics().memory.workingSetSize` is resident set size, which counts every
+resident page including those shared with other processes. The largest mapping
+in a Chromium browser is the executable itself, mapped into every renderer, so
+summing RSS across processes counts it once per renderer. Six tabs of a trivial
+page measured 810 MB summed RSS against 247 MB summed PSS.
+
+This project reported the RSS figures for some time, which overstated both its
+footprint and its savings. `src/main/memory.js` now reads
+`/proc/<pid>/smaps_rollup` for PSS on Linux and falls back to RSS elsewhere,
+labelling which it used. The budget is compared against the PSS figure, which
+also means the budget now means what it says rather than triggering reclaim
+three times too early.
+
+A smoke check asserts the proportional total is well below the naive RSS sum,
+because this is an easy fix to undo by accident and the only symptom is numbers
+that look large.
+
 ### Memory attribution across shared processes
 
 Memory is owned by *processes*; policy applies to *tabs*; the mapping is not

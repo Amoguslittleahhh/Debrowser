@@ -97,7 +97,7 @@ const padL = (s, n) => String(s).padStart(n);
               `${BUDGET ? `, ${BUDGET} MB budget` : ''}` +
               `${LIVE ? `, ${LIVE} live cap` : ''}`);
   console.log(`  origins  : ${ORIGINS === 'distinct' ? 'one site per tab (realistic)' : 'all file:// (one site)'}`);
-  console.log(`  mix      : ${MIX}\n`);
+  console.log(`  mix      : ${MIX}`);
 
   process.stdout.write('  running baseline (no governor)... ');
   const off = await runOnce(false);
@@ -106,6 +106,8 @@ const padL = (s, n) => String(s).padStart(n);
   process.stdout.write('  running with governor...          ');
   const on = await runOnce(true);
   console.log(`${on.settledMB} MB\n`);
+
+  console.log(`  memory   : ${on.accounting === 'pss' ? 'proportional set size (shared pages counted once)' : 'RSS - shared pages counted per process, so over-stated'}\n`);
 
   const saved = off.settledMB - on.settledMB;
   const pct = off.settledMB ? (saved / off.settledMB) * 100 : 0;

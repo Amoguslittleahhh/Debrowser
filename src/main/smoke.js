@@ -104,6 +104,26 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   check('memory is attributed per tab', heavyBaseline > 0,
     `heavy tab measured at ~${Math.round(heavyBaseline)}MB`);
 
+  // Guard against silently reverting to RSS. Summing RSS across processes
+  // counts the Chromium binary once per renderer and overstated this project's
+  // figures by roughly 3x; the fix is easy to undo by accident, and the symptom
+  // is merely "the numbers look big" rather than anything that breaks.
+  const { accountingMode } = require('./memory');
+  const mode = accountingMode();
+  const naiveRssMB = Math.round(
+    require('electron').app.getAppMetrics()
+      .reduce((sum, p) => sum + (p.memory?.workingSetSize || 0) / 1024, 0));
+  const reported = governor.metrics.snapshot().totalMB;
+  if (mode === 'pss') {
+    check('memory is counted proportionally, not as summed RSS',
+      reported < naiveRssMB * 0.75,
+      `${reported}MB proportional vs ${naiveRssMB}MB summed RSS`);
+  } else {
+    // No PSS on this platform; the fallback is expected to match RSS exactly.
+    check('memory accounting falls back to RSS and says so',
+      mode === 'rss' && reported > 0, `mode=${mode}, ${reported}MB`);
+  }
+
   /* ---------------------------------------------------------------- */
   console.log('\n2. Idle ladder: hidden tabs demote on their own\n');
 

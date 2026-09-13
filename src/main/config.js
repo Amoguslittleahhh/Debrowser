@@ -70,9 +70,16 @@ const BASE = {
    *
    * Beyond the cap the least-recently-used tabs are discarded, so the N tabs
    * you are actually moving between stay instant and the long tail costs
-   * nothing. 0 disables the cap.
+   * nothing.
+   *
+   * **Off (0) by default.** A cap limits how many tabs can be open and usable
+   * at once, which is the wrong default for someone who deliberately keeps many
+   * tabs: the goal is to make each tab cheap, not to ration them. It is kept as
+   * an opt-in ceiling for small machines and for anyone who would rather spend
+   * reload latency than memory - set `--max-live-tabs=8`, or use the economy
+   * profile.
    */
-  maxLiveTabs: 8,
+  maxLiveTabs: 0,
 
   /**
    * Idle ladder: how long a tab must be hidden before each demotion. A tab
@@ -177,6 +184,16 @@ const BASE = {
    * ~100ms, which is the wrong trade when memory is the constraint.
    */
   spareRenderer: false,
+
+  /**
+   * Bias V8 towards smaller heaps and smaller generated code rather than peak
+   * throughput (`--js-flags=--optimize-for-size`).
+   *
+   * Measured at a 13% reduction in per-tab footprint. Exposed as a setting
+   * because it is the one lever here that trades a little JIT quality for
+   * memory, so it should be possible to turn off and measure.
+   */
+  optimizeForSize: true,
 
   /**
    * Maximum tabs allowed to load simultaneously.
