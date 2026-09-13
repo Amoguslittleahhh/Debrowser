@@ -136,3 +136,33 @@ With a live cap of 4, per-tab = 0.6 + 290.8/n:
 So "<10MB per open tab" is reachable from roughly 32 tabs upward and is NOT
 reachable at 20 tabs or fewer, at any live cap. That is a property of the metric,
 not a failure of the design, and it must be stated wherever the figure is quoted.
+
+---
+
+## M5 — does freezing a whole renderer trigger Chromium's purge?  NEGATIVE RESULT
+
+Three same-site tabs (heavy.html) in one renderer under `--process-per-site`,
+all hidden, renderer PSS sampled every 15s for 60s after the freeze.
+
+    case        frozen   before            after 60s         delta
+    none         0/3     73.9 PSS / 52.7   72.2 / 50.8       -1.7 MB
+    one          1/3     73.8 PSS / 51.8   75.4 / 52.8       +1.6 MB
+    all          3/3     73.5 PSS / 51.5   75.0 / 52.4       +1.5 MB
+
+Chromium's `MemoryPurgeManager` schedules a renderer purge when *all* of that
+renderer's pages are frozen, so with process-per-site on, freezing one tab of a
+shared renderer should never earn the purge. The hypothesis was that the repo's
+recorded "freezing costs ~5MB" was really the cost of freezing without ever
+earning the purge.
+
+**It is not.** Freezing all three pages performs identically to freezing one
+(+1.5 vs +1.6MB), and both are ~3.2MB worse than leaving the renderer alone.
+Whole-renderer freezing buys nothing, and the existing rule - freeze only tabs
+still burning background CPU - is correct as it stands.
+
+Gate was ">= 3MB/tab to keep". Actual is 0. Lever dropped.
+
+Note on validity: the harness window is never shown, so every renderer is
+backgrounded throughout. That could mask a purge that only fires on a
+transition. It does not affect the comparison being drawn, since both arms run
+under identical conditions and differ only in how many pages were frozen.
