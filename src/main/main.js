@@ -15,6 +15,7 @@ const { app, ipcMain, session } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
 const { TabManager } = require('./tabs/tab-manager');
+const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
@@ -54,6 +55,13 @@ const cfg = loadConfig(argValue('profile') || 'balanced', overrides);
 // to a number chosen on someone else's hardware.
 if (overrides.memoryBudgetMB == null && cfg.profile === 'balanced') {
   cfg.memoryBudgetMB = platform.recommendedBudgetMB();
+}
+
+// Same treatment for the live-renderer cap: a figure fixed in the config would
+// be wrong at both ends of the hardware range. See `maxLiveTabs` in config.js
+// for why this is on at all, and platform.js for how the number is chosen.
+if (overrides.maxLiveTabs == null && cfg.profile === 'balanced') {
+  cfg.maxLiveTabs = platform.recommendedLiveTabs();
 }
 
 // Benchmark switch: lets the per-tab memory flag be measured rather than
@@ -174,6 +182,9 @@ function main() {
   };
 
   app.whenReady().then(() => {
+    // Page images must never outlive the session that took them, and a crash
+    // cannot be relied upon to have run the per-tab cleanup.
+    sweepThumbnails();
     log('system', JSON.stringify(platform.systemInfo()));
     log('config', `profile=${cfg.profile} budget=${cfg.memoryBudgetMB}MB`);
 
@@ -185,7 +196,12 @@ function main() {
       onPresent: async (tab) => {
         if (shell) shell.attachTab(tab);
         if (governor) await governor.onTabActivated(tab);
-      }
+      },
+      onCover: (tab) => (shell ? shell.showPlaceholder(tab) : false),
+      onUncover: () => { if (shell) shell.hidePlaceholder(); },
+      // A speculative page load must never be the reason a frame is dropped,
+      // and must never add to memory the governor is already trying to reclaim.
+      canSpeculate: () => Boolean(governor) && governor.allowsSpeculation()
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
@@ -250,6 +266,9 @@ function main() {
   app.on('before-quit', () => {
     if (governor) governor.stop();
     if (tabs) tabs.closeAll();
+    // Synchronous on purpose: quit does not wait for promises, and leaving
+    // page screenshots on disk is the one cleanup that must not be best effort.
+    sweepThumbnailsSync();
   });
 
   // Pages must never be able to open a renderer with elevated privileges.
@@ -282,6 +301,14 @@ function wireCommands({ tabs, shell, governor, publish, log }) {
 
       case 'activate-tab':
         tabs.activate(payload?.id).then(publish).catch((e) => log(`activate failed: ${e.message}`));
+        break;
+
+      case 'prefetch-tab':
+        // Pointer resting on a tab. Deliberately not followed by publish(): a
+        // speculation is not a state change the user asked for, and repainting
+        // the chrome for every tab the pointer pauses on would cost more than
+        // the head start is worth.
+        tabs.speculate(payload?.id);
         break;
 
       case 'navigate': {

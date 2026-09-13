@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sign in</title>
+<!--
+  A page carrying a credential field. Exists so the thumbnail privacy rule can
+  be tested rather than asserted: this page must never be photographed to disk.
+-->
+<style>
+  body { font: 15px system-ui; background: #101318; color: #e6e9ef;
+         display: grid; place-items: center; height: 100vh; margin: 0; }
+  form { display: grid; gap: 10px; width: 260px; }
+  input { padding: 8px; border-radius: 6px; border: 1px solid #2a2f3a;
+          background: #171b22; color: inherit; }
+</style>
+<form>
+  <h1>Sign in</h1>
+  <input id="user" type="text" placeholder="Username" autocomplete="username">
+  <input id="pass" type="password" placeholder="Password" autocomplete="current-password">
+  <button type="button">Continue</button>
+</form>

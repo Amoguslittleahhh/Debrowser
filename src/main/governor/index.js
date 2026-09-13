@@ -269,6 +269,18 @@ class Governor {
 
       if (this.shouldSkip(tab)) continue;
 
+      // A renderer built on a guess the user never acted on. Taken back at
+      // once rather than left to the ordinary ladder, because the whole point
+      // of bounding speculation is that a pointer swept across the tab strip
+      // cannot quietly leave a trail of resident tabs behind it. A tab the
+      // user did go on to open has had `speculativeUntil` cleared by the
+      // activation and never reaches this.
+      if (tab.speculativeUntil && now > tab.speculativeUntil && !tab.everVisible) {
+        await applyTier(tab, Tier.DISCARDED, this.ctx());
+        this.tabs.clearSpeculation(tab);
+        continue;
+      }
+
       const idle = tab.idleMs(now);
       let target = Tier.WARM;
       if (idle >= this.cfg.coldAfterMs * accel) target = Tier.COLD;
@@ -527,6 +539,33 @@ class Governor {
     await applyTier(tab, Tier.ACTIVE, this.ctx());
   }
 
+  /**
+   * Whether a speculative restore is affordable right now.
+   *
+   * Speculation is the one mechanism here that can add memory rather than
+   * reclaim it, so it is refused in exactly the conditions where the governor
+   * is already working to take memory back, or where the cost would land on a
+   * frame the user is watching:
+   *
+   *   - any memory pressure at all. Under pressure the ladder is compressed
+   *     and the budget is discarding tabs; realising one on a guess would be
+   *     spending against the reclaim happening in the same tick.
+   *   - anything animating. The boost contract defers every expensive action
+   *     while a frame is being drawn, and a page load is expensive.
+   *   - already at the live-renderer cap, where realising a tab means
+   *     discarding a different one. A guess is not worth evicting a tab the
+   *     user actually opened.
+   */
+  allowsSpeculation() {
+    if (this.pressure !== Pressure.NONE) return false;
+    if (this.boost.quiesceRequested) return false;
+    if (this.cfg.maxLiveTabs > 0) {
+      const live = this.tabs.all().filter((tab) => tab.isLive).length;
+      if (live >= this.cfg.maxLiveTabs) return false;
+    }
+    return true;
+  }
+
   snapshot() {
     const m = this.metrics.snapshot();
     return {
@@ -542,6 +581,9 @@ class Governor {
         reclaimedMB: Math.round(this.stats.reclaimedMB),
         ...this.heapLimiter.stats()
       },
+      // What reclaim cost the user, reported beside what it saved. A snapshot
+      // showing only megabytes is half the trade.
+      latency: this.tabs.latency ? this.tabs.latency.stats() : {},
       tabs: this.tabs.all().map((t) => t.toJSON())
     };
   }

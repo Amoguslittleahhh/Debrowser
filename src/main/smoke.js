@@ -11,6 +11,8 @@
  * Run with: npm run smoke
  */
 
+const fs = require('fs');
+const { app } = require('electron');
 const { Tier } = require('./config');
 const fixtureServer = require('./fixture-server');
 
@@ -263,8 +265,95 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   check('activating a discarded tab restores it to the same page', restored,
     `url=${victim.url}`);
 
+  // The guard rail. Every memory lever in this browser is a trade against
+  // responsiveness, and a restore is the only reclaim the user can feel, so the
+  // cost of one is asserted beside the megabytes it saved.
+  //
+  // The assertion is that a restore was measured at all, and that its p95 is
+  // within a ceiling loose enough to survive a loaded CI machine. It is not a
+  // performance target - the real target lives in the bench, where the machine
+  // is not also running a browser test suite. What this catches is a change that
+  // stops recording the series, or that makes a restore take seconds.
+  const restoreLatency = tabs.latency.percentiles('restore');
+  check('a restore is measured, and is not pathologically slow',
+    restoreLatency !== null && restoreLatency.n > 0 && restoreLatency.p95 < 5000,
+    restoreLatency
+      ? `n=${restoreLatency.n} p50=${restoreLatency.p50}ms p95=${restoreLatency.p95}ms`
+      : 'no restore samples recorded');
+
   /* ---------------------------------------------------------------- */
-  console.log('\n8. Live renderer cap\n');
+  console.log('\n8. Restore placeholder\n');
+
+  // A discard the user can see is a discard the reclaim policy cannot afford to
+  // make often. These checks cover the mechanism that hides it, and the privacy
+  // rule that mechanism is bounded by.
+  const shot = tabs.create({ url: pageUrl('heavy.html'), activate: true, realise: true });
+  await waitFor(() => shot.isLive && !shot.loading, { timeoutMs: 10_000 });
+  await tabs.activate(home.id);                       // switch away: captures
+  await waitFor(() => shot.thumbPath !== null, { timeoutMs: 5000 });
+
+  const hasThumb = Boolean(shot.thumbPath) && fs.existsSync(shot.thumbPath || '');
+  const thumbKB = hasThumb ? Math.round(fs.statSync(shot.thumbPath).size / 1024) : 0;
+  check('leaving a tab photographs it, cheaply',
+    hasThumb && thumbKB > 0 && thumbKB < 250,
+    hasThumb ? `${thumbKB}KB on disk` : 'no thumbnail written');
+
+  check('the thumbnail lives outside userData, so a crash leaves nothing behind',
+    hasThumb && shot.thumbPath.startsWith(app.getPath('temp')),
+    hasThumb ? shot.thumbPath.replace(app.getPath('temp'), '<temp>') : 'n/a');
+
+  // The privacy rule. A screenshot of a logged-in page on disk would defeat the
+  // existing refusal to read credential fields into the session store at all.
+  const login = tabs.create({ url: pageUrl('login.html'), activate: true, realise: true });
+  await waitFor(() => login.isLive && !login.loading, { timeoutMs: 10_000 });
+  await tabs.activate(home.id);
+  await sleep(1200);
+  check('a page carrying a password field is never photographed',
+    login.hasSensitiveFields && login.thumbPath === null,
+    `sensitive=${login.hasSensitiveFields} thumbnail=${login.thumbPath || 'none'}`);
+
+  // And the placeholder actually goes up on the restore path.
+  await governor.enforceManualDiscard(shot);
+  const covered = shell.showPlaceholder(shot);
+  shell.hidePlaceholder();
+  check('a discarded tab with a thumbnail can be covered while it reloads',
+    covered === true, `placeholder shown=${covered}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n9. Speculative restore\n');
+
+  // Speculation is the one mechanism here that can add memory rather than
+  // reclaim it, so what is checked is mostly that it refuses to.
+  governor.cfg.maxLiveTabs = 0;          // the cap is exercised in the next section
+  const spec = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true });
+  await waitFor(() => spec.isLive && !spec.loading, { timeoutMs: 10_000 });
+  await governor.enforceManualDiscard(spec);
+
+  const started = tabs.speculate(spec.id);
+  check('resting on a discarded tab starts restoring it',
+    started === true && spec.isLive, `speculated=${started} live=${spec.isLive}`);
+
+  // At most one in flight: a pointer swept across the strip must not rebuild
+  // every renderer it passes.
+  const second = tabs.all().find((t) => !t.isLive && t !== spec);
+  const alsoStarted = second ? tabs.speculate(second.id) : false;
+  check('only one speculation runs at a time',
+    alsoStarted === false, `second speculation accepted=${alsoStarted}`);
+
+  // And the leash: a guess the user never acted on is taken back. Waiting for
+  // the load to finish first is not test hygiene but the actual contract - the
+  // ladder never interrupts a loading tab, so an expired speculation is
+  // reclaimed on the first tick after it settles rather than mid-request.
+  await waitFor(() => spec.isLive && !spec.loading, { timeoutMs: 10_000 });
+  spec.speculativeUntil = Date.now() - 1;
+  spec.everVisible = false;
+  await governor.runIdleLadder();
+  check('a speculation the user ignored is discarded again',
+    !spec.isLive && spec.tier === Tier.DISCARDED,
+    `tier=${spec.tier} live=${spec.isLive}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n10. Live renderer cap\n');
 
   // The cap is what bounds memory for someone who opens tabs in bursts: the
   // budget cannot help them, because on a large machine thirty tabs never reach
@@ -304,13 +393,19 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `url=${revived.url}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n9. Footprint\n');
+  console.log('\n11. Footprint\n');
 
   governor.metrics.sample();
   const snap = governor.metrics.snapshot();
   console.log(`  ${snap.totalMB}MB total across ${snap.processCount} processes ` +
               `(${snap.rendererCount} renderers) for ${tabs.all().length} tabs`);
   console.log(`  browser + GPU + utility overhead: ${snap.overheadMB}MB`);
+  const lat = tabs.latency.stats();
+  const fmtLat = (name) => (lat[name]
+    ? `${name} p50 ${lat[name].p50}ms / p95 ${lat[name].p95}ms (n=${lat[name].n})`
+    : null);
+  const shown = ['restore', 'switch', 'content'].map(fmtLat).filter(Boolean);
+  if (shown.length) console.log(`  what it cost the user: ${shown.join(', ')}`);
   console.log(`  reclaimed so far: ~${Math.round(governor.stats.reclaimedMB)}MB ` +
               `across ${governor.stats.freezes} freezes and ` +
               `${governor.stats.discards} discards`);

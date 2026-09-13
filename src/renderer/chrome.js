@@ -13,6 +13,13 @@
 
 const api = window.debrowser;
 
+/**
+ * How long the pointer must rest on a tab before its renderer is rebuilt
+ * speculatively. Long enough that sweeping across the strip costs nothing,
+ * short enough to still be ahead of the click.
+ */
+const HOVER_DWELL_MS = 150;
+
 const el = {
   tabs: document.getElementById('tabs'),
   newTab: document.getElementById('new-tab'),
@@ -95,6 +102,21 @@ function createTabElement(id) {
     if (event.button === 1) { api.send('close-tab', { id }); return; }
     if (event.button === 0) api.send('activate-tab', { id });
   });
+
+  // Start restoring a discarded tab while the pointer is still on its way to
+  // the click. A restore takes long enough to be worth the head start, and the
+  // dwell is what keeps it from firing on every tab the pointer crosses on the
+  // way somewhere else - which, on a strip of thirty, would rebuild renderers
+  // faster than the governor reclaims them.
+  let dwell = null;
+  const cancelDwell = () => { clearTimeout(dwell); dwell = null; };
+  root.addEventListener('pointerenter', () => {
+    cancelDwell();
+    dwell = setTimeout(() => api.send('prefetch-tab', { id }), HOVER_DWELL_MS);
+  });
+  root.addEventListener('pointerleave', cancelDwell);
+  // A click has already asked for the real thing; the speculation is redundant.
+  root.addEventListener('mousedown', cancelDwell);
   close.addEventListener('click', (event) => {
     event.stopPropagation();
     api.send('close-tab', { id });

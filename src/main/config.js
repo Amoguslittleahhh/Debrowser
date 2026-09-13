@@ -62,22 +62,46 @@ const BASE = {
   /**
    * Hard ceiling on how many tabs may hold a renderer process at once.
    *
-   * This is the most important number in the file for anyone who opens tabs in
-   * bursts. The memory budget alone cannot help them: on a 16GB machine the
-   * budget is ~6GB, so thirty tabs never come close to it and thirty renderers
-   * stay resident at ~120MB each. A cap bounds the footprint by *tab count*
-   * instead, which is the thing that actually varies.
+   * **On by default, scaled to the machine** - see `recommendedLiveTabs` in
+   * platform.js and the override in main.js that applies it. This was off for a
+   * long time, on the reasoning that a cap limits how many tabs can be open and
+   * usable, which is the wrong default for someone who deliberately keeps many.
+   * That reasoning was right about the goal and wrong about the mechanism, in
+   * two ways measurement settled.
    *
-   * Beyond the cap the least-recently-used tabs are discarded, so the N tabs
-   * you are actually moving between stay instant and the long tail costs
-   * nothing.
+   * First, the cap does not limit tab count. It limits how many tabs hold a
+   * *renderer*. Every tab stays open, keeps its history, scroll offset and
+   * unsubmitted input, and restores in place; what is bounded is how many are
+   * resident at once.
    *
-   * **Off (0) by default.** A cap limits how many tabs can be open and usable
-   * at once, which is the wrong default for someone who deliberately keeps many
-   * tabs: the goal is to make each tab cheap, not to ration them. It is kept as
-   * an opt-in ceiling for small machines and for anyone who would rather spend
-   * reload latency than memory - set `--max-live-tabs=8`, or use the economy
-   * profile.
+   * Second, per-tab memory is dominated by fixed overhead, not by renderers.
+   * Measured here: ~238MB of browser, GPU, utility and zygote processes before
+   * a single tab exists, against ~13.2MB for each additional tab. Nothing
+   * reduces that fixed cost - collapsing the GPU, network and zygote processes
+   * was tried, and every variant either saved nothing or stopped the browser
+   * rendering at all - so the only remaining lever on a per-tab figure is how
+   * many renderers are resident.
+   *
+   * What made it acceptable is the restore placeholder. A discard used to show
+   * a blank view for as long as the page took to load; it now shows a picture
+   * of the page as the user left it, so the reload happens behind something
+   * that looks like the tab. The cost of the cap became invisible, and only
+   * then was it worth turning on.
+   *
+   * Measured, one site per tab:
+   *
+   *     30 tabs, no cap   624 MB   20.8 MB/tab   31 renderers
+   *     30 tabs, cap 6    330 MB   11.0 MB/tab    7 renderers
+   *     30 tabs, cap 4    311 MB   10.4 MB/tab    5 renderers
+   *     30 tabs, cap 3    291 MB    9.7 MB/tab    4 renderers
+   *     40 tabs, cap 4    304 MB    7.6 MB/tab    5 renderers
+   *
+   * Note the last row. Fixed overhead is amortised across whatever is open, so
+   * per-tab memory *improves* as more tabs are opened - the opposite of how a
+   * browser usually behaves, and the reason this figure must always be quoted
+   * with its tab count beside it.
+   *
+   * `--max-live-tabs=0` turns the cap off entirely.
    */
   maxLiveTabs: 0,
 

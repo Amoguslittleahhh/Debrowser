@@ -13,7 +13,7 @@
  */
 
 const fixtureServer = require('./fixture-server');
-const { footprintMB, accountingMode } = require('./memory');
+const { footprintMB, accountingMode, unreportedProcessesMB } = require('./memory');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -137,9 +137,16 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
  */
 function byProcessType(app) {
   const out = {};
+  const known = new Set();
   for (const proc of app.getAppMetrics()) {
+    known.add(proc.pid);
     const key = proc.type || 'unknown';
     out[key] = (out[key] || 0) + footprintMB(proc.pid, (proc.memory?.workingSetSize || 0) / 1024);
+  }
+  // Processes Electron does not list at all - the Linux zygotes, ~29MB of pure
+  // fixed overhead. See unreportedProcessesMB in memory.js.
+  for (const proc of unreportedProcessesMB(known).processes) {
+    out[proc.type] = (out[proc.type] || 0) + proc.pssMB;
   }
   for (const key of Object.keys(out)) out[key] = Math.round(out[key]);
   return out;
@@ -155,8 +162,13 @@ function byProcessType(app) {
 async function measure(app, samples = 8, gapMs = 250) {
   let total = 0;
   for (let i = 0; i < samples; i++) {
-    total = app.getAppMetrics().reduce(
+    const metrics = app.getAppMetrics();
+    total = metrics.reduce(
       (sum, p) => sum + footprintMB(p.pid, (p.memory?.workingSetSize || 0) / 1024), 0);
+    // getAppMetrics is not the whole browser: it omits Chromium's zygotes, and
+    // they are fixed overhead, so leaving them out understates every figure by
+    // a constant ~29MB. Measured, see memory.js.
+    total += unreportedProcessesMB(new Set(metrics.map((p) => p.pid))).mb;
     await sleep(gapMs);
   }
   return Math.round(total);

@@ -21,7 +21,8 @@
  */
 
 const { MB } = require('../config');
-const { readProcessMemory, accountingMode, pageMergingStatus } = require('../memory');
+const { readProcessMemory, accountingMode, pageMergingStatus,
+        unreportedProcessesMB } = require('../memory');
 
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
@@ -97,6 +98,14 @@ class Metrics {
     for (const pid of this.byPid.keys()) {
       if (!seen.has(pid)) this.byPid.delete(pid);
     }
+
+    // Electron's process list is not the whole browser: it omits Chromium's
+    // zygotes, ~29MB that does not grow with tab count. Counting them is the
+    // difference between a budget compared against this browser's real
+    // footprint and one compared against most of it.
+    const unreported = unreportedProcessesMB(seen).mb;
+    total += unreported;
+    overhead += unreported;
 
     this.totalMB = total;
     this.browserOverheadMB = overhead;

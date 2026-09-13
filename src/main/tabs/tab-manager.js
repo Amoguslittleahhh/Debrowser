@@ -19,6 +19,15 @@
 const { session: electronSession } = require('electron');
 const { Tab } = require('./tab');
 const { Tier } = require('../config');
+const { LatencyTracker } = require('../latency');
+
+/**
+ * How long a speculatively restored tab is allowed to stay resident before the
+ * idle ladder takes it back. Long enough to cover a pointer that pauses, reads
+ * the title and then clicks; short enough that a guess which did not pay off
+ * costs one renderer for a few seconds rather than for the session.
+ */
+const SPECULATION_TTL_MS = 10_000;
 
 class TabManager {
   /**
@@ -29,6 +38,9 @@ class TabManager {
     partition = 'persist:debrowser',
     onEvent = () => {},
     onPresent = async () => {},
+    onCover = () => false,
+    onUncover = () => {},
+    canSpeculate = () => true,
     log = () => {}
   } = {}) {
     this.cfg = cfg;
@@ -40,6 +52,18 @@ class TabManager {
      * crucially, to unfreeze it - while it is still off screen.
      */
     this.onPresent = onPresent;
+    /**
+     * Show / take away the restore placeholder. The shell owns the view; the
+     * tab manager owns the moment, because only it knows a restore is starting.
+     * `onCover` reports whether a placeholder actually went up.
+     */
+    this.onCover = onCover;
+    this.onUncover = onUncover;
+    /**
+     * Whether a speculative restore is affordable right now. Answered by the
+     * governor, which owns pressure and the animation quiesce; see `speculate`.
+     */
+    this.canSpeculate = canSpeculate;
     this.log = log;
 
     /** @type {Tab[]} - ordered as shown in the tab strip */
@@ -52,6 +76,15 @@ class TabManager {
      * @type {Tab[]}
      */
     this.loadQueue = [];
+
+    /** At most one speculative restore in flight. See `speculate`. */
+    this.speculatingId = null;
+
+    /**
+     * What reclaim costs the user. Read by the governor's snapshot and asserted
+     * in the smoke suite; see ../latency.js for why this is measured at all.
+     */
+    this.latency = new LatencyTracker();
 
     this.configureSession();
   }
@@ -125,15 +158,44 @@ class TabManager {
     if (this.activeId === id && tab.isLive && tab.visible) return tab;
 
     const previous = this.activeTab();
+
+    // Photograph the tab being left *before* hiding it. This is the only moment
+    // its content is definitely on screen: a hidden view returns a stale frame
+    // and a frozen one cannot paint at all, so a capture taken any later - at
+    // discard time, say - would be of nothing worth showing.
+    //
+    // Issued but never awaited. The frame request is made against the view as
+    // it stands now, and waiting for the encode would put disk I/O on the
+    // tab-switch path, which is the one path in this browser that must stay
+    // immediate.
+    if (previous && previous.id !== id && previous.isLive) {
+      previous.captureThumbnail().catch(() => {});
+    }
+
     if (previous && previous.id !== id) {
       previous.setVisible(false);
     }
+
+    // Timed from here rather than from the renderer being built, because this
+    // is when the user asked. Which series the sample belongs to is decided at
+    // the end: a restore and a switch are the same code path and differ only in
+    // whether there was a renderer to begin with.
+    const wasLive = tab.isLive;
+    const stop = this.latency.start('switch');
 
     this.activeId = id;
     // Bypass the admission queue: the user is waiting on this one.
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
-    if (!tab.isLive) tab.realise();
+    if (!tab.isLive) {
+      // Cover the gap before the renderer exists, not after: this is the whole
+      // point, and a placeholder raised after realise() would already be late.
+      const covered = this.onCover(tab);
+      this.latency.record(covered ? 'placeholder' : 'uncovered', 0.1);
+      tab.realise();
+      this.timeToContent(tab, id);
+      this.uncoverWhenReady(tab, id);
+    }
 
     try {
       await this.onPresent(tab);
@@ -141,12 +203,127 @@ class TabManager {
       this.log(`present failed for tab ${tab.id}: ${err.message}`);
     }
 
-    // The user may have switched away again while we were promoting.
-    if (this.activeId !== id) return tab;
+    // The user may have switched away again while we were promoting. The sample
+    // is still recorded: the work was done and the time was spent, and dropping
+    // it would quietly exclude exactly the slow restores a user gave up on.
+    if (this.activeId !== id) {
+      stop(wasLive ? 'switch' : 'restore');
+      return tab;
+    }
 
     tab.setVisible(true);
+    stop(wasLive ? 'switch' : 'restore');
+    this.clearSpeculation(tab);
     this.onEvent(tab, 'activated');
     return tab;
+  }
+
+  /**
+   * Take the placeholder away once the restored page has something to show.
+   *
+   * `did-stop-loading` rather than a true first-paint signal. Paint can lag it
+   * slightly, so the theoretical worst case is a brief flash of the view's
+   * background - which is now the chrome's surface colour rather than white, so
+   * it reads as the browser rather than as a broken page. A double-rAF signal
+   * from the probe preload would be exact; it is not worth an IPC round trip on
+   * the tab-switch path until this proves visible.
+   *
+   * The shell's own ceiling is the backstop: every path that raises a
+   * placeholder is guaranteed to lower it, including the ones here that never
+   * fire because the renderer died first.
+   */
+  uncoverWhenReady(tab, id) {
+    const wc = tab.wc;
+    if (!wc) {
+      this.onUncover();
+      return;
+    }
+    const done = () => {
+      // If the user has already moved on, the placeholder belongs to whatever
+      // they moved to; leave it to that activation to clear.
+      if (this.activeId === id) this.onUncover();
+    };
+    wc.once('did-stop-loading', done);
+    wc.once('did-fail-load', done);
+    wc.once('render-process-gone', done);
+  }
+
+  /**
+   * Time a restore from activation until the page has finished loading.
+   *
+   * Separate from the `restore` series, which stops when the tab is on screen.
+   * The gap between the two is the window a placeholder has to cover, so both
+   * numbers are needed to know whether one is worth showing.
+   *
+   * Bounded by a timeout: a page that never finishes loading must not leave a
+   * timer holding a reference to the tab, and must not be silently omitted
+   * from the series either - it is recorded at the ceiling, which is the
+   * honest reading of "the user never saw this load finish".
+   */
+  timeToContent(tab, id, ceilingMs = 10_000) {
+    const stop = this.latency.start('content');
+    const wc = tab.wc;
+    if (!wc) return;
+
+    const timer = setTimeout(() => {
+      wc.removeListener('did-stop-loading', done);
+      this.latency.record('content', ceilingMs);
+      stop();  // consumed, so the listener below cannot also record
+    }, ceilingMs);
+    if (typeof timer.unref === 'function') timer.unref();
+
+    const done = () => {
+      clearTimeout(timer);
+      // Only counts while this is still the tab the user asked for; a restore
+      // they navigated away from is not a measurement of restore latency.
+      if (this.activeId === id) stop();
+    };
+    wc.once('did-stop-loading', done);
+  }
+
+  /**
+   * Start restoring a discarded tab before the user has clicked it.
+   *
+   * A restore is measured at ~5ms to put the tab on screen but 40-110ms before
+   * its content arrives - and that is against localhost fixtures. The pointer
+   * resting on a tab is a good enough signal that the click is coming to spend
+   * that window early, so the page is already loading by the time it lands.
+   *
+   * This is the one feature here that can *increase* memory, which is the
+   * opposite of the point, so it is deliberately timid. Left ungoverned, a
+   * pointer dragged across a strip of thirty tabs would rebuild renderers
+   * faster than the governor reclaims them - so:
+   *
+   *   - at most one speculation is ever in flight;
+   *   - it goes through `admit`, so the concurrent-load limit still applies;
+   *   - the governor can refuse outright, under memory pressure or while
+   *     anything is animating - a speculative page load must never be the
+   *     reason a frame is dropped;
+   *   - and it expires. A tab realised on a guess that the user never acted on
+   *     is discarded again by the idle ladder, so a swept pointer cannot
+   *     quietly leave a dozen resident renderers behind.
+   */
+  speculate(id) {
+    const tab = this.byId(id);
+    if (!tab || tab.isLive) return false;
+    if (this.speculatingId !== null) return false;
+    if (!this.canSpeculate()) return false;
+
+    tab.speculativeUntil = Date.now() + SPECULATION_TTL_MS;
+    this.speculatingId = id;
+    this.admit(tab);
+    this.latency.record('speculation', 0.1);
+    return true;
+  }
+
+  /**
+   * Called when a tab is activated for real, so a speculation that paid off
+   * stops being treated as one - otherwise the idle ladder would discard the
+   * tab the user is now looking at.
+   */
+  clearSpeculation(tab) {
+    if (tab) tab.speculativeUntil = 0;
+    this.speculatingId = null;
   }
 
   /** How many tabs are mid-load right now. */
@@ -196,6 +373,8 @@ class TabManager {
     const [tab] = this.tabs.splice(index, 1);
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
+    // A picture of the page must not outlive the tab it was taken from.
+    tab.discardThumbnail();
     tab.teardownView();
 
     if (this.activeId === id) {
