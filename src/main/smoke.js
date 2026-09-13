@@ -263,6 +263,22 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   check('activating a discarded tab restores it to the same page', restored,
     `url=${victim.url}`);
 
+  // The guard rail. Every memory lever in this browser is a trade against
+  // responsiveness, and a restore is the only reclaim the user can feel, so the
+  // cost of one is asserted beside the megabytes it saved.
+  //
+  // The assertion is that a restore was measured at all, and that its p95 is
+  // within a ceiling loose enough to survive a loaded CI machine. It is not a
+  // performance target - the real target lives in the bench, where the machine
+  // is not also running a browser test suite. What this catches is a change that
+  // stops recording the series, or that makes a restore take seconds.
+  const restoreLatency = tabs.latency.percentiles('restore');
+  check('a restore is measured, and is not pathologically slow',
+    restoreLatency !== null && restoreLatency.n > 0 && restoreLatency.p95 < 5000,
+    restoreLatency
+      ? `n=${restoreLatency.n} p50=${restoreLatency.p50}ms p95=${restoreLatency.p95}ms`
+      : 'no restore samples recorded');
+
   /* ---------------------------------------------------------------- */
   console.log('\n8. Live renderer cap\n');
 
@@ -311,6 +327,12 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   console.log(`  ${snap.totalMB}MB total across ${snap.processCount} processes ` +
               `(${snap.rendererCount} renderers) for ${tabs.all().length} tabs`);
   console.log(`  browser + GPU + utility overhead: ${snap.overheadMB}MB`);
+  const lat = tabs.latency.stats();
+  const fmtLat = (name) => (lat[name]
+    ? `${name} p50 ${lat[name].p50}ms / p95 ${lat[name].p95}ms (n=${lat[name].n})`
+    : null);
+  const shown = ['restore', 'switch', 'content'].map(fmtLat).filter(Boolean);
+  if (shown.length) console.log(`  what it cost the user: ${shown.join(', ')}`);
   console.log(`  reclaimed so far: ~${Math.round(governor.stats.reclaimedMB)}MB ` +
               `across ${governor.stats.freezes} freezes and ` +
               `${governor.stats.discards} discards`);

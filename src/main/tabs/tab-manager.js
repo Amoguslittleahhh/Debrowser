@@ -19,6 +19,7 @@
 const { session: electronSession } = require('electron');
 const { Tab } = require('./tab');
 const { Tier } = require('../config');
+const { LatencyTracker } = require('../latency');
 
 class TabManager {
   /**
@@ -52,6 +53,12 @@ class TabManager {
      * @type {Tab[]}
      */
     this.loadQueue = [];
+
+    /**
+     * What reclaim costs the user. Read by the governor's snapshot and asserted
+     * in the smoke suite; see ../latency.js for why this is measured at all.
+     */
+    this.latency = new LatencyTracker();
 
     this.configureSession();
   }
@@ -129,11 +136,21 @@ class TabManager {
       previous.setVisible(false);
     }
 
+    // Timed from here rather than from the renderer being built, because this
+    // is when the user asked. Which series the sample belongs to is decided at
+    // the end: a restore and a switch are the same code path and differ only in
+    // whether there was a renderer to begin with.
+    const wasLive = tab.isLive;
+    const stop = this.latency.start('switch');
+
     this.activeId = id;
     // Bypass the admission queue: the user is waiting on this one.
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
-    if (!tab.isLive) tab.realise();
+    if (!tab.isLive) {
+      tab.realise();
+      this.timeToContent(tab, id);
+    }
 
     try {
       await this.onPresent(tab);
@@ -141,12 +158,51 @@ class TabManager {
       this.log(`present failed for tab ${tab.id}: ${err.message}`);
     }
 
-    // The user may have switched away again while we were promoting.
-    if (this.activeId !== id) return tab;
+    // The user may have switched away again while we were promoting. The sample
+    // is still recorded: the work was done and the time was spent, and dropping
+    // it would quietly exclude exactly the slow restores a user gave up on.
+    if (this.activeId !== id) {
+      stop(wasLive ? 'switch' : 'restore');
+      return tab;
+    }
 
     tab.setVisible(true);
+    stop(wasLive ? 'switch' : 'restore');
     this.onEvent(tab, 'activated');
     return tab;
+  }
+
+  /**
+   * Time a restore from activation until the page has finished loading.
+   *
+   * Separate from the `restore` series, which stops when the tab is on screen.
+   * The gap between the two is the window a placeholder has to cover, so both
+   * numbers are needed to know whether one is worth showing.
+   *
+   * Bounded by a timeout: a page that never finishes loading must not leave a
+   * timer holding a reference to the tab, and must not be silently omitted
+   * from the series either - it is recorded at the ceiling, which is the
+   * honest reading of "the user never saw this load finish".
+   */
+  timeToContent(tab, id, ceilingMs = 10_000) {
+    const stop = this.latency.start('content');
+    const wc = tab.wc;
+    if (!wc) return;
+
+    const timer = setTimeout(() => {
+      wc.removeListener('did-stop-loading', done);
+      this.latency.record('content', ceilingMs);
+      stop();  // consumed, so the listener below cannot also record
+    }, ceilingMs);
+    if (typeof timer.unref === 'function') timer.unref();
+
+    const done = () => {
+      clearTimeout(timer);
+      // Only counts while this is still the tab the user asked for; a restore
+      // they navigated away from is not a measurement of restore latency.
+      if (this.activeId === id) stop();
+    };
+    wc.once('did-stop-loading', done);
   }
 
   /** How many tabs are mid-load right now. */

@@ -542,6 +542,9 @@ class Governor {
         reclaimedMB: Math.round(this.stats.reclaimedMB),
         ...this.heapLimiter.stats()
       },
+      // What reclaim cost the user, reported beside what it saved. A snapshot
+      // showing only megabytes is half the trade.
+      latency: this.tabs.latency ? this.tabs.latency.stats() : {},
       tabs: this.tabs.all().map((t) => t.toJSON())
     };
   }

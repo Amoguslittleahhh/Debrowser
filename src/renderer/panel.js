@@ -77,6 +77,15 @@ function render(state) {
   if (s.heapCollections) {
     line += ` · ${s.heapCollections} heap collection(s), ~${s.heapReclaimedMB} MB`;
   }
+
+  // What the reclaim cost, next to what it saved. `restore` is the one that
+  // matters: it is the only reclaim in this browser the user can feel.
+  const lat = state.latency || {};
+  const timings = [];
+  if (lat.restore) timings.push(`restore ${lat.restore.p50}/${lat.restore.p95} ms`);
+  if (lat.switch) timings.push(`switch ${lat.switch.p50}/${lat.switch.p95} ms`);
+  if (timings.length) line += ` · ${timings.join(', ')} (p50/p95)`;
+
   el.stats.textContent = line;
 }
 
