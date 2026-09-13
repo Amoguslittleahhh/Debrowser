@@ -8,29 +8,22 @@
  * surface can freeze a page outright. That exists in the DevTools protocol, so
  * the governor drives it from here.
  *
- * Two CDP *memory* levers are deliberately absent, both removed after
- * measuring them rather than on principle:
+ * On the two CDP *memory* levers, both of which were got wrong at least once:
  *
- *   `Memory.forciblyPurgeJavaScriptMemory` - the obvious choice for a
- *   memory-saving browser. On a page holding ~117MB it reclaimed 0MB on top of
- *   a preceding collection, and it tore down the renderer's isolated worlds,
- *   which killed the activity probe in every trimmed tab and turned any later
- *   IPC to that renderer into a segfault - a tab that died the moment the user
- *   clicked back to it.
+ *   `Memory.forciblyPurgeJavaScriptMemory` is absent for good. On a page
+ *   holding ~117MB it reclaimed 0MB on top of a preceding collection, and it
+ *   tore down the renderer's isolated worlds - killing the activity probe in
+ *   every trimmed tab and turning any later IPC to that renderer into a
+ *   segfault, a tab that died the moment the user clicked back to it.
  *
- *   `HeapProfiler.collectGarbage` - forcing a collection when a tab goes idle.
- *   Instantiating the heap profiler agent costs about 6MB per renderer and
- *   does not return it on detach, so on a typical page the call was a net
- *   +9MB; only a page with an unusually large collectable heap came out ahead.
- *   Across twelve tabs it cost ~90MB - more than the governor was saving.
- *   Chromium already reclaims a backgrounded renderer on its own and does it
- *   better (a heavy tab fell 117MB -> 107MB over a minute unaided, against
- *   112MB with a forced collection), so on an idle tab the correct action
- *   turned out to be no action at all.
- *
- * The memory savings in this browser therefore come from discarding tabs and
- * from the process configuration in platform.js, not from squeezing live
- * renderers. What remains here buys CPU, not memory.
+ *   `HeapProfiler.collectGarbage` is present, but gated. It was removed once on
+ *   the strength of an RSS measurement showing a flat net loss (+9MB per tab),
+ *   and that measurement was wrong - RSS cannot see a 2.4MB instrumentation
+ *   cost through shared-page noise. In proportional set size the call is
+ *   page-dependent: net -6.8MB on a DOM-heavy page, net +7.1MB on a light one.
+ *   So it pays, on the right tabs, and governor/heap-limit.js decides which
+ *   using the square-root heap limit rule. Chromium still reclaims backgrounded
+ *   renderers on its own, so this supplements that rather than replacing it.
  *
  * Every call is best-effort. A renderer can be mid-navigation, crashed, or
  * have DevTools attached by the user (which takes the debugger session away
@@ -172,9 +165,30 @@ class CdpSession {
     if (!res || !Array.isArray(res.metrics)) return null;
     const value = (name) => res.metrics.find((m) => m.name === name)?.value;
     return {
+      // Used is the live set (L in the heap-limit rule); total is how much the
+      // heap has actually committed. The difference is the slack a collection
+      // can hand back, and it is often most of what a renderer is holding: a
+      // page can show 1MB used against 20MB+ of committed pages.
       jsHeapBytes: value('JSHeapUsedSize') ?? null,
+      jsHeapTotalBytes: value('JSHeapTotalSize') ?? null,
       taskDurationSec: value('TaskDuration') ?? null
     };
+  }
+
+  /**
+   * Ask this renderer to run a full garbage collection, reporting how long it
+   * took so the caller can estimate this heap's collection speed.
+   *
+   * Only for tabs chosen by governor/heap-limit.js - never unconditionally. See
+   * the note on this call in the file header for why.
+   *
+   * @returns {{ms:number}|null}
+   */
+  async collectGarbage() {
+    const started = Date.now();
+    const res = await this.send('HeapProfiler.collectGarbage', {}, 5000);
+    if (res === null) return null;
+    return { ms: Date.now() - started };
   }
 }
 

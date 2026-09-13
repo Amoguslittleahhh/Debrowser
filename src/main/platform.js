@@ -186,6 +186,14 @@ function chromiumSwitches(cfg) {
     switches.push(['renderer-process-limit', String(cfg.rendererProcessLimit)]);
   }
 
+  if (cfg.siteIsolation === false) {
+    // Security-relevant: see `siteIsolation` in config.js. Cross-site subframes
+    // stop getting their own processes, and Chromium no longer guarantees that
+    // two sites never share an address space.
+    disabledFeatures.push('site-per-process', 'IsolateOrigins');
+    switches.push(['disable-site-isolation-trials']);
+  }
+
   if (cfg.processPerSite) {
     // One renderer per site rather than per tab. Twelve tabs on the same
     // site collapse into one process instead of twelve, which is the single

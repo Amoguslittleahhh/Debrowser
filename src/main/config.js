@@ -158,6 +158,27 @@ const BASE = {
   },
 
   /**
+   * Keep Chromium's site isolation on.
+   *
+   * **This is a security setting, not a performance one.** Site isolation puts
+   * every site in its own renderer process, which is what prevents a
+   * compromised or malicious page - including a third-party ad frame embedded in
+   * a page you trust - from reading another site's memory. It is the main
+   * mitigation for Spectre-class attacks and cross-site leaks in a browser.
+   *
+   * Turning it off is the single largest remaining memory lever, because most
+   * real pages carry cross-site subframes that each get their own process. On a
+   * page with six cross-site frames, measured per six tabs:
+   *
+   *     isolation on    12 renderers   378 MB
+   *     isolation off    6 renderers   307 MB   (-19%, private -27%)
+   *
+   * That is a real saving for a real cost, and the cost is not one this browser
+   * will take on a user's behalf by default. The `minimal` profile opts in.
+   */
+  siteIsolation: true,
+
+  /**
    * Chromium's own renderer process ceiling. Off by default.
    *
    * When Chromium hits it, it reuses one process for different sites, which
@@ -184,6 +205,60 @@ const BASE = {
    * ~100ms, which is the wrong trade when memory is the constraint.
    */
   spareRenderer: false,
+
+  /**
+   * Per-tab heap limits, after the square-root rule of arXiv:2204.10455.
+   * See governor/heap-limit.js for the rule and for what is approximated here.
+   */
+  heapLimit: {
+    /**
+     * **Off by default, on a negative result.** The rule is implemented and
+     * correct; it simply has little to act on in this browser.
+     *
+     * Two measurements decided it. First, V8's heap is a small part of what a
+     * renderer holds: a settled DOM-heavy page reports about 2MB of committed
+     * heap against 21MB of private memory, so even a perfect collection leaves
+     * 90% of the tab untouched - the rest is DOM, Blink structures and malloc,
+     * which no garbage collector reaches. Second, V8 already collects a
+     * backgrounded heap on its own within about ten seconds, so forcing it
+     * earlier mostly just does sooner what happens anyway: across twenty tabs,
+     * with and without, the settled total differed by 1MB (488 vs 487).
+     *
+     * Against that, acting costs a debugger session of ~2.4MB per tab touched.
+     * Turn it on with `--heap-limit` if your tabs allocate heavily in the
+     * background, where the rule's steady-state behaviour has something to do.
+     */
+    enabled: false,
+
+    /**
+     * The rule's shared constant: the marginal GC time each heap is willing to
+     * spend per unit of memory saved. Lower means more generous heap limits.
+     * It is the single knob that moves the whole memory/GC-time trade-off, and
+     * it must be the same for every heap or the allocation between them stops
+     * being optimal.
+     */
+    c: 2e-8,
+
+    /**
+     * Multiplier on c for hidden tabs. Above 1 means a tighter limit, so more
+     * collections and less memory. The paper permits per-heap weighting as long
+     * as it is applied uniformly; a background tab's GC pause is invisible, so
+     * it is the right place to spend collection time instead of memory.
+     */
+    backgroundWeight: 4,
+
+    /**
+     * Private memory below which a tab is never instrumented at all.
+     *
+     * Requesting a collection needs a debugger session costing ~2.4MB, and on a
+     * light page that exceeds what the collection reclaims - measured net +7.1MB
+     * for a light page against -6.8MB for a DOM-heavy one. The two differ in
+     * private bytes (~10MB against ~21-25MB), so the threshold sits between
+     * them. Read from the OS for free, so the expensive measurement is only
+     * spent where it can pay for itself.
+     */
+    minPrivateMB: 16
+  },
 
   /**
    * Bias V8 towards smaller heaps and smaller generated code rather than peak
@@ -227,6 +302,33 @@ const PROFILES = {
     maxConcurrentLoads: 2,
     processPerSite: true,
     spareRenderer: false
+  },
+
+  /**
+   * Lowest memory this browser can go, by giving up security isolation.
+   *
+   * Only choose this if you understand the trade: without site isolation, a
+   * malicious page or third-party frame shares an address space with other
+   * sites, and the browser's main defence against cross-site data theft is
+   * gone. It is here because the memory saving is real and some people will
+   * want it on a constrained machine for trusted browsing - not because it is
+   * a good default.
+   */
+  minimal: {
+    memoryBudgetMB: 600,
+    tabFloorMB: 30,
+    maxLiveTabs: 0,
+    coldAfterMs: 20_000,
+    freezeAfterMs: 90_000,
+    discardAfterMs: 5 * 60_000,
+    minLifetimeMs: 45_000,
+    discardFromPressure: Pressure.MODERATE,
+    maxConcurrentLoads: 2,
+    processPerSite: true,
+    spareRenderer: false,
+    // The two settings that make this profile what it is.
+    siteIsolation: false,
+    rendererProcessLimit: 4
   },
 
   performance: {

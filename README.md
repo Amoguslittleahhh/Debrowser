@@ -174,6 +174,65 @@ on one site.
 
 ---
 
+## A fourth round: applying the literature, including what did not apply
+
+Three papers were handed over. One was directly actionable, one describes the
+trade this browser makes by hand, and one cannot be reached from here. Saying
+which is which matters more than claiming all three were used.
+
+**Optimal Heap Limits for Reducing Browser Memory Use** (Kirisame, Shenoy &
+Panchekha, OOPSLA 2022, arXiv:2204.10455) is the on-point one. A heap limit
+trades memory against GC time, and the obvious rules are not *compositional*:
+with several heaps, one multiplier produces a memory allocation across them that
+does not minimise total GC time. Their result is
+
+```
+M = L + sqrt(L * g / (c * s))
+```
+
+with L live memory, g allocation rate, s collection speed, and c shared by every
+heap. Every term but c is local, so each tab computes its own limit and the
+allocation across tabs still comes out optimal — coordination without
+communication. Their MemBalancer prototype patches V8 and reports ~16% less
+memory at constant GC time.
+
+Implemented in `src/main/governor/heap-limit.js`, weighting c per tab as the
+paper permits so hidden tabs get tighter limits. **Then disabled by default, on
+measurement:**
+
+- V8's heap is not where a renderer's memory is. A settled DOM-heavy page
+  reports ~2 MB committed heap against ~21 MB private — a perfect collection
+  leaves ~90% of the tab untouched, the rest being DOM, Blink and malloc.
+- V8 already collects a backgrounded heap within ~10 s, so forcing it earlier
+  mostly does sooner what happens anyway. Across 20 tabs: 1 MB difference.
+
+The gap from 16% is the implementation, not the rule. They set a real V8 heap
+limit and thereby change how V8 schedules *its own* collections. Nothing in
+Electron or the DevTools protocol can set that limit, so here the rule can only
+fire collections we request — strictly later, and costing a debugger session.
+Getting there took three bugs, each of which silently made the rule inert:
+screening on PSS (which falls as more processes share the binary, so every tab
+fell under the threshold); comparing the limit against `JSHeapUsedSize` when M
+bounds the committed *size*; and having no trigger for load-time garbage, which
+is a one-time backlog rather than steady-state growth.
+
+**Mesh** (Powers, Tench, Berger & McGregor, arXiv:1902.04738) compacts C/C++
+heaps without moving pointers, using virtual memory to merge sparse pages. It
+addresses exactly the fragmentation that makes up part of that 21 MB of
+non-V8 private memory — but applying it means replacing PartitionAlloc inside
+Chromium, not configuring a browser built on it. Not applied, and not claimed.
+
+**TME-Box** (Unterguggenberger et al., arXiv:2407.10740) gets scalable
+in-process isolation from Intel TME-MK memory encryption keys. It is the most
+interesting of the three for this project conceptually, because it answers the
+exact dilemma the `minimal` profile resolves by hand: isolation costs a process
+per principal, and a browser pays that per site. Hardware that isolated
+principals *within* a process would make the security/memory trade disappear. It
+needs specific Intel hardware plus compiler and kernel support, so it is
+unreachable from an Electron app. Not applied.
+
+---
+
 ## Method
 
 Each file in `experiments/` is a standalone Electron app that isolates one

@@ -97,9 +97,24 @@ function footprintMB(pid, rssFallbackMB) {
   return detail ? detail.pssMB : rssFallbackMB;
 }
 
+/**
+ * Private (unshared) memory for a process, in MB, or null if unavailable.
+ *
+ * Distinct from the footprint and needed separately, because PSS is not a
+ * stable way to describe one process in isolation: each shared page is divided
+ * by the number of processes mapping it, so the *same* renderer reports a lower
+ * PSS simply because more renderers exist. Private bytes are intrinsic to the
+ * process, which makes them the right basis for a threshold like "is this tab
+ * big enough to be worth instrumenting".
+ */
+function privateMB(pid) {
+  const detail = readProcessMemory(pid);
+  return detail ? detail.privateMB : null;
+}
+
 /** How the numbers on this host should be described. */
 function accountingMode() {
   return detectPss() ? 'pss' : 'rss';
 }
 
-module.exports = { footprintMB, readProcessMemory, accountingMode, detectPss };
+module.exports = { footprintMB, privateMB, readProcessMemory, accountingMode, detectPss };

@@ -55,17 +55,32 @@ if (overrides.memoryBudgetMB == null && cfg.profile === 'balanced') {
   cfg.memoryBudgetMB = platform.recommendedBudgetMB();
 }
 
-// Note the presence check. `Number(null)` is 0, and 0 is a *meaningful* value
-// here (it disables the cap), so testing the parsed number alone would silently
-// turn the cap off whenever the flag was absent - which is exactly what it did.
 // Benchmark switch: lets the per-tab memory flag be measured rather than
 // assumed. Not something a user needs to touch.
 if (argv.includes('--no-optimize-for-size')) cfg.optimizeForSize = false;
+if (argv.includes('--no-heap-limit')) cfg.heapLimit.enabled = false;
+if (argv.includes('--heap-limit')) cfg.heapLimit.enabled = true;
 
+// Note the presence check. `Number(null)` is 0, and 0 is a *meaningful* value
+// here (it disables the cap), so testing the parsed number alone would silently
+// turn the cap off whenever the flag was absent - which is exactly what it did.
 const liveTabsRaw = argValue('max-live-tabs');
 if (liveTabsRaw !== null) {
   const parsed = Number(liveTabsRaw);
   if (Number.isFinite(parsed) && parsed >= 0) cfg.maxLiveTabs = Math.round(parsed);
+}
+
+// Say it loudly and unconditionally, not behind the verbose flag: running
+// without site isolation is a security posture the user should be reminded of
+// every time, not a quiet configuration detail.
+if (cfg.siteIsolation === false) {
+  console.warn(
+    '[debrowser] WARNING: site isolation is DISABLED (profile: %s).\n' +
+    '           Different sites may share a renderer process, so the browser\n' +
+    '           cannot prevent a malicious page or embedded third-party frame\n' +
+    '           from reading another site\'s data. Use this only for browsing\n' +
+    '           you trust. Run without --profile=minimal to restore isolation.',
+    cfg.profile);
 }
 
 function log(...args) {
