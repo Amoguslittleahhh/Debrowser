@@ -53,6 +53,18 @@ const cfg = loadConfig(argValue('profile') || 'balanced', overrides);
 // to a number chosen on someone else's hardware.
 if (overrides.memoryBudgetMB == null && cfg.profile === 'balanced') {
   cfg.memoryBudgetMB = platform.recommendedBudgetMB();
+  // The live-tab cap matters more than the budget on a big machine, where the
+  // budget is never reached; size it to the host too.
+  cfg.maxLiveTabs = platform.recommendedLiveTabs();
+}
+
+// Note the presence check. `Number(null)` is 0, and 0 is a *meaningful* value
+// here (it disables the cap), so testing the parsed number alone would silently
+// turn the cap off whenever the flag was absent - which is exactly what it did.
+const liveTabsRaw = argValue('max-live-tabs');
+if (liveTabsRaw !== null) {
+  const parsed = Number(liveTabsRaw);
+  if (Number.isFinite(parsed) && parsed >= 0) cfg.maxLiveTabs = Math.round(parsed);
 }
 
 function log(...args) {
@@ -62,6 +74,14 @@ function log(...args) {
 /* ------------------------------------------------------------------ */
 /* Chromium switches - must be applied before `app` is ready           */
 /* ------------------------------------------------------------------ */
+
+// Tests and benchmarks give each tab its own site so the process model behaves
+// as it would for real browsing, rather than collapsing a pile of same-site
+// file:// URLs into one renderer. That needs `*.test` to resolve locally.
+if (SMOKE_TEST || (argv.includes('--bench-test') && argv.includes('--distinct-origins'))) {
+  const { HOST_RESOLVER_RULES } = require('./fixture-server');
+  app.commandLine.appendSwitch('host-resolver-rules', HOST_RESOLVER_RULES);
+}
 
 for (const [name, value] of platform.chromiumSwitches(cfg)) {
   if (value === undefined) app.commandLine.appendSwitch(name);
@@ -122,6 +142,7 @@ function main() {
     log('config', `profile=${cfg.profile} budget=${cfg.memoryBudgetMB}MB`);
 
     tabs = new TabManager({
+      cfg,
       onEvent: onTabEvent,
       log,
       // Awaited before a tab is shown, so it is never presented while frozen.
@@ -166,7 +187,9 @@ function main() {
       const settleMs = Number(argValue('settle')) || 8000;
       const coldMs = Number(argValue('cold')) || undefined;
       const freezeMs = Number(argValue('freeze')) || undefined;
-      runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, freezeMs })
+      const distinctOrigins = argv.includes('--distinct-origins');
+      const mix = argValue('mix') || 'default';
+      runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, freezeMs, distinctOrigins, mix })
         .then((result) => {
           // Single machine-readable line for bench/bench.js to parse.
           process.stdout.write(`\n__BENCH__${JSON.stringify(result)}\n`);

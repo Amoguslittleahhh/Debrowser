@@ -105,17 +105,21 @@ function recommendedBudgetMB() {
 }
 
 /**
- * Renderer process ceiling scaled to the machine. Each renderer carries a
- * fixed overhead (V8 isolate, Blink globals, IPC plumbing) of roughly 25-40MB
- * before it renders anything, so on small machines capping the count saves
- * more than any per-page trimming can.
+ * How many tabs should be allowed to hold a renderer at once on this machine.
+ *
+ * Each renderer carries a fixed overhead - V8 isolate, Blink globals, IPC
+ * plumbing - of roughly 25-40MB before it renders anything, so on a small
+ * machine the number of live renderers dominates everything else the governor
+ * can do. Unlike a Chromium process limit this is enforced by discarding the
+ * least-recently-used tab, which costs a reload rather than costing site
+ * isolation.
  */
-function recommendedRendererLimit() {
+function recommendedLiveTabs() {
   const totalMB = Math.round(os.totalmem() / MB);
-  const cores = os.cpus()?.length || 4;
-  if (totalMB <= 4096) return Math.max(3, Math.min(6, cores));
-  if (totalMB <= 8192) return Math.max(6, Math.min(10, cores * 2));
-  return 0; // 0 = no explicit cap; let Chromium's own heuristic run
+  if (totalMB <= 4096) return 4;
+  if (totalMB <= 8192) return 6;
+  if (totalMB <= 16384) return 8;
+  return 12;
 }
 
 /** Free physical memory as a fraction of total. Used for host-level pressure. */
@@ -169,9 +173,17 @@ function chromiumSwitches(cfg) {
 
   // --- Memory ------------------------------------------------------------
 
-  const rendererLimit = cfg.rendererProcessLimit || recommendedRendererLimit();
-  if (rendererLimit > 0) {
-    switches.push(['renderer-process-limit', String(rendererLimit)]);
+  // Deliberately only set when explicitly configured, and not derived from
+  // host RAM as an earlier version did.
+  //
+  // When Chromium hits this limit it starts reusing a single process for
+  // *different* sites, which weakens site isolation - the security boundary
+  // that keeps one origin from reading another's memory. The governor's
+  // `maxLiveTabs` cap already bounds the renderer count, and does it by
+  // discarding tabs rather than by collapsing unrelated origins together, so
+  // the limit buys nothing here and costs something real.
+  if (cfg.rendererProcessLimit > 0) {
+    switches.push(['renderer-process-limit', String(cfg.rendererProcessLimit)]);
   }
 
   if (cfg.processPerSite) {
@@ -234,7 +246,7 @@ module.exports = {
   clampPriority,
   runningRootUnsandboxed,
   recommendedBudgetMB,
-  recommendedRendererLimit,
+  recommendedLiveTabs,
   systemMemoryPressure,
   systemInfo,
   chromiumSwitches

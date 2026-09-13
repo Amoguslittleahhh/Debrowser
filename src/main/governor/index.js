@@ -34,7 +34,7 @@ const { Metrics } = require('./metrics');
 const { BoostController } = require('./boost');
 const { applyTier, refreshPriority } = require('./tiers');
 
-/** Refresh per-tab JS heap every N ticks; it needs a CDP round trip each. */
+/** Refresh per-tab heap/CPU every N ticks; each needs a CDP round trip. */
 const HEAP_SAMPLE_EVERY = 3;
 
 class Governor {
@@ -82,7 +82,7 @@ class Governor {
       this.tickCount += 1;
 
       this.metrics.sample();
-      if (this.tickCount % HEAP_SAMPLE_EVERY === 0) await this.sampleHeaps();
+      if (this.tickCount % HEAP_SAMPLE_EVERY === 0) await this.samplePerTabMetrics();
       this.metrics.attribute();
 
       this.pressure = this.computePressure();
@@ -92,6 +92,7 @@ class Governor {
 
       await this.runPostAnimationSettle();
       await this.runIdleLadder();
+      await this.enforceLiveTabCap();
       await this.enforceBudget();
 
       this.onUpdate(this.snapshot());
@@ -101,22 +102,42 @@ class Governor {
   }
 
   /**
-   * Per-tab JS heap, used to split shared-renderer memory fairly.
+   * Per-tab heap and CPU, for tabs that share a renderer with another tab.
    *
-   * Only sampled for tabs that actually share a renderer with another tab.
-   * Everywhere else the process figure *is* the tab figure and the heap adds
-   * nothing - and it is not free to ask: enabling the Performance domain
-   * instantiates instrumentation inside the renderer. Sampling every tab cost
-   * around 8MB per tab in benchmarking, which is a governor that spends more
+   * Only those tabs: where a tab owns its process outright, the process figures
+   * *are* the tab's figures and asking the page is pure cost - enabling the
+   * Performance domain instantiates instrumentation inside the renderer, and
+   * sampling every tab measured at ~8MB per tab, a governor spending more
    * memory measuring than it saves.
+   *
+   * Frozen tabs are skipped as well. Their CPU is zero by construction, and
+   * asking would re-attach a debugger session that was deliberately detached.
    */
-  async sampleHeaps() {
+  async samplePerTabMetrics() {
+    const now = Date.now();
     for (const tab of this.tabs.all()) {
       if (!tab.isLive || !tab.cdp) continue;
       if (!tab.sharesProcess) continue;
+      if (tab.tier === Tier.FROZEN) continue;
       if (tab.boosted) continue; // never add CDP traffic to an animating tab
-      const bytes = await tab.cdp.jsHeapBytes();
-      if (bytes != null) tab.jsHeapMB = bytes / (1024 * 1024);
+
+      const metrics = await tab.cdp.pageMetrics();
+      if (!metrics) continue;
+
+      if (metrics.jsHeapBytes != null) tab.jsHeapMB = metrics.jsHeapBytes / (1024 * 1024);
+
+      // Differentiate cumulative task time into a percentage of one core.
+      if (metrics.taskDurationSec != null) {
+        if (tab.lastTaskSec != null && tab.lastTaskAt) {
+          const elapsedSec = (now - tab.lastTaskAt) / 1000;
+          if (elapsedSec > 0) {
+            const busySec = Math.max(0, metrics.taskDurationSec - tab.lastTaskSec);
+            tab.taskCpu = (busySec / elapsedSec) * 100;
+          }
+        }
+        tab.lastTaskSec = metrics.taskDurationSec;
+        tab.lastTaskAt = now;
+      }
     }
   }
 
@@ -191,6 +212,13 @@ class Governor {
       if (idle >= this.cfg.freezeAfterMs * accel && tab.cpu >= this.cfg.freezeCpuThreshold) {
         target = Tier.FROZEN;
       }
+
+      // Discard on time alone, independent of pressure. A tab nobody has
+      // looked at for a quarter of an hour is holding ~100MB on the chance
+      // it gets revisited; the reload when it does is cheaper than carrying
+      // that indefinitely, and it is the only reclaim that returns the whole
+      // renderer rather than a fraction of a heap.
+      if (idle >= this.cfg.discardAfterMs * accel) target = Tier.DISCARDED;
       // Discarding on a timer alone is deliberately not done here. An idle
       // frozen tab costs no CPU and has already been collected; destroying
       // it buys the remainder only at the price of a reload later. That trade
@@ -202,6 +230,60 @@ class Governor {
         await applyTier(tab, target, this.ctx());
         if (target === Tier.FROZEN) this.stats.freezes += 1;
       }
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Live renderer cap                                                 */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Hold the number of tabs with a live renderer at or below `maxLiveTabs`,
+   * discarding least-recently-used first.
+   *
+   * This exists because the memory budget cannot serve someone who opens tabs
+   * in bursts. The budget is sized to the machine, so on 16GB it sits near
+   * 6GB - and thirty tabs at ~100MB each never reach it. Thirty renderers stay
+   * resident, the user watches their memory climb, and every policy in this
+   * file correctly concludes there is nothing to do.
+   *
+   * A count-based cap bounds the footprint by the thing that actually varies.
+   * Because candidates are ordered least-recently-used, the tabs the user is
+   * moving between stay live and instant while the long tail costs nothing -
+   * so this is allowed to override the grace period that otherwise protects
+   * recently-left tabs. It never overrides audio, unsubmitted input or a
+   * pinned tab.
+   */
+  async enforceLiveTabCap() {
+    const cap = this.cfg.maxLiveTabs;
+    if (!cap) return;
+    if (this.boost.quiesceRequested) return; // never reclaim mid-animation
+
+    const liveCount = this.tabs.all().filter((tab) => tab.isLive).length;
+    let excess = liveCount - cap;
+    if (excess <= 0) return;
+
+    const candidates = this.tabs.all()
+      .filter((tab) => tab.isLive && !tab.visible && !this.shouldSkip(tab))
+      .sort((a, b) => a.lastActiveAt - b.lastActiveAt); // least recent first
+
+    for (const tab of candidates) {
+      if (excess <= 0) break;
+      const target = this.clampToProtections(tab, Tier.DISCARDED, { ignoreGrace: true });
+      if (target !== Tier.DISCARDED) continue; // protected; leave it resident
+
+      const before = tab.rssMB;
+      if (await applyTier(tab, Tier.DISCARDED, this.ctx())) {
+        this.stats.discards += 1;
+        this.stats.reclaimedMB += before;
+        excess -= 1;
+      }
+    }
+
+    if (excess > 0) {
+      // Everything left is protected. Correct, but worth saying once: it means
+      // the cap is not being met and the user's memory will sit above target.
+      this.log(`live-tab cap: ${excess} tab(s) over cap and all protected`);
     }
   }
 
@@ -267,7 +349,7 @@ class Governor {
 
   /** One step further down, respecting every protection. */
   nextTierDown(tab, discardAllowed) {
-    const ceiling = this.clampToProtections(tab, Tier.DISCARDED, discardAllowed);
+    const ceiling = this.clampToProtections(tab, Tier.DISCARDED, { discardAllowed });
     const currentRank = tierRank(tab.tier);
     const ceilingRank = tierRank(ceiling);
     if (ceilingRank <= currentRank) return null;
@@ -288,7 +370,7 @@ class Governor {
    * Cap how far a tab may be demoted. Returns the lowest tier permitted for
    * this tab right now, which may be higher than the tier requested.
    */
-  clampToProtections(tab, requested, discardAllowed = true) {
+  clampToProtections(tab, requested, { discardAllowed = true, ignoreGrace = false } = {}) {
     let floor = requested;
 
     const cap = (tier) => {
@@ -303,7 +385,16 @@ class Governor {
     if (tab.hasDirtyInput) cap(Tier.FROZEN);
 
     // A tab the user just left is one they are likely about to return to.
-    if (tab.idleMs() < this.cfg.minLifetimeMs) cap(Tier.FROZEN);
+    //
+    // Two carve-outs. A tab that has never been visible has nothing on screen
+    // to return to, so the grace period does not apply - otherwise opening
+    // twenty background links would make twenty renderers untouchable for a
+    // minute. And `ignoreGrace` lets the live-tab cap through, because there
+    // the candidates are already ordered least-recently-used: the tab being
+    // discarded is the Nth least recent, never one just left.
+    if (tab.everVisible && !ignoreGrace && tab.idleMs() < this.cfg.minLifetimeMs) {
+      cap(Tier.FROZEN);
+    }
 
     if (tab.pinned) cap(this.pressure === Pressure.CRITICAL ? Tier.FROZEN : Tier.COLD);
 
@@ -366,6 +457,8 @@ class Governor {
     return {
       ...m,
       budgetMB: this.cfg.memoryBudgetMB,
+      maxLiveTabs: this.cfg.maxLiveTabs,
+      liveTabs: this.tabs.all().filter((tab) => tab.isLive).length,
       pressure: this.pressure,
       profile: this.cfg.profile,
       boostedTabId: this.boost.boostedTabId,

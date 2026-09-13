@@ -35,7 +35,7 @@ const TIER_TEXT = {
 };
 
 const PRESSURE_TEXT = {
-  none: 'Under budget. Tabs are demoted on the idle ladder only.',
+  none: 'Under budget. Tabs are demoted on the idle ladder and by the live cap.',
   moderate: 'Approaching budget. Idle tabs are being trimmed sooner.',
   high: 'Over budget. Idle tabs are being frozen and may be discarded.',
   critical: 'Well over budget. Reclaiming aggressively from the least-used tabs.'
@@ -44,7 +44,13 @@ const PRESSURE_TEXT = {
 function render(state) {
   el.total.textContent = `${state.totalMB} MB`;
   el.budget.textContent = `${state.budgetMB} MB`;
-  el.renderers.textContent = String(state.rendererCount);
+  el.renderers.textContent = state.maxLiveTabs
+    ? `${state.liveTabs}/${state.maxLiveTabs}`
+    : String(state.liveTabs);
+  el.renderers.title = state.maxLiveTabs
+    ? `${state.liveTabs} tabs hold a renderer, out of a cap of ${state.maxLiveTabs}. ` +
+      `Beyond the cap the least-recently-used tab is discarded.`
+    : 'Live renderer cap is disabled.';
 
   el.pressure.textContent = PRESSURE_TEXT[state.pressure] || state.pressure;
   el.pressure.dataset.pressure = state.pressure;
@@ -58,8 +64,8 @@ function render(state) {
 
   const s = state.stats;
   el.stats.textContent =
-    `${state.profile} profile · ${s.freezes} frozen · ${s.discards} discarded · ` +
-    `~${s.reclaimedMB} MB reclaimed`;
+    `${state.profile} profile · ${state.rendererCount} process(es) · ` +
+    `${s.freezes} frozen · ${s.discards} discarded · ~${s.reclaimedMB} MB reclaimed`;
 }
 
 function renderRows(tabs) {

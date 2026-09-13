@@ -30,7 +30,17 @@ const arg = (name, fallback) => {
 const TABS = Number(arg('tabs', 12));
 const PROFILE = arg('profile', 'balanced');
 const SETTLE = Number(arg('settle', 8000));
-const BUDGET = arg('budget', null); // MB; constrains the governed run only
+const BUDGET = arg('budget', null);   // MB; constrains the governed run only
+const LIVE = arg('live', null);       // max live renderers; governed run only
+/**
+ * Origins default to distinct (t1.test, t2.test, …) because that is what real
+ * browsing looks like to Chromium's process model. With `--origins=file` every
+ * fixture is a file:// URL, which is a *single* site - so one-renderer-per-site
+ * collapses them all into a couple of processes and the saving looks far larger
+ * than anyone would actually see. Kept available, but not the default.
+ */
+const ORIGINS = arg('origins', 'distinct');
+const MIX = arg('mix', 'default');
 
 function runOnce(withGovernor) {
   return new Promise((resolve, reject) => {
@@ -42,10 +52,15 @@ function runOnce(withGovernor) {
       `--profile=${PROFILE}`,
       '--disable-gpu'
     ];
+    // Applied to both halves: the comparison is only fair if the baseline faces
+    // the same process model as the governed run.
+    if (ORIGINS === 'distinct') args.push('--distinct-origins');
+    args.push(`--mix=${MIX}`);
     if (!withGovernor) args.push('--no-governor');
     // The budget only means anything to the governed run; the baseline has no
     // governor to enforce it, which is exactly the comparison being drawn.
     if (withGovernor && BUDGET) args.push(`--budget=${BUDGET}`);
+    if (withGovernor && LIVE) args.push(`--max-live-tabs=${LIVE}`);
     // Containers and CI images run as root, where Chromium refuses to start
     // sandboxed. A normal desktop run never needs this.
     if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
@@ -79,7 +94,10 @@ const padL = (s, n) => String(s).padStart(n);
   console.log(`  host     : ${os.platform()} ${os.arch()}, ${os.cpus().length} cores, ` +
               `${Math.round(os.totalmem() / 1024 / 1024)} MB RAM`);
   console.log(`  workload : ${TABS} tabs, ${PROFILE} profile, ${SETTLE}ms settle` +
-              `${BUDGET ? `, ${BUDGET} MB budget` : ''}\n`);
+              `${BUDGET ? `, ${BUDGET} MB budget` : ''}` +
+              `${LIVE ? `, ${LIVE} live cap` : ''}`);
+  console.log(`  origins  : ${ORIGINS === 'distinct' ? 'one site per tab (realistic)' : 'all file:// (one site)'}`);
+  console.log(`  mix      : ${MIX}\n`);
 
   process.stdout.write('  running baseline (no governor)... ');
   const off = await runOnce(false);
@@ -100,7 +118,15 @@ const padL = (s, n) => String(s).padStart(n);
       `${(off.perTabMB - on.perTabMB).toFixed(1)} MB`);
   row('renderer processes', off.liveRenderers, on.liveRenderers,
       on.liveRenderers - off.liveRenderers);
-  row('peak during load', `${off.peakMB} MB`, `${on.peakMB} MB`, '');
+  row('peak during load', `${off.peakMB} MB`, `${on.peakMB} MB`,
+      `${on.peakMB - off.peakMB >= 0 ? '+' : ''}${on.peakMB - off.peakMB} MB`);
+  row('live renderer cap', '—', on.maxLiveTabs ? String(on.maxLiveTabs) : 'off', '');
+  row('live tabs', String(off.liveTabs), String(on.liveTabs), '');
+  if (on.protectedLive) {
+    console.log(`\n  note: ${on.protectedLive} of the ${on.liveTabs} live tabs are held by a ` +
+                `protection (unsaved input or audio),\n        so they are immune to the cap by ` +
+                `design. Use --mix=noforms to measure the cap alone.`);
+  }
 
   console.log(`\n  saving: ${pct.toFixed(1)}%`);
   console.log(`  governed tab states: ${JSON.stringify(on.tiers)}\n`);

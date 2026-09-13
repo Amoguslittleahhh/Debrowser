@@ -11,11 +11,22 @@
  * Run with: npm run smoke
  */
 
-const path = require('path');
 const { Tier } = require('./config');
+const fixtureServer = require('./fixture-server');
 
-const PAGES = path.join(__dirname, '..', '..', 'test', 'pages');
-const pageUrl = (name) => `file://${path.join(PAGES, name)}`;
+/**
+ * Fixtures are served on distinct sites (t1.test, t2.test, …) rather than as
+ * `file://` URLs.
+ *
+ * This is not incidental. With one-renderer-per-site enabled by default, every
+ * file:// fixture lands in a single shared renderer - so the suite would be
+ * testing a world where no tab owns its process, per-tab CPU is an estimate,
+ * and a tab's measured memory is a share of someone else's. Distinct sites are
+ * both what real browsing looks like and the configuration in which the
+ * assertions below mean what they say.
+ */
+let fixtures = null;
+let pageUrl = (name) => fixtureServer.fileUrl(name);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -53,6 +64,10 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
 
 async function runSmoke({ tabs, governor, shell, cfg }) {
   console.log('\n=== Debrowser smoke test ===\n');
+
+  fixtures = await fixtureServer.start();
+  let siteIndex = 0;
+  pageUrl = (name) => fixtures.url(name, siteIndex++);
 
   // Compress the idle ladder so the test exercises hours of behaviour in
   // seconds. Policy is unchanged; only the clock is.
@@ -225,7 +240,47 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `url=${victim.url}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n8. Footprint\n');
+  console.log('\n8. Live renderer cap\n');
+
+  // The cap is what bounds memory for someone who opens tabs in bursts: the
+  // budget cannot help them, because on a large machine thirty tabs never reach
+  // it. Use a deliberately small cap so the behaviour is unambiguous.
+  governor.cfg.maxLiveTabs = 3;
+  governor.cfg.minLifetimeMs = 500;
+
+  const burst = [];
+  for (let i = 0; i < 6; i++) {
+    burst.push(tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true }));
+  }
+
+  const settledUnderCap = await waitFor(() => {
+    const live = tabs.all().filter((t) => t.isLive).length;
+    return live <= governor.cfg.maxLiveTabs;
+  }, { timeoutMs: 20_000 });
+
+  const liveNow = tabs.all().filter((t) => t.isLive).length;
+  check('a burst of tabs is held at the live renderer cap', settledUnderCap,
+    `${tabs.all().length} tabs open, ${liveNow} live (cap ${governor.cfg.maxLiveTabs})`);
+
+  check('the visible tab survives the cap',
+    tabs.activeTab()?.isLive === true, `active tab live=${tabs.activeTab()?.isLive}`);
+
+  // The cap must reclaim least-recently-used first, so the newest burst tab
+  // should outlive the oldest.
+  const oldest = burst[0];
+  const newest = burst[burst.length - 1];
+  check('the cap discards least-recently-used first',
+    !oldest.isLive || newest.isLive,
+    `oldest live=${oldest.isLive}, newest live=${newest.isLive}`);
+
+  // And a capped-out tab must still come back intact.
+  const revived = await tabs.activate(oldest.id);
+  const cameBack = await waitFor(() => revived.isLive && !revived.loading, { timeoutMs: 10_000 });
+  check('a tab discarded by the cap reopens normally', cameBack,
+    `url=${revived.url}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n9. Footprint\n');
 
   governor.metrics.sample();
   const snap = governor.metrics.snapshot();
@@ -237,6 +292,8 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
               `${governor.stats.discards} discards`);
 
   /* ---------------------------------------------------------------- */
+  if (fixtures) await fixtures.close();
+
   const failed = results.filter((r) => !r.passed);
   console.log(`\n=== ${results.length - failed.length}/${results.length} checks passed ===\n`);
   if (failed.length) {

@@ -132,9 +132,16 @@ class Metrics {
       tabs.forEach((tab, i) => {
         const share = weights[i] / weightSum;
         tab.rssMB = proc.rssMB * share;
-        tab.cpu = proc.cpu * share;
         tab.sharesProcess = true;
         tab.processTabCount = tabs.length;
+
+        // CPU is *not* shared out proportionally when we can do better. A
+        // proportional split says every tab in a shared renderer is equally
+        // busy, which made the governor freeze quiet tabs that happened to
+        // share a process with a busy one. `taskCpu` is that page's own
+        // main-thread time, measured per document over CDP; fall back to the
+        // split only until the first sample lands.
+        tab.cpu = tab.taskCpu != null ? tab.taskCpu : proc.cpu * share;
       });
     }
 

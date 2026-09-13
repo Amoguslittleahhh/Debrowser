@@ -34,15 +34,23 @@ pass; a normal desktop install must not use it.
 
 | | `economy` | `balanced` | `performance` |
 |---|---|---|---|
+| live renderers | 4 | sized to the machine (4-12) | 24 |
 | memory budget | 700 MB | sized to the machine | 3000 MB |
-| renderer sharing | per site | per tab | per tab |
-| spare renderer | no | yes | yes |
-| discard from | moderate pressure | high pressure | critical pressure |
+| discard idle tab after | 3 min | 15 min | 2 hrs |
+| simultaneous loads | 2 | 3 | 6 |
+| renderer sharing | per site | per site | per tab |
+| spare renderer | no | no | yes |
 
-`balanced` sizes its budget from the host's actual RAM (28-45% of total,
-clamped to 512-6144 MB), because a fixed figure strands memory on a
-workstation and thrashes on a netbook. Override with `--budget=1200`, or drag
-the slider in the task manager.
+`balanced` sizes both the live-renderer cap and the budget from the host's
+actual RAM, because fixed figures strand memory on a workstation and thrash on
+a netbook. Override either with `--max-live-tabs=6` / `--budget=1200`, or drag
+the budget slider in the task manager.
+
+**The live-renderer cap is the number that matters if you open tabs in
+bursts.** A memory budget cannot help there: on a 16 GB machine the budget is
+~6 GB, so thirty tabs never reach it and thirty renderers stay resident. The
+cap bounds the footprint by tab count instead, discarding least-recently-used
+first, so the handful you are actually moving between stay instant.
 
 ### Keyboard
 
@@ -94,6 +102,21 @@ gives it back the moment it stops.
   needs no privileges on any platform, so the animating tab wins the CPU by
   everyone else standing aside.
 
+### Staying compact with many tabs
+
+Three mechanisms, aimed at the case where tabs arrive faster than they are read:
+
+- **A live-renderer cap.** At most N tabs hold a renderer; past that the
+  least-recently-used is discarded. Bounds memory by tab count rather than
+  hoping a budget is reached.
+- **Load admission.** At most a few tabs load at once. Peak memory is a
+  *loading* phenomenon - a page mid-load holds its parser, network buffers and
+  pre-compaction heap simultaneously - so a burst of thirty tabs otherwise
+  spikes far above where it settles. Queued tabs cost nothing while they wait,
+  and anything you click loads immediately.
+- **Lazy background tabs.** A tab opened in the background gets no renderer at
+  all until first viewed. Twenty middle-clicked links cost one renderer.
+
 ### Where the savings come from
 
 Deliberately, **not** from squeezing live renderers. The memory savings come
@@ -110,31 +133,40 @@ costs memory rather than saving any.
 
 ## Measured results
 
-All from `npm run bench` on a 4-core, 16 GB Linux host, 12 tabs (a mix of
-memory-heavy, idle, animating and form pages). Reproduce with the commands
-shown.
+From `npm run bench` on a 4-core, 16 GB Linux host. Every tab is served on its
+**own site** (`t1.test`, `t2.test`, …) rather than as `file://` URLs, because
+all `file://` pages are one site to Chromium's process model - measuring that
+way collapses thirty tabs into two processes and reports a saving nobody would
+actually see.
 
-**Holding a memory budget** — `node bench/bench.js --tabs=12 --budget=800`
+**Thirty tabs** — `node bench/bench.js --tabs=30`
 
 | | baseline | governed | delta |
 |---|---|---|---|
-| total resident | 1465 MB | **793 MB** | **−672 MB (−46%)** |
-| per tab | 122.1 MB | 66.1 MB | −56.0 MB |
-| renderer processes | 13 | 5 | −8 |
+| total resident | 3081 MB | **1156 MB** | **−1925 MB (−62%)** |
+| peak during load | 3083 MB | **1165 MB** | **−1918 MB** |
+| per tab | 102.7 MB | 38.5 MB | −64.2 MB |
+| renderer processes | 31 | 9 | −22 |
+| live tabs | 30 | 8 | −22 |
 
-Final tab states: 1 active, 3 frozen, 8 discarded — all restoring on click,
-with scroll position and unsubmitted input intact.
+The peak matters as much as the total here: the governed run never spikes on
+the way up, so opening thirty tabs at once does not briefly claim 3 GB before
+settling.
 
-**Process configuration alone** — `node bench/bench.js --tabs=12 --profile=economy`
+**Twelve tabs** — `node bench/bench.js --tabs=12`
 
-The economy profile's Chromium configuration takes the same 12 tabs from
-**1465 MB to 556 MB (−62%)** before the governor does anything at all. This is
-the single largest memory lever in the project.
+1474 MB → **1148 MB (−22%)**. The saving is smaller because twelve tabs is
+close to the cap, so most of them legitimately stay resident.
 
-**Cost when there is nothing to do** — `node bench/bench.js --tabs=12`
+**A note on the fixture mix.** The default mix includes a form page holding
+unsubmitted input, which the governor refuses to discard — so a quarter of the
+tabs are immune to reclaim by design, and the governed run sits at 8 live tabs
+even with a cap of 4. That is the protection working. `--mix=noforms` measures
+the cap against tabs that are all reclaimable: 30 tabs → 8 live exactly,
+3122 MB → 1179 MB.
 
-With memory far under budget the governor has no work to do, and costs
-**+9 MB (0.6%)** across 12 tabs for its own instrumentation.
+**Cost when there is nothing to do.** With few tabs and memory far under
+budget, the governor costs ~9 MB for its own instrumentation.
 
 ---
 
@@ -180,6 +212,13 @@ tried, measured and removed — live on the `claude/research-build` branch.
   why unsubmitted input is protected from discard rather than restored from it.
 - Form restore keys off element `id`. Fields without one are captured but not
   replayed, since an index-based path is not stable across a reload.
+- The live-renderer cap means the N+1th tab you return to reloads. That is the
+  trade the cap exists to make; raise `--max-live-tabs` if you would rather
+  spend the memory.
+- Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
+  per-site (the default) several same-site tabs share one, and a page's own CPU
+  is read per-document over CDP — which covers its main thread but not its Web
+  Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
 - No extensions, no bookmarks, no history UI, no downloads UI. This is a
   resource-management browser, not a Chrome replacement.
 - Password and payment fields are deliberately never read into the session
