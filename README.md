@@ -14,6 +14,43 @@ The interesting part is `src/main/governor/`.
 
 ---
 
+## Running it
+
+```bash
+npm install
+npm start                  # balanced
+npm run start:economy      # least memory
+npm run start:performance  # most headroom
+
+npm run smoke              # 21-check end-to-end test, headless
+npm run bench              # memory benchmark
+```
+
+On Linux without a display, prefix with `xvfb-run -a`. Running as root (in a
+container) additionally needs `--no-sandbox`, which the npm scripts already
+pass; a normal desktop install must not use it.
+
+### Profiles
+
+| | `economy` | `balanced` | `performance` |
+|---|---|---|---|
+| memory budget | 700 MB | sized to the machine | 3000 MB |
+| renderer sharing | per site | per tab | per tab |
+| spare renderer | no | yes | yes |
+| discard from | moderate pressure | high pressure | critical pressure |
+
+`balanced` sizes its budget from the host's actual RAM (28-45% of total,
+clamped to 512-6144 MB), because a fixed figure strands memory on a
+workstation and thrashes on a netbook. Override with `--budget=1200`, or drag
+the slider in the task manager.
+
+### Keyboard
+
+`Ctrl/Cmd+T` new tab · `+W` close · `+R` reload · `+L` address bar ·
+`+M` task manager
+
+---
+
 ## What it actually does
 
 Every tab sits in one of five tiers. The governor moves tabs between them on a
@@ -57,6 +94,18 @@ gives it back the moment it stops.
   needs no privileges on any platform, so the animating tab wins the CPU by
   everyone else standing aside.
 
+### Where the savings come from
+
+Deliberately, **not** from squeezing live renderers. The memory savings come
+from discarding tabs and from the process configuration (one renderer per site,
+no spare renderer, a renderer cap); the CPU savings come from freezing
+background CPU burners, priority management, and the animation boost.
+
+That is why a merely-idle tab is left completely alone — Chromium already
+reclaims a backgrounded renderer on its own, and better than forcing it to.
+Freezing is applied only to tabs still burning CPU out of sight, because it
+costs memory rather than saving any.
+
 ---
 
 ## Measured results
@@ -78,8 +127,7 @@ with scroll position and unsubmitted input intact.
 
 **Process configuration alone** — `node bench/bench.js --tabs=12 --profile=economy`
 
-The economy profile's Chromium configuration (one renderer per *site* rather
-than per tab, no spare renderer, a renderer cap) takes the same 12 tabs from
+The economy profile's Chromium configuration takes the same 12 tabs from
 **1465 MB to 556 MB (−62%)** before the governor does anything at all. This is
 the single largest memory lever in the project.
 
@@ -90,74 +138,6 @@ With memory far under budget the governor has no work to do, and costs
 
 ---
 
-## Three things that were measured and thrown away
-
-Every obvious memory lever in this space turned out to be a loss. They are
-documented in the code where someone would otherwise re-add them.
-
-**`Memory.forciblyPurgeJavaScriptMemory`** — the canonical "free the tab's
-memory" call. On a page holding ~117 MB it reclaimed **0 MB** beyond a normal
-collection, and it tears down the renderer's isolated worlds: the activity
-probe died in every trimmed tab, and the next IPC to that renderer **segfaulted
-it** — a tab that dies the moment you click back to it.
-
-**`HeapProfiler.collectGarbage` on idle tabs** — forcing a collection when a
-tab goes quiet. Instantiating the heap profiler costs ~6 MB per renderer and
-never gives it back, so on a typical page the call was a net **+9 MB**. Across
-12 tabs it cost ~90 MB, more than the governor was saving. Chromium reclaims a
-backgrounded renderer on its own and does it *better* — a heavy tab fell
-117 MB → 107 MB over a minute unaided, against 112 MB with a forced collection.
-The correct action on an idle tab turned out to be **no action at all**.
-
-**Freezing every idle tab** — freezing is a CPU optimisation, and it has a real
-memory *cost*: it stops the very renderer tasks that reclaim memory in the
-background, so a frozen tab settles a few MB higher than one left quietly
-alone. Tabs are now frozen only when they are still burning CPU out of sight
-(a polling timer, a worker, an animation nobody is watching), where trading a
-few MB for real CPU → zero is overwhelmingly worth it.
-
-The through-line: **the memory savings come from discarding tabs and from the
-process configuration, not from squeezing live renderers.**
-
----
-
-## Running it
-
-```bash
-npm install
-npm start                  # balanced
-npm run start:economy      # least memory
-npm run start:performance  # most headroom
-
-npm run smoke              # 21-check end-to-end test, headless
-npm run bench              # memory benchmark
-```
-
-On Linux without a display, prefix with `xvfb-run -a`. Running as root (in a
-container) additionally needs `--no-sandbox`, which the npm scripts already
-pass; a normal desktop install must not use it.
-
-### Profiles
-
-| | `economy` | `balanced` | `performance` |
-|---|---|---|---|
-| memory budget | 700 MB | sized to the machine | 3000 MB |
-| renderer sharing | per site | per tab | per tab |
-| spare renderer | no | yes | yes |
-| discard from | moderate pressure | high pressure | critical pressure |
-
-`balanced` sizes its budget from the host's actual RAM (28–45% of total,
-clamped to 512–6144 MB), because a fixed figure strands memory on a
-workstation and thrashes on a netbook. Override with `--budget=1200`, or drag
-the slider in the task manager.
-
-### Keyboard
-
-`Ctrl/Cmd+T` new tab · `+W` close · `+R` reload · `+L` address bar ·
-`+M` task manager
-
----
-
 ## Cross-platform
 
 Everything OS-specific is confined to `src/main/platform.js`: process priority
@@ -165,10 +145,8 @@ Everything OS-specific is confined to `src/main/platform.js`: process priority
 host RAM, and the Chromium switch list. The policy in `governor/` is written
 once and behaves identically everywhere.
 
-The flag list is deliberately short. An earlier version force-enabled
-`CanvasOopRasterization`, which **segfaulted the renderer of any page with a
-canvas** whenever the machine fell back to software rasterization. Nothing goes
-in that list now unless it is both verifiable and load-bearing.
+The Chromium flag list is deliberately short — nothing goes in it unless it is
+both verifiable and load-bearing.
 
 ---
 
@@ -179,7 +157,7 @@ src/main/
   governor/     the resource policy: tick loop, tiers, boost, metrics
   tabs/         tab lifecycle, discard/restore, session capture
   platform.js   everything OS-specific
-  cdp.js        DevTools protocol wrapper (and what was rejected, and why)
+  cdp.js        DevTools protocol wrapper
   window.js     window layout: chrome, tab views, side panel
 src/preload/    activity probe (pages) and the chrome bridge
 src/renderer/   the browser UI, written from scratch
@@ -188,6 +166,9 @@ bench/          memory benchmark harness
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design in depth.
+
+The measurements behind the design decisions — including the levers that were
+tried, measured and removed — live on the `claude/research-build` branch.
 
 ---
 
