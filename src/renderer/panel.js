@@ -69,9 +69,15 @@ function render(state) {
   }
 
   const s = state.stats;
-  el.stats.textContent =
+  let line =
     `${state.profile} profile · ${state.rendererCount} process(es) · ` +
     `${s.freezes} frozen · ${s.discards} discarded · ~${s.reclaimedMB} MB reclaimed`;
+  // Only shown once the heap limit rule has actually acted, so the line stays
+  // quiet in the default configuration where the rule is off.
+  if (s.heapCollections) {
+    line += ` · ${s.heapCollections} heap collection(s), ~${s.heapReclaimedMB} MB`;
+  }
+  el.stats.textContent = line;
 }
 
 function renderRows(tabs) {

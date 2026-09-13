@@ -30,6 +30,7 @@
  */
 
 const fs = require('fs');
+const { MB } = require('./config');
 
 const isLinux = process.platform === 'linux';
 
@@ -97,20 +98,14 @@ function footprintMB(pid, rssFallbackMB) {
   return detail ? detail.pssMB : rssFallbackMB;
 }
 
-/**
- * Private (unshared) memory for a process, in MB, or null if unavailable.
- *
- * Distinct from the footprint and needed separately, because PSS is not a
- * stable way to describe one process in isolation: each shared page is divided
- * by the number of processes mapping it, so the *same* renderer reports a lower
- * PSS simply because more renderers exist. Private bytes are intrinsic to the
- * process, which makes them the right basis for a threshold like "is this tab
- * big enough to be worth instrumenting".
+/*
+ * A note for callers that want more than one figure: use `readProcessMemory`
+ * directly. It returns pss, rss and private from a single read, and the hot
+ * path does want all of them - an earlier version had a thin per-field wrapper
+ * beside this one, so the governor read and regex-parsed smaps_rollup twice per
+ * process per tick, and the two figures came from different instants while
+ * being reported as one sample.
  */
-function privateMB(pid) {
-  const detail = readProcessMemory(pid);
-  return detail ? detail.privateMB : null;
-}
 
 /* ------------------------------------------------------------------ */
 /* Page merging (KSM)                                                   */
@@ -134,14 +129,36 @@ function privateMB(pid) {
  * system rather than just this browser - useful as a corroborating signal next
  * to our own PSS measurement, not as a figure to attribute to ourselves.
  */
-function pageMergingStatus() {
-  if (!isLinux) return { supported: false, processMergeable: false, ksmRunning: false };
+/** Memoised: the `mg` flag is set before exec and cannot change afterwards. */
+let processMergeableCache = null;
 
-  let processMergeable = false;
+function processMergeable() {
+  if (processMergeableCache !== null) return processMergeableCache;
+  if (!isLinux) {
+    processMergeableCache = false;
+    return processMergeableCache;
+  }
   try {
-    // VmFlags carries `mg` on every region KSM is allowed to consider.
-    processMergeable = /^VmFlags:.*\bmg\b/m.test(fs.readFileSync(`/proc/${process.pid}/smaps`, 'utf8'));
-  } catch { /* no smaps; leave false */ }
+    // VmFlags carries `mg` on every region KSM is allowed to consider. This is
+    // the full per-VMA smaps rather than smaps_rollup, which does not carry
+    // VmFlags - and it is genuinely expensive to parse on a process with as
+    // many mappings as a browser, which is exactly why it is read once per
+    // process lifetime and not per governor tick.
+    processMergeableCache =
+      /^VmFlags:.*\bmg\b/m.test(fs.readFileSync(`/proc/${process.pid}/smaps`, 'utf8'));
+  } catch {
+    processMergeableCache = false;
+  }
+  return processMergeableCache;
+}
+
+function pageMergingStatus() {
+  // Asked on every governor tick, so the expensive half is memoised above and
+  // the cheap sysfs reads are skipped entirely when merging cannot happen -
+  // which is the default configuration, where this result is discarded.
+  if (!processMergeable()) {
+    return { processMergeable: false, ksmRunning: false, profitMB: null, active: false };
+  }
 
   const sysfs = (name) => {
     try {
@@ -155,13 +172,11 @@ function pageMergingStatus() {
   const profit = sysfs('general_profit');
 
   return {
-    supported: run !== null,
-    processMergeable,
+    processMergeable: true,
     ksmRunning: run === 1,
-    pagesSharing: sysfs('pages_sharing'),
-    profitMB: profit == null ? null : Math.round(profit / (1024 * 1024)),
+    profitMB: profit == null ? null : Math.round(profit / MB),
     // Merging only actually happens when both halves are true.
-    active: processMergeable && run === 1
+    active: run === 1
   };
 }
 
@@ -171,6 +186,5 @@ function accountingMode() {
 }
 
 module.exports = {
-  footprintMB, privateMB, readProcessMemory, accountingMode, detectPss,
-  pageMergingStatus
+  footprintMB, readProcessMemory, accountingMode, detectPss, pageMergingStatus
 };

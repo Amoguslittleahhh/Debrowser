@@ -18,6 +18,7 @@ const { TabManager } = require('./tabs/tab-manager');
 const { BrowserShell } = require('./window');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
+const { pageMergingStatus } = require('./memory');
 
 const path = require('path');
 
@@ -58,7 +59,6 @@ if (overrides.memoryBudgetMB == null && cfg.profile === 'balanced') {
 // Benchmark switch: lets the per-tab memory flag be measured rather than
 // assumed. Not something a user needs to touch.
 if (argv.includes('--no-optimize-for-size')) cfg.optimizeForSize = false;
-if (argv.includes('--no-heap-limit')) cfg.heapLimit.enabled = false;
 if (argv.includes('--heap-limit')) cfg.heapLimit.enabled = true;
 
 // Note the presence check. `Number(null)` is 0, and 0 is a *meaningful* value
@@ -86,7 +86,6 @@ if (cfg.siteIsolation === false) {
 // Page merging is a security-relevant choice, so its state is reported at every
 // launch rather than left to be discovered in a panel.
 {
-  const { pageMergingStatus } = require('./memory');
   const merging = pageMergingStatus();
   if (merging.active) {
     console.warn(

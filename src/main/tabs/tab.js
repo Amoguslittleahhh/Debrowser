@@ -69,14 +69,7 @@ class Tab {
      * L, g and s in the paper's terms. All null until this tab has been
      * measured, which only happens if it is big enough to be worth it.
      */
-    /** Set once the load-time garbage has been collected for the current page. */
-    this.heapBacklogCollected = false;
-    this.liveHeapBytes = null;          // L: live set, read just after a collection
-    this.heapTotalBytes = null;         // committed heap size, what M bounds
-    this.allocRateBytesPerSec = null;   // g: smoothed allocation rate
-    this.gcSpeedBytesPerSec = null;     // s: observed collection throughput
-    this.lastHeapBytes = null;
-    this.lastHeapAt = 0;
+    this.resetHeapState();
 
     // Activity, written by the probe and the boost controller.
     this.reportedDemand = 'idle';
@@ -187,10 +180,7 @@ class Tab {
       this.url = url;
       // A new document means new load-time garbage, and the previous page's
       // heap estimates no longer describe anything.
-      this.heapBacklogCollected = false;
-      this.liveHeapBytes = null;
-      this.heapTotalBytes = null;
-      this.lastHeapBytes = null;
+      this.resetHeapState();
       this.emit('updated');
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
@@ -282,6 +272,29 @@ class Tab {
     this.emit('updated');
   }
 
+  /**
+   * Clear the heap state for the square-root heap limit rule
+   * (governor/heap-limit.js): L, g and s in the paper's terms. All null until
+   * this tab has been measured, which only happens if it is big enough to be
+   * worth it.
+   *
+   * Called from the constructor and from every point where the heap these
+   * estimates describe ceases to exist - a navigation, a renderer teardown.
+   * Partially clearing them is worse than not clearing them at all: a stale
+   * allocation rate paired with a fresh live set makes the rule compute a
+   * limit for a heap that never existed.
+   */
+  resetHeapState() {
+    /** Set once the load-time garbage has been collected for the current page. */
+    this.heapBacklogCollected = false;
+    this.liveHeapBytes = null;          // L: live set, read just after a collection
+    this.heapTotalBytes = null;         // committed heap size, what M bounds
+    this.allocRateBytesPerSec = null;   // g: smoothed allocation rate
+    this.gcSpeedBytesPerSec = null;     // s: observed collection throughput
+    this.lastHeapBytes = null;
+    this.lastHeapAt = 0;
+  }
+
   teardownView() {
     if (this.cdp) {
       this.cdp.detach();
@@ -303,13 +316,7 @@ class Tab {
     this.lastTaskSec = null;
     this.lastTaskAt = 0;
     // A new renderer means a new heap; none of the rule's estimates carry over.
-    this.heapBacklogCollected = false;
-    this.liveHeapBytes = null;
-    this.heapTotalBytes = null;
-    this.allocRateBytesPerSec = null;
-    this.gcSpeedBytesPerSec = null;
-    this.lastHeapBytes = null;
-    this.lastHeapAt = 0;
+    this.resetHeapState();
     this.boosted = false;
     this.pendingSettleAt = 0;
   }
