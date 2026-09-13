@@ -33,6 +33,7 @@ const { Tier, Pressure, tierRank, TIER_ORDER } = require('../config');
 const { Metrics } = require('./metrics');
 const { BoostController } = require('./boost');
 const { applyTier, refreshPriority } = require('./tiers');
+const { HeapLimiter } = require('./heap-limit');
 
 /** Refresh per-tab heap/CPU every N ticks; each needs a CDP round trip. */
 const HEAP_SAMPLE_EVERY = 3;
@@ -51,6 +52,7 @@ class Governor {
 
     this.metrics = new Metrics(app, () => this.tabs.all());
     this.boost = new BoostController(cfg, log);
+    this.heapLimiter = new HeapLimiter(cfg, log);
 
     this.timer = null;
     this.tickCount = 0;
@@ -91,6 +93,7 @@ class Governor {
       this.boost.update(active, this.tabs.all());
 
       await this.runPostAnimationSettle();
+      await this.runHeapLimits();
       await this.runIdleLadder();
       await this.enforceLiveTabCap();
       await this.enforceBudget();
@@ -163,17 +166,70 @@ class Governor {
    * pass deliberately does *not* do is force the page to give memory back.
    *
    * That was the original design - decay the boost, wait for the page to
-   * settle, then collect - and measurement killed it. Forcing a collection
-   * costs about 6MB per renderer in heap-profiler instrumentation that is
-   * never returned, against a few megabytes reclaimed, and it stalls the very
-   * tab the user is looking at. Chromium gives the memory back on its own once
-   * the tab stops being busy, and more of it. So the honest post-animation
-   * behaviour is: hand back CPU immediately, and leave memory alone.
+   * settle, then collect - and it is still not done here, for a reason that
+   * survived the correction to how memory is measured: this tab is the *visible*
+   * one. A collection stalls the renderer, and stalling the tab the user is
+   * looking at immediately after an animation is exactly the jank this browser
+   * exists to avoid. Heap limits apply to hidden tabs only (runHeapLimits), and
+   * this tab becomes eligible the moment it is hidden.
    */
   async runPostAnimationSettle() {
     for (const tab of this.boost.dueSettles(this.tabs.all())) {
       this.stats.settles += 1;
       this.log(`tab ${tab.id}: settled after animation`);
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Per-tab heap limits (square-root rule)                            */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Collect the garbage of any hidden tab whose heap has passed the limit the
+   * square-root rule sets for it. See governor/heap-limit.js.
+   *
+   * Two gates before anything is measured, let alone collected: a tab must be
+   * big enough for a collection to out-earn the debugger session it costs, and
+   * nothing may be animating anywhere - a collection stalls a renderer, and
+   * stalling one while the user watches a transition is how a memory saver
+   * becomes a janky browser.
+   */
+  async runHeapLimits() {
+    if (!this.cfg.heapLimit.enabled) return;
+    if (this.boost.quiesceRequested) return;
+
+    const now = Date.now();
+    for (const tab of this.tabs.all()) {
+      if (!this.heapLimiter.worthMeasuring(tab)) continue;
+      if (this.shouldSkip(tab)) continue;
+
+      const metrics = await tab.cdp.pageMetrics();
+      if (!metrics || metrics.jsHeapBytes == null) continue;
+      this.heapLimiter.observe(tab, metrics.jsHeapBytes, now, metrics.jsHeapTotalBytes);
+
+      // Either the one-time backlog from loading, or steady-state growth past
+      // the limit the rule sets. See hasLoadBacklog for why both exist.
+      const backlog = this.heapLimiter.hasLoadBacklog(tab);
+      if (!backlog && !this.heapLimiter.isOverLimit(tab)) continue;
+
+      // Measured on the committed size, which is what a collection actually
+      // returns to the OS.
+      const before = metrics.jsHeapTotalBytes ?? metrics.jsHeapBytes;
+      const result = await tab.cdp.collectGarbage();
+      if (!result) continue;
+
+      // Re-read to learn L exactly, which is only knowable just after a
+      // collection, and to measure what this one actually achieved.
+      const after = await tab.cdp.pageMetrics();
+      const afterBytes = after?.jsHeapTotalBytes ?? after?.jsHeapBytes ?? before;
+      // L is the live set after collecting, which is the used figure.
+      if (after?.jsHeapBytes != null) tab.liveHeapBytes = after.jsHeapBytes;
+      tab.heapTotalBytes = afterBytes;
+      this.heapLimiter.recordCollection(tab, before, afterBytes, result.ms);
+
+      this.log(`tab ${tab.id}: heap ${fmtMB(before)} -> ${fmtMB(afterBytes)} ` +
+               `(${backlog ? 'load backlog' : 'over limit'}, ` +
+               `limit now ${fmtMB(this.heapLimiter.limitFor(tab))}, ${result.ms}ms)`);
     }
   }
 
@@ -462,11 +518,17 @@ class Governor {
       pressure: this.pressure,
       profile: this.cfg.profile,
       boostedTabId: this.boost.boostedTabId,
-      stats: { ...this.stats, reclaimedMB: Math.round(this.stats.reclaimedMB) },
+      stats: {
+        ...this.stats,
+        reclaimedMB: Math.round(this.stats.reclaimedMB),
+        ...this.heapLimiter.stats()
+      },
       tabs: this.tabs.all().map((t) => t.toJSON())
     };
   }
 }
+
+const fmtMB = (bytes) => `${Math.round((bytes || 0) / (1024 * 1024))}MB`;
 
 const PRESSURE_RANK = {
   [Pressure.NONE]: 0,

@@ -55,6 +55,7 @@ class Tab {
 
     // Measurement, written by the metrics module.
     this.rssMB = 0;
+    this.privateMB = 0;
     this.cpu = 0;
     this.jsHeapMB = 0;
     this.sharesProcess = false;
@@ -62,6 +63,20 @@ class Tab {
     this.taskCpu = null;
     this.lastTaskSec = null;
     this.lastTaskAt = 0;
+
+    /**
+     * Heap state for the square-root heap limit rule (governor/heap-limit.js):
+     * L, g and s in the paper's terms. All null until this tab has been
+     * measured, which only happens if it is big enough to be worth it.
+     */
+    /** Set once the load-time garbage has been collected for the current page. */
+    this.heapBacklogCollected = false;
+    this.liveHeapBytes = null;          // L: live set, read just after a collection
+    this.heapTotalBytes = null;         // committed heap size, what M bounds
+    this.allocRateBytesPerSec = null;   // g: smoothed allocation rate
+    this.gcSpeedBytesPerSec = null;     // s: observed collection throughput
+    this.lastHeapBytes = null;
+    this.lastHeapAt = 0;
 
     // Activity, written by the probe and the boost controller.
     this.reportedDemand = 'idle';
@@ -168,7 +183,16 @@ class Tab {
     wc.on('did-start-loading', () => { this.loading = true; this.emit('updated'); });
     wc.on('did-stop-loading', () => { this.loading = false; this.emit('updated'); });
 
-    wc.on('did-navigate', (_e, url) => { this.url = url; this.emit('updated'); });
+    wc.on('did-navigate', (_e, url) => {
+      this.url = url;
+      // A new document means new load-time garbage, and the previous page's
+      // heap estimates no longer describe anything.
+      this.heapBacklogCollected = false;
+      this.liveHeapBytes = null;
+      this.heapTotalBytes = null;
+      this.lastHeapBytes = null;
+      this.emit('updated');
+    });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (isMainFrame) { this.url = url; this.emit('updated'); }
     });
@@ -278,6 +302,14 @@ class Tab {
     this.taskCpu = null;
     this.lastTaskSec = null;
     this.lastTaskAt = 0;
+    // A new renderer means a new heap; none of the rule's estimates carry over.
+    this.heapBacklogCollected = false;
+    this.liveHeapBytes = null;
+    this.heapTotalBytes = null;
+    this.allocRateBytesPerSec = null;
+    this.gcSpeedBytesPerSec = null;
+    this.lastHeapBytes = null;
+    this.lastHeapAt = 0;
     this.boosted = false;
     this.pendingSettleAt = 0;
   }

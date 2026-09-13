@@ -19,7 +19,8 @@ The interesting part is `src/main/governor/`.
 ```bash
 npm install
 npm start                  # balanced
-npm run start:economy      # least memory
+npm run start:economy      # less memory, isolation intact
+npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
 npm run start:performance  # most headroom
 
 npm run smoke              # 21-check end-to-end test, headless
@@ -32,14 +33,23 @@ pass; a normal desktop install must not use it.
 
 ### Profiles
 
-| | `economy` | `balanced` | `performance` |
-|---|---|---|---|
-| live renderer cap | 4 | **off** | off |
-| memory budget | 700 MB | sized to the machine | 3000 MB |
-| discard idle tab after | 3 min | 15 min | 2 hrs |
-| simultaneous loads | 2 | 3 | 6 |
-| renderer sharing | per site | per site | per tab |
-| V8 optimize-for-size | yes | yes | yes |
+| | `minimal` | `economy` | `balanced` | `performance` |
+|---|---|---|---|---|
+| **site isolation** | **off** | on | on | on |
+| live renderer cap | off | 4 | **off** | off |
+| memory budget | 600 MB | 700 MB | sized to the machine | 3000 MB |
+| discard idle tab after | 5 min | 3 min | 15 min | 2 hrs |
+| simultaneous loads | 2 | 2 | 3 | 6 |
+| renderer sharing | per site | per site | per site | per tab |
+| V8 optimize-for-size | yes | yes | yes | yes |
+
+> **`minimal` disables site isolation.** That is a security setting, not a
+> performance one: site isolation is what stops a malicious page — or a
+> third-party ad frame inside a page you trust — from reading another site's
+> memory, and it is the browser's main defence against Spectre-class and
+> cross-site leak attacks. Turning it off saves real memory (below) and the
+> browser will not do it on your behalf; it prints a warning on every launch.
+> Use it for browsing you trust, on a machine where you need the memory.
 
 **There is no cap on how many tabs stay live by default.** The goal is to make
 each tab cheap, not to ration them. A cap exists as an opt-in ceiling for small
@@ -177,6 +187,23 @@ share of one copy of Chromium.
 | 30 different sites | **592 MB** | 19.7 MB | 31 |
 | 30 tabs on one site | **348 MB** | 11.6 MB | 2 |
 
+### What site isolation costs (the `minimal` profile)
+
+Most real pages carry cross-site subframes — ads, embeds, social buttons — and
+with strict isolation each one gets its own renderer. Measured on a fixture with
+six cross-site frames per page:
+
+| 12 tabs of an embed-heavy page | renderers | total |
+|---|---|---|
+| `balanced` (isolation on) | 19 | 486 MB |
+| `minimal` (isolation off) | 13 | **414 MB (−15%)** |
+
+On tabs with *no* subframes, disabling isolation saves nothing — each top-level
+site still needs its own process. The saving comes entirely from collapsing
+subframes, which is why it only shows up on a fixture that has them. Adding a
+renderer process limit on top forces cross-site reuse as well, taking 12 tabs of
+a DOM-heavy page from 463 MB to 376 MB (−19%) at 4 renderers.
+
 ### What `--optimize-for-size` is worth
 
 | | per tab | total (30 tabs) |
@@ -200,6 +227,37 @@ Tested per-tab, in PSS, and rejected:
 | `--disable-features=BackForwardCache` | no difference |
 | `webPreferences.spellcheck: false` | no difference (0.1 MB) |
 | `--disable-features=Translate,OptimizationHints,MediaRouter` | no difference, slightly worse |
+
+### Optimal heap limits: implemented, and off by default
+
+`src/main/governor/heap-limit.js` implements the square-root heap limit rule from
+[Kirisame, Shenoy & Panchekha, *Optimal Heap Limits for Reducing Browser Memory
+Use*](https://arxiv.org/abs/2204.10455) (OOPSLA 2022), whose MemBalancer
+prototype reports ~16% less memory at constant GC time by patching V8:
+
+```
+M = L + sqrt(L * g / (c * s))
+```
+
+It is implemented faithfully — including the paper's note that *c* may be
+weighted per heap, so hidden tabs get a tighter limit since their GC pauses are
+invisible — and it is **disabled by default, on a measured negative result**:
+
+- **V8's heap is not where the memory is.** A settled DOM-heavy page reports
+  ~2 MB of committed heap against ~21 MB of private memory. Even a perfect
+  collection leaves ~90% of the tab untouched; the rest is DOM, Blink structures
+  and malloc, which no garbage collector reaches.
+- **V8 already does it.** A backgrounded heap is collected on its own within
+  ~10 s, so forcing it earlier mostly just does sooner what happens anyway.
+  Across 20 tabs, with and without, the settled total differed by 1 MB.
+
+The gap between that and the paper's 16% is the implementation, not the rule:
+they set a real V8 heap limit, which changes *how V8 schedules its own
+collections*. Nothing in Electron's API or the DevTools protocol can set that
+limit, so the rule can only be used here as a trigger for collections we request
+ourselves — which is both more expensive (a debugger session, ~2.4 MB per tab)
+and strictly later. Enable with `--heap-limit` if your tabs allocate heavily in
+the background, where the steady-state rule has something to act on.
 
 ---
 

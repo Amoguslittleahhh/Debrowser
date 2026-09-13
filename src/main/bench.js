@@ -28,7 +28,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 const MIXES = {
   default: ['heavy.html', 'idle.html', 'animated.html', 'form.html'],
-  noforms: ['heavy.html', 'idle.html', 'animated.html', 'busy.html']
+  noforms: ['heavy.html', 'idle.html', 'animated.html', 'busy.html'],
+  // Pages carrying cross-site subframes, as most real pages do. This is the
+  // only mix that shows what site isolation costs; see test/pages/embeds.html.
+  embeds: ['embeds.html']
 };
 
 async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, freezeMs, distinctOrigins, mix = 'default' }) {

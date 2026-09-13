@@ -9,7 +9,8 @@
     "start:economy": "electron . --profile=economy",
     "start:performance": "electron . --profile=performance",
     "bench": "node bench/bench.js",
-    "smoke": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu"
+    "smoke": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu",
+    "start:minimal": "electron . --profile=minimal"
   },
   "devDependencies": {
     "electron": "^44.0.0"

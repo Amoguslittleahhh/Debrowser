@@ -21,7 +21,7 @@
  */
 
 const { MB } = require('../config');
-const { footprintMB, accountingMode } = require('../memory');
+const { footprintMB, privateMB, accountingMode } = require('../memory');
 
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
@@ -66,6 +66,7 @@ class Metrics {
       // ../memory.js.
       const rssMB = (proc.memory?.workingSetSize || 0) / 1024;
       const footprint = footprintMB(pid, rssMB);
+      const priv = privateMB(pid);
       const cpu = proc.cpu?.percentCPUUsage || 0;
 
       const prev = this.byPid.get(pid);
@@ -76,6 +77,7 @@ class Metrics {
             type: proc.type
           }
         : { rssMB: footprint, cpu, type: proc.type };
+      smoothed.privateMB = priv == null ? (prev?.privateMB ?? footprint) : priv;
 
       this.byPid.set(pid, smoothed);
       total += smoothed.rssMB;
@@ -130,6 +132,7 @@ class Metrics {
 
       if (tabs.length === 1) {
         tabs[0].rssMB = proc.rssMB;
+        tabs[0].privateMB = proc.privateMB;
         tabs[0].cpu = proc.cpu;
         tabs[0].sharesProcess = false;
         continue;
@@ -142,6 +145,7 @@ class Metrics {
       tabs.forEach((tab, i) => {
         const share = weights[i] / weightSum;
         tab.rssMB = proc.rssMB * share;
+        tab.privateMB = (proc.privateMB || 0) * share;
         tab.sharesProcess = true;
         tab.processTabCount = tabs.length;
 
@@ -159,6 +163,7 @@ class Metrics {
     for (const tab of this.getTabs()) {
       if (!tab.pid) {
         tab.rssMB = 0;
+        tab.privateMB = 0;
         tab.cpu = 0;
         tab.sharesProcess = false;
       }

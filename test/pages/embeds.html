@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cross-site embeds test page</title>
+  <style>
+    body { margin: 0; padding: 16px; background: #101318; color: #e6e8ee; font: 14px system-ui; }
+    iframe { width: 240px; height: 90px; border: 1px solid #2c303a; margin: 4px; }
+  </style>
+</head>
+<body>
+  <!--
+    A page carrying several CROSS-SITE subframes, which is what an ordinary news
+    or shopping page looks like: ads, embeds, social buttons, analytics frames.
+
+    This fixture exists because it is the only way to measure what site
+    isolation costs. With strict site isolation each cross-site subframe becomes
+    an out-of-process iframe with its own renderer, so one tab can hold seven
+    processes. Fixtures without subframes cannot show that at all - and an
+    earlier measurement concluded "disabling site isolation saves nothing"
+    purely because every fixture was subframe-free.
+
+    The frame hosts are distinct registrable domains (f1.test, f2.test, …),
+    resolved locally by --host-resolver-rules, so they are genuinely cross-site
+    rather than merely cross-port.
+  -->
+  <h1>Embeds page</h1>
+  <p id="status">building frames…</p>
+  <div id="frames"></div>
+
+  <script>
+    const FRAME_COUNT = 6;
+    const port = location.port;
+    const host = document.getElementById('frames');
+    const frag = document.createDocumentFragment();
+    for (let i = 1; i <= FRAME_COUNT; i++) {
+      const f = document.createElement('iframe');
+      f.src = `http://f${i}.test:${port}/idle.html`;
+      f.loading = 'eager';
+      frag.appendChild(f);
+    }
+    host.appendChild(frag);
+    document.getElementById('status').textContent =
+      `${FRAME_COUNT} cross-site frames (f1.test … f${FRAME_COUNT}.test)`;
+  </script>
+</body>
+</html>
