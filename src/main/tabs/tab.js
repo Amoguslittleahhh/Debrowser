@@ -152,6 +152,13 @@ class Tab {
     /** Path to this tab's thumbnail on disk, or null. Never the image itself. */
     this.thumbPath = null;
 
+    /**
+     * When a speculative restore stops being excused. Non-zero only while this
+     * tab holds a renderer built on a guess that the user was about to click
+     * it; see TabManager#speculate and the idle ladder's expiry clause.
+     */
+    this.speculativeUntil = 0;
+
     this.bounds = { x: 0, y: 0, width: 0, height: 0 };
   }
 

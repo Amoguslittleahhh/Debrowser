@@ -320,7 +320,40 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     covered === true, `placeholder shown=${covered}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n9. Live renderer cap\n');
+  console.log('\n9. Speculative restore\n');
+
+  // Speculation is the one mechanism here that can add memory rather than
+  // reclaim it, so what is checked is mostly that it refuses to.
+  governor.cfg.maxLiveTabs = 0;          // the cap is exercised in the next section
+  const spec = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true });
+  await waitFor(() => spec.isLive && !spec.loading, { timeoutMs: 10_000 });
+  await governor.enforceManualDiscard(spec);
+
+  const started = tabs.speculate(spec.id);
+  check('resting on a discarded tab starts restoring it',
+    started === true && spec.isLive, `speculated=${started} live=${spec.isLive}`);
+
+  // At most one in flight: a pointer swept across the strip must not rebuild
+  // every renderer it passes.
+  const second = tabs.all().find((t) => !t.isLive && t !== spec);
+  const alsoStarted = second ? tabs.speculate(second.id) : false;
+  check('only one speculation runs at a time',
+    alsoStarted === false, `second speculation accepted=${alsoStarted}`);
+
+  // And the leash: a guess the user never acted on is taken back. Waiting for
+  // the load to finish first is not test hygiene but the actual contract - the
+  // ladder never interrupts a loading tab, so an expired speculation is
+  // reclaimed on the first tick after it settles rather than mid-request.
+  await waitFor(() => spec.isLive && !spec.loading, { timeoutMs: 10_000 });
+  spec.speculativeUntil = Date.now() - 1;
+  spec.everVisible = false;
+  await governor.runIdleLadder();
+  check('a speculation the user ignored is discarded again',
+    !spec.isLive && spec.tier === Tier.DISCARDED,
+    `tier=${spec.tier} live=${spec.isLive}`);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n10. Live renderer cap\n');
 
   // The cap is what bounds memory for someone who opens tabs in bursts: the
   // budget cannot help them, because on a large machine thirty tabs never reach
@@ -360,7 +393,7 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `url=${revived.url}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n10. Footprint\n');
+  console.log('\n11. Footprint\n');
 
   governor.metrics.sample();
   const snap = governor.metrics.snapshot();

@@ -198,7 +198,10 @@ function main() {
         if (governor) await governor.onTabActivated(tab);
       },
       onCover: (tab) => (shell ? shell.showPlaceholder(tab) : false),
-      onUncover: () => { if (shell) shell.hidePlaceholder(); }
+      onUncover: () => { if (shell) shell.hidePlaceholder(); },
+      // A speculative page load must never be the reason a frame is dropped,
+      // and must never add to memory the governor is already trying to reclaim.
+      canSpeculate: () => Boolean(governor) && governor.allowsSpeculation()
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
@@ -298,6 +301,14 @@ function wireCommands({ tabs, shell, governor, publish, log }) {
 
       case 'activate-tab':
         tabs.activate(payload?.id).then(publish).catch((e) => log(`activate failed: ${e.message}`));
+        break;
+
+      case 'prefetch-tab':
+        // Pointer resting on a tab. Deliberately not followed by publish(): a
+        // speculation is not a state change the user asked for, and repainting
+        // the chrome for every tab the pointer pauses on would cost more than
+        // the head start is worth.
+        tabs.speculate(payload?.id);
         break;
 
       case 'navigate': {

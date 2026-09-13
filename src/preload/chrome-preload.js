@@ -25,7 +25,8 @@ const COMMANDS = new Set([
   'set-profile',
   'set-budget',
   'discard-tab',
-  'pin-tab'
+  'pin-tab',
+  'prefetch-tab'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {

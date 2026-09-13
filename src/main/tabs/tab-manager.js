@@ -21,6 +21,14 @@ const { Tab } = require('./tab');
 const { Tier } = require('../config');
 const { LatencyTracker } = require('../latency');
 
+/**
+ * How long a speculatively restored tab is allowed to stay resident before the
+ * idle ladder takes it back. Long enough to cover a pointer that pauses, reads
+ * the title and then clicks; short enough that a guess which did not pay off
+ * costs one renderer for a few seconds rather than for the session.
+ */
+const SPECULATION_TTL_MS = 10_000;
+
 class TabManager {
   /**
    * @param {object} options - { partition, onEvent, log }
@@ -32,6 +40,7 @@ class TabManager {
     onPresent = async () => {},
     onCover = () => false,
     onUncover = () => {},
+    canSpeculate = () => true,
     log = () => {}
   } = {}) {
     this.cfg = cfg;
@@ -50,6 +59,11 @@ class TabManager {
      */
     this.onCover = onCover;
     this.onUncover = onUncover;
+    /**
+     * Whether a speculative restore is affordable right now. Answered by the
+     * governor, which owns pressure and the animation quiesce; see `speculate`.
+     */
+    this.canSpeculate = canSpeculate;
     this.log = log;
 
     /** @type {Tab[]} - ordered as shown in the tab strip */
@@ -62,6 +76,9 @@ class TabManager {
      * @type {Tab[]}
      */
     this.loadQueue = [];
+
+    /** At most one speculative restore in flight. See `speculate`. */
+    this.speculatingId = null;
 
     /**
      * What reclaim costs the user. Read by the governor's snapshot and asserted
@@ -196,6 +213,7 @@ class TabManager {
 
     tab.setVisible(true);
     stop(wasLive ? 'switch' : 'restore');
+    this.clearSpeculation(tab);
     this.onEvent(tab, 'activated');
     return tab;
   }
@@ -261,6 +279,51 @@ class TabManager {
       if (this.activeId === id) stop();
     };
     wc.once('did-stop-loading', done);
+  }
+
+  /**
+   * Start restoring a discarded tab before the user has clicked it.
+   *
+   * A restore is measured at ~5ms to put the tab on screen but 40-110ms before
+   * its content arrives - and that is against localhost fixtures. The pointer
+   * resting on a tab is a good enough signal that the click is coming to spend
+   * that window early, so the page is already loading by the time it lands.
+   *
+   * This is the one feature here that can *increase* memory, which is the
+   * opposite of the point, so it is deliberately timid. Left ungoverned, a
+   * pointer dragged across a strip of thirty tabs would rebuild renderers
+   * faster than the governor reclaims them - so:
+   *
+   *   - at most one speculation is ever in flight;
+   *   - it goes through `admit`, so the concurrent-load limit still applies;
+   *   - the governor can refuse outright, under memory pressure or while
+   *     anything is animating - a speculative page load must never be the
+   *     reason a frame is dropped;
+   *   - and it expires. A tab realised on a guess that the user never acted on
+   *     is discarded again by the idle ladder, so a swept pointer cannot
+   *     quietly leave a dozen resident renderers behind.
+   */
+  speculate(id) {
+    const tab = this.byId(id);
+    if (!tab || tab.isLive) return false;
+    if (this.speculatingId !== null) return false;
+    if (!this.canSpeculate()) return false;
+
+    tab.speculativeUntil = Date.now() + SPECULATION_TTL_MS;
+    this.speculatingId = id;
+    this.admit(tab);
+    this.latency.record('speculation', 0.1);
+    return true;
+  }
+
+  /**
+   * Called when a tab is activated for real, so a speculation that paid off
+   * stops being treated as one - otherwise the idle ladder would discard the
+   * tab the user is now looking at.
+   */
+  clearSpeculation(tab) {
+    if (tab) tab.speculativeUntil = 0;
+    this.speculatingId = null;
   }
 
   /** How many tabs are mid-load right now. */

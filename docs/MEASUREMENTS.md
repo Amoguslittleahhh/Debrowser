@@ -166,3 +166,32 @@ Note on validity: the harness window is never shown, so every renderer is
 backgrounded throughout. That could mask a purge that only fires on a
 transition. It does not affect the comparison being drawn, since both arms run
 under identical conditions and differ only in how many pages were frozen.
+
+---
+
+## M8 — is hover-prefetch worth it?
+
+Six reps, A/B over the same fixture pages. Timed from the activation call until
+the page has finished loading - the window a user spends looking at a
+placeholder.
+
+    cold        p50 139.5 ms   (min 122.5, max 183.2)
+    prefetched  p50   0.5 ms   (min   0.5, max   0.7)
+
+**Read this carefully; the headline overstates it.** The fixture is served from
+localhost and loads in ~140ms, which is *shorter than the 150ms dwell*. So the
+page had already finished loading before the click landed, and activation had
+nothing left to wait for. That is not what a real page will do.
+
+The honest statement of the benefit: the saving is bounded by the dwell, not by
+the page load. A page that takes 800ms will still take about 650ms after a 150ms
+head start - a real improvement, and not the near-elimination this measurement
+shows. Any figure quoted from this experiment must carry that caveat.
+
+The cost side cannot be measured by `npm run bench`, which never moves a pointer
+and so never speculates at all. It is bounded by construction instead: one
+speculation in flight at a time, refused under any memory pressure, refused
+while anything is animating, refused at the live-renderer cap, routed through
+the same concurrent-load limit as any other realise, and expired by the idle
+ladder if the user does not act on it. The smoke suite asserts the one-at-a-time
+rule and the expiry.
