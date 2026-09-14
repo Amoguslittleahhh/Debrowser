@@ -12,6 +12,7 @@
     "smoke": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu",
     "start:minimal": "electron . --profile=minimal",
     "build:ksm": "cc -O2 -Wall -o tools/ksm-launch tools/ksm-launch.c",
+    "build:memtrim": "cc -O2 -Wall -o tools/mem-trim tools/mem-trim.c",
     "start:merged": "npm run build:ksm && tools/ksm-launch electron ."
   },
   "devDependencies": {
