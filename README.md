@@ -450,5 +450,9 @@ tried, measured and removed — live on the `claude/research-build` branch.
   Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
 - No extensions, no bookmarks, no history UI, no downloads UI. This is a
   resource-management browser, not a Chrome replacement.
+- `legacy/debrowser.hta` ports the residency model to MSHTML for machines that
+  can only run an HTA. It is a curiosity, not a supported browser: unsandboxed,
+  untested, and unable to do anything this project measures per-tab. See
+  `legacy/README.md`.
 - Password and payment fields are deliberately never read into the session
   store, so a discarded tab will not restore them.
