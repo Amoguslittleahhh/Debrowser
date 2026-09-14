@@ -31,6 +31,26 @@ distributed *with applications*, not with the Evergreen Runtime, so whether it
 is present at all is a property of your machine and not something that can be
 settled from a spec.
 
+The report is also written to `%TEMP%\debrowser-legacy\probe-report.txt`, which
+is easier to send than copying out of a textarea — and a report that has been
+retyped or truncated is worse than none, since its exact contents decide what
+gets built next.
+
+### How far this has been verified
+
+Wine cannot run it: Wine implements `mshtml` through Gecko but its `mshta.exe`
+is a stub that prints `mshta.exe is a stub!` and exits, so `.hta` files do not
+run there at all. That was tried and abandoned.
+
+What *was* verified, by executing the probe's own script with stubs: the JScript
+parses and is ES5-clean, the markup is balanced, the generated PowerShell renders
+with balanced braces, parens and quotes, and the GO / MAYBE / STOP verdict logic
+returns the right answer for all five combinations of runtime present or absent,
+loader found or not, and `Add-Type` working or blocked.
+
+None of that touches Windows. It means the probe is not broken; it does not mean
+the answer is known.
+
 ## Read this first
 
 **It is unsandboxed.** An HTA runs with your full user privileges, and MSHTML no

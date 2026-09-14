@@ -52,6 +52,7 @@
     <button id="again">Run again</button>
   </div>
   <div id="verdict"></div>
+  <div id="saved" class="sub" style="margin-top:8px"></div>
 </div>
 
 <script type="text/javascript">
@@ -312,6 +313,29 @@ function run() {
   note("--- powershell ---");
   probePowershell(ctx);
   verdict();
+  saveReport(ctx);
+}
+
+/**
+ * Write the report beside the probe's other state.
+ *
+ * Copying out of a textarea works, but a file can be sent verbatim, and a
+ * report that has been retyped or truncated is worse than no report - the
+ * whole point of this probe is that its exact contents decide what gets built.
+ */
+function saveReport(ctx) {
+  if (!ctx.fso || !ctx.tmp) return;
+  var path = ctx.tmp + "\\probe-report.txt";
+  try {
+    var f = ctx.fso.CreateTextFile(path, true);
+    f.Write(lines.join("\r\n"));
+    f.Close();
+    document.getElementById("saved").innerHTML =
+      "Report also written to: <b>" + path + "</b>";
+  } catch (e) {
+    document.getElementById("saved").innerHTML =
+      "Could not write the report to disk: " + e.message + " — copy it from above instead.";
+  }
 }
 
 document.getElementById("again").onclick = function () {
