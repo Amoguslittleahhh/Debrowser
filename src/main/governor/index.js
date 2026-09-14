@@ -615,6 +615,11 @@ class Governor {
     // platform that cannot trim either.
     if (tab.privateMB == null || tab.privateMB < cfg.minPrivateMB) return false;
 
+    // This renderer's trim was refused recently. Asked here rather than left to
+    // fail in `demote`, so the tab simply stays where it is instead of being
+    // walked down the ladder every tick to be turned back at the last step.
+    if (platform.trimBackoffMs(tab.pid) > 0) return false;
+
     // Every tab sharing this renderer must also be ready to go.
     const group = this.metrics.tabsByPid().get(tab.pid);
     if (!group) return false;

@@ -399,6 +399,23 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     check('a hibernated tab wakes with its page state intact, no reload',
       woke && stateIntact && big.url === urlBefore,
       `tier=${big.tier} retained-state=${stateIntact}`);
+
+    // A refusal must cost once, not every tick. A pid that does not exist is
+    // refused by the kernel at `pidfd_open` (ESRCH), which is the cheapest
+    // honest way to drive this path - the helper answers `err <pid> 3` exactly
+    // as it would for an EPERM on a real renderer.
+    const platform = require('./platform');
+    const ghost = 0x7ffffffe;
+    const first = await platform.trimProcessMemory(ghost);
+    const backoff = platform.trimBackoffMs(ghost);
+    const t0 = Date.now();
+    const second = await platform.trimProcessMemory(ghost);
+    const secondTookMs = Date.now() - t0;
+    check('a refused trim backs off instead of retrying every tick',
+      first === null && second === null && backoff > 0 && secondTookMs < 5,
+      `refused=${first === null} backoff=${Math.round(backoff / 1000)}s ` +
+      `second attempt took ${secondTookMs}ms (no round trip)`);
+    platform.forgetProcess(ghost);
   }
 
   /* ---------------------------------------------------------------- */
