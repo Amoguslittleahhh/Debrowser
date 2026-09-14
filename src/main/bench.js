@@ -13,7 +13,9 @@
  */
 
 const fixtureServer = require('./fixture-server');
-const { footprintMB, accountingMode, unreportedProcessesMB } = require('./memory');
+const fs = require('fs');
+const { footprintMB, accountingMode, unreportedProcessesMB,
+        compressionStatus } = require('./memory');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -135,7 +137,9 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
     mix,
     protectedLive: liveDetail.filter((t) => !t.visible && (t.dirty || t.audible)).length,
     liveDetail,
-    breakdown
+    breakdown,
+    system: systemMemory(),
+    compression: compressionStatus()
   };
 }
 
@@ -160,6 +164,37 @@ function byProcessType(app) {
     out[proc.type] = (out[proc.type] || 0) + proc.pssMB;
   }
   for (const key of Object.keys(out)) out[key] = Math.round(out[key]);
+  return out;
+}
+
+/**
+ * What the whole machine has spare, and what the compressor is holding.
+ *
+ * The guard against this project's highest-risk measurement error. Trimming a
+ * renderer moves pages out of that process's accounting and into the
+ * compressor's - measured at 2.1:1 - so a per-process figure alone overstates
+ * the saving by roughly double. Reporting a system-wide number beside the total
+ * makes that visible automatically rather than depending on someone remembering
+ * to check it by hand, which is how the one correct trim measurement in this
+ * project was obtained.
+ *
+ * Linux only; returns nulls elsewhere, where the totals are unaffected anyway.
+ */
+function systemMemory() {
+  const out = { availableMB: null, zramStoredMB: null, zramPhysicalMB: null };
+  try {
+    const info = fs.readFileSync('/proc/meminfo', 'utf8');
+    const m = /MemAvailable:\s+(\d+) kB/.exec(info);
+    if (m) out.availableMB = Math.round(Number(m[1]) / 1024);
+  } catch { /* not Linux, or not readable */ }
+  try {
+    // mm_stat: orig_data_size compr_data_size mem_used_total ...
+    const cols = fs.readFileSync('/sys/block/zram0/mm_stat', 'utf8').trim().split(/\s+/).map(Number);
+    if (cols.length >= 3 && cols[0] > 0) {
+      out.zramStoredMB = Math.round(cols[0] / 1048576);
+      out.zramPhysicalMB = Math.round(cols[2] / 1048576);
+    }
+  } catch { /* no zram */ }
   return out;
 }
 

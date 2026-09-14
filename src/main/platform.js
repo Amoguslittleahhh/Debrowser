@@ -14,6 +14,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { MB } = require('./config');
+const { compressionStatus } = require('./memory');
 
 const PLATFORM = process.platform; // 'linux' | 'darwin' | 'win32'
 const isLinux = PLATFORM === 'linux';
@@ -304,11 +305,27 @@ function stopTrimHelper() {
  */
 async function trimCapability(log) {
   const h = trimHelper(log);
-  const available = await h.probe();
+  const permitted = await h.probe();
+
+  // Two independent conditions, and the second is the one that bites. The
+  // helper's self-test only proves the syscall is *permitted*: MADV_PAGEOUT
+  // succeeds with no swap configured and reclaims nothing, because the kernel
+  // has nowhere to put dirty anonymous pages. Reporting "available" on that
+  // basis means the governor hibernates ten tabs for zero return before its
+  // self-disable notices. Ask where the pages would actually go.
+  const compression = compressionStatus();
+
+  let reason = null;
+  if (!permitted) reason = h.reason || `not implemented on ${PLATFORM}`;
+  else if (!compression.available) {
+    reason = 'no swap or zram configured - the kernel has nowhere to compress into';
+  }
+
   return {
-    available,
-    mechanism: isLinux ? 'process_madvise(MADV_PAGEOUT)' : null,
-    reason: available ? null : (h.reason || `not implemented on ${PLATFORM}`)
+    available: permitted && compression.available,
+    mechanism: isLinux ? `process_madvise(MADV_PAGEOUT) -> ${compression.compressor || 'nothing'}` : null,
+    reason,
+    compression
   };
 }
 

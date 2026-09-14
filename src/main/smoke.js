@@ -195,6 +195,24 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   check('the governor defers stalling work while an animation runs',
     governor.boost.quiesceRequested, 'quiesce requested');
 
+  // The same property, under the load that was added after this check was
+  // written. Thumbnail capture, the placeholder composite and speculative loads
+  // all landed on the tab-switch path, and each one is work that could steal
+  // frames from exactly the tab being animated. The quiesce gates are the
+  // mechanism; this is what makes them a guarantee rather than an intention.
+  const speculatable = tabs.all().find((t) => !t.isLive && t !== animated);
+  const spooled = speculatable ? tabs.speculate(speculatable.id) : false;
+  animated.captureThumbnail().catch(() => {});
+  await sleep(1200);
+
+  check('an animating tab keeps its boost while a capture and a speculation run',
+    animated.boosted && animated.tier === Tier.ACTIVE,
+    `boosted=${animated.boosted} tier=${animated.tier} speculation=${spooled}`);
+
+  check('speculation is refused outright while anything is animating',
+    governor.allowsSpeculation() === false,
+    `allowsSpeculation=${governor.allowsSpeculation()}`);
+
   /* ---------------------------------------------------------------- */
   console.log('\n5. Resources are handed back when the animation ends\n');
 
@@ -327,6 +345,19 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // matters is that memory actually leaves the process and that the page comes
   // back without a reload - a tier that reports success while reclaiming
   // nothing is the failure mode this whole feature nearly shipped with.
+  // The capability must not claim to work where it provably cannot. MADV_PAGEOUT
+  // succeeds with no swap and reclaims nothing, so a check that only asks
+  // whether the syscall is permitted reports a working feature on a machine
+  // where it does nothing - which is exactly what shipped, and what this asserts
+  // against.
+  const compression = require('./memory').compressionStatus();
+  const cap = await require('./platform').trimCapability();
+  check('hibernation is only offered where there is somewhere to compress into',
+    cap.available === (cap.compression.available && /MADV_PAGEOUT/.test(cap.mechanism || '')),
+    compression.available
+      ? `compressor=${compression.compressor} ${compression.swapMB}MB, available=${cap.available}`
+      : `no compressor, available=${cap.available}, reason="${cap.reason}"`);
+
   if (!governor.trimAvailable) {
     console.log(`  SKIP  hibernation unavailable here: ${governor.trimReason}`);
   } else {

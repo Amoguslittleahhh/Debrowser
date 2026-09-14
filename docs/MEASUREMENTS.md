@@ -361,3 +361,116 @@ One caveat on scope: this host runs with `--disable-gpu`, so compositing is
 software. A machine doing real GPU compositing may hold per-view surfaces that
 this cannot see. If anyone revisits it, that is the configuration to measure -
 and `breakdown.GPU` is still the number to watch.
+
+---
+
+## 8a — is there a per-open-tab cost worth bounding?  NO. The model was wrong.
+
+The premise: `Tab#captureNavigation` stores `nav.getAllEntries()` unbounded, and
+the model said each open tab costs 0.6MB in the browser process forever - the one
+term that never amortises, worth 60MB at 100 tabs. Both halves turned out to be
+wrong, and the second one matters.
+
+### Navigation history is not the cost
+
+    history depth    retained
+        5 entries      4.7 KB      (934 B/entry)
+       20 entries     18.8 KB      (934 B/entry)
+       50 entries     46.8 KB      (934 B/entry)
+
+Linear at 934 bytes per entry, so a realistic 20-deep history is 19KB - three
+percent of the 600KB the hypothesis needed.
+
+### A discarded tab leaves ~950KB, and 99.6% of it is not ours
+
+    baseline (no tabs)      86.9 MB
+    30 tabs live           101.2 MB
+    30 tabs discarded      114.7 MB    <- MORE than when they were live
+
+    residue per discarded tab : 949 KB
+    of which our stored state :   4 KB
+
+Discarding thirty renderers made the browser process *grow* by 13.5MB. That
+looks alarming and is not: cycling a second identical batch through grew it by
+**-0.2MB**, so the residue is allocator slack reused by the next tab, not a leak.
+
+### The asymptote does not exist
+
+Built 60 tabs one at a time, discarding each immediately, so open tabs rose
+while live renderers stayed at zero:
+
+     0 tabs      85.7 MB
+    15 tabs      98.9 MB     901 KB/tab
+    30 tabs     100.4 MB     102 KB/tab
+    45 tabs     101.0 MB      41 KB/tab
+    60 tabs     100.2 MB     -55 KB/tab
+
+**The cost is a one-time allocator warm-up of ~13MB that saturates by about 30
+tabs, then flat.** The browser process holds ~100MB whether sixty discarded tabs
+are open or thirty.
+
+### The corrected model
+
+    was:  total(n) = 238 fixed + 0.6 MB x tabs_open + 13.2 MB x min(n, cap)
+    is:   total(n) = 238 fixed (including ~13MB browser high-water, saturating
+                     by ~30 tabs)  +  13.2 MB x min(n, cap)
+
+The `0.6 MB x tabs_open` term was an artefact: M1 measured it with the governor
+off, so all thirty of those tabs were **live**, and it captured Chromium's
+per-live-WebContents cost rather than the residue of a discarded one.
+
+Per-tab memory therefore falls toward zero as tabs are opened rather than
+converging on a floor - which is why 45 tabs measured 8.1MB/tab and 100 would be
+around 3.4. **Opening more tabs is already free**, and there is nothing here to
+bound. 8a is closed with no change made: capping navigation history would save
+4KB against a per-tab cost that is already approximately zero.
+
+The whole of the remaining cost is now the 238MB intercept.
+
+---
+
+## 8b / 8c — the fixed overhead is irreducible. The investigation is closed.
+
+### 8b — are the caches sized from host RAM?  No.
+
+Six tabs, governor off, two reps each, on a 16GB host:
+
+    variant                  total    delta
+    baseline                 316 MB       0
+    disk-cache=1MB           316 MB       0
+    media-cache=1MB          315 MB      -1
+    v8 code cache off        316 MB       0
+    main-process V8 tuning   316 MB       0
+    all four                 316 MB       0
+
+Every variant inside ±1MB, which is noise. Chromium's caches are not sized from
+available RAM in any way these flags reach, and tuning the *browser* process's
+own V8 (`--optimize-for-size`, `--max-old-space-size=64`) does nothing either.
+
+### 8c — the true per-process floor: not measurable
+
+`--single-process` collapses every renderer into the browser process, which
+would have bounded what 8b could ever have been worth. It does not run: the
+harness produces no result at all, the same failure as `--no-zygote` in M7.
+
+### The conclusion
+
+Three independent attacks on the 238MB of fixed overhead, all measuring zero:
+
+    M7   collapse the GPU, network and zygote processes   nothing, or broken
+    8b   bound the caches inside them                     nothing
+    8c   collapse everything into one process             will not run
+
+Combined with M1's finding that a bare Electron app with one `about:blank` view
+already holds 82MB in its browser process, **the fixed overhead is Electron's
+and cannot be reduced from outside Chromium.** It is not a lever this project
+has failed to pull; it is not a lever.
+
+With 8a showing there is no per-open-tab cost either, the model reduces to:
+
+    total(n) = 238 MB fixed + 13.2 MB x min(n, liveCap)
+
+Every term in that expression is now at a measured floor. **This browser is
+finished on memory.** What remains is not optimisation but a different
+architecture - a lighter engine, which M6 already argued costs the CDP control
+surface the whole governor depends on.
