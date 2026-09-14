@@ -332,3 +332,32 @@ so that case is reproducible rather than asserted.
 The headline workload is unaffected either way: 30 tabs on the default cap
 measured 363MB / 12.1MB per tab with the tier live, against 362MB / 12.1MB
 before it existed.
+
+---
+
+## Lever 4 — parking hidden views. NEGATIVE RESULT, not built
+
+Eight tabs of `heavy.html`, one visible, measured with every hidden view
+attached to the window and again with each removed via `removeChildView`:
+
+    8 tabs, views attached   total 364 MB   {Browser:82, GPU:19, Utility:25, Tab:215}
+    hidden views parked      total 363 MB   {Browser:81, GPU:19, Utility:26, Tab:215}
+    re-attached              total 364 MB   {Browser:81, GPU:19, Utility:26, Tab:215}
+
+**1MB across eight tabs**, and `GPU` does not move at all. The gate was a
+measurable drop in `breakdown.GPU`; there is none. Chromium already releases a
+widget's compositor tiles when it is hidden, which `setVisible(false)` does, so
+by the time a view is parked there is nothing left in it to release.
+
+Re-attaching returned to the original figure exactly, so `addChildView` /
+`removeChildView` churn does not leak - the mechanism works, it just has nothing
+to reclaim.
+
+Not built. It would have added a detach/re-attach path, a first-paint hazard on
+re-attach, and a `layout()` special case for views not in the tree, in exchange
+for 0.125MB per tab.
+
+One caveat on scope: this host runs with `--disable-gpu`, so compositing is
+software. A machine doing real GPU compositing may hold per-view surfaces that
+this cannot see. If anyone revisits it, that is the configuration to measure -
+and `breakdown.GPU` is still the number to watch.

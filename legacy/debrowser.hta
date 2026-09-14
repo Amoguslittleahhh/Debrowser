@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Debrowser Legacy - the residency architecture, on an engine from 2013.
+
+  A single .hta run by mshta.exe. No Node, no Chromium, no DevTools protocol,
+  no multi-process model: MSHTML puts every frame in this one process, so
+  per-tab measurement, freezing, hibernation and the process governor are all
+  simply unavailable here.
+
+  What does port is the part that produced the wins in the real browser:
+  RESIDENCY. Cap how many tabs hold a live frame, destroy the rest, restore
+  them on demand behind a placeholder. That idea is engine-independent, and it
+  is the whole reason this file exists - 45 tabs at 8.1MB each in the Electron
+  build came from residency, not from making renderers smaller.
+
+  UNTESTED. This was written on Linux; there is no mshta.exe here to run it
+  against. It is shipped separately from the browser precisely so that being
+  wrong costs nothing that works - it either runs on your machine or it does
+  not, and it cannot break anything else either way.
+
+  SECURITY, stated plainly and left visible in the UI. An HTA runs with your
+  full user privileges and no sandbox, on an engine that no longer receives
+  security updates for web content. Browsing arbitrary sites this way is not
+  safe, and mshta.exe is blocked outright in many managed environments. On old
+  Windows, Firefox ESR or a maintained Chromium fork are better choices for
+  real browsing. This is here because it is an interesting demonstration.
+
+  Run: mshta.exe debrowser.hta
+-->
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Debrowser Legacy</title>
+<hta:application
+  id="debrowserLegacy"
+  applicationname="Debrowser Legacy"
+  border="thin"
+  scroll="no"
+  singleinstance="yes"
+  contextmenu="no"
+  selection="no"
+  windowstate="maximize" />
+<style>
+  /* IE11 supports most of this; the -ms- prefixes cover flexbox, which shipped
+     in MSHTML under the older spec spelling. */
+  html, body {
+    height: 100%; margin: 0; overflow: hidden;
+    background: #16181d; color: #e6e9ef;
+    font: 13px "Segoe UI", Tahoma, sans-serif;
+  }
+  #app { height: 100%; display: -ms-flexbox; display: flex;
+         -ms-flex-direction: column; flex-direction: column; }
+
+  #warn {
+    background: #4a1d1d; color: #ffd7d7; padding: 5px 10px; font-size: 11px;
+    border-bottom: 1px solid #6b2a2a;
+  }
+  #warn b { color: #fff; }
+
+  #chrome { background: #1b1e25; border-bottom: 1px solid #2a2f3a; }
+  #strip { white-space: nowrap; overflow-x: auto; overflow-y: hidden; padding: 6px 6px 0 6px; }
+  .tab {
+    display: inline-block; max-width: 200px; padding: 6px 8px; margin-right: 4px;
+    background: #232833; border: 1px solid #2f3542; border-bottom: none;
+    border-radius: 5px 5px 0 0; cursor: pointer; vertical-align: bottom;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tab.active { background: #2d3444; border-color: #3b4354; }
+  .tab .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin-right: 6px; background: #5aa86d;
+  }
+  .tab.parked .dot { background: #6b7380; }
+  .tab .x { margin-left: 8px; color: #8b93a3; }
+  .tab .x:hover { color: #fff; }
+
+  #bar { padding: 6px 8px; display: -ms-flexbox; display: flex; }
+  #bar button {
+    background: #232833; color: #cfd5e0; border: 1px solid #2f3542;
+    border-radius: 4px; padding: 4px 9px; margin-right: 4px; cursor: pointer;
+  }
+  #bar button:hover { background: #2d3444; }
+  #url {
+    -ms-flex: 1; flex: 1; background: #12151b; color: #e6e9ef;
+    border: 1px solid #2f3542; border-radius: 4px; padding: 5px 8px; margin: 0 4px;
+  }
+
+  #stage { -ms-flex: 1; flex: 1; position: relative; background: #101318; }
+  #stage iframe { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; }
+  #placeholder {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    background: #16181d; display: none; z-index: 50;
+  }
+  #placeholder .card {
+    position: absolute; left: 50%; top: 44%; width: 380px; margin-left: -190px;
+    text-align: center; color: #8b93a3;
+  }
+  #placeholder .card .t { color: #e6e9ef; font-size: 15px; margin-bottom: 6px; }
+
+  #status {
+    background: #1b1e25; border-top: 1px solid #2a2f3a;
+    padding: 4px 10px; font-size: 11px; color: #8b93a3;
+  }
+  #status b { color: #cfd5e0; font-weight: normal; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="warn">
+    <b>Unsandboxed.</b> This runs with your full user privileges on an engine that
+    no longer gets security updates for web content. Fine for a look; not a browser
+    to trust with real browsing.
+  </div>
+
+  <div id="chrome">
+    <div id="strip"></div>
+    <div id="bar">
+      <button id="back" title="Back">&#8592;</button>
+      <button id="fwd" title="Forward">&#8594;</button>
+      <button id="reload" title="Reload">&#8635;</button>
+      <input id="url" type="text" placeholder="Type a URL and press Enter">
+      <button id="newtab" title="New tab">+</button>
+    </div>
+  </div>
+
+  <div id="stage">
+    <div id="placeholder"><div class="card">
+      <div class="t" id="ph-title"></div>
+      <div id="ph-url"></div>
+      <div style="margin-top:10px">restoring&#8230;</div>
+    </div></div>
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<script type="text/javascript">
+/* ES5 only. IE11 is the best MSHTML offers and it has no let, const, arrow
+   functions, template literals or classes. Written in the dialect the engine
+   actually speaks rather than transpiled down to it. */
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/* Configuration                                                       */
+/* ------------------------------------------------------------------ */
+
+var CONFIG = {
+  /* The entire architecture, in one number. Tabs beyond this lose their frame;
+     they stay in the strip, keep their URL and title, and are rebuilt when
+     clicked. In the Electron build this is what took 45 tabs from 821MB to
+     365MB - not smaller renderers, just fewer of them resident. */
+  maxLiveTabs: 4,
+
+  /* How long a hidden tab may sit before its frame is released on time alone.
+     Shorter than the real browser's fifteen minutes because there is no memory
+     measurement here to drive it - a timer is all the signal available. */
+  parkAfterMs: 90 * 1000,
+
+  tickMs: 2000,
+  homeUrl: "https://example.com/"
+};
+
+/* ------------------------------------------------------------------ */
+/* Tabs                                                                */
+/* ------------------------------------------------------------------ */
+
+var tabs = [];
+var activeId = null;
+var nextId = 1;
+var stats = { parked: 0, restored: 0 };
+
+function Tab(url) {
+  this.id = nextId++;
+  this.url = url;
+  this.title = url;
+  this.frame = null;          /* null means parked: no frame, no memory */
+  this.lastActiveAt = now();
+  this.el = null;
+}
+
+function now() { return (new Date()).getTime(); }
+function byId(id) { for (var i = 0; i < tabs.length; i++) if (tabs[i].id === id) return tabs[i]; return null; }
+function activeTab() { return byId(activeId); }
+
+/** Give a tab a live frame. The only place one is created. */
+function realise(tab) {
+  if (tab.frame) return;
+  var f = document.createElement("iframe");
+  f.setAttribute("frameborder", "0");
+  f.style.display = "none";
+  document.getElementById("stage").appendChild(f);
+  tab.frame = f;
+
+  /* Cross-origin frames cannot be read from here - same-origin policy applies
+     inside an HTA exactly as it does in a page - so the title only updates for
+     documents that permit it. The URL is always known because we set it. */
+  f.onload = function () {
+    try {
+      var d = f.contentWindow.document;
+      if (d && d.title) { tab.title = d.title; renderStrip(); }
+    } catch (e) { /* cross-origin: the URL is all we get, and that is fine */ }
+    if (activeId === tab.id) hidePlaceholder();
+  };
+  f.src = tab.url;
+}
+
+/**
+ * Release a tab's frame, keeping everything needed to rebuild it.
+ *
+ * This is the whole trick. The tab object survives holding its URL and title;
+ * only the frame - the expensive part - goes away.
+ */
+function park(tab) {
+  if (!tab.frame) return;
+  try { tab.frame.src = "about:blank"; } catch (e) {}
+  if (tab.frame.parentNode) tab.frame.parentNode.removeChild(tab.frame);
+  tab.frame = null;
+  stats.parked++;
+  renderStrip();
+}
+
+function activate(id) {
+  var tab = byId(id);
+  if (!tab) return;
+  var previous = activeTab();
+  if (previous && previous.frame) previous.frame.style.display = "none";
+
+  activeId = id;
+  tab.lastActiveAt = now();
+
+  if (!tab.frame) {
+    /* Restoring. Cover the gap with the tab's identity rather than a blank
+       stage - the same reason the real browser shows a thumbnail: the wait is
+       unavoidable, being unable to tell what is happening is not. */
+    showPlaceholder(tab);
+    stats.restored++;
+    realise(tab);
+  }
+  tab.frame.style.display = "block";
+  document.getElementById("url").value = tab.url;
+  enforceCap();
+  renderStrip();
+}
+
+function closeTab(id) {
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].id !== id) continue;
+    park(tabs[i]);
+    tabs.splice(i, 1);
+    if (activeId === id) {
+      var next = tabs[i] || tabs[i - 1];
+      activeId = null;
+      if (next) activate(next.id); else newTab(CONFIG.homeUrl);
+    }
+    renderStrip();
+    return;
+  }
+}
+
+function newTab(url) {
+  var tab = new Tab(url || CONFIG.homeUrl);
+  tabs.push(tab);
+  activate(tab.id);
+  return tab;
+}
+
+/* ------------------------------------------------------------------ */
+/* The governor, such as it can be here                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Hold the number of live frames at the cap, releasing least-recently-used
+ * first. The visible tab is never a candidate.
+ */
+function enforceCap() {
+  var live = [];
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].frame && tabs[i].id !== activeId) live.push(tabs[i]);
+  }
+  var excess = (live.length + 1) - CONFIG.maxLiveTabs;
+  if (excess <= 0) return;
+  live.sort(function (a, b) { return a.lastActiveAt - b.lastActiveAt; });
+  for (var k = 0; k < excess && k < live.length; k++) park(live[k]);
+}
+
+/** Release frames nobody has looked at for a while, cap or no cap. */
+function tick() {
+  var t = now();
+  for (var i = 0; i < tabs.length; i++) {
+    var tab = tabs[i];
+    if (tab.id === activeId || !tab.frame) continue;
+    if (t - tab.lastActiveAt >= CONFIG.parkAfterMs) park(tab);
+  }
+  renderStatus();
+}
+
+/* ------------------------------------------------------------------ */
+/* Measurement                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * This process's working set, in MB, via WMI.
+ *
+ * The one thing this environment offers that Electron does not: an HTA can ask
+ * the OS about itself directly. Without it there would be no way to tell
+ * whether parking frames achieves anything, and an unmeasured memory feature is
+ * exactly what the real project deletes.
+ *
+ * Sums every mshta.exe, because an HTA cannot easily learn its own pid - so the
+ * figure is this window plus any other HTA running. Returns null if WMI is
+ * unavailable, which is common on locked-down machines.
+ */
+function workingSetMB() {
+  try {
+    var wmi = GetObject("winmgmts:\\\\.\\root\\cimv2");
+    var rows = wmi.ExecQuery("SELECT WorkingSetSize FROM Win32_Process WHERE Name='mshta.exe'");
+    var total = 0;
+    var e = new Enumerator(rows);
+    for (; !e.atEnd(); e.moveNext()) total += Number(e.item().WorkingSetSize) || 0;
+    return total / 1048576;
+  } catch (err) {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Rendering                                                           */
+/* ------------------------------------------------------------------ */
+
+function renderStrip() {
+  var strip = document.getElementById("strip");
+  strip.innerHTML = "";
+  for (var i = 0; i < tabs.length; i++) {
+    (function (tab) {
+      var el = document.createElement("div");
+      el.className = "tab" + (tab.id === activeId ? " active" : "") + (tab.frame ? "" : " parked");
+      el.title = (tab.frame ? "Live" : "Parked - rebuilt when opened") + "\n" + tab.url;
+
+      var dot = document.createElement("span");
+      dot.className = "dot";
+      el.appendChild(dot);
+      el.appendChild(document.createTextNode(trim(tab.title, 24)));
+
+      var x = document.createElement("span");
+      x.className = "x";
+      x.innerHTML = "&#215;";
+      x.onclick = function (ev) {
+        closeTab(tab.id);
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+        return false;
+      };
+      el.appendChild(x);
+      el.onclick = function () { activate(tab.id); };
+      strip.appendChild(el);
+    })(tabs[i]);
+  }
+}
+
+function renderStatus() {
+  var live = 0;
+  for (var i = 0; i < tabs.length; i++) if (tabs[i].frame) live++;
+  var mb = workingSetMB();
+  var parts = [
+    "<b>" + tabs.length + "</b> tabs",
+    "<b>" + live + "</b> live (cap " + CONFIG.maxLiveTabs + ")",
+    "<b>" + stats.parked + "</b> parked, <b>" + stats.restored + "</b> restored"
+  ];
+  if (mb !== null) {
+    parts.push("working set <b>" + Math.round(mb) + " MB</b>");
+    if (tabs.length) parts.push("<b>" + (mb / tabs.length).toFixed(1) + " MB</b> per open tab");
+  } else {
+    parts.push("working set unavailable (WMI blocked)");
+  }
+  document.getElementById("status").innerHTML = parts.join(" &middot; ");
+}
+
+function showPlaceholder(tab) {
+  document.getElementById("ph-title").innerHTML = escapeHtml(trim(tab.title, 60));
+  document.getElementById("ph-url").innerHTML = escapeHtml(trim(tab.url, 70));
+  document.getElementById("placeholder").style.display = "block";
+  /* Never let a placeholder outlive its page: a stuck one looks like a hang.
+     The real browser uses the same ceiling for the same reason. */
+  window.setTimeout(hidePlaceholder, 4000);
+}
+function hidePlaceholder() { document.getElementById("placeholder").style.display = "none"; }
+
+function trim(s, n) { s = String(s); return s.length > n ? s.substr(0, n - 1) + "…" : s; }
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function normaliseUrl(raw) {
+  var s = String(raw || "").replace(/^\s+|\s+$/g, "");
+  if (!s) return null;
+  if (/^[a-z]+:/i.test(s)) return s;
+  if (/^[\w.-]+\.[a-z]{2,}(\/|$)/i.test(s)) return "https://" + s;
+  return "https://duckduckgo.com/?q=" + encodeURIComponent(s);
+}
+
+/* ------------------------------------------------------------------ */
+/* Wiring                                                              */
+/* ------------------------------------------------------------------ */
+
+document.getElementById("newtab").onclick = function () { newTab(CONFIG.homeUrl); };
+document.getElementById("reload").onclick = function () {
+  var t = activeTab();
+  if (!t) return;
+  if (t.frame) { try { t.frame.contentWindow.location.reload(); } catch (e) { t.frame.src = t.url; } }
+  else activate(t.id);
+};
+document.getElementById("back").onclick = function () {
+  var t = activeTab();
+  try { if (t && t.frame) t.frame.contentWindow.history.back(); } catch (e) {}
+};
+document.getElementById("fwd").onclick = function () {
+  var t = activeTab();
+  try { if (t && t.frame) t.frame.contentWindow.history.forward(); } catch (e) {}
+};
+document.getElementById("url").onkeydown = function (ev) {
+  var e = ev || window.event;
+  if (e.keyCode !== 13) return;
+  var target = normaliseUrl(document.getElementById("url").value);
+  if (!target) return;
+  var t = activeTab() || newTab(target);
+  t.url = target;
+  t.title = target;
+  if (t.frame) t.frame.src = target; else activate(t.id);
+  renderStrip();
+};
+
+window.onload = function () {
+  newTab(CONFIG.homeUrl);
+  window.setInterval(tick, CONFIG.tickMs);
+  renderStatus();
+};
+</script>
+</body>
+</html>
