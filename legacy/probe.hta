@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Debrowser Legacy - capability probe (M0).
+  Run:  mshta.exe probe.hta
+
+  Answers the questions that decide whether a WebView2 engine can exist inside
+  an HTA at all. Nothing in this project gets built on top of WebView2 until
+  this reports back from a real machine, because the load-bearing fact - whether
+  WebView2's COM surface is reachable without the SDK's WebView2Loader.dll,
+  which ships with applications rather than with the Evergreen Runtime - is not
+  something that can be settled by reasoning about it.
+
+  Every check is independent and every failure is caught and named. A probe that
+  dies on its first missing key tells you less than one that finishes and
+  reports six things.
+-->
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Debrowser Legacy - probe</title>
+<hta:application id="probe" applicationname="Debrowser Probe"
+  border="thin" scroll="no" singleinstance="yes" contextmenu="no" />
+<style>
+  html, body { height: 100%; margin: 0; background: #16181d; color: #e6e9ef;
+               font: 13px "Segoe UI", Tahoma, sans-serif; overflow: hidden; }
+  #wrap { padding: 14px; height: 100%; box-sizing: border-box; }
+  h1 { font-size: 15px; margin: 0 0 3px 0; font-weight: 600; }
+  .sub { color: #8b93a3; font-size: 11px; margin-bottom: 10px; }
+  #out { width: 100%; height: 340px; box-sizing: border-box;
+         background: #0e1116; color: #cfd5e0; border: 1px solid #2a2f3a;
+         border-radius: 4px; font: 12px Consolas, "Courier New", monospace;
+         padding: 8px; white-space: pre; overflow: auto; }
+  .row { margin-top: 10px; }
+  button { background: #232833; color: #cfd5e0; border: 1px solid #2f3542;
+           border-radius: 4px; padding: 6px 12px; cursor: pointer; margin-right: 6px; }
+  button:hover { background: #2d3444; }
+  #verdict { margin-top: 10px; padding: 8px 10px; border-radius: 4px;
+             font-size: 12px; display: none; }
+  .go   { background: #1d3a24; color: #bfe8c9; border: 1px solid #2c5636; }
+  .stop { background: #3a2020; color: #f0c9c9; border: 1px solid #5a2f2f; }
+  .wait { background: #33301d; color: #ecdfb0; border: 1px solid #524c2c; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>Debrowser Legacy &mdash; capability probe</h1>
+  <div class="sub">Decides whether a WebView2 engine can live inside this HTA. Nothing is installed or changed.</div>
+  <textarea id="out" readonly>running&#8230;</textarea>
+  <div class="row">
+    <button id="copy">Select all (then Ctrl+C)</button>
+    <button id="again">Run again</button>
+  </div>
+  <div id="verdict"></div>
+</div>
+
+<script type="text/javascript">
+/* ES5 only: MSHTML tops out at IE11, which has no let, const, arrows,
+   template literals or classes. */
+"use strict";
+
+var lines = [];
+function say(k, v) { lines.push(pad(k, 30) + " = " + v); flush(); }
+function note(t)   { lines.push(t); flush(); }
+function pad(s, n) { s = String(s); while (s.length < n) s += " "; return s; }
+function flush()   { document.getElementById("out").value = lines.join("\r\n"); }
+
+/* ------------------------------------------------------------------ */
+/* Checks that need nothing but the HTA itself                         */
+/* ------------------------------------------------------------------ */
+
+function probeLocal() {
+  say("probe version", "M0/1");
+  say("document mode", document.documentMode || "unknown");
+  say("user agent", navigator.userAgent);
+
+  var fso = null;
+  try {
+    fso = new ActiveXObject("Scripting.FileSystemObject");
+    say("FileSystemObject", "ok");
+  } catch (e) {
+    say("FileSystemObject", "FAIL: " + e.message);
+  }
+
+  var sh = null;
+  try {
+    sh = new ActiveXObject("WScript.Shell");
+    say("WScript.Shell", "ok");
+  } catch (e) {
+    say("WScript.Shell", "FAIL: " + e.message);
+  }
+
+  /* Where the reconciliation files would live. Writable, or the whole
+     architecture has nowhere to put its state. */
+  var tmp = null;
+  if (fso && sh) {
+    try {
+      tmp = sh.ExpandEnvironmentStrings("%TEMP%") + "\\debrowser-legacy";
+      if (!fso.FolderExists(tmp)) fso.CreateFolder(tmp);
+      var probeFile = tmp + "\\writetest.txt";
+      var f = fso.CreateTextFile(probeFile, true);
+      f.WriteLine("ok");
+      f.Close();
+      fso.DeleteFile(probeFile);
+      say("temp dir writable", "ok  (" + tmp + ")");
+    } catch (e2) {
+      say("temp dir writable", "FAIL: " + e2.message);
+      tmp = null;
+    }
+  }
+  return { fso: fso, sh: sh, tmp: tmp };
+}
+
+/* ------------------------------------------------------------------ */
+/* Checks that need PowerShell                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The PowerShell half, as a script written to disk and run.
+ *
+ * Deliberately not piped: WScript.Shell.Exec().StdOut.ReadLine() blocks the
+ * HTA's single UI thread, so the script writes its own output file and this
+ * reads it afterwards. For a one-shot probe that is simpler and cannot deadlock.
+ */
+function powershellScript() {
+  return [
+    "param([string]$Out)",
+    "$ErrorActionPreference = 'Continue'",
+    "$r = New-Object System.Collections.ArrayList",
+    "function Add($k, $v) { [void]$r.Add(('{0,-30} = {1}' -f $k, $v)) }",
+    "",
+    "Add 'powershell version' $PSVersionTable.PSVersion.ToString()",
+    "Add 'language mode' $ExecutionContext.SessionState.LanguageMode",
+    "Add 'os' (Get-CimInstance Win32_OperatingSystem -EA SilentlyContinue).Caption",
+    "",
+    "# .NET Framework, which is what Add-Type compiles against.",
+    "try {",
+    "  $ndp = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full' -EA Stop",
+    "  Add '.NET Framework release' $ndp.Release",
+    "  Add '.NET Framework version' $ndp.Version",
+    "} catch { Add '.NET Framework' ('FAIL: ' + $_.Exception.Message) }",
+    "",
+    "$csc = Join-Path $env:WINDIR 'Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe'",
+    "Add 'csc.exe present' (Test-Path $csc)",
+    "",
+    "# THE decisive check: can this machine compile C# at runtime? Without it",
+    "# there is no way to build a WebView2 host without shipping a binary.",
+    "try {",
+    "  Add-Type -TypeDefinition 'public class DbProbe { public static int Ping() { return 42; } }' -EA Stop",
+    "  Add 'Add-Type compiles' ('ok (ping=' + [DbProbe]::Ping() + ')')",
+    "} catch { Add 'Add-Type compiles' ('FAIL: ' + $_.Exception.Message) }",
+    "",
+    "# WebView2 Evergreen Runtime, by its published client GUID.",
+    "$guid = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'",
+    "$found = $false",
+    "foreach ($root in @(",
+    "    'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\',",
+    "    'HKLM:\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\',",
+    "    'HKCU:\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\')) {",
+    "  try {",
+    "    $k = Get-ItemProperty ($root + $guid) -EA Stop",
+    "    if ($k.pv) { Add 'WebView2 runtime' $k.pv; Add 'WebView2 reg root' $root; $found = $true; break }",
+    "  } catch { }",
+    "}",
+    "if (-not $found) { Add 'WebView2 runtime' 'NOT FOUND' }",
+    "",
+    "# Install directory, and whether the loader DLL is anywhere near it.",
+    "$appDirs = @()",
+    "foreach ($base in @(",
+    "    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\\EdgeWebView\\Application'),",
+    "    (Join-Path $env:ProgramFiles 'Microsoft\\EdgeWebView\\Application'))) {",
+    "  if ($base -and (Test-Path $base)) { $appDirs += (Get-ChildItem $base -Directory -EA SilentlyContinue | % { $_.FullName }) }",
+    "}",
+    "if ($appDirs.Count) { Add 'WebView2 app dir' ($appDirs -join '; ') } else { Add 'WebView2 app dir' 'NOT FOUND' }",
+    "",
+    "# THE OTHER decisive check. WebView2Loader.dll normally ships WITH AN APP,",
+    "# not with the runtime. If it is absent everywhere, hand-written COM interop",
+    "# has no documented entry point and the WebView2 path may not exist.",
+    "# Bounded on purpose. A -Recurse over Program Files takes minutes and would",
+    "# read as a hang; the runtime's own directory is where the answer lives.",
+    "$loaders = @()",
+    "foreach ($d in $appDirs) {",
+    "  $loaders += (Get-ChildItem $d -Filter 'WebView2Loader.dll' -Recurse -Depth 2 -EA SilentlyContinue | % { $_.FullName })",
+    "}",
+    "$loaders = $loaders | Select -Unique | Select -First 6",
+    "if ($loaders.Count) { Add 'WebView2Loader.dll' ($loaders -join '; ') } else { Add 'WebView2Loader.dll' 'NOT FOUND ANYWHERE' }",
+    "",
+    "# Is the COM class registered? If it is, interop may not need the loader.",
+    "foreach ($progid in @('Microsoft.Web.WebView2.Core.CoreWebView2Environment')) {",
+    "  try { $t = [Type]::GetTypeFromProgID($progid); Add ('progid ' + $progid) (if_null $t) } catch { }",
+    "}",
+    "# Is anything WebView2-shaped registered for COM? Checked by name rather",
+    "# than by enumerating CLSID, which holds tens of thousands of keys.",
+    "$anyCom = $false",
+    "foreach ($n in @('Microsoft.Web.WebView2.Core.CoreWebView2Environment','WebView2.Environment')) {",
+    "  try { if (Get-Item ('HKLM:\\SOFTWARE\\Classes\\' + $n) -EA Stop) { Add ('com progid ' + $n) 'registered'; $anyCom = $true } } catch { }",
+    "}",
+    "if (-not $anyCom) { Add 'com progids' 'none of the probed names are registered' }",
+    "",
+    "# WMI, which is how per-tab memory would be measured at all.",
+    "try {",
+    "  $n = @(Get-CimInstance Win32_Process -EA Stop).Count",
+    "  Add 'WMI Win32_Process' ('ok (' + $n + ' processes)')",
+    "} catch { Add 'WMI Win32_Process' ('FAIL: ' + $_.Exception.Message) }",
+    "",
+    "Set-Content -Path $Out -Value ($r -join \"`r`n\") -Encoding UTF8"
+  ].join("\r\n");
+}
+
+function probePowershell(ctx) {
+  if (!ctx.fso || !ctx.sh || !ctx.tmp) {
+    say("powershell checks", "SKIPPED (no filesystem or shell access)");
+    return;
+  }
+  var ps1 = ctx.tmp + "\\probe.ps1";
+  var outFile = ctx.tmp + "\\probe.out.txt";
+
+  try {
+    /* if_null is referenced by the script above for a tidy null report. */
+    var script = "function if_null($v) { if ($null -eq $v) { 'null' } else { $v } }\r\n" + powershellScript();
+    var f = ctx.fso.CreateTextFile(ps1, true);
+    f.Write(script);
+    f.Close();
+  } catch (e) {
+    say("write probe.ps1", "FAIL: " + e.message);
+    return;
+  }
+
+  try { if (ctx.fso.FileExists(outFile)) ctx.fso.DeleteFile(outFile); } catch (e0) { }
+
+  var cmd = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'
+          + ps1 + '" -Out "' + outFile + '"';
+  var code;
+  try {
+    /* Hidden, and waited on. This blocks the UI, which is acceptable for a
+       one-shot diagnostic and is why the real thing uses a polled file
+       instead. */
+    code = ctx.sh.Run(cmd, 0, true);
+    say("powershell exit code", code);
+  } catch (e2) {
+    say("powershell", "FAIL: " + e2.message +
+        "  (blocked by policy or not installed?)");
+    return;
+  }
+
+  try {
+    if (!ctx.fso.FileExists(outFile)) {
+      say("powershell output", "FAIL: no output file written");
+      return;
+    }
+    var t = ctx.fso.OpenTextFile(outFile, 1);
+    var body = t.AtEndOfStream ? "" : t.ReadAll();
+    t.Close();
+    note("");
+    note(body);
+  } catch (e3) {
+    say("read powershell output", "FAIL: " + e3.message);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Verdict                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Turn the report into the one decision this probe exists to make.
+ *
+ * Deliberately conservative: "maybe" is a real answer here, and claiming the
+ * WebView2 path works when the loader is missing would restart exactly the
+ * guesswork this probe is meant to end.
+ */
+function verdict() {
+  var text = lines.join("\n");
+  var el = document.getElementById("verdict");
+  /* Matched by regex, not by column position: the report is space-padded and
+     tying the verdict to an exact width breaks the moment a key is renamed. */
+  var hasRuntime = /WebView2 runtime\s+= (?!NOT FOUND)\S/.test(text);
+  var hasLoader  = /WebView2Loader\.dll\s+= (?!NOT FOUND)\S/.test(text);
+  var canCompile = /Add-Type compiles\s+= ok/.test(text);
+
+  var msg, cls;
+  if (hasRuntime && hasLoader && canCompile) {
+    cls = "go";
+    msg = "GO — runtime present, loader found, C# compiles on this machine. "
+        + "The WebView2 path is worth building: M1 then M2.";
+  } else if (hasRuntime && canCompile) {
+    cls = "wait";
+    msg = "MAYBE — runtime present and C# compiles, but WebView2Loader.dll was not "
+        + "found. Interop may still work through the registered COM class; this is "
+        + "the case that needs one small spike before M2 is committed to.";
+  } else {
+    cls = "stop";
+    msg = "STOP — " + (!hasRuntime ? "no WebView2 runtime. " : "")
+        + (!canCompile ? "cannot compile C# here. " : "")
+        + "The WebView2 engine cannot be built on this machine; the plan stops at "
+        + "MSHTML and says so.";
+  }
+  el.className = cls;
+  el.innerHTML = msg;
+  el.style.display = "block";
+}
+
+/* ------------------------------------------------------------------ */
+
+function run() {
+  lines = [];
+  document.getElementById("verdict").style.display = "none";
+  note("Debrowser Legacy probe — " + (new Date()).toString());
+  note("");
+  var ctx = probeLocal();
+  note("");
+  note("--- powershell ---");
+  probePowershell(ctx);
+  verdict();
+}
+
+document.getElementById("again").onclick = function () {
+  document.getElementById("out").value = "running…";
+  window.setTimeout(run, 50);
+};
+document.getElementById("copy").onclick = function () {
+  var o = document.getElementById("out");
+  o.focus(); o.select();
+};
+
+window.onload = function () {
+  /* Let the window paint before the blocking PowerShell call. */
+  window.setTimeout(run, 60);
+};
+</script>
+</body>
+</html>

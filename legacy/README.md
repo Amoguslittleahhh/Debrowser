@@ -6,6 +6,31 @@ The residency architecture, on an engine from 2013, in one file.
 mshta.exe debrowser.hta
 ```
 
+## Run the probe first
+
+```
+mshta.exe probe.hta
+```
+
+`probe.hta` answers whether a **WebView2** engine can exist inside an HTA on
+your machine, which decides whether this can ever render the modern web. It
+installs nothing and changes nothing: it reads registry keys, tries to compile
+one trivial C# class, and reports.
+
+It ends in one of three verdicts:
+
+- **GO** — WebView2 runtime present, `WebView2Loader.dll` found, and C# compiles
+  here. The modern engine is worth building.
+- **MAYBE** — runtime and compiler present but no loader DLL. Interop might
+  still work through the registered COM class; needs one small spike first.
+- **STOP** — the WebView2 engine cannot be built on this machine, and the honest
+  answer is MSHTML only.
+
+The reason this exists rather than being reasoned about: `WebView2Loader.dll` is
+distributed *with applications*, not with the Evergreen Runtime, so whether it
+is present at all is a property of your machine and not something that can be
+settled from a spec.
+
 ## Read this first
 
 **It is unsandboxed.** An HTA runs with your full user privileges, and MSHTML no
