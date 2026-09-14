@@ -298,3 +298,37 @@ canvas, an open socket. Those are capped at FROZEN and hold their full footprint
 indefinitely because discarding them would lose state. Hibernation returns ~half
 of that, losslessly, for a 4-12ms resume - and it is the only lever that works on
 them at all.
+
+---
+
+## Hibernation in the benchmark — 605MB without discarding anything
+
+`npm run bench -- --tabs=6 --mix=bigheap`, six application-weight tabs (120-200MB
+of live JS each):
+
+                    baseline   governed    delta
+    total resident   1084 MB     479 MB   -605 MB  (-55.8%)
+    per tab          180.7 MB    79.8 MB
+    renderers              7          7        0
+    tab states       all live    { active: 1, hibernated: 5 }
+
+**Nothing was discarded.** All seven renderers stayed alive with their page state
+intact; the saving is entirely pages moved into the compressor. This is the first
+workload here where reclaim cost no reload at all.
+
+### Why the other mixes show the tier never firing
+
+A run on `noforms` reports `{ active: 1, discarded: 12, cold: 5, frozen: 2 }` and
+no hibernation at all. That is the gate working, not a failure: those fixtures
+hold roughly 10-36MB private, and the 30MB floor correctly excludes them because
+the measured return at that size (~10MB) is not worth a syscall and a resume
+stall on a tab that could simply be discarded for more.
+
+It is worth stating because the two readings look contradictory. Hibernation is
+not a general-purpose lever - it is for tabs heavy enough to be worth compressing
+and protected enough that discarding them is not allowed. `--mix=bigheap` exists
+so that case is reproducible rather than asserted.
+
+The headline workload is unaffected either way: 30 tabs on the default cap
+measured 363MB / 12.1MB per tab with the tier live, against 362MB / 12.1MB
+before it existed.

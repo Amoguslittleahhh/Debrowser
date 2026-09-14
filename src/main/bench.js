@@ -31,7 +31,13 @@ const MIXES = {
   noforms: ['heavy.html', 'idle.html', 'animated.html', 'busy.html'],
   // Pages carrying cross-site subframes, as most real pages do. This is the
   // only mix that shows what site isolation costs; see test/pages/embeds.html.
-  embeds: ['embeds.html']
+  embeds: ['embeds.html'],
+  // Pages holding a few hundred megabytes of live JavaScript, which is what an
+  // application tab looks like. The only mix that reaches the hibernation
+  // threshold: the others are light enough that the 30MB private floor
+  // correctly excludes them, so a run on `noforms` shows the tier never firing
+  // and says nothing about whether it works.
+  bigheap: ['bigheap.html?mb=200', 'bigheap.html?mb=120']
 };
 
 async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, freezeMs, distinctOrigins, mix = 'default' }) {
@@ -46,6 +52,11 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
   if (governor) {
     cfg.coldAfterMs = coldMs ?? 2000;
     cfg.freezeAfterMs = freezeMs ?? 4000;
+    // Compressed for the same reason as the rest of the ladder. Left at its
+    // real three minutes, hibernation simply never fires inside a benchmark
+    // run, and the tier would look like it does nothing rather than like it was
+    // never reached.
+    cfg.hibernate.afterMs = 5000;
     cfg.minLifetimeMs = 1500;
     cfg.tickMs = 500;
     governor.stop();
