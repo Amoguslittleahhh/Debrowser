@@ -42,6 +42,10 @@ Wine cannot run it: Wine implements `mshtml` through Gecko but its `mshta.exe`
 is a stub that prints `mshta.exe is a stub!` and exits, so `.hta` files do not
 run there at all. That was tried and abandoned.
 
+Run `node legacy/verdict-test.js` to check that yourself; it extracts the script
+straight out of `probe.hta`, so it always tests the file that ships rather than a
+copy of it.
+
 What *was* verified, by executing the probe's own script with stubs: the JScript
 parses and is ES5-clean, the markup is balanced, the generated PowerShell renders
 with balanced braces, parens and quotes, and the GO / MAYBE / STOP verdict logic
