@@ -195,3 +195,61 @@ while anything is animating, refused at the live-renderer cap, routed through
 the same concurrent-load limit as any other realise, and expired by the idle
 ladder if the user does not act on it. The smoke suite asserts the one-at-a-time
 rule and the expiry.
+
+---
+
+## M4 / M4b — does trimming a hidden renderer return memory? YES (after two false negatives)
+
+`process_madvise(MADV_PAGEOUT)` over a hidden, frozen renderer's private
+anonymous regions, with 4GB of lzo-rle zram configured and `CAP_SYS_NICE` held.
+
+### The result that counts
+
+Renderer holding a 254MB live JS heap (`test/pages/bigheap.html`):
+
+                     PSS     private  | sys avail    zram stored / physical
+    before trim    327.5      303.4   |  15089 MB      0.0  /   0.0 MB
+    10s after       57.9       33.7   |  15238 MB    264.2  / 123.6 MB
+
+    private freed from process : 269.7 MB
+    zram physical growth       : 123.6 MB   (compression 2.1:1)
+    NET system reclaim         : 146.1 MB
+    MemAvailable moved         : +149 MB    (independent corroboration)
+    resume cost                : 12 ms
+
+The net figure is what matters: 269.7MB left the process and 123.6MB of it
+reappeared as zram's own allocation, so the system got 146MB back. System-wide
+MemAvailable agreeing to within 3MB is the check that distinguishes a real
+saving from pages merely moving into the compressor's accounting - without it
+this would look like a 270MB win.
+
+A 2.1:1 ratio is what varied object data does. An earlier sanity check hit
+39:1 because the test buffers were a single repeated byte; a fixture that
+flatters the mechanism is worse than no fixture, which is why
+`bigheap.html` builds deliberately varied records.
+
+### Two false negatives first, both mine
+
+The first two runs reported ~1MB reclaimed and were both invalid.
+
+**The probe was broken.** V8 reserves an enormous virtual address range for its
+heap cages - measured at **1446.7 GiB** in one renderer. The probe walked
+`/proc/<pid>/maps` and handed every private anonymous region to
+`process_madvise`, which returns at most `0x7FFFF000` bytes per call. The
+reservations consumed the entire per-call cap before reaching a single resident
+page: analysis of the renderer's smaps showed the cap was hit after **0 of 214
+regions**, covering **0 MiB of 281 MiB** resident. The syscall returned success
+each time.
+
+**And the compressor had gone away.** zram's `disksize` reset to 0 between setup
+and execution, so there was no swap to page into either. Two independent faults
+producing the same null result, which is why it read as convincing.
+
+Fixed by reading `smaps` rather than `maps` and advising only regions with
+`Rss > 0`, batched under the syscall cap - 115 regions and 917MB advised rather
+than 214 regions and 1.4TiB. The harness now refuses to emit a figure at all
+unless zram is active, so this cannot silently recur.
+
+**The lesson worth keeping:** a syscall returning success is not evidence it did
+anything. Both `advised=` and a system-wide counter had to be read before the
+result meant anything.
