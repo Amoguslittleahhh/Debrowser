@@ -36,38 +36,39 @@ const platform = require('../platform');
  * apart from refreshing process priority, which other subsystems may have
  * changed underneath us.
  *
+ * A demotion can stop short: freezing is refused, or the trim behind
+ * HIBERNATED is unavailable. So `promote` and `demote` return *the tier the tab
+ * actually reached*, never a success flag, and this is the one place that
+ * records a tier change. Those paths used to assign `tab.tier` themselves and
+ * report failure, which left the tab in a tier nobody was told about -
+ * `tierChangedAt` stale, no `updated` event, and the governor's counters keyed
+ * off a transition reported as not having happened.
+ *
  * @param {object} tab
  * @param {string} target
  * @param {object} ctx - { cfg, ipcHub, log }
+ * @returns {Promise<string|null>} the tier now in effect, or null if unmoved
  */
 async function applyTier(tab, target, ctx) {
   const { cfg, log } = ctx;
   const current = tab.tier;
   if (current === target && target !== Tier.ACTIVE) {
     refreshPriority(tab, cfg);
-    return false;
+    return null;
   }
 
   const goingUp = tierRank(target) < tierRank(current);
-  const result = goingUp
+  const reached = goingUp
     ? await promote(tab, target, ctx)
     : await demote(tab, target, ctx);
 
-  // A demotion can stop short: freezing is refused, or the trim behind
-  // HIBERNATED is unavailable. Those paths used to assign `tab.tier` themselves
-  // and return false, which left the tab in a tier nobody was told about -
-  // `tierChangedAt` stale, no `updated` event, and the governor's counters
-  // keyed off a transition that had been reported as not happening. So they
-  // return the tier they actually reached instead, and every tier change in
-  // this browser goes through the one place that records it.
-  const reached = typeof result === 'string' ? result : (result ? target : null);
-  if (reached && reached !== current) {
-    tab.tier = reached;
-    tab.tierChangedAt = Date.now();
-    log(`tab ${tab.id}: ${current} -> ${reached}`);
-    tab.emit('updated');
-  }
-  return reached === target;
+  if (!reached || reached === current) return null;
+
+  tab.tier = reached;
+  tab.tierChangedAt = Date.now();
+  log(`tab ${tab.id}: ${current} -> ${reached}`);
+  tab.emit('updated');
+  return reached;
 }
 
 /* ------------------------------------------------------------------ */
@@ -109,7 +110,7 @@ async function promote(tab, target, ctx) {
   // a visible page is not throttled either way - while touching renderer
   // preferences on a page the governor may have just frozen.
   refreshPriority(tab, cfg, target);
-  return true;
+  return target;
 }
 
 /* ------------------------------------------------------------------ */
@@ -123,7 +124,7 @@ async function demote(tab, target, ctx) {
     return discard(tab, ctx);
   }
 
-  if (!tab.isLive) return false;
+  if (!tab.isLive) return null;
 
   refreshPriority(tab, cfg, target);
 
@@ -148,12 +149,12 @@ async function demote(tab, target, ctx) {
   // mark a tab as having been idle long enough to be a discard candidate -
   // which is the reclaim that actually returns memory.
 
-  // `isStopped` rather than a tier comparison: a tab stepping from FROZEN to
-  // HIBERNATED is already stopped, and freezing it again would re-attach the
-  // debugger session that the freeze below deliberately detached - paying
-  // ~2.4MB inside the renderer, on the tier whose entire purpose is to give
-  // memory back, moments before trimming it.
-  if (tierRank(target) >= tierRank(Tier.FROZEN) && !isStopped(tab.tier)) {
+  // Only when the freeze step lies between where the tab is and where it is
+  // going. A tab stepping from FROZEN to HIBERNATED has already been through
+  // it, and freezing again would re-attach the debugger session the freeze
+  // below deliberately detached - paying ~2.4MB inside the renderer, on the
+  // tier whose entire purpose is to give memory back, moments before trimming.
+  if (tierRank(target) >= tierRank(Tier.FROZEN) && tierRank(tab.tier) < tierRank(Tier.FROZEN)) {
     const frozen = await tab.cdp.freeze();
     if (!frozen) {
       // Freezing is the one step that can legitimately fail (DevTools
@@ -171,19 +172,14 @@ async function demote(tab, target, ctx) {
   }
 
   if (target === Tier.HIBERNATED) {
-    // Once per renderer, not once per tab. Several tabs of the same site share
-    // a process, and the second trim of a process trimmed moments ago pages out
-    // whatever the first one left - a syscall for nothing. The governor owns
-    // the set and clears it every tick.
-    const trimmed = ctx.trimmedPids;
-    if (trimmed && trimmed.has(tab.pid)) {
-      tab.trimmedAt = Date.now();
-      return true;
-    }
-
     // Strictly after the freeze. Trimming a page still running its own tasks
     // just means it faults everything straight back in, and the freeze is what
     // makes the pages cold enough to be worth taking.
+    //
+    // Deduplicating repeat trims of one renderer is `trimProcessMemory`'s job,
+    // not this function's: a trim acts on a process, several tabs of a site
+    // share one, and the tier ladder walks tabs. It reports 0 bytes for a
+    // redundant call, which is a fine outcome here - null is the only refusal.
     const advised = await platform.trimProcessMemory(tab.pid, log);
     if (advised == null) {
       // Trimming is unavailable or was refused. The tab is frozen, which is a
@@ -191,11 +187,10 @@ async function demote(tab, target, ctx) {
       log(`tab ${tab.id}: trim unavailable; holding at frozen`);
       return Tier.FROZEN;
     }
-    if (trimmed) trimmed.add(tab.pid);
     tab.trimmedAt = Date.now();
   }
 
-  return true;
+  return target;
 }
 
 /**
@@ -233,7 +228,7 @@ async function discard(tab, ctx) {
   }
 
   tab.teardownView();
-  return true;
+  return Tier.DISCARDED;
 }
 
 /* ------------------------------------------------------------------ */

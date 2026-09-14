@@ -79,6 +79,7 @@
 #include <sys/uio.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 #ifndef MADV_COLD
 #define MADV_COLD 20
@@ -191,30 +192,25 @@ static long long trim_process(pid_t pid, int *err) {
  * syscall, same permission path, a few hundred microseconds, and a real answer.
  */
 static int self_test(void) {
-    int ready[2], done[2];             /* child -> parent, parent -> child */
+    int ready[2];                      /* child -> parent: "my page exists" */
     if (pipe(ready) < 0) return 0;
-    if (pipe(done) < 0) { close(ready[0]); close(ready[1]); return 0; }
 
     pid_t child = fork();
-    if (child < 0) {
-        close(ready[0]); close(ready[1]); close(done[0]); close(done[1]);
-        return 0;
-    }
+    if (child < 0) { close(ready[0]); close(ready[1]); return 0; }
 
     if (child == 0) {
         /* Child: hold one dirty anonymous page so there is something resident
-           to advise, say so, then block until the parent is done with us. */
-        close(ready[0]); close(done[1]);
+           to advise, say so, then wait to be killed. */
+        close(ready[0]);
         volatile char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
                                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (page != MAP_FAILED) *page = 1;
         char b = 1;
         while (write(ready[1], &b, 1) < 0 && errno == EINTR) { }
-        while (read(done[0], &b, 1) < 0 && errno == EINTR) { }
-        _exit(0);
+        for (;;) pause();
     }
 
-    close(ready[1]); close(done[0]);
+    close(ready[1]);
 
     /* Wait for the page to exist before advising it. Without this the child may
        not have touched anything yet, the advise loop finds no resident region,
@@ -223,14 +219,13 @@ static int self_test(void) {
     char b;
     ssize_t got;
     while ((got = read(ready[0], &b, 1)) < 0 && errno == EINTR) { }
+    close(ready[0]);
 
     int err = 0;
     long long r = got == 1 ? trim_process(child, &err) : -1;
 
-    close(ready[0]);
-    close(done[1]);                    /* releases the child's read() */
-    int status;
-    while (waitpid(child, &status, 0) < 0 && errno == EINTR) { }
+    kill(child, SIGKILL);
+    while (waitpid(child, NULL, 0) < 0 && errno == EINTR) { }
 
     /* Zero bytes advised means nothing was actually attempted; that is not a
        demonstration that trimming works. */
