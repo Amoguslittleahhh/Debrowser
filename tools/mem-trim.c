@@ -37,6 +37,18 @@
  *   2. Batch under the per-call cap. Even with reservations excluded, a large
  *      renderer's resident anonymous memory can exceed 0x7FFFF000 in one call.
  *
+ * WHAT IS DELIBERATELY LEFT BEHIND. Measured against a live renderer holding a
+ * 120MB fixture heap: 227 MiB private resident, of which this advises 148 MiB
+ * and skips 79 MiB. All 79 MiB is private *file-backed* - the Chromium binary's
+ * own dirtied pages and mapped resources - and none of it is a named anonymous
+ * region ([anon:...] appeared 0 times in that renderer's smaps, so the named-
+ * anon exclusion this filter appears to make is not one it ever performs in
+ * practice). Skipping it is correct: clean file pages are reclaimable by the
+ * kernel without a compressor at all, so advising them spends the per-call
+ * budget to duplicate work the page cache already does. The number is recorded
+ * here because "the helper skips a third of private memory" reads like a bug
+ * until you know what the third is.
+ *
  * Permissions: process_madvise(2) with MADV_PAGEOUT against another process
  * needs ptrace-read access (same uid suffices) AND CAP_SYS_NICE. A desktop
  * launch has the first and not the second, so this needs a one-time
@@ -66,6 +78,7 @@
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
+#include <sys/wait.h>
 
 #ifndef MADV_COLD
 #define MADV_COLD 20
@@ -163,15 +176,65 @@ static long long trim_process(pid_t pid, int *err) {
 }
 
 /*
- * Can this build trim at all? Answered by trying it on ourselves, which needs
- * the same capability and costs nothing: our own pages are advised cold and
- * fault straight back. Reporting this at startup is what lets the browser say
- * "unavailable" rather than silently doing nothing on every tier transition.
+ * Can this build trim at all?
+ *
+ * Answered by trimming a *child*, not ourselves. Since Linux 6.13,
+ * process_madvise on your own mm is permitted without CAP_SYS_NICE (the
+ * capability check is skipped when the target mm is the caller's), so a
+ * self-trim succeeds on any modern kernel and proves nothing about the case
+ * that matters - advising another process's pages, which is every real trim
+ * this helper performs. On such a host the old self-test reported "can trim"
+ * with no capability held, and the browser then enabled hibernation, froze
+ * tabs, and collected EPERM on every one of them.
+ *
+ * So: fork, have the child touch a page and wait, trim the child, reap it. Same
+ * syscall, same permission path, a few hundred microseconds, and a real answer.
  */
 static int self_test(void) {
+    int ready[2], done[2];             /* child -> parent, parent -> child */
+    if (pipe(ready) < 0) return 0;
+    if (pipe(done) < 0) { close(ready[0]); close(ready[1]); return 0; }
+
+    pid_t child = fork();
+    if (child < 0) {
+        close(ready[0]); close(ready[1]); close(done[0]); close(done[1]);
+        return 0;
+    }
+
+    if (child == 0) {
+        /* Child: hold one dirty anonymous page so there is something resident
+           to advise, say so, then block until the parent is done with us. */
+        close(ready[0]); close(done[1]);
+        volatile char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (page != MAP_FAILED) *page = 1;
+        char b = 1;
+        while (write(ready[1], &b, 1) < 0 && errno == EINTR) { }
+        while (read(done[0], &b, 1) < 0 && errno == EINTR) { }
+        _exit(0);
+    }
+
+    close(ready[1]); close(done[0]);
+
+    /* Wait for the page to exist before advising it. Without this the child may
+       not have touched anything yet, the advise loop finds no resident region,
+       and the helper reports success having made no syscall at all - the same
+       class of false positive as advising untouched reservations. */
+    char b;
+    ssize_t got;
+    while ((got = read(ready[0], &b, 1)) < 0 && errno == EINTR) { }
+
     int err = 0;
-    long long r = trim_process(getpid(), &err);
-    return (r >= 0 && err == 0) ? 1 : 0;
+    long long r = got == 1 ? trim_process(child, &err) : -1;
+
+    close(ready[0]);
+    close(done[1]);                    /* releases the child's read() */
+    int status;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) { }
+
+    /* Zero bytes advised means nothing was actually attempted; that is not a
+       demonstration that trimming works. */
+    return (r > 0 && err == 0) ? 1 : 0;
 }
 
 int main(void) {

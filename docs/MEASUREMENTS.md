@@ -294,10 +294,48 @@ is ~0.2MB against ~48% of a hibernated one - and the residency work already
 reaches 8.1MB per open tab at 45 tabs.
 
 Where it matters is the **protected set**: tabs holding unsubmitted input, a live
-canvas, an open socket. Those are capped at FROZEN and hold their full footprint
-indefinitely because discarding them would lose state. Hibernation returns ~half
-of that, losslessly, for a 4-12ms resume - and it is the only lever that works on
-them at all.
+canvas, an open socket. Those cannot be discarded without losing state, so
+without this tier they hold their full footprint indefinitely. Hibernation
+returns ~half of that, losslessly, for a 4-12ms resume - and it is the only lever
+that works on them at all.
+
+A code review caught that this did not actually happen: every "do not destroy
+this tab" protection capped at FROZEN, one rank above HIBERNATED, so the tier was
+unreachable for exactly the tabs it was built for. With the protections capped at
+HIBERNATED instead, `--mix=bigheap` at 12 tabs measures:
+
+```
+                     baseline    governed
+total resident        1409 MB      481 MB      -928 MB  (-65.9%)
+system available     14125 MB    14560 MB      +435 MB
+compressor holding         -       267 MB   from 576 MB stored
+tab states                      {"active":1,"discarded":4,"hibernated":7}
+```
+
+The independent `MemAvailable` reading is the one that makes it trustworthy: 576
+MB left the renderers and 267 MB came back as zram's own allocation, so the net
+is real and roughly half the per-process figure - the 2:1 accounting trap, seen
+directly.
+
+### The capability probe was testing the wrong process
+
+`mem-trim`'s `caps` command answered "can this machine trim?" by trimming
+**itself**. Since Linux 6.13 `process_madvise` skips the `CAP_SYS_NICE` check
+when the target mm is the caller's own, so on any current kernel that self-test
+succeeds whether or not the capability is held - while every real trim, which
+targets a renderer, returns `EPERM`. Measured on this host (6.18), with the
+capability dropped:
+
+```
+old helper, capsh --drop=cap_sys_nice   ->  caps linux 1     (wrong)
+new helper, capsh --drop=cap_sys_nice   ->  caps linux 0
+new helper, capability held             ->  caps linux 1
+```
+
+The helper now forks a child, waits for it to dirty a page, and trims *that* -
+the same syscall down the same permission path as a real trim - and reports
+failure if zero bytes were advised, since a call that never happened is not a
+demonstration that trimming works.
 
 ---
 

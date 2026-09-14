@@ -142,7 +142,9 @@ const padL = (s, n) => String(s).padStart(n);
   if (sys.zramPhysicalMB != null) {
     row('compressor holding', '—',
         `${sys.zramPhysicalMB} MB`,
-        `${sys.zramStoredMB} MB stored`);
+        // Kept inside the column width: at 13 characters "576 MB stored"
+        // overflowed into the figure beside it and the two ran together.
+        `from ${sys.zramStoredMB}MB`);
   }
   if (on.compression && !on.compression.available) {
     console.log(`\n  note: no swap or zram configured, so hibernation is inert on this host.`);
