@@ -426,3 +426,51 @@ bound. 8a is closed with no change made: capping navigation history would save
 4KB against a per-tab cost that is already approximately zero.
 
 The whole of the remaining cost is now the 238MB intercept.
+
+---
+
+## 8b / 8c — the fixed overhead is irreducible. The investigation is closed.
+
+### 8b — are the caches sized from host RAM?  No.
+
+Six tabs, governor off, two reps each, on a 16GB host:
+
+    variant                  total    delta
+    baseline                 316 MB       0
+    disk-cache=1MB           316 MB       0
+    media-cache=1MB          315 MB      -1
+    v8 code cache off        316 MB       0
+    main-process V8 tuning   316 MB       0
+    all four                 316 MB       0
+
+Every variant inside ±1MB, which is noise. Chromium's caches are not sized from
+available RAM in any way these flags reach, and tuning the *browser* process's
+own V8 (`--optimize-for-size`, `--max-old-space-size=64`) does nothing either.
+
+### 8c — the true per-process floor: not measurable
+
+`--single-process` collapses every renderer into the browser process, which
+would have bounded what 8b could ever have been worth. It does not run: the
+harness produces no result at all, the same failure as `--no-zygote` in M7.
+
+### The conclusion
+
+Three independent attacks on the 238MB of fixed overhead, all measuring zero:
+
+    M7   collapse the GPU, network and zygote processes   nothing, or broken
+    8b   bound the caches inside them                     nothing
+    8c   collapse everything into one process             will not run
+
+Combined with M1's finding that a bare Electron app with one `about:blank` view
+already holds 82MB in its browser process, **the fixed overhead is Electron's
+and cannot be reduced from outside Chromium.** It is not a lever this project
+has failed to pull; it is not a lever.
+
+With 8a showing there is no per-open-tab cost either, the model reduces to:
+
+    total(n) = 238 MB fixed + 13.2 MB x min(n, liveCap)
+
+Every term in that expression is now at a measured floor. **This browser is
+finished on memory.** What remains is not optimisation but a different
+architecture - a lighter engine, which M6 already argued costs the CDP control
+surface the whole governor depends on.
