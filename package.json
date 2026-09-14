@@ -1,6 +1,6 @@
 {
   "name": "debrowser",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "A memory-adaptive web browser: minimum RAM and CPU per tab, without costing smoothness.",
   "main": "src/main/main.js",
@@ -9,11 +9,12 @@
     "start:economy": "electron . --profile=economy",
     "start:performance": "electron . --profile=performance",
     "bench": "node bench/bench.js",
-    "smoke": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu",
+    "smoke": "electron . --smoke-test --disable-gpu",
     "start:minimal": "electron . --profile=minimal",
     "build:ksm": "cc -O2 -Wall -o tools/ksm-launch tools/ksm-launch.c",
     "build:memtrim": "cc -O2 -Wall -o tools/mem-trim tools/mem-trim.c",
-    "start:merged": "npm run build:ksm && tools/ksm-launch electron ."
+    "start:merged": "npm run build:ksm && tools/ksm-launch electron .",
+    "smoke:headless": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu"
   },
   "devDependencies": {
     "electron": "^44.0.0"
