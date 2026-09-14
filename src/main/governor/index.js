@@ -29,11 +29,13 @@
  *     CPU to recover memory the page will immediately allocate again.
  */
 
-const { Tier, Pressure, tierRank, TIER_ORDER, MB } = require('../config');
+const { Tier, Pressure, tierRank, TIER_ORDER, isStopped, MB } = require('../config');
 const { Metrics } = require('./metrics');
 const { BoostController } = require('./boost');
 const { applyTier, refreshPriority } = require('./tiers');
 const { HeapLimiter } = require('./heap-limit');
+const { readProcessMemory } = require('../memory');
+const platform = require('../platform');
 
 /** Refresh per-tab heap/CPU every N ticks; each needs a CDP round trip. */
 const HEAP_SAMPLE_EVERY = 3;
@@ -58,7 +60,20 @@ class Governor {
     this.tickCount = 0;
     this.pressure = Pressure.NONE;
     this.running = false;
-    this.stats = { discards: 0, freezes: 0, settles: 0, reclaimedMB: 0 };
+    this.stats = {
+      discards: 0, freezes: 0, settles: 0, reclaimedMB: 0,
+      hibernations: 0, hibernateReclaimedMB: 0
+    };
+
+    /**
+     * Whether the OS can trim a renderer here at all, resolved once at start.
+     * Null until answered, which reads as "no" - a tier that silently does
+     * nothing is worse than one that has not started yet.
+     */
+    this.trimAvailable = false;
+    this.trimReason = 'not probed';
+    this.hibernationSamples = [];
+    this.hibernationDisabled = false;
   }
 
   start() {
@@ -68,6 +83,33 @@ class Governor {
     }, this.cfg.tickMs);
     if (typeof this.timer.unref === 'function') this.timer.unref();
     this.log(`governor started: budget ${this.cfg.memoryBudgetMB}MB, profile ${this.cfg.profile}`);
+    this.probeTrim();
+  }
+
+  /**
+   * Ask once whether this machine can hand a renderer's pages to a compressor.
+   *
+   * Asynchronous and deliberately not awaited: it spawns a helper and has it
+   * trim itself, which takes a few milliseconds, and until it answers
+   * `trimAvailable` stays false so nothing hibernates. Starting a tick late is
+   * the right failure - the alternative is blocking startup on a capability
+   * that is absent on most machines anyway.
+   */
+  probeTrim() {
+    if (!this.cfg.hibernate.enabled) {
+      this.trimReason = 'disabled by configuration';
+      return;
+    }
+    platform.trimCapability(this.log).then((cap) => {
+      this.trimAvailable = cap.available;
+      this.trimReason = cap.reason;
+      this.log(cap.available
+        ? `hibernation available via ${cap.mechanism}`
+        : `hibernation unavailable: ${cap.reason}`);
+    }).catch((err) => {
+      this.trimAvailable = false;
+      this.trimReason = err.message;
+    });
   }
 
   stop() {
@@ -126,7 +168,7 @@ class Governor {
 
     for (const tab of this.tabs.all()) {
       if (!tab.isLive || !tab.cdp) continue;
-      if (tab.tier === Tier.FROZEN) continue;
+      if (isStopped(tab.tier)) continue;   // stopped: cannot answer, and re-attaching undoes the point
       if (tab.boosted) continue; // never add CDP traffic to an animating tab
 
       // Two consumers want this reading, and it costs a CDP round trip, so it
@@ -300,6 +342,17 @@ class Governor {
         target = Tier.FROZEN;
       }
 
+      // Hibernate: freeze, then hand the cold pages to the OS compressor. A
+      // separate rule from freezing above, and deliberately so - that one is
+      // about CPU and fires only on tabs still burning it, this one is about
+      // memory and fires on quiet tabs the other deliberately leaves alone.
+      //
+      // Measured at 29-49% of a renderer's private memory returned, for a
+      // 4-12ms resume. Nothing is lost: the process stays alive and its state
+      // is untouched, which is what makes it the only lever that works on tabs
+      // the protections refuse to discard.
+      if (this.shouldHibernate(tab, idle, accel)) target = Tier.HIBERNATED;
+
       // Discard on time alone, independent of pressure. A tab nobody has
       // looked at for a quarter of an hour is holding ~100MB on the chance
       // it gets revisited; the reload when it does is cheaper than carrying
@@ -314,8 +367,10 @@ class Governor {
 
       target = this.clampToProtections(tab, target);
       if (tierRank(target) > tierRank(tab.tier)) {
-        await applyTier(tab, target, this.ctx());
+        const before = target === Tier.HIBERNATED ? tab.privateMB : null;
+        const moved = await applyTier(tab, target, this.ctx());
         if (target === Tier.FROZEN) this.stats.freezes += 1;
+        if (moved && tab.tier === Tier.HIBERNATED) this.recordHibernation(tab, before);
       }
     }
   }
@@ -442,10 +497,13 @@ class Governor {
     if (ceilingRank <= currentRank) return null;
 
     let next = TIER_ORDER[currentRank + 1];
-    // Under memory pressure, stepping through FROZEN is counterproductive:
-    // it costs memory rather than saving any (see runIdleLadder). When this
-    // tab may be discarded outright, go straight there.
-    if (next === Tier.FROZEN && ceiling === Tier.DISCARDED) next = Tier.DISCARDED;
+    // Under memory pressure, stepping through the stopped tiers is the wrong
+    // move when this tab may be discarded outright: FROZEN costs memory rather
+    // than saving any, and HIBERNATED returns about half a renderer where
+    // discarding returns all of it. Both are worth having on the *idle* ladder,
+    // where nothing is contended and losing no state is the point; under real
+    // pressure the full reclaim is what is needed, so go straight there.
+    if (isStopped(next) && ceiling === Tier.DISCARDED) next = Tier.DISCARDED;
     return next;
   }
 
@@ -488,6 +546,76 @@ class Governor {
     if (!discardAllowed) cap(Tier.FROZEN);
 
     return floor;
+  }
+
+  /**
+   * Is this tab worth hibernating right now?
+   *
+   * The renderer-granularity clause is the load-bearing one. Under
+   * `process-per-site` several tabs share a process, and trimming a process
+   * whose sibling is still live just means the sibling faults everything back
+   * in - so the whole group has to be eligible or none of it is.
+   */
+  shouldHibernate(tab, idle, accel) {
+    const cfg = this.cfg.hibernate;
+    if (!cfg.enabled || this.hibernationDisabled) return false;
+    if (!this.trimAvailable) return false;
+    if (idle < cfg.afterMs * accel) return false;
+
+    // A speculative page load must never be the reason a frame is dropped, and
+    // neither must a syscall plus a resume stall.
+    if (this.boost.quiesceRequested) return false;
+
+    // Private bytes, free from the OS, and the figure the measured curve is in
+    // terms of. Null means the platform cannot report it, which is every
+    // platform that cannot trim either.
+    if (tab.privateMB == null || tab.privateMB < cfg.minPrivateMB) return false;
+
+    // Every tab sharing this renderer must also be ready to go.
+    const group = this.metrics.tabsByPid().get(tab.pid);
+    if (!group) return false;
+    return group.every((sibling) => sibling === tab || (
+      !sibling.visible
+      && !this.shouldSkip(sibling)
+      && sibling.idleMs() >= cfg.afterMs * accel
+      && tierRank(this.clampToProtections(sibling, Tier.HIBERNATED)) >= tierRank(Tier.HIBERNATED)
+    ));
+  }
+
+  /**
+   * Learn whether hibernation actually pays on this machine, and stop if it
+   * does not.
+   *
+   * Every figure behind this tier was measured on one host with zram
+   * configured. A machine where the compressor is missing or ineffective would
+   * otherwise keep paying the syscall and the resume stall forever in exchange
+   * for nothing, which is exactly the failure this repo deletes levers for.
+   */
+  recordHibernation(tab, privateBeforeMB) {
+    this.stats.hibernations += 1;
+    if (privateBeforeMB == null) return;
+
+    // Re-read now rather than waiting for the next tick: the pages are gone by
+    // the time the trim returns, and the tab's cached figure is pre-trim.
+    const after = readProcessMemory(tab.pid);
+    if (!after) return;
+    const reclaimed = privateBeforeMB - after.privateMB;
+    this.stats.hibernateReclaimedMB += Math.max(0, reclaimed);
+    this.hibernationSamples.push(reclaimed);
+
+    const cfg = this.cfg.hibernate;
+    if (this.hibernationSamples.length < cfg.sampleSize) return;
+
+    const sorted = [...this.hibernationSamples].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    if (median < cfg.minReclaimMB) {
+      this.hibernationDisabled = true;
+      this.log(`hibernation disabled: median reclaim ${median.toFixed(1)}MB over ` +
+               `${sorted.length} tabs is below the ${cfg.minReclaimMB}MB it costs to bother`);
+    } else {
+      // Proven on this host; stop sampling.
+      this.hibernationSamples = [];
+    }
   }
 
   /** Tabs that should be left entirely alone this tick. */
@@ -584,6 +712,11 @@ class Governor {
       // What reclaim cost the user, reported beside what it saved. A snapshot
       // showing only megabytes is half the trade.
       latency: this.tabs.latency ? this.tabs.latency.stats() : {},
+      hibernation: {
+        available: this.trimAvailable,
+        reason: this.trimAvailable ? null : this.trimReason,
+        disabled: this.hibernationDisabled
+      },
       tabs: this.tabs.all().map((t) => t.toJSON())
     };
   }

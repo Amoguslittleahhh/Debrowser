@@ -31,6 +31,7 @@ const TIER_TEXT = {
   warm: 'Background',
   cold: 'Idle · discardable',
   frozen: 'Frozen · 0% CPU',
+  hibernated: 'Hibernated · compressed',
   discarded: 'Discarded · 0 MB'
 };
 
@@ -76,6 +77,17 @@ function render(state) {
   // quiet in the default configuration where the rule is off.
   if (s.heapCollections) {
     line += ` · ${s.heapCollections} heap collection(s), ~${s.heapReclaimedMB} MB`;
+  }
+
+  // An inert lever must be visible, not silent: "nothing has hibernated yet" and
+  // "this machine cannot hibernate at all" look identical from a count alone.
+  const hib = state.hibernation;
+  if (hib && !hib.available) {
+    el.pressure.textContent += ` Hibernation unavailable: ${hib.reason}.`;
+  } else if (hib && hib.disabled) {
+    el.pressure.textContent += ' Hibernation disabled: it reclaimed too little on this machine.';
+  } else if (s.hibernations) {
+    line += ` · ${s.hibernations} hibernated, ~${Math.round(s.hibernateReclaimedMB)} MB compressed`;
   }
 
   // What the reclaim cost, next to what it saved. `restore` is the one that

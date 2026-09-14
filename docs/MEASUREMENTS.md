@@ -253,3 +253,82 @@ unless zram is active, so this cannot silently recur.
 **The lesson worth keeping:** a syscall returning success is not evidence it did
 anything. Both `advised=` and a system-wide counter had to be read before the
 result meant anything.
+
+---
+
+## M4c — the reclaim curve, and where the gate belongs
+
+Same harness as M4b across heap sizes. "NET" is private freed from the process
+minus zram's own physical growth, i.e. what the system actually got back.
+
+    private before   NET reclaim   % of private   resume
+        37 MB           10.9 MB         29%        4.0 ms
+        63 MB           22.6 MB         36%        4.6 ms
+        83 MB           32.5 MB         39%        3.9 ms
+       144 MB           66.7 MB         46%        4.9 ms
+       194 MB           94.4 MB         49%        3.0 ms
+       303 MB          146.1 MB         48%       12.0 ms
+
+Net reclaim is close to linear in private memory - **roughly 29-49%, rising with
+size and plateauing near 48%** - and the resume cost is flat at 4-12ms across the
+whole range, an order of magnitude inside the 150ms guard rail.
+
+**There is no dead zone.** The plan assumed light tabs would not pay and the gate
+would have to sit high. That assumption came from M4's broken probe, which
+reported ~1MB on a 37MB-private renderer; the same tab measured with the fixed
+probe returns **10.9MB**, which is most of the 13.2MB marginal cost of a tab.
+A gate around 30MB private is defensible - below that the absolute return falls
+under ~9MB - but it is a floor on pointless work, not a threshold separating
+tabs that pay from tabs that do not.
+
+**One flake, worth recording.** The first 150MB run reported 3.6MB net. Two
+re-runs returned 95.6MB and 93.2MB, so the low reading was noise rather than a
+non-monotonicity in the curve, and the curve above uses the mean of the repeats.
+A single anomalous point in a monotonic series is worth re-running before it is
+explained.
+
+### What this does and does not change
+
+It does not move the headline. Discard still reclaims far more - a discarded tab
+is ~0.2MB against ~48% of a hibernated one - and the residency work already
+reaches 8.1MB per open tab at 45 tabs.
+
+Where it matters is the **protected set**: tabs holding unsubmitted input, a live
+canvas, an open socket. Those are capped at FROZEN and hold their full footprint
+indefinitely because discarding them would lose state. Hibernation returns ~half
+of that, losslessly, for a 4-12ms resume - and it is the only lever that works on
+them at all.
+
+---
+
+## Hibernation in the benchmark — 605MB without discarding anything
+
+`npm run bench -- --tabs=6 --mix=bigheap`, six application-weight tabs (120-200MB
+of live JS each):
+
+                    baseline   governed    delta
+    total resident   1084 MB     479 MB   -605 MB  (-55.8%)
+    per tab          180.7 MB    79.8 MB
+    renderers              7          7        0
+    tab states       all live    { active: 1, hibernated: 5 }
+
+**Nothing was discarded.** All seven renderers stayed alive with their page state
+intact; the saving is entirely pages moved into the compressor. This is the first
+workload here where reclaim cost no reload at all.
+
+### Why the other mixes show the tier never firing
+
+A run on `noforms` reports `{ active: 1, discarded: 12, cold: 5, frozen: 2 }` and
+no hibernation at all. That is the gate working, not a failure: those fixtures
+hold roughly 10-36MB private, and the 30MB floor correctly excludes them because
+the measured return at that size (~10MB) is not worth a syscall and a resume
+stall on a tab that could simply be discarded for more.
+
+It is worth stating because the two readings look contradictory. Hibernation is
+not a general-purpose lever - it is for tabs heavy enough to be worth compressing
+and protected enough that discarding them is not allowed. `--mix=bigheap` exists
+so that case is reproducible rather than asserted.
+
+The headline workload is unaffected either way: 30 tabs on the default cap
+measured 363MB / 12.1MB per tab with the tier live, against 362MB / 12.1MB
+before it existed.

@@ -10,6 +10,9 @@
  */
 
 const os = require('os');
+const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
 const { MB } = require('./config');
 
 const PLATFORM = process.platform; // 'linux' | 'darwin' | 'win32'
@@ -76,6 +79,237 @@ function clampPriority(priority) {
 function canRaisePriority() {
   if (isWindows) return true;
   return typeof process.getuid === 'function' && process.getuid() === 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Trimming a background renderer into the OS compressor                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ask the OS to reclaim a renderer's cold pages, holding them compressed.
+ *
+ * A hidden tab keeps its whole working set for as long as it lives. Usually the
+ * governor answers that by discarding the renderer, but a tab holding
+ * unsubmitted input or live in-page state cannot be discarded without losing it,
+ * so those sit at FROZEN holding everything. This is the lever that works on
+ * them: the process stays alive and its state is untouched, while its cold pages
+ * move into zram (or, on other platforms, whatever compressor exists) and fault
+ * back on resume.
+ *
+ * Measured at roughly 29-49% of a renderer's private memory returned to the
+ * system, rising with size, for a 4-12ms resume - see docs/MEASUREMENTS.md,
+ * M4b/M4c. The percentage is net of the compressor's own allocation, which runs
+ * about 2:1, so a per-process reading alone overstates it by roughly double.
+ *
+ * **Linux only, deliberately.** Windows would hand pages to MemCompression via
+ * `SetProcessWorkingSetSizeEx(h, -1, -1)` and needs no elevation to do it, which
+ * makes it the better platform for this on paper. It is not implemented because
+ * it could not be executed on the machine this was written on, and shipping a
+ * plausible-looking call nobody has run is worse than an honest refusal: a wrong
+ * number gets checked, working-looking code does not. macOS has no public API to
+ * force its compressor at all. Both report `available: false` with a reason.
+ */
+
+const TRIM_BINARY = path.join(__dirname, '..', '..', 'tools', 'mem-trim');
+const TRIM_TIMEOUT_MS = 2000;
+
+class TrimHelper {
+  constructor(log = () => {}) {
+    this.log = log;
+    this.child = null;
+    this.pending = null;      // { resolve, timer } - one request at a time
+    this.queue = [];
+    this.restarts = 0;
+    /** null until the helper has been asked; then true/false. */
+    this.canTrim = null;
+    this.reason = null;
+  }
+
+  /**
+   * Start the helper, once. It is deliberately long-lived: spawning a process
+   * per trim would cost more than the trim it performs saves, and tier
+   * transitions are frequent.
+   */
+  start() {
+    if (this.child || this.reason) return Boolean(this.child);
+    if (!isLinux) { this.reason = `not implemented on ${PLATFORM}`; return false; }
+    if (!fs.existsSync(TRIM_BINARY)) {
+      this.reason = 'tools/mem-trim not built (npm run build:memtrim)';
+      return false;
+    }
+    try {
+      this.child = spawn(TRIM_BINARY, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch (err) {
+      this.reason = `could not start helper: ${err.message}`;
+      return false;
+    }
+
+    let buffer = '';
+    this.child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        this.settle(line.trim());
+      }
+    });
+    // A helper that dies takes trim with it rather than the browser: every
+    // caller treats an unavailable trim as "do nothing", never as an error.
+    this.child.on('exit', () => {
+      this.child = null;
+      this.settle(null);
+      if (this.restarts++ === 0) {
+        this.log('mem-trim helper exited; restarting once');
+        this.start();
+      } else {
+        this.reason = 'helper exited repeatedly';
+      }
+    });
+    // The helper must never be the reason the browser will not exit, and must
+    // never be unreferenced while a reply is in flight - unreferencing stdout
+    // permanently means the event loop can exit before the answer arrives, and
+    // the request simply never resolves. So the handles are referenced only
+    // while a request is outstanding; see `hold` and `release`.
+    this.child.unref();
+    this.release();
+    return true;
+  }
+
+  /** Shut the helper down. Called on quit; safe to call when not running. */
+  stop() {
+    const child = this.child;
+    this.child = null;
+    if (!child) return;
+    try {
+      child.stdin.end();
+      child.kill();
+    } catch { /* already gone */ }
+  }
+
+  /** Keep the event loop alive while waiting for a reply. */
+  hold() {
+    if (!this.child) return;
+    this.child.stdout.ref();
+    this.child.stdin.ref();
+  }
+
+  /** Stop holding it once nothing is outstanding. */
+  release() {
+    if (!this.child || this.pending || this.queue.length) return;
+    this.child.stdout.unref();
+    this.child.stdin.unref();
+  }
+
+  settle(line) {
+    const waiting = this.pending;
+    this.pending = null;
+    if (waiting) {
+      clearTimeout(waiting.timer);
+      waiting.resolve(line);
+    }
+    const next = this.queue.shift();
+    if (next) this.send(next.command, next.resolve);
+    else this.release();
+  }
+
+  send(command, resolve) {
+    if (!this.start()) return resolve(null);
+    if (this.pending) {
+      this.queue.push({ command, resolve });
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      // A wedged helper must never stall a tier transition.
+      this.log(`mem-trim timed out on "${command}"`);
+      this.settle(null);
+    }, TRIM_TIMEOUT_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    this.pending = { resolve, timer };
+    this.hold();
+    try {
+      this.child.stdin.write(`${command}\n`);
+    } catch {
+      this.settle(null);
+    }
+    return undefined;
+  }
+
+  request(command) {
+    return new Promise((resolve) => this.send(command, resolve));
+  }
+
+  /** Bytes advised, or null if the trim did not happen. */
+  async trim(pid) {
+    if (!pid) return null;
+    const line = await this.request(`trim ${pid}`);
+    if (!line) return null;
+    const ok = /^ok \d+ (\d+)$/.exec(line);
+    if (ok) return Number(ok[1]);
+    const err = /^err \d+ (\d+)$/.exec(line);
+    if (err) this.log(`mem-trim refused pid ${pid}: errno ${err[1]}`);
+    return null;
+  }
+
+  /** Whether trimming can work here at all, asked once. */
+  async probe() {
+    if (this.canTrim !== null) return this.canTrim;
+    if (!this.start()) { this.canTrim = false; return false; }
+    const line = await this.request('caps');
+    const m = line && /^caps \w+ ([01])$/.exec(line);
+    this.canTrim = Boolean(m && m[1] === '1');
+    if (!this.canTrim) {
+      // The overwhelmingly likely cause on a desktop, and the one with a fix.
+      this.reason = 'needs CAP_SYS_NICE: sudo setcap cap_sys_nice+ep tools/mem-trim';
+    }
+    return this.canTrim;
+  }
+}
+
+let helper = null;
+const trimHelper = (log) => (helper || (helper = new TrimHelper(log)));
+
+/**
+ * Trim one process. Resolves to bytes advised, or null when trimming did not
+ * happen for any reason - unavailable platform, missing capability, dead helper.
+ * Never rejects: a failed trim is a missed optimisation, not an error.
+ */
+function trimProcessMemory(pid, log) {
+  return trimHelper(log).trim(pid);
+}
+
+/**
+ * Undo a trim. A no-op on Linux, where MADV_PAGEOUT is one-shot and the pages
+ * fault back on their own - kept so the promotion path reads the same on every
+ * platform, and because the macOS approach (marking the process background)
+ * would genuinely need undoing or a restored tab stays throttled and janky.
+ */
+function untrimProcessMemory() {
+  return true;
+}
+
+/** Release the trim helper. Called from `before-quit`. */
+function stopTrimHelper() {
+  if (helper) helper.stop();
+}
+
+/**
+ * Whether trimming works here, and if not, why.
+ *
+ * Shaped like `pageMergingStatus()` in memory.js and for the same reason: the
+ * failure modes are indistinguishable from the outside. "No helper built",
+ * "helper built but lacks CAP_SYS_NICE" and "works fine but there is no swap to
+ * page into" all look identical as a flat zero, and a user who cannot tell which
+ * one they have cannot fix it.
+ */
+async function trimCapability(log) {
+  const h = trimHelper(log);
+  const available = await h.probe();
+  return {
+    available,
+    mechanism: isLinux ? 'process_madvise(MADV_PAGEOUT)' : null,
+    reason: available ? null : (h.reason || `not implemented on ${PLATFORM}`)
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -263,6 +497,10 @@ module.exports = {
   isWindows,
   setProcessPriority,
   getProcessPriority,
+  trimProcessMemory,
+  untrimProcessMemory,
+  trimCapability,
+  stopTrimHelper,
   canRaisePriority,
   clampPriority,
   runningRootUnsandboxed,
