@@ -140,11 +140,16 @@ const padL = (s, n) => String(s).padStart(n);
         before != null ? `${sys.availableMB - before >= 0 ? '+' : ''}${sys.availableMB - before} MB` : '');
   }
   if (sys.zramPhysicalMB != null) {
-    row('compressor holding', '—',
-        `${sys.zramPhysicalMB} MB`,
-        // Kept inside the column width: at 13 characters "576 MB stored"
-        // overflowed into the figure beside it and the two ran together.
-        `from ${sys.zramStoredMB}MB`);
+    // The delta column carries signed deltas on every other row, and this is
+    // not one, so the ratio goes in a note rather than being squeezed into
+    // twelve characters under a heading that says "delta".
+    row('compressor holding', '—', `${sys.zramPhysicalMB} MB`, '');
+    if (sys.zramStoredMB > 0) {
+      const ratio = (sys.zramStoredMB / sys.zramPhysicalMB).toFixed(1);
+      console.log(`\n  note: ${sys.zramStoredMB} MB left the renderers and ${sys.zramPhysicalMB} MB came back` +
+                  ` as the compressor's own\n        allocation (${ratio}:1), so the net saving is` +
+                  ` the total above, not the per-process figure.`);
+    }
   }
   if (on.compression && !on.compression.available) {
     console.log(`\n  note: no swap or zram configured, so hibernation is inert on this host.`);

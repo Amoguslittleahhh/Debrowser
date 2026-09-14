@@ -255,10 +255,7 @@ const BASE = {
    * unsubmitted input or live in-page state is capped at HIBERNATED by the
    * protections - discarding it would lose the thing being protected - and
    * without this tier it would hold its entire footprint for as long as the
-   * browser runs. (Those protections capped at FROZEN until it was noticed that
-   * this made the tier unreachable for precisely the tabs it was written for:
-   * hibernation destroys nothing, so "do not destroy this tab" is not a reason
-   * to refuse it.) Freezing
+   * browser runs. Freezing
    * saves nothing on its own; measured, it *costs* about 3MB. Hibernation is the
    * only lever that works on those tabs.
    *

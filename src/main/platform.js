@@ -114,26 +114,45 @@ function canRaisePriority() {
 const TRIM_BINARY = path.join(__dirname, '..', '..', 'tools', 'mem-trim');
 const TRIM_TIMEOUT_MS = 2000;
 
+/**
+ * How long a pid stays "just trimmed".
+ *
+ * Only has to outlast one governor pass, which is what walks a renderer's tabs
+ * one after another. Cleared outright when the tab is promoted, so a renderer
+ * that wakes and goes cold again inside the window is still trimmed properly.
+ */
+const TRIM_COOLDOWN_MS = 5000;
+
+/**
+ * What a command or a reply is *about*, which is all the correlation this
+ * protocol needs: `trim <pid>` is answered by `ok <pid> …` or `err <pid> …`,
+ * and `caps` by `caps linux <0|1>`.
+ */
+function replyId(line) {
+  const [verb, second] = line.split(' ');
+  return verb === 'caps' ? 'caps' : second;
+}
+
 class TrimHelper {
   constructor(log = () => {}) {
     this.log = log;
     this.child = null;
-    this.pending = null;      // { resolve, timer } - one request at a time
+    this.pending = null;      // { id, resolve, timer } - one request at a time
     this.queue = [];
     this.restarts = 0;
     this.stopped = false;
     /**
-     * Replies owed by the helper for requests we have already given up on.
+     * Pids trimmed recently, and when.
      *
-     * The protocol has no request ids, and it does not need them as long as
-     * this is tracked: the helper answers in order, one line per command. But a
-     * timed-out request is not cancelled - the helper is still working on it and
-     * will eventually print its reply - so without this the late answer to a
-     * trim of pid A would be handed to the caller waiting on pid B, reporting
-     * bytes that were never advised for it. Each timeout adds one owed reply and
-     * the next line from the helper is dropped against it.
+     * A trim acts on a *process*, but the governor's tier ladder walks *tabs*,
+     * and under `process-per-site` several tabs share one renderer - so the
+     * second and later tabs of a group ask to trim a pid that was paged out
+     * microseconds ago, which advises whatever the first call left behind for
+     * no return. Held here rather than in the governor because "a trim acts on
+     * a process" is this layer's fact, not the ladder's, and because it is the
+     * only place both the trim and its undo pass through.
      */
-    this.owed = 0;
+    this.trimmedAt = new Map();
     /** null until the helper has been asked; then true/false. */
     this.canTrim = null;
     this.reason = null;
@@ -163,18 +182,22 @@ class TrimHelper {
       buffer += chunk.toString();
       let nl;
       while ((nl = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, nl);
+        const line = buffer.slice(0, nl).trim();
         buffer = buffer.slice(nl + 1);
-        // The late reply to something nobody is waiting for any more.
-        if (this.owed > 0) { this.owed -= 1; continue; }
-        this.settle(line.trim());
+        // Every reply names what it answers - `ok <pid>`, `err <pid>`, `caps` -
+        // so a line that does not name the outstanding request is the late
+        // answer to one that already timed out. Dropping it on that basis is
+        // what stops the stale byte count for pid A being handed to the caller
+        // waiting on pid B; a timed-out request is never cancelled, because the
+        // helper is inside a syscall and will answer eventually.
+        if (!this.pending || replyId(line) !== this.pending.id) continue;
+        this.settle(line);
       }
     });
     // A helper that dies takes trim with it rather than the browser: every
     // caller treats an unavailable trim as "do nothing", never as an error.
     this.child.on('exit', () => {
       this.child = null;
-      this.owed = 0;                 // a dead helper owes nothing
       this.settle(null);
       if (this.stopped) return;      // we asked it to go
       if (this.restarts++ === 0) {
@@ -245,16 +268,14 @@ class TrimHelper {
       return undefined;
     }
     const timer = setTimeout(() => {
-      // A wedged helper must never stall a tier transition. The request is not
-      // cancelled - the helper is inside a syscall and will answer eventually -
-      // so the answer is booked as owed and dropped when it arrives, rather than
-      // being handed to whoever asks next.
+      // A wedged helper must never stall a tier transition. Giving up here does
+      // not cancel the request; the stdout handler drops the late reply when it
+      // arrives, because it will not name the request outstanding by then.
       this.log(`mem-trim timed out on "${command}"`);
-      this.owed += 1;
       this.settle(null);
     }, TRIM_TIMEOUT_MS);
     if (typeof timer.unref === 'function') timer.unref();
-    this.pending = { resolve, timer };
+    this.pending = { id: replyId(command), resolve, timer };
     this.hold();
     try {
       this.child.stdin.write(`${command}\n`);
@@ -271,13 +292,31 @@ class TrimHelper {
   /** Bytes advised, or null if the trim did not happen. */
   async trim(pid) {
     if (!pid) return null;
+    // Nothing is left to page out this soon after the last call, so answer
+    // "trimmed, zero bytes" without troubling the helper. Zero rather than null
+    // because the process *is* trimmed; null is reserved for refusals.
+    const last = this.trimmedAt.get(pid);
+    if (last != null && Date.now() - last < TRIM_COOLDOWN_MS) return 0;
+
     const line = await this.request(`trim ${pid}`);
     if (!line) return null;
     const ok = /^ok \d+ (\d+)$/.exec(line);
-    if (ok) return Number(ok[1]);
+    if (ok) {
+      this.trimmedAt.set(pid, Date.now());
+      return Number(ok[1]);
+    }
     const err = /^err \d+ (\d+)$/.exec(line);
     if (err) this.log(`mem-trim refused pid ${pid}: errno ${err[1]}`);
     return null;
+  }
+
+  /**
+   * Forget that a pid was trimmed, so the next request is honoured in full.
+   * Called when a tab is promoted: the renderer is running again, its pages are
+   * faulting back, and what it holds a moment later is worth taking again.
+   */
+  forget(pid) {
+    this.trimmedAt.delete(pid);
   }
 
   /** Whether trimming can work here at all, asked once. */
@@ -299,9 +338,10 @@ let helper = null;
 const trimHelper = (log) => (helper || (helper = new TrimHelper(log)));
 
 /**
- * Trim one process. Resolves to bytes advised, or null when trimming did not
- * happen for any reason - unavailable platform, missing capability, dead helper.
- * Never rejects: a failed trim is a missed optimisation, not an error.
+ * Trim one process. Resolves to bytes advised - possibly zero, for a process
+ * trimmed moments ago - or null when trimming did not happen for any reason:
+ * unavailable platform, missing capability, dead helper. Never rejects: a failed
+ * trim is a missed optimisation, not an error.
  */
 function trimProcessMemory(pid, log) {
   return trimHelper(log).trim(pid);
@@ -312,8 +352,12 @@ function trimProcessMemory(pid, log) {
  * fault back on their own - kept so the promotion path reads the same on every
  * platform, and because the macOS approach (marking the process background)
  * would genuinely need undoing or a restored tab stays throttled and janky.
+ *
+ * It does clear the trim cooldown, which is the one piece of state a promotion
+ * genuinely invalidates on every platform.
  */
-function untrimProcessMemory() {
+function untrimProcessMemory(pid) {
+  if (helper && pid) helper.forget(pid);
   return true;
 }
 

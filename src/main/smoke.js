@@ -352,12 +352,14 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // against.
   const compression = require('./memory').compressionStatus();
   const cap = await require('./platform').trimCapability();
-  // Both halves, and a named reason whenever either is missing. Asserting on
-  // the compressor alone passed on a machine with zram and no CAP_SYS_NICE -
-  // the mechanism string was built from the platform rather than from whether
-  // the syscall is actually permitted, so the check could not see that half.
+  // Both halves, against an *independent* reading of the compressor, and a
+  // named reason whenever either is missing. Asserting on `cap.compression`
+  // would restate the expression that produced `cap.available` and could not
+  // fail; asserting on the compressor alone passed on a machine with zram and
+  // no CAP_SYS_NICE, because the mechanism string was built from the platform
+  // rather than from whether the syscall is actually permitted.
   check('hibernation is only offered where there is somewhere to compress into',
-    cap.available === (cap.permitted && cap.compression.available)
+    cap.available === (cap.permitted && compression.available)
       && (cap.available || typeof cap.reason === 'string'),
     `permitted=${cap.permitted} compressor=${compression.available
       ? `${compression.compressor} ${compression.swapMB}MB` : 'none'} ` +

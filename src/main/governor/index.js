@@ -76,18 +76,20 @@ class Governor {
     this.hibernationDisabled = false;
 
     /**
-     * Renderers already trimmed during the current tick.
+     * Renderers whose hibernation has already been measured this tick.
      *
-     * Hibernation acts on a *process*, but the ladder walks *tabs*, and under
-     * `process-per-site` several tabs share one renderer. Without this every
-     * tab in the group would issue its own `trim` for the same pid - the second
-     * and later ones paging out whatever the first had left, for a few hundred
-     * microseconds each and no return - and each would then record its own
-     * "reclaim" sample, so one process trimmed once would look like four
-     * hibernations, three of which measured near zero and dragged the
-     * self-disable median down towards switching the tier off.
+     * A trim acts on a *process* and the ladder walks *tabs*, so under
+     * `process-per-site` a renderer with four tabs reaches HIBERNATED four
+     * times. Trimming it once is `platform.trimProcessMemory`'s business;
+     * *measuring* it once is this one's - without it, one process trimmed once
+     * books four samples, three of them near zero, dragging the self-disable
+     * median down towards switching a working tier off.
      */
-    this.trimmedPids = new Set();
+    this.measuredPids = new Set();
+
+    // Nothing in it changes for the governor's lifetime, and `applyTier` is
+    // called per tab per tick.
+    this.tierCtx = { cfg, ipcHub, log };
   }
 
   start() {
@@ -138,7 +140,7 @@ class Governor {
     this.running = true;
     try {
       this.tickCount += 1;
-      this.trimmedPids.clear();
+      this.measuredPids.clear();
 
       this.metrics.sample();
       if (this.tickCount % HEAP_SAMPLE_EVERY === 0) await this.samplePerTabMetrics();
@@ -382,24 +384,26 @@ class Governor {
 
       target = this.clampToProtections(tab, target);
       if (tierRank(target) > tierRank(tab.tier)) {
-        const from = tab.tier;
         // Whole-process, because that is the unit a trim acts in. The tab's own
         // `privateMB` is its *share* of the renderer under the attribution in
         // metrics.js, so comparing it against a post-trim process reading
         // subtracted a fraction from a whole and reported a reclaim several
-        // times the truth on any shared renderer.
-        const before = target === Tier.HIBERNATED && !this.trimmedPids.has(tab.pid)
-          ? readProcessMemory(tab.pid)
+        // times the truth on any shared renderer. Taken from the reading this
+        // tick already made rather than re-reading /proc: both predate the
+        // freeze `applyTier` is about to perform, so they describe the same
+        // thing, and one of them is free.
+        const before = target === Tier.HIBERNATED
+          ? this.metrics.byPid.get(tab.pid)?.privateMB ?? null
           : null;
 
-        await applyTier(tab, target, this.ctx());
-
-        // Keyed off where the tab actually landed, not where it was asked to
-        // go: freezing and trimming can each be refused, and a tier the tab is
-        // not in must not be counted as one it reached.
-        if (tab.tier !== from) {
-          if (tab.tier === Tier.FROZEN) this.stats.freezes += 1;
-          if (tab.tier === Tier.HIBERNATED && before) this.recordHibernation(tab, before);
+        // Where the tab actually landed, not where it was asked to go:
+        // freezing and trimming can each be refused, and a tier the tab is not
+        // in must not be counted as one it reached.
+        const reached = await applyTier(tab, target, this.ctx());
+        if (reached === Tier.FROZEN) this.stats.freezes += 1;
+        if (reached === Tier.HIBERNATED && !this.measuredPids.has(tab.pid)) {
+          this.measuredPids.add(tab.pid);
+          this.recordHibernation(tab, before);
         }
       }
     }
@@ -445,7 +449,7 @@ class Governor {
       if (target !== Tier.DISCARDED) continue; // protected; leave it resident
 
       const before = tab.rssMB;
-      if (await applyTier(tab, Tier.DISCARDED, this.ctx())) {
+      if (await applyTier(tab, Tier.DISCARDED, this.ctx()) === Tier.DISCARDED) {
         this.stats.discards += 1;
         this.stats.reclaimedMB += before;
         excess -= 1;
@@ -480,8 +484,8 @@ class Governor {
       if (!next) continue;
 
       const before = tab.rssMB;
-      const changed = await applyTier(tab, next, this.ctx());
-      if (!changed) continue;
+      const reached = await applyTier(tab, next, this.ctx());
+      if (reached !== next) continue;
 
       if (next === Tier.DISCARDED) {
         this.stats.discards += 1;
@@ -631,9 +635,9 @@ class Governor {
    * otherwise keep paying the syscall and the resume stall forever in exchange
    * for nothing, which is exactly the failure this repo deletes levers for.
    */
-  recordHibernation(tab, before) {
+  recordHibernation(tab, privateBeforeMB) {
     this.stats.hibernations += 1;
-    if (!before) return;
+    if (privateBeforeMB == null) return;
 
     // Re-read now rather than waiting for the next tick: the pages are gone by
     // the time the trim returns, and the cached figure is pre-trim. Both
@@ -641,7 +645,7 @@ class Governor {
     // against a whole is not a measurement.
     const after = readProcessMemory(tab.pid);
     if (!after) return;
-    const reclaimed = before.privateMB - after.privateMB;
+    const reclaimed = privateBeforeMB - after.privateMB;
     this.stats.hibernateReclaimedMB += Math.max(0, reclaimed);
     this.hibernationSamples.push(reclaimed);
 
@@ -680,7 +684,7 @@ class Governor {
   }
 
   ctx() {
-    return { cfg: this.cfg, ipcHub: this.ipcHub, log: this.log, trimmedPids: this.trimmedPids };
+    return this.tierCtx;
   }
 
   /* ---------------------------------------------------------------- */
@@ -696,9 +700,9 @@ class Governor {
   async enforceManualDiscard(tab) {
     if (!tab || tab.visible || !tab.isLive) return false;
     const target = this.clampToProtections(tab, Tier.DISCARDED);
-    const changed = await applyTier(tab, target, this.ctx());
-    if (changed && target === Tier.DISCARDED) this.stats.discards += 1;
-    return changed;
+    const reached = await applyTier(tab, target, this.ctx());
+    if (reached === Tier.DISCARDED) this.stats.discards += 1;
+    return reached !== null;
   }
 
   /** Called by the tab manager the moment the user switches tabs. */
