@@ -253,3 +253,48 @@ unless zram is active, so this cannot silently recur.
 **The lesson worth keeping:** a syscall returning success is not evidence it did
 anything. Both `advised=` and a system-wide counter had to be read before the
 result meant anything.
+
+---
+
+## M4c — the reclaim curve, and where the gate belongs
+
+Same harness as M4b across heap sizes. "NET" is private freed from the process
+minus zram's own physical growth, i.e. what the system actually got back.
+
+    private before   NET reclaim   % of private   resume
+        37 MB           10.9 MB         29%        4.0 ms
+        63 MB           22.6 MB         36%        4.6 ms
+        83 MB           32.5 MB         39%        3.9 ms
+       144 MB           66.7 MB         46%        4.9 ms
+       194 MB           94.4 MB         49%        3.0 ms
+       303 MB          146.1 MB         48%       12.0 ms
+
+Net reclaim is close to linear in private memory - **roughly 29-49%, rising with
+size and plateauing near 48%** - and the resume cost is flat at 4-12ms across the
+whole range, an order of magnitude inside the 150ms guard rail.
+
+**There is no dead zone.** The plan assumed light tabs would not pay and the gate
+would have to sit high. That assumption came from M4's broken probe, which
+reported ~1MB on a 37MB-private renderer; the same tab measured with the fixed
+probe returns **10.9MB**, which is most of the 13.2MB marginal cost of a tab.
+A gate around 30MB private is defensible - below that the absolute return falls
+under ~9MB - but it is a floor on pointless work, not a threshold separating
+tabs that pay from tabs that do not.
+
+**One flake, worth recording.** The first 150MB run reported 3.6MB net. Two
+re-runs returned 95.6MB and 93.2MB, so the low reading was noise rather than a
+non-monotonicity in the curve, and the curve above uses the mean of the repeats.
+A single anomalous point in a monotonic series is worth re-running before it is
+explained.
+
+### What this does and does not change
+
+It does not move the headline. Discard still reclaims far more - a discarded tab
+is ~0.2MB against ~48% of a hibernated one - and the residency work already
+reaches 8.1MB per open tab at 45 tabs.
+
+Where it matters is the **protected set**: tabs holding unsubmitted input, a live
+canvas, an open socket. Those are capped at FROZEN and hold their full footprint
+indefinitely because discarding them would lose state. Hibernation returns ~half
+of that, losslessly, for a 4-12ms resume - and it is the only lever that works on
+them at all.
