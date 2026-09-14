@@ -14,7 +14,7 @@
 const path = require('path');
 const fs = require('fs');
 const { WebContentsView, app } = require('electron');
-const { Tier } = require('../config');
+const { Tier, isStopped } = require('../config');
 const { CdpSession } = require('../cdp');
 
 const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload.js');
@@ -418,7 +418,8 @@ class Tab {
   capturePageState(ipcHub, timeoutMs = 400) {
     // Only a live, unfrozen renderer can answer. The governor snapshots the
     // moment a tab is hidden, before it can reach a state where it cannot.
-    if (!this.isLive || this.tier === Tier.FROZEN) return Promise.resolve(null);
+    // A stopped page cannot run the script that answers, frozen or hibernated.
+    if (!this.isLive || isStopped(this.tier)) return Promise.resolve(null);
     return ipcHub.request(this.wc, timeoutMs).then((state) => {
       if (state) {
         this.hasDirtyInput = Boolean(state.dirty);
@@ -570,7 +571,10 @@ class Tab {
    */
   sendToPage(channel, ...args) {
     if (!this.isLive) return false;
-    if (this.tier === Tier.FROZEN) return false;
+    // Rank, not equality. A hibernated renderer is every bit as stopped as a
+    // frozen one, and IPC to a stopped renderer is the segfault this gate
+    // exists to prevent - so a new tier below FROZEN must never slip past it.
+    if (isStopped(this.tier)) return false;
 
     try {
       this.wc.send(channel, ...args);

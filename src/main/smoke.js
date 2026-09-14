@@ -74,6 +74,7 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // Compress the idle ladder so the test exercises hours of behaviour in
   // seconds. Policy is unchanged; only the clock is.
   cfg.coldAfterMs = 1500;
+  cfg.hibernate.afterMs = 3500;
   cfg.freezeAfterMs = 3000;
   cfg.minLifetimeMs = 1000;
   cfg.tickMs = 500;
@@ -320,7 +321,50 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     covered === true, `placeholder shown=${covered}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n9. Speculative restore\n');
+  console.log('\n9. Hibernation\n');
+
+  // The only lever that works on a tab the protections refuse to discard. What
+  // matters is that memory actually leaves the process and that the page comes
+  // back without a reload - a tier that reports success while reclaiming
+  // nothing is the failure mode this whole feature nearly shipped with.
+  if (!governor.trimAvailable) {
+    console.log(`  SKIP  hibernation unavailable here: ${governor.trimReason}`);
+  } else {
+    const big = tabs.create({ url: pageUrl('bigheap.html?mb=120'), activate: false, realise: true });
+    await waitFor(() => big.isLive && !big.loading, { timeoutMs: 30_000 });
+    // Let the heap finish building and the governor take a private-bytes reading.
+    await waitFor(() => big.privateMB != null && big.privateMB > governor.cfg.hibernate.minPrivateMB,
+      { timeoutMs: 30_000 });
+
+    const privateBefore = big.privateMB;
+    const hibernated = await waitFor(() => big.tier === Tier.HIBERNATED, { timeoutMs: 20_000 });
+    check('an idle tab hibernates rather than being discarded',
+      hibernated && big.isLive,
+      `tier=${big.tier} live=${big.isLive}`);
+
+    await sleep(1500);
+    const after = require('./memory').readProcessMemory(big.pid);
+    const reclaimed = after ? privateBefore - after.privateMB : 0;
+    check('hibernating actually removes memory from the renderer',
+      reclaimed > 5,
+      `private ${privateBefore.toFixed(0)}MB -> ${after ? after.privateMB.toFixed(0) : '?'}MB ` +
+      `(${reclaimed.toFixed(0)}MB out)`);
+
+    // The whole point: no reload, no lost state.
+    const urlBefore = big.url;
+    await tabs.activate(big.id);
+    const woke = await waitFor(() => big.tier === Tier.ACTIVE, { timeoutMs: 10_000 });
+    const stateIntact = big.isLive
+      ? await big.wc.executeJavaScript('!!window.__retained && window.__retained.length > 0')
+          .catch(() => false)
+      : false;
+    check('a hibernated tab wakes with its page state intact, no reload',
+      woke && stateIntact && big.url === urlBefore,
+      `tier=${big.tier} retained-state=${stateIntact}`);
+  }
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n10. Speculative restore\n');
 
   // Speculation is the one mechanism here that can add memory rather than
   // reclaim it, so what is checked is mostly that it refuses to.
@@ -353,7 +397,7 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `tier=${spec.tier} live=${spec.isLive}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n10. Live renderer cap\n');
+  console.log('\n11. Live renderer cap\n');
 
   // The cap is what bounds memory for someone who opens tabs in bursts: the
   // budget cannot help them, because on a large machine thirty tabs never reach
@@ -393,7 +437,7 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `url=${revived.url}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n11. Footprint\n');
+  console.log('\n12. Footprint\n');
 
   governor.metrics.sample();
   const snap = governor.metrics.snapshot();

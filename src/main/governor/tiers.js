@@ -24,7 +24,7 @@
  * before the tab is shown.
  */
 
-const { Tier, tierRank } = require('../config');
+const { Tier, tierRank, isStopped } = require('../config');
 const platform = require('../platform');
 
 /**
@@ -71,7 +71,13 @@ async function promote(tab, target, ctx) {
     // `realise` restores navigation and sets its own provisional tier.
   }
 
-  // Undo freezing before anything else: a frozen page cannot run the script
+  // Undo the trim before the unfreeze. On Linux this is a no-op - paged-out
+  // memory faults back on its own, measured at 4-12ms - but the ordering is
+  // what a platform needing a real undo would require, and getting it wrong
+  // there means a restored tab that stays throttled.
+  if (tab.tier === Tier.HIBERNATED) platform.untrimProcessMemory(tab.pid);
+
+  // Undo freezing before anything else: a stopped page cannot run the script
   // that would repaint it, so showing it first would flash stale content.
   if (tab.cdp && tierRank(tab.tier) >= tierRank(Tier.FROZEN)) {
     await tab.cdp.unfreeze();
@@ -148,6 +154,21 @@ async function demote(tab, target, ctx) {
     tab.cdp.detach();
   }
 
+  if (target === Tier.HIBERNATED) {
+    // Strictly after the freeze. Trimming a page still running its own tasks
+    // just means it faults everything straight back in, and the freeze is what
+    // makes the pages cold enough to be worth taking.
+    const advised = await platform.trimProcessMemory(tab.pid, log);
+    if (advised == null) {
+      // Trimming is unavailable or was refused. The tab is frozen, which is a
+      // legitimate tier, so report that rather than a state it is not in.
+      log(`tab ${tab.id}: trim unavailable; holding at frozen`);
+      tab.tier = Tier.FROZEN;
+      return false;
+    }
+    tab.trimmedAt = Date.now();
+  }
+
   return true;
 }
 
@@ -163,7 +184,9 @@ async function discard(tab, ctx) {
 
   // Refresh the snapshot only if the page can still answer. A frozen tab
   // already has one, taken when it was demoted to COLD.
-  if (tab.tier !== Tier.FROZEN) {
+  // Only an unstopped page can answer; a hibernated one is as mute as a frozen
+  // one and already had its snapshot taken on the way down.
+  if (!isStopped(tab.tier)) {
     try {
       await tab.capturePageState(ipcHub);
     } catch (err) {

@@ -61,7 +61,7 @@
  * does not model.
  */
 
-const { Tier, MB } = require('../config');
+const { Tier, isStopped, MB } = require('../config');
 
 /**
  * Collection speed to assume before a tab has been observed collecting, in
@@ -140,7 +140,7 @@ class HeapLimiter {
     // `heapLimit.enabled` is checked by the caller, which skips the whole pass.
     if (!tab.isLive || !tab.cdp) return false;
     if (tab.visible) return false;              // never stall the foreground tab
-    if (tab.tier === Tier.FROZEN) return false; // frozen: no allocation, no point
+    if (isStopped(tab.tier)) return false;       // stopped: no allocation, no point
     if (tab.boosted) return false;
 
     // Private bytes, not the PSS footprint. PSS for one process falls as more

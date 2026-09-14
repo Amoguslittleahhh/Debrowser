@@ -18,13 +18,30 @@ const Tier = {
   WARM: 'warm',          // hidden but recent; timers throttled, memory intact
   COLD: 'cold',          // hidden a while; eligible for discard, no renderer action
   FROZEN: 'frozen',      // hidden and idle; CPU quiesced to ~0, RAM retained
+  HIBERNATED: 'hibernated', // frozen, and its cold pages handed to the OS compressor
   DISCARDED: 'discarded' // renderer torn down; ~0 RAM, restores from session state
 };
 
 /** Ascending order used for "demote by one step" / comparisons. */
-const TIER_ORDER = [Tier.ACTIVE, Tier.WARM, Tier.COLD, Tier.FROZEN, Tier.DISCARDED];
+const TIER_ORDER = [Tier.ACTIVE, Tier.WARM, Tier.COLD, Tier.FROZEN,
+                    Tier.HIBERNATED, Tier.DISCARDED];
 
 const tierRank = (tier) => TIER_ORDER.indexOf(tier);
+
+/**
+ * Is this tier one where the renderer is alive but its task queues are stopped?
+ *
+ * True for FROZEN and HIBERNATED, false for DISCARDED - which has no renderer at
+ * all - and false for everything above.
+ *
+ * It exists because inserting HIBERNATED broke every `=== Tier.FROZEN` test that
+ * meant "stopped" rather than "frozen specifically", and those were scattered
+ * across four files. One of them guards IPC to a stopped renderer, where the
+ * failure mode is a segfault rather than a wrong answer, so the distinction is
+ * named once here instead of being re-derived at each site.
+ */
+const isStopped = (tier) => tierRank(tier) >= tierRank(Tier.FROZEN)
+                         && tierRank(tier) <= tierRank(Tier.HIBERNATED);
 
 /** Global memory pressure bands, derived from usage against the budget. */
 const Pressure = {
@@ -231,6 +248,72 @@ const BASE = {
   spareRenderer: false,
 
   /**
+   * Hibernation: freeze a hidden tab, then hand its cold pages to the OS
+   * memory compressor.
+   *
+   * The tab that cannot be discarded is the one this exists for. A tab holding
+   * unsubmitted input or live in-page state is capped at FROZEN by the
+   * protections, and there it holds its entire footprint for as long as the
+   * browser runs - discarding it would lose the thing being protected. Freezing
+   * saves nothing on its own; measured, it *costs* about 3MB. Hibernation is the
+   * only lever that works on those tabs.
+   *
+   * Measured net reclaim, after subtracting what the compressor itself
+   * allocates (docs/MEASUREMENTS.md, M4c):
+   *
+   *     private before   NET reclaim   resume
+   *          37 MB          10.9 MB     4.0 ms
+   *          83 MB          32.5 MB     3.9 ms
+   *         194 MB          94.4 MB     3.0 ms
+   *         303 MB         146.1 MB    12.0 ms
+   *
+   * Roughly 29-49% of a renderer's private memory, rising with size, for a
+   * resume cost an order of magnitude inside the 150ms budget. Note the *net*:
+   * pages leaving the process reappear as the compressor's own allocation at
+   * about 2:1, so a per-process reading alone overstates this by roughly double.
+   *
+   * On by default, and inert unless the platform can actually do it - which
+   * today means Linux, with `tools/mem-trim` built, CAP_SYS_NICE granted, and
+   * swap or zram configured. `trimCapability()` reports which of those is
+   * missing rather than leaving a silent zero. Unlike page merging, this is not
+   * gated behind a warning: KSM shares identical pages *between* processes and
+   * programs, which is a genuine cross-site channel, whereas paging to a
+   * compressor keeps each process's data to itself.
+   */
+  hibernate: {
+    enabled: true,
+
+    /**
+     * How long a tab must be hidden before it is worth hibernating. Shorter
+     * than `discardAfterMs`, because hibernation is lossless and cheap to undo,
+     * so it is the step that should happen first and often.
+     */
+    afterMs: 3 * 60_000,
+
+    /**
+     * Private memory below which a tab is not worth the syscall.
+     *
+     * A floor on pointless work rather than a real threshold: the measured
+     * curve has no dead zone, and even a 37MB tab returns 10.9MB. Below roughly
+     * this, the absolute return falls under ~9MB and the resume stall stops
+     * being free. Read from the OS for nothing, like `heapLimit.minPrivateMB`.
+     */
+    minPrivateMB: 30,
+
+    /**
+     * Turn the tier off at runtime if it does not pay on this host.
+     *
+     * Every measured figure here comes from one machine. If a real one returns
+     * less than this per hibernation, the median over the first `sampleSize`
+     * attempts falls below it and the tier disables itself with one log line,
+     * rather than spending syscalls and resume stalls forever on a lever that
+     * does nothing.
+     */
+    minReclaimMB: 5,
+    sampleSize: 10
+  },
+
+  /**
    * Per-tab heap limits, after the square-root rule of arXiv:2204.10455.
    * See governor/heap-limit.js for the rule and for what is approximated here.
    */
@@ -378,7 +461,7 @@ const PROFILES = {
  * BASE's object, letting a later `cfg.heapLimit.enabled = true` mutate the
  * module default for every config loaded afterwards.
  */
-const NESTED = ['pressure', 'pressureAccel', 'boost', 'heapLimit'];
+const NESTED = ['pressure', 'pressureAccel', 'boost', 'heapLimit', 'hibernate'];
 
 function loadConfig(profileName = 'balanced', overrides = {}) {
   const profile = PROFILES[profileName] || PROFILES.balanced;
@@ -394,4 +477,6 @@ function loadConfig(profileName = 'balanced', overrides = {}) {
   return cfg;
 }
 
-module.exports = { Tier, TIER_ORDER, tierRank, Pressure, Demand, PROFILES, loadConfig, MB };
+module.exports = {
+  Tier, TIER_ORDER, tierRank, isStopped, Pressure, Demand, PROFILES, loadConfig, MB
+};
