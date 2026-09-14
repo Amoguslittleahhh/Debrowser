@@ -24,7 +24,7 @@ npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
 npm run start:merged       # + page merging (KSM) - side-channel risk, read below
 npm run start:performance  # most headroom
 
-npm run smoke              # 31-check end-to-end test, headless
+npm run smoke              # 37-check end-to-end test, headless
 npm run bench              # memory benchmark
 ```
 
@@ -82,6 +82,7 @@ browser is to its memory budget.
 | `WARM` | Hidden recently. Chromium throttles its timers. | Nothing |
 | `COLD` | Hidden a while. No renderer action; now a discard candidate. | Nothing |
 | `FROZEN` | Task queues stopped, CPU → ~0, memory and DOM intact. | One CDP round trip |
+| `HIBERNATED` | Frozen, and its cold pages handed to the OS memory compressor. | ~4–12 ms of page faults |
 | `DISCARDED` | Renderer destroyed. ~0 MB. | A reload, behind a thumbnail |
 
 Against that sit the protections, which always win:
@@ -135,6 +136,51 @@ from doing it. What makes a tab cheap:
   loading-time phenomenon — a page mid-load holds its parser, network buffers
   and pre-compaction heap simultaneously. Queued tabs cost nothing while they
   wait, and anything you click loads immediately.
+
+### Hibernation: the lever for tabs that must not be discarded
+
+A tab holding text you typed, or a half-drawn canvas, is never discarded — the
+protections cap it at `FROZEN`, and there it holds its **whole** footprint for as
+long as the browser runs. Freezing saves nothing on its own; measured here, it
+*costs* about 3 MB. So those tabs, the ones most worth reclaiming from, were the
+ones nothing could touch.
+
+Hibernation freezes the tab and then asks the OS to take its cold pages, which
+the kernel's compressor holds at roughly 2:1. The process stays alive and its
+state is untouched, so waking it is a few milliseconds of page faults rather than
+a reload. Measured net of what the compressor itself allocates:
+
+| private before | returned to the system | wake |
+|---|---|---|
+| 37 MB | 10.9 MB | 4.0 ms |
+| 83 MB | 32.5 MB | 3.9 ms |
+| 194 MB | 94.4 MB | 3.0 ms |
+| 303 MB | 146.1 MB | 12.0 ms |
+
+Roughly 29–49% of a renderer's private memory, rising with size. Note *net*: the
+pages reappear as the compressor's own allocation, so a per-process reading alone
+overstates this by about double — the figures above subtract it.
+
+**Linux only, and it needs two things your system probably does not have yet:**
+
+```bash
+npm run build:memtrim
+sudo setcap cap_sys_nice+ep tools/mem-trim   # process_madvise on another process
+sudo swapon /dev/zram0                       # somewhere to compress into
+```
+
+Without either, the tier is inert and the task manager says which piece is
+missing rather than showing a silent zero. Windows would reach the same effect
+through `SetProcessWorkingSetSizeEx` and needs no elevation at all, which makes
+it the *better* platform for this — it is not implemented because it could not be
+tested here, and shipping a plausible-looking call nobody has run is worse than
+saying so. macOS has no public API to force its compressor.
+
+Unlike page merging, this is on by default where available and carries no
+warning. The distinction is real: KSM shares identical pages *between* processes
+and other programs, which is a cross-site inference channel; paging to a
+compressor keeps each process's data to itself, leaving only a timing signal on
+the compression ratio of your own memory.
 
 ### Where the savings come from
 

@@ -122,6 +122,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 .dot[data-tier="cold"] { background: var(--warn); }
 .dot[data-tier="frozen"] { background: var(--accent); }
+.dot[data-tier="hibernated"] { background: var(--accent); opacity: 0.55; }
 .dot[data-tier="discarded"] { background: var(--text-dim); opacity: 0.5; }
 
 .row-main { min-width: 0; }

@@ -278,3 +278,32 @@ its renderer, making per-tab CPU an estimate and per-tab memory a share of
 somebody else's. Distinct origins are what real browsing looks like to the
 process model, and the only configuration in which the assertions mean what
 they say.
+
+
+## Memory compression as a side channel
+
+The `HIBERNATED` tier hands a renderer's cold pages to the kernel's compressor.
+That is a weaker exposure than the page merging in `tools/ksm-launch.c`, and the
+difference is worth stating because the two are easy to lump together.
+
+KSM finds byte-identical pages **across** processes and collapses them onto one
+physical copy. That is a genuine cross-site channel: a write to a merged page
+takes a measurably different time, so code in one page can test whether specific
+content exists in another process's memory. It is why page merging is opt-in here
+and prints a warning on every launch.
+
+A compression store does not deduplicate across processes. What leaks instead is
+how well *your own* memory compressed - the store's size and the latency of
+faulting a page back both depend on the data's compressibility. That is a real
+signal (arXiv:2111.08404 studies compression side channels specifically), but it
+is a signal about memory the observer already had, not a probe into another
+site's address space.
+
+Two things keep it narrow here. The tier only ever trims a renderer that is
+already frozen and hidden, so no script is running in it to take a measurement;
+and under `process-per-site` a renderer holds one site's pages, so what compressed
+well is that site's own data.
+
+This is why hibernation is on by default where available while page merging is
+not, and the reasoning belongs written down rather than re-derived the next time
+someone compares them.

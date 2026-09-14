@@ -169,6 +169,7 @@ function tierLabel(tab) {
     case 'warm': return `Background - ${tab.rssMB}MB`;
     case 'cold': return `Idle, may be discarded to save memory - ${tab.rssMB}MB`;
     case 'frozen': return `Frozen - no CPU, ${tab.rssMB}MB retained`;
+    case 'hibernated': return 'Hibernated - memory compressed, opens instantly';
     case 'discarded': return 'Discarded - reloads when opened';
     default: return tab.tier;
   }

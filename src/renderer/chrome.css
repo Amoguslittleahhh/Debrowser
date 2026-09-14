@@ -127,6 +127,7 @@ html, body {
 .tier[data-tier="warm"]      { background: var(--ok); opacity: 0.7; }
 .tier[data-tier="cold"]      { background: var(--warn); opacity: 0.8; }
 .tier[data-tier="frozen"]    { background: var(--accent); }
+.tier[data-tier="hibernated"] { background: var(--accent); opacity: 0.55; }
 .tier[data-tier="discarded"] { background: var(--text-dim); opacity: 0.5; }
 
 .tab.boosted .tier {
