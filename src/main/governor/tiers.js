@@ -17,6 +17,10 @@
  *             rather than saving any - it also stops the renderer tasks that
  *             reclaim memory in the background - so the governor applies it
  *             only to tabs still consuming CPU out of sight.
+ *   HIBERNATED frozen, then the renderer's cold pages handed to the OS
+ *             compressor. Undo cost: the pages fault back, measured at 4-12ms.
+ *             Nothing is lost, which is what makes it the one reclaim available
+ *             on a tab the protections refuse to destroy.
  *   DISCARDED renderer destroyed. Undo cost: a reload. Reserved for genuine
  *             memory contention, never used on a schedule alone.
  *
@@ -45,17 +49,25 @@ async function applyTier(tab, target, ctx) {
   }
 
   const goingUp = tierRank(target) < tierRank(current);
-  const ok = goingUp
+  const result = goingUp
     ? await promote(tab, target, ctx)
     : await demote(tab, target, ctx);
 
-  if (ok) {
-    tab.tier = target;
+  // A demotion can stop short: freezing is refused, or the trim behind
+  // HIBERNATED is unavailable. Those paths used to assign `tab.tier` themselves
+  // and return false, which left the tab in a tier nobody was told about -
+  // `tierChangedAt` stale, no `updated` event, and the governor's counters
+  // keyed off a transition that had been reported as not happening. So they
+  // return the tier they actually reached instead, and every tier change in
+  // this browser goes through the one place that records it.
+  const reached = typeof result === 'string' ? result : (result ? target : null);
+  if (reached && reached !== current) {
+    tab.tier = reached;
     tab.tierChangedAt = Date.now();
-    log(`tab ${tab.id}: ${current} -> ${target}`);
+    log(`tab ${tab.id}: ${current} -> ${reached}`);
     tab.emit('updated');
   }
-  return ok;
+  return reached === target;
 }
 
 /* ------------------------------------------------------------------ */
@@ -136,15 +148,19 @@ async function demote(tab, target, ctx) {
   // mark a tab as having been idle long enough to be a discard candidate -
   // which is the reclaim that actually returns memory.
 
-  if (tierRank(target) >= tierRank(Tier.FROZEN)) {
+  // `isStopped` rather than a tier comparison: a tab stepping from FROZEN to
+  // HIBERNATED is already stopped, and freezing it again would re-attach the
+  // debugger session that the freeze below deliberately detached - paying
+  // ~2.4MB inside the renderer, on the tier whose entire purpose is to give
+  // memory back, moments before trimming it.
+  if (tierRank(target) >= tierRank(Tier.FROZEN) && !isStopped(tab.tier)) {
     const frozen = await tab.cdp.freeze();
     if (!frozen) {
       // Freezing is the one step that can legitimately fail (DevTools
       // attached, page in an unfreezable state such as holding a lock). Stay
       // at COLD rather than reporting a tier we are not actually in.
       log(`tab ${tab.id}: freeze refused; holding at cold`);
-      tab.tier = Tier.COLD;
-      return false;
+      return Tier.COLD;
     }
 
     // A frozen page stays frozen after the debugger goes away, so there is no
@@ -155,6 +171,16 @@ async function demote(tab, target, ctx) {
   }
 
   if (target === Tier.HIBERNATED) {
+    // Once per renderer, not once per tab. Several tabs of the same site share
+    // a process, and the second trim of a process trimmed moments ago pages out
+    // whatever the first one left - a syscall for nothing. The governor owns
+    // the set and clears it every tick.
+    const trimmed = ctx.trimmedPids;
+    if (trimmed && trimmed.has(tab.pid)) {
+      tab.trimmedAt = Date.now();
+      return true;
+    }
+
     // Strictly after the freeze. Trimming a page still running its own tasks
     // just means it faults everything straight back in, and the freeze is what
     // makes the pages cold enough to be worth taking.
@@ -163,9 +189,9 @@ async function demote(tab, target, ctx) {
       // Trimming is unavailable or was refused. The tab is frozen, which is a
       // legitimate tier, so report that rather than a state it is not in.
       log(`tab ${tab.id}: trim unavailable; holding at frozen`);
-      tab.tier = Tier.FROZEN;
-      return false;
+      return Tier.FROZEN;
     }
+    if (trimmed) trimmed.add(tab.pid);
     tab.trimmedAt = Date.now();
   }
 
@@ -201,9 +227,9 @@ async function discard(tab, ctx) {
     // page perfectly intact at near-zero CPU, so take that instead and lose
     // nothing; the memory stays, and that is the correct trade.
     log(`tab ${tab.id}: discard cancelled, holds unsubmitted input`);
-    if (tab.cdp) await tab.cdp.freeze();
-    tab.tier = Tier.FROZEN;
-    return false;
+    if (isStopped(tab.tier)) return tab.tier;       // already stopped; leave it there
+    const frozen = tab.cdp ? await tab.cdp.freeze() : false;
+    return frozen ? Tier.FROZEN : tab.tier;
   }
 
   tab.teardownView();

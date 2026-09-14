@@ -352,11 +352,16 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // against.
   const compression = require('./memory').compressionStatus();
   const cap = await require('./platform').trimCapability();
+  // Both halves, and a named reason whenever either is missing. Asserting on
+  // the compressor alone passed on a machine with zram and no CAP_SYS_NICE -
+  // the mechanism string was built from the platform rather than from whether
+  // the syscall is actually permitted, so the check could not see that half.
   check('hibernation is only offered where there is somewhere to compress into',
-    cap.available === (cap.compression.available && /MADV_PAGEOUT/.test(cap.mechanism || '')),
-    compression.available
-      ? `compressor=${compression.compressor} ${compression.swapMB}MB, available=${cap.available}`
-      : `no compressor, available=${cap.available}, reason="${cap.reason}"`);
+    cap.available === (cap.permitted && cap.compression.available)
+      && (cap.available || typeof cap.reason === 'string'),
+    `permitted=${cap.permitted} compressor=${compression.available
+      ? `${compression.compressor} ${compression.swapMB}MB` : 'none'} ` +
+    `available=${cap.available}${cap.available ? '' : ` reason="${cap.reason}"`}`);
 
   if (!governor.trimAvailable) {
     console.log(`  SKIP  hibernation unavailable here: ${governor.trimReason}`);

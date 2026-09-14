@@ -74,6 +74,20 @@ class Governor {
     this.trimReason = 'not probed';
     this.hibernationSamples = [];
     this.hibernationDisabled = false;
+
+    /**
+     * Renderers already trimmed during the current tick.
+     *
+     * Hibernation acts on a *process*, but the ladder walks *tabs*, and under
+     * `process-per-site` several tabs share one renderer. Without this every
+     * tab in the group would issue its own `trim` for the same pid - the second
+     * and later ones paging out whatever the first had left, for a few hundred
+     * microseconds each and no return - and each would then record its own
+     * "reclaim" sample, so one process trimmed once would look like four
+     * hibernations, three of which measured near zero and dragged the
+     * self-disable median down towards switching the tier off.
+     */
+    this.trimmedPids = new Set();
   }
 
   start() {
@@ -124,6 +138,7 @@ class Governor {
     this.running = true;
     try {
       this.tickCount += 1;
+      this.trimmedPids.clear();
 
       this.metrics.sample();
       if (this.tickCount % HEAP_SAMPLE_EVERY === 0) await this.samplePerTabMetrics();
@@ -367,10 +382,25 @@ class Governor {
 
       target = this.clampToProtections(tab, target);
       if (tierRank(target) > tierRank(tab.tier)) {
-        const before = target === Tier.HIBERNATED ? tab.privateMB : null;
-        const moved = await applyTier(tab, target, this.ctx());
-        if (target === Tier.FROZEN) this.stats.freezes += 1;
-        if (moved && tab.tier === Tier.HIBERNATED) this.recordHibernation(tab, before);
+        const from = tab.tier;
+        // Whole-process, because that is the unit a trim acts in. The tab's own
+        // `privateMB` is its *share* of the renderer under the attribution in
+        // metrics.js, so comparing it against a post-trim process reading
+        // subtracted a fraction from a whole and reported a reclaim several
+        // times the truth on any shared renderer.
+        const before = target === Tier.HIBERNATED && !this.trimmedPids.has(tab.pid)
+          ? readProcessMemory(tab.pid)
+          : null;
+
+        await applyTier(tab, target, this.ctx());
+
+        // Keyed off where the tab actually landed, not where it was asked to
+        // go: freezing and trimming can each be refused, and a tier the tab is
+        // not in must not be counted as one it reached.
+        if (tab.tier !== from) {
+          if (tab.tier === Tier.FROZEN) this.stats.freezes += 1;
+          if (tab.tier === Tier.HIBERNATED && before) this.recordHibernation(tab, before);
+        }
       }
     }
   }
@@ -527,7 +557,17 @@ class Governor {
 
     // Unsubmitted input survives a freeze perfectly; it does not survive a
     // discard. The memory cost of holding it is not a close call.
-    if (tab.hasDirtyInput) cap(Tier.FROZEN);
+    //
+    // HIBERNATED rather than FROZEN, which is the whole reason that tier
+    // exists. Every protection below this line means "do not *destroy* this
+    // tab", and hibernation destroys nothing: the process stays alive, the
+    // heap and DOM are untouched, and the pages come back from the compressor
+    // on a fault - the same guarantee the OS already gives every process it
+    // swaps. Capping these at FROZEN made HIBERNATED unreachable for exactly
+    // the tabs it was built for, and left them holding their full working set
+    // instead. The cost of being wrong is 4-12ms on resume (M4b/M4c), not lost
+    // text.
+    if (tab.hasDirtyInput) cap(Tier.HIBERNATED);
 
     // A tab the user just left is one they are likely about to return to.
     //
@@ -538,12 +578,12 @@ class Governor {
     // the candidates are already ordered least-recently-used: the tab being
     // discarded is the Nth least recent, never one just left.
     if (tab.everVisible && !ignoreGrace && tab.idleMs() < this.cfg.minLifetimeMs) {
-      cap(Tier.FROZEN);
+      cap(Tier.HIBERNATED);
     }
 
-    if (tab.pinned) cap(this.pressure === Pressure.CRITICAL ? Tier.FROZEN : Tier.COLD);
+    if (tab.pinned) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.COLD);
 
-    if (!discardAllowed) cap(Tier.FROZEN);
+    if (!discardAllowed) cap(Tier.HIBERNATED);
 
     return floor;
   }
@@ -591,15 +631,17 @@ class Governor {
    * otherwise keep paying the syscall and the resume stall forever in exchange
    * for nothing, which is exactly the failure this repo deletes levers for.
    */
-  recordHibernation(tab, privateBeforeMB) {
+  recordHibernation(tab, before) {
     this.stats.hibernations += 1;
-    if (privateBeforeMB == null) return;
+    if (!before) return;
 
     // Re-read now rather than waiting for the next tick: the pages are gone by
-    // the time the trim returns, and the tab's cached figure is pre-trim.
+    // the time the trim returns, and the cached figure is pre-trim. Both
+    // readings are of the same process, taken the same way - a share compared
+    // against a whole is not a measurement.
     const after = readProcessMemory(tab.pid);
     if (!after) return;
-    const reclaimed = privateBeforeMB - after.privateMB;
+    const reclaimed = before.privateMB - after.privateMB;
     this.stats.hibernateReclaimedMB += Math.max(0, reclaimed);
     this.hibernationSamples.push(reclaimed);
 
@@ -638,7 +680,7 @@ class Governor {
   }
 
   ctx() {
-    return { cfg: this.cfg, ipcHub: this.ipcHub, log: this.log };
+    return { cfg: this.cfg, ipcHub: this.ipcHub, log: this.log, trimmedPids: this.trimmedPids };
   }
 
   /* ---------------------------------------------------------------- */

@@ -266,6 +266,9 @@ function main() {
   app.on('before-quit', () => {
     if (governor) governor.stop();
     if (tabs) tabs.closeAll();
+    // The trim helper is a long-lived child process of ours. Nothing else ends
+    // it, and it holds an open stdin on a pipe that outlives us.
+    platform.stopTrimHelper();
     // Synchronous on purpose: quit does not wait for promises, and leaving
     // page screenshots on disk is the one cleanup that must not be best effort.
     sweepThumbnailsSync();

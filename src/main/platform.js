@@ -121,6 +121,19 @@ class TrimHelper {
     this.pending = null;      // { resolve, timer } - one request at a time
     this.queue = [];
     this.restarts = 0;
+    this.stopped = false;
+    /**
+     * Replies owed by the helper for requests we have already given up on.
+     *
+     * The protocol has no request ids, and it does not need them as long as
+     * this is tracked: the helper answers in order, one line per command. But a
+     * timed-out request is not cancelled - the helper is still working on it and
+     * will eventually print its reply - so without this the late answer to a
+     * trim of pid A would be handed to the caller waiting on pid B, reporting
+     * bytes that were never advised for it. Each timeout adds one owed reply and
+     * the next line from the helper is dropped against it.
+     */
+    this.owed = 0;
     /** null until the helper has been asked; then true/false. */
     this.canTrim = null;
     this.reason = null;
@@ -132,7 +145,7 @@ class TrimHelper {
    * transitions are frequent.
    */
   start() {
-    if (this.child || this.reason) return Boolean(this.child);
+    if (this.child || this.reason || this.stopped) return Boolean(this.child);
     if (!isLinux) { this.reason = `not implemented on ${PLATFORM}`; return false; }
     if (!fs.existsSync(TRIM_BINARY)) {
       this.reason = 'tools/mem-trim not built (npm run build:memtrim)';
@@ -152,6 +165,8 @@ class TrimHelper {
       while ((nl = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
+        // The late reply to something nobody is waiting for any more.
+        if (this.owed > 0) { this.owed -= 1; continue; }
         this.settle(line.trim());
       }
     });
@@ -159,7 +174,9 @@ class TrimHelper {
     // caller treats an unavailable trim as "do nothing", never as an error.
     this.child.on('exit', () => {
       this.child = null;
+      this.owed = 0;                 // a dead helper owes nothing
       this.settle(null);
+      if (this.stopped) return;      // we asked it to go
       if (this.restarts++ === 0) {
         this.log('mem-trim helper exited; restarting once');
         this.start();
@@ -177,8 +194,15 @@ class TrimHelper {
     return true;
   }
 
-  /** Shut the helper down. Called on quit; safe to call when not running. */
+  /**
+   * Shut the helper down. Called on quit; safe to call when not running.
+   *
+   * The flag is the point: killing the child fires the `exit` handler, whose
+   * job is to bring a crashed helper back. Without it, shutting down spawned a
+   * fresh helper process on the way out of the browser.
+   */
   stop() {
+    this.stopped = true;
     const child = this.child;
     this.child = null;
     if (!child) return;
@@ -221,8 +245,12 @@ class TrimHelper {
       return undefined;
     }
     const timer = setTimeout(() => {
-      // A wedged helper must never stall a tier transition.
+      // A wedged helper must never stall a tier transition. The request is not
+      // cancelled - the helper is inside a syscall and will answer eventually -
+      // so the answer is booked as owed and dropped when it arrives, rather than
+      // being handed to whoever asks next.
       this.log(`mem-trim timed out on "${command}"`);
+      this.owed += 1;
       this.settle(null);
     }, TRIM_TIMEOUT_MS);
     if (typeof timer.unref === 'function') timer.unref();
@@ -323,7 +351,12 @@ async function trimCapability(log) {
 
   return {
     available: permitted && compression.available,
-    mechanism: isLinux ? `process_madvise(MADV_PAGEOUT) -> ${compression.compressor || 'nothing'}` : null,
+    // Reported separately so the two halves can be told apart from outside -
+    // the same reason `pageMergingStatus()` splits `processMergeable` from
+    // `ksmRunning`. A caller checking only the compressor would call this
+    // capability correct on a machine that has zram and no CAP_SYS_NICE.
+    permitted,
+    mechanism: permitted ? `process_madvise(MADV_PAGEOUT) -> ${compression.compressor || 'nothing'}` : null,
     reason,
     compression
   };
