@@ -24,13 +24,39 @@ npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
 npm run start:merged       # + page merging (KSM) - side-channel risk, read below
 npm run start:performance  # most headroom
 
-npm run smoke              # 37-check end-to-end test, headless
+npm run smoke              # 41-check end-to-end test against real renderers
 npm run bench              # memory benchmark
 ```
 
-On Linux without a display, prefix with `xvfb-run -a`. Running as root (in a
-container) additionally needs `--no-sandbox`, which the npm scripts already
-pass; a normal desktop install must not use it.
+Needs Node 18+ and runs on Windows, macOS and Linux. `npm run smoke` drives a
+real browser, so it wants a display; on a headless Linux box or in CI use
+`npm run smoke:headless`, which wraps it in `xvfb-run` and adds `--no-sandbox`
+for running as root in a container. **A normal desktop install must never pass
+`--no-sandbox`** — it is in the headless script only because Chromium refuses to
+start sandboxed as root.
+
+### What works on which platform
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Browser, tabs, session restore, task manager | yes | yes | yes |
+| Idle ladder: warm → cold → frozen → discarded | yes | yes | yes |
+| Live-renderer cap, thumbnails, hover-prefetch | yes | yes | yes |
+| Animation boost, background nice-down | yes | yes | yes |
+| Proportional (PSS) memory accounting | yes | falls back to RSS | falls back to RSS |
+| `HIBERNATED` tier — compress a tab's cold pages | with zram/swap **and** `CAP_SYS_NICE` | no public API | not implemented |
+| Page merging (KSM) | opt-in, needs root | no | no |
+
+Where a lever is unavailable the browser says so by name in the task manager
+rather than silently doing nothing, and everything above it on the ladder still
+works — the headline residency win comes from the live-renderer cap and
+invisible discard, which are on everywhere.
+
+> **Tested on Linux.** Every OS-specific path is guarded and returns a neutral
+> value off-Linux rather than failing, and all of them were re-checked for this
+> release — but the app has not been *executed* on Windows or macOS, so treat
+> those as expected-to-work rather than verified. If something breaks there, it
+> is a bug and not a designed limitation.
 
 ### Profiles
 
@@ -72,7 +98,7 @@ above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 
 ## What it actually does
 
-Every tab sits in one of five tiers. The governor moves tabs between them on a
+Every tab sits in one of six tiers. The governor moves tabs between them on a
 2-second tick, driven by how long they have been out of sight and how close the
 browser is to its memory budget.
 
@@ -90,7 +116,8 @@ Against that sit the protections, which always win:
 - The visible tab is **never** frozen, discarded, or deprioritised.
 - Nothing that stalls a renderer runs while anything is animating.
 - A tab playing audio is never frozen or discarded.
-- A tab holding text you typed is never discarded — it is frozen instead.
+- A tab holding text you typed is never discarded — it is frozen, and its
+  cold pages compressed, instead.
 - A tab you left moments ago is never discarded, at any pressure.
 - A tab already near its floor is left alone entirely.
 

@@ -151,8 +151,6 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   /* ---------------------------------------------------------------- */
   console.log('\n3. A tab still burning CPU in the background is frozen\n');
 
-  await settledSample(governor, 4);
-  const busyCpuBefore = busy.cpu;
   // Compared against a quiet tab rather than an absolute figure: CPU is
   // reported as a smoothed average, so the exact number at any instant depends
   // on where in the worker's duty cycle the sample lands. What matters, and
@@ -162,8 +160,21 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // against - sharing a process's CPU out proportionally - made a busy tab and a
   // quiet one report *identical* CPU, so a margin over the idle tab catches it
   // while tolerating how much the worker's duty cycle varies between runs.
+  //
+  // Waited for rather than read once. The figure is an exponential moving
+  // average seeded from zero, so how many samples it takes to climb depends on
+  // the machine: on a contended or cold host four samples put it at 0.04%,
+  // under the margin, and the check failed on a browser that was behaving
+  // correctly. Waiting asserts the same property without asserting a rate of
+  // convergence nobody promised.
+  const cpuGap = () => busy.cpu - heavy.cpu;
+  const distinguishable = await waitFor(async () => {
+    await settledSample(governor, 2, 150);
+    return cpuGap() > 0.1;
+  }, { timeoutMs: 15_000, pollMs: 0 });
+  const busyCpuBefore = busy.cpu;
   check('a still-working hidden tab is distinguishable from a quiet one',
-    busyCpuBefore > heavy.cpu + 0.1,
+    distinguishable,
     `busy ${busyCpuBefore.toFixed(2)}% vs idle ${heavy.cpu.toFixed(2)}%`);
 
   const busyFroze = await waitFor(() => busy.tier === Tier.FROZEN, { timeoutMs: 12_000 });
