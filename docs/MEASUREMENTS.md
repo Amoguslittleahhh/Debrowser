@@ -337,6 +337,32 @@ the same syscall down the same permission path as a real trim - and reports
 failure if zero bytes were advised, since a call that never happened is not a
 demonstration that trimming works.
 
+### …and then reported the wrong remedy
+
+Third time for the same class of fault, found by deliberately breaking the
+helper four different ways and reading what `trimCapability()` said. Every
+unreachable-helper path funnelled into one message, so a binary that was merely
+not executable was reported as a missing kernel capability — a confident remedy
+(`sudo setcap …`) for a problem the user did not have:
+
+```
+                                    before                    after
+binary missing        "needs CAP_SYS_NICE: setcap…"   "not built (npm run build:memtrim)"
+binary not executable  (crashed the browser)          "could not start helper: …EACCES"
+capability dropped    "needs CAP_SYS_NICE: setcap…"   "needs CAP_SYS_NICE: setcap…"
+healthy               available                       available
+```
+
+The "crashed the browser" row is not hyperbole and was not hypothetical: a write
+to a helper that has died raises EPIPE, which Node delivers as an asynchronous
+`'error'` event rather than throwing from `write()`, so the `try`/`catch` around
+the write never saw it — and an `'error'` event with no listener terminates the
+process. A dead memory-trim helper took the whole browser with it.
+
+The rule this keeps re-teaching: a capability report is only worth having if each
+distinct failure produces a distinct, *checkable* message. Collapsing them costs
+nothing until someone follows the advice.
+
 ---
 
 ## Hibernation in the benchmark — 605MB without discarding anything

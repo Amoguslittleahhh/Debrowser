@@ -255,9 +255,21 @@ class TrimHelper {
       this.log(`mem-trim pipe error: ${err.message}`);
       this.settle(HELPER_GONE);
     };
-    this.child.on('error', pipeFailed);
     this.child.stdin.on('error', pipeFailed);
     this.child.stdout.on('error', pipeFailed);
+
+    // An 'error' on the child itself is a different animal from a broken pipe:
+    // it means the process could not be *spawned* (EACCES on a binary that is
+    // not executable, ENOEXEC on one built for another architecture), and node
+    // does not promise an 'exit' after it - so nothing else will ever set
+    // `reason`, and the restart-once path would spin on a binary that cannot
+    // run. Recorded as the permanent, named failure it is, which is also what
+    // stops `probe` reporting it as a missing capability.
+    this.child.on('error', (err) => {
+      this.reason = `could not start helper: ${err.message}`;
+      this.child = null;
+      this.settle(HELPER_GONE);
+    });
 
     // A helper that dies takes trim with it rather than the browser: every
     // caller treats an unavailable trim as "do nothing", never as an error.
@@ -478,11 +490,28 @@ class TrimHelper {
     if (this.canTrim !== null) return this.canTrim;
     if (!this.start()) { this.canTrim = false; return false; }
     const line = await this.request('caps');
+    this.canTrim = false;
+
+    // Never reached the helper, so it said nothing about capabilities. Whatever
+    // went wrong already has a name - a spawn failure, a helper that exited, a
+    // shutdown - and overwriting it with the permissions message below would
+    // hand the user a confident remedy for a problem they do not have. That is
+    // the failure this whole capability report exists to avoid: it was observed
+    // telling someone to run `setcap` on a binary that was merely not
+    // executable.
+    if (line === HELPER_GONE) {
+      this.reason = this.reason || 'helper could not be reached';
+      return false;
+    }
+
     const m = line && /^caps \w+ ([01])$/.exec(line);
     this.canTrim = Boolean(m && m[1] === '1');
     if (!this.canTrim) {
-      // The overwhelmingly likely cause on a desktop, and the one with a fix.
-      this.reason = 'needs CAP_SYS_NICE: sudo setcap cap_sys_nice+ep tools/mem-trim';
+      // The helper ran and answered "no". On a desktop that is overwhelmingly
+      // the missing capability, and it is the one with a fix.
+      this.reason = m
+        ? 'needs CAP_SYS_NICE: sudo setcap cap_sys_nice+ep tools/mem-trim'
+        : `helper gave an unreadable answer: "${line}"`;
     }
     return this.canTrim;
   }
