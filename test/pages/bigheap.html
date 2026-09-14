@@ -1,0 +1,67 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Large retained JS heap</title>
+<!--
+  Retains a few hundred megabytes of live JavaScript objects, which is what a
+  real application tab holds and what none of the other fixtures here do:
+  heavy.html is DOM-heavy but only ~36MB private, and a settled page of that
+  size has almost no private anonymous memory left for the OS to reclaim.
+
+  The data is deliberately varied rather than repetitive. An earlier probe run
+  used buffers filled with a single repeated byte, which lzo-rle compressed
+  about 25:1 and made the compressor look miraculous. Real heaps do not
+  compress like that, and a fixture that flatters the mechanism is worse than
+  no fixture.
+-->
+<style>
+  body { font: 14px system-ui; background: #101318; color: #e6e9ef; padding: 24px; }
+</style>
+<h1>Large retained heap</h1>
+<p id="status">allocating…</p>
+<script>
+  // Retained on window so nothing here is collectable.
+  window.__retained = [];
+  const TARGET_MB = Number(new URLSearchParams(location.search).get('mb') || 250);
+
+  // A cheap deterministic PRNG: varied content, reproducible between runs.
+  let seed = 0x2545f491;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+
+  const WORDS = ['alpha','bravo','charlie','delta','echo','foxtrot','golf','hotel',
+                 'india','juliet','kilo','lima','mike','november','oscar','papa'];
+
+  function record(i) {
+    // Shaped like application state: objects holding strings, numbers, arrays.
+    const n = 4 + ((i * 7) % 9);
+    const tags = [];
+    for (let t = 0; t < n; t++) tags.push(WORDS[(i * 3 + t) % WORDS.length] + '-' + ((i * 31 + t) % 9973));
+    return {
+      id: i,
+      key: 'rec_' + i.toString(36) + '_' + Math.floor(rnd() * 1e9).toString(36),
+      score: rnd() * 1000,
+      when: Date.now() - Math.floor(rnd() * 1e9),
+      tags,
+      body: tags.join(' ') + ' ' + Math.floor(rnd() * 1e15).toString(36).repeat(3)
+    };
+  }
+
+  let i = 0;
+  function fill() {
+    const began = performance.now();
+    // Chunked so the page stays responsive enough to report progress.
+    while (performance.now() - began < 40) {
+      const batch = [];
+      for (let k = 0; k < 2000; k++) batch.push(record(i++));
+      window.__retained.push(batch);
+    }
+    const heapMB = performance.memory ? performance.memory.usedJSHeapSize / 1048576 : -1;
+    document.getElementById('status').textContent =
+      `${i.toLocaleString()} records, heap ${heapMB.toFixed(0)} MB`;
+    if (heapMB >= 0 && heapMB < TARGET_MB) return setTimeout(fill, 0);
+    document.title = 'heap ready';
+    document.getElementById('status').textContent =
+      `done: ${i.toLocaleString()} records, heap ${heapMB.toFixed(0)} MB`;
+    window.__heapReady = true;
+  }
+  fill();
+</script>
