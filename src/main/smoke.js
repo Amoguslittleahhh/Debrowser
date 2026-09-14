@@ -408,13 +408,19 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     const ghost = 0x7ffffffe;
     const first = await platform.trimProcessMemory(ghost);
     const backoff = platform.trimBackoffMs(ghost);
-    const t0 = Date.now();
     const second = await platform.trimProcessMemory(ghost);
-    const secondTookMs = Date.now() - t0;
+    const backoffAfter = platform.trimBackoffMs(ghost);
+
+    // That the second call never reached the helper is asserted from the
+    // backoff, not from a stopwatch: a wall-clock budget in a main process that
+    // has just built a 120MB heap fails on a GC pause, and a round trip about a
+    // pid that does not exist returns in about a millisecond anyway, so timing
+    // could not tell the two apart. A second refusal would have been a second
+    // strike and doubled the window; an unchanged window is the evidence.
     check('a refused trim backs off instead of retrying every tick',
-      first === null && second === null && backoff > 0 && secondTookMs < 5,
-      `refused=${first === null} backoff=${Math.round(backoff / 1000)}s ` +
-      `second attempt took ${secondTookMs}ms (no round trip)`);
+      first === null && second === null && backoff > 0 && backoffAfter <= backoff,
+      `refused=${first === null} backoff=${Math.round(backoff / 1000)}s, ` +
+      `unchanged after a second attempt=${backoffAfter <= backoff}`);
     platform.forgetProcess(ghost);
   }
 

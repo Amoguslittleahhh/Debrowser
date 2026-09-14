@@ -138,8 +138,32 @@ const TRIM_COOLDOWN_MS = 5000;
 const TRIM_BACKOFF_MS = 30_000;
 const TRIM_BACKOFF_MAX_MS = 600_000;
 
-/** Prune expired backoff entries once a map gets past this many pids. */
+/**
+ * A timeout escalates on its own, much shorter ladder.
+ *
+ * `err <pid> <errno>` is the kernel saying no, and saying it again in ten
+ * minutes is the right response. A timeout is not that: the syscall may well
+ * have completed just after we stopped waiting, which is why the cooldown is
+ * recorded alongside it. Sharing one ladder would exile a healthy renderer that
+ * is merely slow to page out for ten minutes on the strength of two slow calls.
+ */
+const TRIM_TIMEOUT_BACKOFF_MAX_MS = 60_000;
+
+/** Cap on the pid maps, enforced by eviction rather than only by expiry. */
 const TRIM_MAP_LIMIT = 256;
+
+/**
+ * Resolution meaning "there is no helper", as distinct from "the helper did not
+ * answer in time".
+ *
+ * The difference decides whether a failure is charged to the pid that happened
+ * to ask. It cannot be inferred after the fact by looking at `this.child`: the
+ * exit handler nulls it, resolves the pending request - which only *queues* the
+ * continuation - and then synchronously restarts the helper, so by the time the
+ * caller resumes, `this.child` is a live process again and the crash looks like
+ * a per-pid timeout. Not a string any reply can be.
+ */
+const HELPER_GONE = '\u0000helper-gone';
 
 /**
  * What a command or a reply is *about*, which is all the correlation this
@@ -220,11 +244,26 @@ class TrimHelper {
         this.settle(line);
       }
     });
+    // Writing to a helper that has died raises EPIPE, and Node reports that as
+    // an asynchronous 'error' event on the stream rather than throwing from
+    // `write()` - so the try/catch in `send` never sees it, and an 'error' event
+    // with no listener is fatal to the *browser*. A dead memory-trim helper
+    // taking the whole browser down with it is the worst possible trade for an
+    // optimisation that is inert on most machines. Caught here, and reported as
+    // what it is: there is no helper, so nobody's pid is at fault.
+    const pipeFailed = (err) => {
+      this.log(`mem-trim pipe error: ${err.message}`);
+      this.settle(HELPER_GONE);
+    };
+    this.child.on('error', pipeFailed);
+    this.child.stdin.on('error', pipeFailed);
+    this.child.stdout.on('error', pipeFailed);
+
     // A helper that dies takes trim with it rather than the browser: every
     // caller treats an unavailable trim as "do nothing", never as an error.
     this.child.on('exit', () => {
       this.child = null;
-      this.settle(null);
+      this.settle(HELPER_GONE);
       if (this.stopped) return;      // we asked it to go
       if (this.restarts++ === 0) {
         this.log('mem-trim helper exited; restarting once');
@@ -288,7 +327,7 @@ class TrimHelper {
   }
 
   send(command, resolve) {
-    if (!this.start()) return resolve(null);
+    if (!this.start()) return resolve(HELPER_GONE);
     if (this.pending) {
       this.queue.push({ command, resolve });
       return undefined;
@@ -306,7 +345,7 @@ class TrimHelper {
     try {
       this.child.stdin.write(`${command}\n`);
     } catch {
-      this.settle(null);
+      this.settle(HELPER_GONE);
     }
     return undefined;
   }
@@ -329,6 +368,11 @@ class TrimHelper {
     if (this.backoffMs(pid) > 0) return null;
 
     const line = await this.request(`trim ${pid}`);
+
+    // No helper at all. That failure belongs to every pid, not to whichever one
+    // happened to ask, and `reason` already reports it.
+    if (line === HELPER_GONE) return null;
+
     const ok = line && /^ok \d+ (\d+)$/.exec(line);
     if (ok) {
       this.trimmedAt.set(pid, Date.now());
@@ -338,14 +382,19 @@ class TrimHelper {
 
     const err = line && /^err \d+ (\d+)$/.exec(line);
     if (err) {
-      this.refuse(pid, `errno ${err[1]}`);
-    } else if (this.child) {
-      // No reply from a helper that is still running: it timed out inside the
-      // syscall on this process. Not attributed to the pid when the helper is
-      // gone entirely - that failure belongs to every pid, and `reason` already
-      // reports it.
-      this.refuse(pid, 'no reply');
+      this.refuse(pid, `errno ${err[1]}`, TRIM_BACKOFF_MAX_MS);
+      return null;
     }
+
+    // Timed out inside the syscall on this process. Treated as a trim that
+    // probably *landed*: the helper is still working, and MADV_PAGEOUT on a
+    // large renderer taking longer than we waited says nothing about whether
+    // the kernel accepted it. So the cooldown is recorded - asking again
+    // immediately would page out what this call is still in the middle of
+    // taking - and the backoff runs on the short ladder, because a slow
+    // renderer must not be exiled for ten minutes for being slow.
+    this.trimmedAt.set(pid, Date.now());
+    this.refuse(pid, 'no reply in time', TRIM_TIMEOUT_BACKOFF_MAX_MS);
     return null;
   }
 
@@ -356,12 +405,20 @@ class TrimHelper {
     return Math.max(0, entry.until - Date.now());
   }
 
-  /** Record a refusal and push the pid's next attempt further out. */
-  refuse(pid, why) {
+  /**
+   * Record a refusal and push the pid's next attempt further out.
+   *
+   * `ceiling` is what separates a kernel refusal from a timeout. Strikes reset
+   * when the kind of failure changes, so a renderer that timed out twice and
+   * then hits a real EPERM starts that ladder from the bottom rather than
+   * inheriting an escalation earned for something else.
+   */
+  refuse(pid, why, ceiling) {
     this.prune();
-    const strikes = (this.refused.get(pid)?.strikes || 0) + 1;
-    const wait = Math.min(TRIM_BACKOFF_MS * 2 ** (strikes - 1), TRIM_BACKOFF_MAX_MS);
-    this.refused.set(pid, { until: Date.now() + wait, strikes });
+    const prev = this.refused.get(pid);
+    const strikes = prev && prev.ceiling === ceiling ? prev.strikes + 1 : 1;
+    const wait = Math.min(TRIM_BACKOFF_MS * 2 ** (strikes - 1), ceiling);
+    this.refused.set(pid, { until: Date.now() + wait, strikes, ceiling });
     // Logged on every refusal, which the backoff itself keeps to a trickle:
     // once per pid at 30s, then a minute, then two, up to ten.
     this.log(`mem-trim refused pid ${pid}: ${why}; not retrying for ${Math.round(wait / 1000)}s`);
@@ -389,15 +446,30 @@ class TrimHelper {
   }
 
   /**
-   * Bound the maps on a long session. `forgetProcess` handles the ordinary case
+   * Bound both maps on a long session. `forgetProcess` handles the ordinary case
    * as renderers exit; this is the backstop for pids that were refused and never
    * seen again.
+   *
+   * Expiry alone does not bound anything - a host with no CAP_SYS_NICE refuses
+   * every renderer it ever opens, and inside one backoff window none of those
+   * entries is expired - so once the expired ones are gone, the oldest survivors
+   * are evicted down to the limit. Evicting a live backoff early only means that
+   * pid is asked once more, which is the cheap direction to be wrong in.
    */
   prune() {
-    if (this.refused.size < TRIM_MAP_LIMIT) return;
     const now = Date.now();
+    for (const [pid, at] of this.trimmedAt) {
+      if (now - at >= TRIM_COOLDOWN_MS) this.trimmedAt.delete(pid);
+    }
+
+    if (this.refused.size < TRIM_MAP_LIMIT) return;
     for (const [pid, entry] of this.refused) {
       if (entry.until <= now) this.refused.delete(pid);
+    }
+    if (this.refused.size < TRIM_MAP_LIMIT) return;
+    const oldestFirst = [...this.refused.entries()].sort((a, b) => a[1].until - b[1].until);
+    for (const [pid] of oldestFirst.slice(0, this.refused.size - TRIM_MAP_LIMIT + 1)) {
+      this.refused.delete(pid);
     }
   }
 
