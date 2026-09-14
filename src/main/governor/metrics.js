@@ -22,7 +22,7 @@
 
 const { MB } = require('../config');
 const { readProcessMemory, accountingMode, pageMergingStatus,
-        unreportedProcessesMB } = require('../memory');
+        unreportedProcessesMB, compressionStatus } = require('../memory');
 
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
@@ -205,6 +205,7 @@ class Metrics {
     return {
       accounting: accountingMode(),
       pageMerging: pageMergingStatus(),
+      compression: compressionStatus(),
       totalMB: Math.round(this.totalMB),
       overheadMB: Math.round(this.browserOverheadMB),
       reclaimableMB: Math.round(this.reclaimableMB()),

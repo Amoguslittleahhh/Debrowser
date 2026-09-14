@@ -130,6 +130,24 @@ const padL = (s, n) => String(s).padStart(n);
                 `design. Use --mix=noforms to measure the cap alone.`);
   }
 
+  // The system-wide reading, beside the per-process one. A trim that only moves
+  // pages into the compressor's own accounting is not a saving, and the totals
+  // above cannot show that on their own.
+  const sys = on.system || {};
+  if (sys.availableMB != null) {
+    const before = off.system && off.system.availableMB;
+    row('system available', before != null ? `${before} MB` : '—', `${sys.availableMB} MB`,
+        before != null ? `${sys.availableMB - before >= 0 ? '+' : ''}${sys.availableMB - before} MB` : '');
+  }
+  if (sys.zramPhysicalMB != null) {
+    row('compressor holding', '—',
+        `${sys.zramPhysicalMB} MB`,
+        `${sys.zramStoredMB} MB stored`);
+  }
+  if (on.compression && !on.compression.available) {
+    console.log(`\n  note: no swap or zram configured, so hibernation is inert on this host.`);
+  }
+
   console.log(`\n  saving: ${pct.toFixed(1)}%`);
   console.log(`  governed tab states: ${JSON.stringify(on.tiers)}\n`);
 

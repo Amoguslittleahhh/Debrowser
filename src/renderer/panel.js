@@ -84,6 +84,11 @@ function render(state) {
   const hib = state.hibernation;
   if (hib && !hib.available) {
     el.pressure.textContent += ` Hibernation unavailable: ${hib.reason}.`;
+    // Name the fix, not just the fault. "No swap" is something the user can act
+    // on in one command; "unavailable" on its own is not.
+    if (state.compression && !state.compression.available) {
+      el.pressure.textContent += ' Enabling zram or swap would turn it on.';
+    }
   } else if (hib && hib.disabled) {
     el.pressure.textContent += ' Hibernation disabled: it reclaimed too little on this machine.';
   } else if (s.hibernations) {

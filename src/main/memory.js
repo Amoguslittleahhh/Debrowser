@@ -308,6 +308,65 @@ function processType(pid) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Somewhere to compress into                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Whether this system has a memory compressor for a trimmed renderer to page
+ * into, and which kind.
+ *
+ * This exists because `MADV_PAGEOUT` **succeeds with no swap configured**. The
+ * kernel accepts the advice and reclaims nothing, because there is nowhere to
+ * put dirty anonymous pages - so a capability check that only asks "is the
+ * syscall permitted?" reports a working feature on a machine where it provably
+ * does nothing. That is not hypothetical: it happened during development, where
+ * a reset zram device made a trim measurement read as a negative result about
+ * the mechanism itself.
+ *
+ * Reported separately from whether the helper can run, exactly as
+ * `pageMergingStatus()` separates `processMergeable` from `ksmRunning`, and for
+ * the same reason: both failures look identical from the outside - a flat zero -
+ * and a user who cannot tell which one they have cannot fix it.
+ *
+ * Disk swap works too; it is simply slower to fault back. zram is the good case
+ * because the pages stay in RAM compressed, which is what the measured 4-12ms
+ * resume assumes.
+ *
+ * @returns {{available:boolean, compressor:string|null, swapMB:number, zramMB:number}}
+ */
+function compressionStatus() {
+  const none = { available: false, compressor: null, swapMB: 0, zramMB: 0 };
+  if (!isLinux) return none;
+
+  let text;
+  try {
+    text = fs.readFileSync('/proc/swaps', 'utf8');
+  } catch {
+    return none;
+  }
+
+  let swapMB = 0;
+  let zramMB = 0;
+  // First line is the header; each remaining line is "Filename Type Size Used Priority",
+  // with Size in 1KB units.
+  for (const line of text.trim().split('\n').slice(1)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 3) continue;
+    const mb = Number(cols[2]) / 1024;
+    if (!Number.isFinite(mb)) continue;
+    swapMB += mb;
+    if (/zram/i.test(cols[0])) zramMB += mb;
+  }
+
+  return {
+    available: swapMB > 0,
+    compressor: swapMB === 0 ? null : (zramMB > 0 ? 'zram' : 'swap'),
+    swapMB: Math.round(swapMB),
+    zramMB: Math.round(zramMB)
+  };
+}
+
 /** How the numbers on this host should be described. */
 function accountingMode() {
   return detectPss() ? 'pss' : 'rss';
@@ -315,5 +374,5 @@ function accountingMode() {
 
 module.exports = {
   footprintMB, readProcessMemory, accountingMode, detectPss, pageMergingStatus,
-  unreportedProcessesMB
+  unreportedProcessesMB, compressionStatus
 };
