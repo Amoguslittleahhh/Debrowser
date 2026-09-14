@@ -124,6 +124,24 @@ const TRIM_TIMEOUT_MS = 2000;
 const TRIM_COOLDOWN_MS = 5000;
 
 /**
+ * Backoff after a trim the kernel refused for a specific process, doubling per
+ * consecutive refusal up to the cap.
+ *
+ * Without it a refusal costs the same every tick, forever. The tab holds at
+ * FROZEN, the ladder targets HIBERNATED again two seconds later, and the
+ * governor issues another serialised round trip to the helper for a call that
+ * has already failed - a per-pid EPERM or a process that has gone away does not
+ * become true again by being asked more often. The global self-disable does not
+ * cover this: it measures reclaim across the browser and is deliberately blind
+ * to one renderer refusing while the rest work.
+ */
+const TRIM_BACKOFF_MS = 30_000;
+const TRIM_BACKOFF_MAX_MS = 600_000;
+
+/** Prune expired backoff entries once a map gets past this many pids. */
+const TRIM_MAP_LIMIT = 256;
+
+/**
  * What a command or a reply is *about*, which is all the correlation this
  * protocol needs: `trim <pid>` is answered by `ok <pid> …` or `err <pid> …`,
  * and `caps` by `caps linux <0|1>`.
@@ -153,6 +171,14 @@ class TrimHelper {
      * only place both the trim and its undo pass through.
      */
     this.trimmedAt = new Map();
+    /**
+     * Pids whose trim the kernel refused: `pid -> { until, strikes }`.
+     *
+     * Separate from `trimmedAt` because the two mean opposite things - one says
+     * "there is nothing left to take", the other "this one cannot be asked yet"
+     * - and they are cleared by different events.
+     */
+    this.refused = new Map();
     /** null until the helper has been asked; then true/false. */
     this.canTrim = null;
     this.reason = null;
@@ -298,25 +324,81 @@ class TrimHelper {
     const last = this.trimmedAt.get(pid);
     if (last != null && Date.now() - last < TRIM_COOLDOWN_MS) return 0;
 
+    // Still serving out an earlier refusal. Refused without a round trip, which
+    // is the whole point: the caller sees the same null it saw last time.
+    if (this.backoffMs(pid) > 0) return null;
+
     const line = await this.request(`trim ${pid}`);
-    if (!line) return null;
-    const ok = /^ok \d+ (\d+)$/.exec(line);
+    const ok = line && /^ok \d+ (\d+)$/.exec(line);
     if (ok) {
       this.trimmedAt.set(pid, Date.now());
+      this.refused.delete(pid);          // a working pid carries no strikes
       return Number(ok[1]);
     }
-    const err = /^err \d+ (\d+)$/.exec(line);
-    if (err) this.log(`mem-trim refused pid ${pid}: errno ${err[1]}`);
+
+    const err = line && /^err \d+ (\d+)$/.exec(line);
+    if (err) {
+      this.refuse(pid, `errno ${err[1]}`);
+    } else if (this.child) {
+      // No reply from a helper that is still running: it timed out inside the
+      // syscall on this process. Not attributed to the pid when the helper is
+      // gone entirely - that failure belongs to every pid, and `reason` already
+      // reports it.
+      this.refuse(pid, 'no reply');
+    }
     return null;
+  }
+
+  /** Milliseconds left before `pid` may be asked again. */
+  backoffMs(pid) {
+    const entry = this.refused.get(pid);
+    if (!entry) return 0;
+    return Math.max(0, entry.until - Date.now());
+  }
+
+  /** Record a refusal and push the pid's next attempt further out. */
+  refuse(pid, why) {
+    this.prune();
+    const strikes = (this.refused.get(pid)?.strikes || 0) + 1;
+    const wait = Math.min(TRIM_BACKOFF_MS * 2 ** (strikes - 1), TRIM_BACKOFF_MAX_MS);
+    this.refused.set(pid, { until: Date.now() + wait, strikes });
+    // Logged on every refusal, which the backoff itself keeps to a trickle:
+    // once per pid at 30s, then a minute, then two, up to ten.
+    this.log(`mem-trim refused pid ${pid}: ${why}; not retrying for ${Math.round(wait / 1000)}s`);
   }
 
   /**
    * Forget that a pid was trimmed, so the next request is honoured in full.
    * Called when a tab is promoted: the renderer is running again, its pages are
-   * faulting back, and what it holds a moment later is worth taking again.
+   * faulting back, and what it holds a moment later is worth taking again. The
+   * refusal record deliberately survives - waking a tab does not grant the
+   * permission that was missing, and clearing it here would restore the
+   * every-tick retry through any tab the user happens to visit.
    */
   forget(pid) {
     this.trimmedAt.delete(pid);
+  }
+
+  /**
+   * Drop everything known about a pid. Called when the process is gone: pids are
+   * recycled, and a new renderer must not inherit a dead one's backoff.
+   */
+  forgetProcess(pid) {
+    this.trimmedAt.delete(pid);
+    this.refused.delete(pid);
+  }
+
+  /**
+   * Bound the maps on a long session. `forgetProcess` handles the ordinary case
+   * as renderers exit; this is the backstop for pids that were refused and never
+   * seen again.
+   */
+  prune() {
+    if (this.refused.size < TRIM_MAP_LIMIT) return;
+    const now = Date.now();
+    for (const [pid, entry] of this.refused) {
+      if (entry.until <= now) this.refused.delete(pid);
+    }
   }
 
   /** Whether trimming can work here at all, asked once. */
@@ -359,6 +441,23 @@ function trimProcessMemory(pid, log) {
 function untrimProcessMemory(pid) {
   if (helper && pid) helper.forget(pid);
   return true;
+}
+
+/**
+ * How long until `pid` may be trimmed again after a refusal, in milliseconds;
+ * 0 when it is free to try. Read by the governor so a renderer the kernel will
+ * not trim is not walked down to HIBERNATED every tick just to be turned back.
+ */
+function trimBackoffMs(pid) {
+  return helper && pid ? helper.backoffMs(pid) : 0;
+}
+
+/**
+ * Forget everything about a process that has exited. Pids are recycled, and a
+ * new renderer landing on a dead one's pid must not inherit its backoff.
+ */
+function forgetProcess(pid) {
+  if (helper && pid) helper.forgetProcess(pid);
 }
 
 /** Release the trim helper. Called from `before-quit`. */
@@ -593,6 +692,8 @@ module.exports = {
   getProcessPriority,
   trimProcessMemory,
   untrimProcessMemory,
+  trimBackoffMs,
+  forgetProcess,
   trimCapability,
   stopTrimHelper,
   canRaisePriority,

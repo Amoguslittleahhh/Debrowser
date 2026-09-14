@@ -23,6 +23,7 @@
 const { MB } = require('../config');
 const { readProcessMemory, accountingMode, pageMergingStatus,
         unreportedProcessesMB, compressionStatus } = require('../memory');
+const platform = require('../platform');
 
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
@@ -95,8 +96,14 @@ class Metrics {
     }
 
     // Drop processes that have exited so stale memory never inflates the total.
+    // This is also the one place the browser learns that a pid is gone, so it is
+    // where the platform layer is told to forget what it knows about it - pids
+    // are recycled, and a new renderer must not inherit a dead one's trim
+    // cooldown or its refusal backoff.
     for (const pid of this.byPid.keys()) {
-      if (!seen.has(pid)) this.byPid.delete(pid);
+      if (seen.has(pid)) continue;
+      this.byPid.delete(pid);
+      platform.forgetProcess(pid);
     }
 
     // Electron's process list is not the whole browser: it omits Chromium's
