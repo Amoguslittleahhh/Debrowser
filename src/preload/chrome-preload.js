@@ -29,7 +29,6 @@ const COMMANDS = new Set([
   'prefetch-tab',
   'open-menu',
   'open-settings',
-  'close-settings',
   'set-pref'
 ]);
 

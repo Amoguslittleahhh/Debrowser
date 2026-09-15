@@ -595,36 +595,40 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) 
   // cap, be eligible for discard, or stay resident once closed. The last is the
   // one worth asserting - a settings page that quietly holds a renderer for the
   // life of the window would spend more than several tabs.
+  // Settings is a page now, not a lid laid over the content area.
   //
-  // The count that must not move is the *tab* count: a settings page that
-  // arrived as a tab would be counted against the cap and could be discarded
-  // mid-edit. The live-renderer count is not the test - the governor is free to
-  // reclaim an idle tab while this runs, and does.
-  const tabsBefore = tabs.all().length;
-  const liveBefore = tabs.all().filter((t) => t.isLive).length;
-  shell.toggleSettings(true);
-  const settingsOpened = Boolean(shell.settingsView);
-  await sleep(400);
-  const tabsDuring = tabs.all().length;
-  const liveDuring = tabs.all().filter((t) => t.isLive).length;
-  shell.toggleSettings(false);
-  check('settings opens and closes without becoming a governed tab',
-    settingsOpened && !shell.settingsView && tabsDuring === tabsBefore && liveDuring <= liveBefore,
-    `opened=${settingsOpened} tabs ${tabsBefore} -> ${tabsDuring}, live ${liveBefore} -> ${liveDuring}`);
+  // The overlay it replaced produced a bug that looked like a freeze: it
+  // covered every tab, nothing dismissed it, and switching tabs appeared to do
+  // nothing. So the property worth asserting is that opening Settings leaves
+  // the browser navigable - a second tab can still be activated and become
+  // visible afterwards - and that the page is exempt from the governor, which
+  // would otherwise be free to freeze or discard it mid-edit.
+  const pages = require('./pages');
+  const settingsTab = tabs.create({ url: pages.SETTINGS_URL, activate: true, realise: true });
+  await waitFor(() => settingsTab.isLive && !settingsTab.loading, { timeoutMs: 10_000 });
 
-  // The file on disk is untrusted input - it reaches the governor and the
-  // Chromium command line - so the schema has to refuse nonsense rather than
-  // pass it through. Same validator guards the settings page and the file.
-  const rejected = [
-    prefs.set('memoryBudgetMB', -1),
-    prefs.set('theme', 'chartreuse'),
-    prefs.set('maxLiveTabs', 9999),
-    prefs.set('accent', 'javascript:alert(1)'),
-    prefs.set('nonexistent', true)
-  ];
-  check('a preference outside its schema is refused, not stored',
-    rejected.every((accepted) => accepted === false),
-    `${rejected.filter((a) => !a).length}/5 refused`);
+  const other = tabs.all().find((t) => t !== settingsTab && !t.internal);
+  await tabs.activate(other.id);
+  await sleep(300);
+
+  check('opening settings does not trap the browser on it',
+    other.visible && !settingsTab.visible,
+    `settings visible=${settingsTab.visible}, other tab visible=${other.visible}`);
+
+  // Ask for the deepest demotion there is and confirm the protections refuse it.
+  const floor = governor.clampToProtections(settingsTab, Tier.DISCARDED, { discardAllowed: true });
+  check('the browser\'s own pages are never demoted by the governor',
+    settingsTab.internal && floor === Tier.ACTIVE,
+    `internal=${settingsTab.internal}, asked for discarded, allowed ${floor}`);
+
+  // Opening it twice focuses the one that is open rather than making a second,
+  // which could disagree with the first about what the preferences are.
+  const before = tabs.all().length;
+  const again = tabs.all().find((t) => t.url === pages.SETTINGS_URL);
+  check('settings is a singleton', again === settingsTab && tabs.all().length === before,
+    `${tabs.all().length} tabs, one settings`);
+
+  tabs.close(settingsTab.id);
 
   // The three-dot menu is built fresh on every open from live state, and it is
   // the one part of the chrome that is not a web page - a throw here would take

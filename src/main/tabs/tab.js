@@ -18,6 +18,10 @@ const { Tier, isStopped } = require('../config');
 const { CdpSession } = require('../cdp');
 
 const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload.js');
+// The browser's own pages need the command bridge the chrome uses; a web page
+// must never get it. Which one a tab loads is decided by `internal` below.
+const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
+const pages = require('../pages');
 
 let nextTabId = 1;
 
@@ -77,7 +81,16 @@ class Tab {
     this.log = log;
 
     this.url = url;
-    this.title = url;
+    /**
+     * One of the browser's own pages, served under `debrowser://`.
+     *
+     * Decided from the URL rather than passed in, so it survives a discard and
+     * restore, and so nothing a page does can turn itself into one. It governs
+     * two things that must never disagree: which preload the renderer gets, and
+     * whether the governor is allowed to touch this tab.
+     */
+    this.internal = pages.isInternal(url);
+    this.title = this.internal ? pages.titleFor(url) : url;
     this.favicon = null;
     this.pinned = false;
 
@@ -175,6 +188,28 @@ class Tab {
     return this.visible ? 0 : now - this.lastActiveAt;
   }
 
+  /**
+   * Keep a privileged page from becoming a privileged web page.
+   *
+   * An internal tab's renderer has the command bridge in its preload. If a link
+   * in Settings could navigate that same renderer to a site, the site's own
+   * JavaScript would inherit it - a complete escape from the sandbox this
+   * browser otherwise keeps pages inside. So an internal tab is confined: any
+   * navigation away from `debrowser://` is cancelled and handed to a normal tab
+   * instead, which is also the behaviour a user wants from a link in Settings.
+   */
+  confineToInternalPages() {
+    this.wc.on('will-navigate', (event, url) => {
+      if (pages.isInternal(url)) return;
+      event.preventDefault();
+      this.onEvent(this, 'open-tab', { url });
+    });
+    this.wc.setWindowOpenHandler(({ url }) => {
+      this.onEvent(this, 'open-tab', { url });
+      return { action: 'deny' };
+    });
+  }
+
   /* ---------------------------------------------------------------- */
   /* Realisation and teardown                                          */
   /* ---------------------------------------------------------------- */
@@ -189,7 +224,7 @@ class Tab {
     this.view = new WebContentsView({
       webPreferences: {
         session: this.session,
-        preload: PROBE_PRELOAD,
+        preload: this.internal ? PAGE_PRELOAD : PROBE_PRELOAD,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -209,6 +244,8 @@ class Tab {
     this.wc = this.view.webContents;
     this.cdp = new CdpSession(this.wc, this.log);
     this.crashed = false;
+
+    if (this.internal) this.confineToInternalPages();
 
     this.wireEvents();
 

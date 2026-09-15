@@ -1,0 +1,86 @@
+/* New tab. Palette and base reset come from theme.css. */
+
+html, body { height: 100%; }
+
+body {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+main {
+  width: min(560px, calc(100vw - 48px));
+  margin-top: -8vh;          /* optically centred rather than measured-centred */
+  text-align: center;
+}
+
+#wordmark {
+  margin: 0 0 22px;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  /* One short fade on open. Cheap - opacity and transform stay on the
+     compositor - and it runs once rather than looping, so an idle new tab
+     costs nothing at all.
+
+     Deliberately no `animation-fill-mode`. With `both` the element is pinned at
+     the keyframe's starting opacity until the animation runs, and a view that
+     is never composited - created in the background, or captured while hidden -
+     never runs it, leaving the page permanently faded. Without a fill mode the
+     element's own style is what shows, so the worst case is no animation rather
+     than an invisible page. */
+  animation: rise 260ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+#search { animation: rise 260ms cubic-bezier(0.2, 0, 0.2, 1) 40ms; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Anyone who has asked not to see motion sees none. */
+@media (prefers-reduced-motion: reduce) {
+  #wordmark, #search { animation: none; }
+}
+
+/*
+ * And nobody sees half of one.
+ *
+ * A view that is not composited has its animation frames throttled hard, so an
+ * animation started while hidden is still part-way through when the tab is
+ * finally shown - the page appears half-faded and settles afterwards, which
+ * looks like a rendering fault rather than an entrance. This browser realises
+ * tabs in the background routinely, so that is the common case, not the odd
+ * one. newtab.js sets this until the page is actually on screen.
+ */
+body.still #wordmark, body.still #search { animation: none; }
+
+#q {
+  width: 100%;
+  height: 46px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 23px;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  user-select: text;
+  cursor: text;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+#q:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.stat {
+  margin: 20px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  min-height: 1em;
+}

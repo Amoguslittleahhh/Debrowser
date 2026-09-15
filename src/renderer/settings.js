@@ -280,9 +280,12 @@ function save(key, value) {
   api.send('set-pref', { key, value });
 }
 
-document.getElementById('close').addEventListener('click', () => api.send('close-settings'));
+// Settings is a tab, so closing it closes the tab - the same thing the × on the
+// tab strip does. There is no separate "close settings" concept any more, which
+// is the point: the overlay that had one is what trapped the browser on it.
+document.getElementById('close').addEventListener('click', () => api.send('close-tab'));
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') api.send('close-settings');
+  if (event.key === 'Escape') api.send('close-tab');
 });
 
 function renderUpdateState(u) {

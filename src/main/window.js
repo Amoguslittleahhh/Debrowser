@@ -72,17 +72,6 @@ class BrowserShell {
     this.panelOpen = false;
 
     /**
-     * Settings, as a view covering the content area rather than a tab.
-     *
-     * A tab would be the Chrome-like thing to do, but a tab here is a governed
-     * object: it would count against the live-renderer cap, be eligible for
-     * discard, and could be frozen mid-edit. Settings is chrome, so it is built
-     * like the panel - created on open, destroyed on close, never resident.
-     * @type {Electron.WebContentsView|null}
-     */
-    this.settingsView = null;
-
-    /**
      * One reused ImageView showing the outgoing tab's thumbnail while a
      * restored tab loads. See showPlaceholder.
      * @type {Electron.ImageView|null}
@@ -267,44 +256,6 @@ class BrowserShell {
 
   /* ---------------------------------------------------------------- */
 
-  /**
-   * Show or hide the settings page.
-   *
-   * Sits above the tab views and below the chrome, so the tab strip and address
-   * bar stay live while it is open - settings covers the page, not the browser.
-   */
-  toggleSettings(open = !this.settingsView) {
-    if (Boolean(open) === Boolean(this.settingsView)) return Boolean(this.settingsView);
-
-    if (open) {
-      this.settingsView = new WebContentsView({
-        webPreferences: {
-          preload: CHROME_PRELOAD,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-          backgroundThrottling: false
-        }
-      });
-      const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
-      this.window.contentView.addChildView(
-        this.settingsView, chromeIndex === -1 ? undefined : chromeIndex);
-      this.settingsView.webContents.loadFile(path.join(RENDERER_DIR, 'settings.html'));
-      // Same hand-off as the chrome: a view that has just loaded has nothing to
-      // render until someone sends it a snapshot, and only main owns one.
-      this.settingsView.webContents.once('did-finish-load', () => this.onCommand('view-ready'));
-    } else {
-      try {
-        this.window.contentView.removeChildView(this.settingsView);
-        this.settingsView.webContents.close();
-      } catch { /* already gone */ }
-      this.settingsView = null;
-    }
-
-    this.layout();
-    return Boolean(this.settingsView);
-  }
-
   /* ---------------------------------------------------------------- */
 
   contentBounds() {
@@ -353,7 +304,6 @@ class BrowserShell {
     }
 
     if (this.placeholderView) this.placeholderView.setBounds(bounds);
-    if (this.settingsView) this.settingsView.setBounds(bounds);
 
     if (this.panelView) {
       this.panelView.setBounds({
@@ -382,12 +332,10 @@ class BrowserShell {
     if (this.updater) full.updates = this.updater.snapshot();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
-    send(this.settingsView, 'debrowser:state', full);
   }
 
   destroy() {
     this.togglePanel(false);
-    this.toggleSettings(false);
     if (!this.window.isDestroyed()) this.window.destroy();
   }
 }

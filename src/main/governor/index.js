@@ -556,6 +556,16 @@ class Governor {
       if (tierRank(tier) < tierRank(floor)) floor = tier;
     };
 
+    // The browser's own pages are not governed at all.
+    //
+    // Not because they are precious - Settings is a cheap page - but because
+    // every tier below ACTIVE is wrong for them. Freezing one stops the page
+    // servicing the very controls the user is operating; discarding one throws
+    // away a half-filled form and reloads it as though the browser had crashed.
+    // They are also a fixed, small number of tabs that the user opened to *do*
+    // something, so there is nothing to reclaim and no reason to look.
+    if (tab.internal) { cap(Tier.ACTIVE); return floor; }
+
     // Audio is the most noticeable thing a browser can take away.
     if (tab.audible) cap(Tier.WARM);
 

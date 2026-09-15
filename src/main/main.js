@@ -22,6 +22,7 @@ const { Updater } = require('./updater');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
+const pages = require('./pages');
 
 const path = require('path');
 
@@ -33,7 +34,7 @@ const OFFLINE_MODE = SMOKE_TEST || process.argv.includes('--bench-test');
 // have nothing to do with the governor.
 const HOME_URL = OFFLINE_MODE
   ? `file://${path.join(__dirname, '..', '..', 'test', 'pages', 'idle.html')}`
-  : 'https://example.com';
+  : pages.NEW_TAB_URL;
 
 /* ------------------------------------------------------------------ */
 /* Configuration                                                       */
@@ -142,6 +143,11 @@ for (const [name, value] of platform.chromiumSwitches(cfg)) {
   else app.commandLine.appendSwitch(name, value);
 }
 
+// The browser's own pages live behind a real scheme, so they have origins,
+// URLs and history like any other page. Registration has to happen before the
+// app is ready; the handler is installed after it.
+pages.registerScheme();
+
 // One instance owns the profile directory; a second launch focuses the first.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -204,6 +210,7 @@ function main() {
     // have - so it was a row of screen spent on a menu that leads nowhere. Every
     // shortcut worth having is bound in the chrome renderer.
     Menu.setApplicationMenu(null);
+    pages.serve(log);
 
     prefs = new Prefs(log);
     applyPrefs(cfg, prefs, log);
@@ -399,11 +406,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
         break;
 
       case 'open-settings':
-        shell.toggleSettings(true);
-        break;
-
-      case 'close-settings':
-        shell.toggleSettings(false);
+        openInternalPage(tabs, pages.SETTINGS_URL);
+        publish();
         break;
 
       case 'set-pref': {
@@ -446,6 +450,22 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
 
     publish();
   });
+}
+
+/**
+ * Open one of the browser's own pages, or focus it if it is already open.
+ *
+ * Focus rather than open again, because these are singletons in the way a
+ * settings window is: a second Settings tab is never what the user meant, and
+ * two of them can disagree about what the current preferences are.
+ */
+function openInternalPage(tabs, url) {
+  const existing = tabs.all().find((t) => t.url === url);
+  if (existing) {
+    tabs.activate(existing.id).catch(() => {});
+    return existing;
+  }
+  return tabs.create({ url });
 }
 
 /**
@@ -514,7 +534,7 @@ function appMenuTemplate({ tabs, shell, prefs, publish = () => {} }) {
       checked: shell.panelOpen,
       click: () => { shell.togglePanel(); publish(); }
     },
-    { label: 'Settings', click: () => shell.toggleSettings(true) },
+    { label: 'Settings', click: () => { openInternalPage(tabs, pages.SETTINGS_URL); publish(); } },
     { type: 'separator' },
     { label: `Debrowser ${app.getVersion()}`, enabled: false }
   ];
