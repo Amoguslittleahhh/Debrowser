@@ -23,6 +23,24 @@ and are worth knowing rather than rediscovering:
   after the one that introduced it. If "Keep my email addresses private" is ever
   switched on for this account, pushes carrying it are rejected with `GH007`.
 
-Releases already record the account that triggered them, so they need nothing
-extra; the release itself is published by `github-actions[bot]` and that cannot
-be changed from a Claude Code session.
+## Releases
+
+Every release credits the owner and the bot side by side, in the body:
+
+```
+Released by **Amoguslittleahhh** (<amogus36311@gmail.com>) and **`github-actions[bot]`**.
+```
+
+It goes in the body because a release's `author` is whoever's token created it,
+and that is always `github-actions[bot]` — the workflow publishes with the
+built-in `GITHUB_TOKEN`. The field is not settable to a person, and a Claude
+Code session's token is refused outright when it tries to create or edit a
+release, so the body is the only place the credit can live.
+
+Appended by the "Extract this version's notes" step in
+`.github/workflows/release.yml`, so it cannot be forgotten on a release.
+
+The release body is that version's notes and nothing else — the step takes the
+first `## ` section of `CHANGELOG.md` and drops its heading. Publishing the
+whole changelog means every download page repeats the notes for versions the
+reader already has, burying the one thing they came to read.
