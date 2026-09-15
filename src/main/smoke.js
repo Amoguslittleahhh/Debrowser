@@ -13,7 +13,7 @@
 
 const fs = require('fs');
 const { app } = require('electron');
-const { Tier } = require('./config');
+const { Tier, tierRank } = require('./config');
 const fixtureServer = require('./fixture-server');
 
 /**
@@ -130,7 +130,13 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   /* ---------------------------------------------------------------- */
   console.log('\n2. Idle ladder: hidden tabs demote on their own\n');
 
-  const demoted = await waitFor(() => heavy.tier === Tier.COLD, { timeoutMs: 8000 });
+  // "At least COLD", not "exactly COLD". The tab passes *through* COLD on its
+  // way down, so an equality test polled every 200ms can miss it entirely - and
+  // does, on a slow or contended machine where the tab is still busy enough to
+  // be frozen a moment later. The property is that an idle tab demotes itself
+  // without being told; which rung it has reached by the time we look is not.
+  const demoted = await waitFor(
+    () => tierRank(heavy.tier) >= tierRank(Tier.COLD), { timeoutMs: 8000 });
   check('an idle hidden tab is demoted to discard-eligible on its own', demoted,
     `heavy tab reached ${heavy.tier}`);
 
@@ -145,8 +151,17 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `~${Math.round(heavyBaseline)}MB -> ~${Math.round(heavyAfterIdle)}MB ` +
     `(${delta >= 0 ? '+' : ''}${Math.round(delta)}MB)`);
 
+  // Conditional on the tab actually being quiet, which is the policy: freezing
+  // is for tabs still burning CPU out of sight. `heavy.html` is a DOM-heavy
+  // page and on a slow machine it can still be above the 0.8% threshold when
+  // the compressed freeze clock fires - at which point freezing it is *correct*
+  // and an unconditional assertion fails on the governor doing the right thing.
+  // Asserting the implication instead tests the rule rather than the fixture.
+  const heavyIsQuiet = heavy.cpu < cfg.freezeCpuThreshold;
   check('a quiet tab is not frozen, because freezing it would only cost memory',
-    heavy.tier !== Tier.FROZEN, `heavy tab at ${heavy.tier}`);
+    !heavyIsQuiet || heavy.tier !== Tier.FROZEN,
+    `heavy tab at ${heavy.tier}, ${heavy.cpu.toFixed(2)}% CPU ` +
+    `(threshold ${cfg.freezeCpuThreshold}%)${heavyIsQuiet ? '' : ' - still busy, so freezing is correct'}`);
 
   /* ---------------------------------------------------------------- */
   console.log('\n3. A tab still burning CPU in the background is frozen\n');
