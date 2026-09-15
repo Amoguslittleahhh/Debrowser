@@ -16,6 +16,7 @@ const el = {
   budget: document.getElementById('budget'),
   renderers: document.getElementById('renderers'),
   pressure: document.getElementById('pressure'),
+  totalLabel: document.getElementById('total-label'),
   list: document.getElementById('tab-list'),
   stats: document.getElementById('stats'),
   close: document.getElementById('close'),
@@ -44,6 +45,28 @@ const PRESSURE_TEXT = {
 
 function render(state) {
   el.total.textContent = `${state.totalMB} MB`;
+
+  // Say which quantity this is. The same label sits over two different
+  // measurements depending on the platform: proportional set size on Linux,
+  // and summed working set everywhere else, because Windows and macOS expose no
+  // cheap PSS equivalent and Electron's `getAppMetrics` reports only
+  // `workingSetSize` (its `private` and `shared` fields are in the typings but
+  // come back zero). Summed working set counts every page shared between
+  // processes - chiefly one copy of Chromium per process - once for each of
+  // them, so the figure runs roughly 2x high and climbs with process count.
+  // Leaving that unsaid means a Windows user reads a number two to three times
+  // the browser's real footprint with nothing to tell them.
+  const proportional = state.accounting === 'pss';
+  el.total.title = proportional
+    ? 'Proportional set size: pages shared between processes are counted once, ' +
+      'split across the processes sharing them. This is real physical memory.'
+    : 'Summed working set. This platform offers no cheap proportional measure, ' +
+      'so pages shared between processes - chiefly one copy of Chromium in each ' +
+      'of them - are counted once per process. Measured at about 2x the ' +
+      'proportional figure, rising with process count. The browser is holding ' +
+      'meaningfully less than this number says.';
+  el.totalLabel.textContent = proportional ? 'resident' : 'resident (over-counts)';
+
   el.budget.textContent = `${state.budgetMB} MB`;
   el.renderers.textContent = state.maxLiveTabs
     ? `${state.liveTabs}/${state.maxLiveTabs}`
@@ -62,6 +85,14 @@ function render(state) {
   }
 
   renderRows(state.tabs);
+
+  if (!proportional) {
+    el.pressure.textContent +=
+      ` Memory is counted as summed working set on this platform, which counts ` +
+      `each shared page once per process - about 2x high, and more with more ` +
+      `processes open. The real footprint is lower; the budget is compared ` +
+      `against the same inflated figure, so it reclaims earlier rather than later.`;
+  }
 
   const merging = state.pageMerging;
   if (merging && merging.active) {

@@ -522,6 +522,16 @@ tried, measured and removed — live on the `claude/research-build` branch.
 - A restored tab is covered by a thumbnail while it reloads. Pages carrying a
   password or payment field are never photographed, the images live in the OS
   temp directory, and they are deleted on close, on quit and again on startup.
+- **The memory figure is proportional on Linux and summed working set
+  everywhere else, and the second one over-counts.** Windows and macOS expose no
+  cheap PSS equivalent, and Electron reports only `workingSetSize` per process
+  (its `private`/`shared` fields read zero), so every page shared between
+  processes — chiefly one copy of Chromium in each of them — is counted once per
+  process. Measured at **1.95x** the proportional figure across five processes,
+  and it rises with process count. The task manager now labels the number
+  "resident (over-counts)" there rather than leaving you to wonder why two tabs
+  look like a gigabyte. The budget is compared against the same inflated total,
+  so the governor reclaims earlier than it needs to rather than later.
 - Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web
