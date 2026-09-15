@@ -217,6 +217,24 @@ jobs:
           ls -lh artifacts/
           test "$(ls -1 artifacts/ | wc -l)" -gt 0 || { echo "no artifacts"; exit 1; }
 
+      # The release page describes the release it is on, and nothing else.
+      #
+      # Publishing the whole CHANGELOG meant every download page repeated the
+      # notes for every version before it, so the thing a visitor actually came
+      # to read - what changed in the version they are about to download - was
+      # buried under the history of the ones they already have.
+      #
+      # Takes the first `## ` section and drops its heading, since the release
+      # is already titled with its version.
+      - name: Extract this version's notes
+        run: |
+          awk '/^## /{n++; if (n==1) next} n==1' CHANGELOG.md > RELEASE_NOTES.md
+          # An empty body would publish a release that says nothing at all,
+          # which is a packaging mistake worth failing on rather than shipping.
+          test -s RELEASE_NOTES.md || { echo "no notes found at the top of CHANGELOG.md"; exit 1; }
+          echo "--- release body ---"
+          cat RELEASE_NOTES.md
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -224,6 +242,6 @@ jobs:
           # this run's commit.
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           draft: ${{ github.event.inputs.draft == 'true' }}
-          body_path: CHANGELOG.md
+          body_path: RELEASE_NOTES.md
           files: artifacts/*
           fail_on_unmatched_files: true
