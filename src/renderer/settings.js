@@ -29,6 +29,15 @@ const ACCENTS = [
   { value: '#43b8c4', name: 'Teal' }
 ];
 
+/** Tab strip colours. Muted on purpose: this is a large area, not an accent. */
+const STRIP_COLORS = [
+  { value: '#1b2430', name: 'Slate',   css: '#1b2430' },
+  { value: '#241c2e', name: 'Plum',    css: '#241c2e' },
+  { value: '#1a2622', name: 'Pine',    css: '#1a2622' },
+  { value: '#2b2119', name: 'Umber',   css: '#2b2119' },
+  { value: '#2a1c22', name: 'Wine',    css: '#2a1c22' }
+];
+
 const SECTIONS = {
   appearance: [
     {
@@ -52,6 +61,45 @@ const SECTIONS = {
         { value: 'roomy', name: 'Roomy' },
         { value: 'compact', name: 'Compact' }
       ]
+    },
+    {
+      key: 'tabBarColor',
+      label: 'Tab strip colour',
+      hint: 'Separate from the accent, because the strip is the largest painted area ' +
+            'in the window and the colour that works as a focus ring rarely works across it. ' +
+            'The second swatch follows the accent instead.',
+      type: 'stripColor'
+    },
+    {
+      key: 'windowOpacity',
+      label: 'Window translucency',
+      hint: 'Asked of the system compositor, which is already drawing this window, ' +
+            'so it costs essentially nothing. Needs a desktop that composites.',
+      type: 'range',
+      min: 0.6,
+      max: 1,
+      step: 0.02,
+      format: (v) => `${Math.round(v * 100)}%`
+    },
+    {
+      key: 'backgroundMaterial',
+      label: 'Window material',
+      hint: 'Windows 11 only. Lets the system paint its own blurred backdrop, which is ' +
+            'cheaper than doing it ourselves. Ignored elsewhere.',
+      type: 'select',
+      options: [
+        { value: 'none', name: 'None' },
+        { value: 'mica', name: 'Mica' },
+        { value: 'acrylic', name: 'Acrylic' },
+        { value: 'tabbed', name: 'Tabbed' }
+      ]
+    },
+    {
+      key: 'reduceMotion',
+      label: 'Reduce motion',
+      hint: 'Stops the small entrance and press animations. Your system setting is ' +
+            'always honoured regardless of this.',
+      type: 'checkbox'
     },
     {
       key: 'showMemoryMeter',
@@ -99,6 +147,25 @@ const SECTIONS = {
       placeholder: 'Automatic',
       min: 0,
       max: 200
+    }
+  ],
+
+  advanced: [
+    {
+      key: 'showMemoryDetail',
+      label: 'Explain the memory figures',
+      hint: 'Adds the notes about what the numbers mean and where they over-count to ' +
+            'the task manager. Off by default, because a live instrument reads better ' +
+            'without a wall of text beside it.',
+      type: 'checkbox'
+    },
+    {
+      key: 'hardwareAcceleration',
+      label: 'Use hardware acceleration',
+      hint: 'Turn off if pages flicker, views come up blank, or the browser will not ' +
+            'start — that is almost always a GPU driver. Chromium decides this at ' +
+            'launch, so it takes effect when you restart.',
+      type: 'checkbox'
     }
   ],
 
@@ -242,6 +309,66 @@ function buildControl(spec) {
         const next = value == null ? '' : String(value);
         if (input.value !== next) input.value = next;
       }
+    }
+
+    case 'range': {
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(spec.min);
+      input.max = String(spec.max);
+      input.step = String(spec.step);
+      const out = document.createElement('span');
+      out.className = 'unit';
+
+      const show = (v) => { out.textContent = spec.format ? spec.format(v) : String(v); };
+      // `input` for the live preview as it is dragged, `change` to save - so a
+      // drag across the range is one write to disk rather than forty.
+      input.addEventListener('input', () => show(Number(input.value)));
+      input.addEventListener('change', () => save(spec.key, Number(input.value)));
+
+      const wrap = document.createDocumentFragment();
+      wrap.append(input, out);
+      return {
+        node: wrap,
+        input,
+        write(value) {
+          const v = Number(value);
+          if (document.activeElement !== input) input.value = String(v);
+          show(v);
+        }
+      };
+    }
+
+    case 'stripColor': {
+      const wrap = document.createElement('div');
+      wrap.className = 'swatches';
+
+      const choices = [
+        { value: 'default', name: 'Default', css: '#16181d' },
+        { value: 'mirror', name: 'Match the accent colour', css: 'var(--accent)' },
+        ...STRIP_COLORS
+      ];
+      const buttons = choices.map(({ value, name, css }) => {
+        const button = document.createElement('button');
+        button.className = 'swatch';
+        button.style.background = css;
+        button.title = name;
+        button.setAttribute('aria-label', name);
+        button.setAttribute('aria-pressed', 'false');
+        if (value === 'mirror') button.classList.add('mirror');
+        button.addEventListener('click', () => save(spec.key, value));
+        wrap.append(button);
+        return { button, value };
+      });
+      return {
+        node: wrap,
+        input: null,
+        write(value) {
+          for (const { button, value: own } of buttons) {
+            button.setAttribute('aria-pressed', String(own === value));
+          }
+        }
+      };
     }
 
     case 'accent': {

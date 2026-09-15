@@ -124,12 +124,30 @@ input[type="checkbox"] {
 .swatch {
   width: 22px;
   height: 22px;
-  border: 2px solid transparent;
+  /* Always outlined, never transparent. A swatch whose colour matches the row
+     it sits on - the dark "Default" one, against the dark surface - is
+     otherwise invisible, so the choice looks like it is missing. */
+  border: 2px solid var(--border);
   border-radius: 50%;
   cursor: default;
   padding: 0;
 }
 .swatch[aria-pressed="true"] { border-color: var(--text); }
+.swatch { transition: transform var(--fast) var(--ease), border-color var(--fast) ease; }
+.swatch:hover { transform: scale(1.12); }
+
+/* The "follow the accent" swatch says so by showing the accent itself, with a
+   ring that marks it as a rule rather than a colour. */
+.swatch.mirror { box-shadow: inset 0 0 0 2px var(--bg); }
+
+input[type="range"] {
+  width: 150px;
+  accent-color: var(--accent);
+  cursor: default;
+}
+
+.row { transition: background-color var(--fast) ease; }
+.row:hover { background: color-mix(in srgb, var(--text) 3%, var(--bg)); }
 
 .note {
   max-width: 620px;

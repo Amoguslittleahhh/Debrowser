@@ -25,7 +25,7 @@ html, body {
   display: flex;
   align-items: flex-end;
   height: 40px;
-  background: var(--bg);
+  background: var(--strip);
   /* Empty strip drags the window, because the strip *is* the title bar now. */
   -webkit-app-region: drag;
 
@@ -81,7 +81,13 @@ html, body {
   background: transparent;
   border: none;
   color: var(--text-dim);
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color var(--fast) ease, color var(--fast) ease;
+  animation: tab-in var(--slow) var(--ease);
+}
+
+@keyframes tab-in {
+  from { opacity: 0; transform: translateY(3px) scaleX(0.96); }
+  to   { opacity: 1; transform: none; }
 }
 
 /* Inactive tabs are flat against the strip, as in Chrome; only hover and the
@@ -188,9 +194,14 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   background: transparent;
   color: var(--text-dim);
   cursor: default;
+  transition: background-color var(--fast) ease, color var(--fast) ease,
+              transform var(--fast) var(--ease);
 }
 
 .icon-btn:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+/* A press that moves is the cheapest possible confirmation that it registered. */
+.icon-btn:active:not(:disabled) { transform: scale(0.92); }
+.new-tab:active { transform: scale(0.9); }
 .icon-btn:disabled { opacity: 0.32; }
 .icon-btn:disabled:hover { background: transparent; color: var(--text-dim); }
 
@@ -221,6 +232,8 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   color: var(--text-dim);
   cursor: default;
   -webkit-app-region: no-drag;
+  transition: background-color var(--fast) ease, color var(--fast) ease,
+              transform var(--fast) var(--ease);
 }
 .new-tab:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
 
@@ -235,6 +248,8 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   border-radius: 16px;
   background: var(--bg);
   border: 1px solid transparent;
+  transition: background-color var(--fast) ease, border-color var(--fast) ease,
+              box-shadow var(--fast) ease;
 }
 
 .omnibox:hover { background: color-mix(in srgb, var(--bg) 80%, var(--text) 4%); }

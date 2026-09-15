@@ -23,6 +23,37 @@
   --warn: #e0a33e;
   --crit: #e2564a;
   --radius: 7px;
+
+  /* The tab strip's own colour. Falls back to the window background unless a
+     choice has been set on <body> by theme.js. */
+  --strip: var(--bg);
+}
+
+/*
+ * Motion, in one place.
+ *
+ * Every animation in this browser is a transform or an opacity change on a
+ * small element, so it stays on the compositor and never causes layout - the
+ * chrome is a live renderer for the whole life of the window, and an animation
+ * that reflows it would undo part of what the governor saves.
+ */
+:root {
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --fast: 120ms;
+  --slow: 220ms;
+}
+
+/* Two ways to ask for stillness, and both are honoured everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body.calm *, body.calm *::before, body.calm *::after {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
 }
 
 /*

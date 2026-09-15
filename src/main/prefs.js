@@ -31,6 +31,38 @@ const SCHEMA = {
   theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
   accent:       { def: '#5b8cff', ok: (v) => /^#[0-9a-f]{6}$/i.test(v) },
   tabWidth:     { def: 'roomy',  ok: (v) => ['roomy', 'compact'].includes(v) },
+
+  /**
+   * The tab strip's colour, kept separate from the accent on purpose: the strip
+   * is the largest painted area in the chrome, and the colour that works as a
+   * 3px focus ring is rarely the one you want across the top of the window.
+   * 'mirror' follows the accent for anyone who would rather not choose twice.
+   */
+  tabBarColor:  { def: 'default', ok: (v) => v === 'default' || v === 'mirror' || /^#[0-9a-f]{6}$/i.test(v) },
+
+  /**
+   * Window translucency, as plain opacity.
+   *
+   * Deliberately the cheap mechanism. Real per-element transparency needs a
+   * transparent window, which forces the whole surface through the compositor
+   * with an alpha channel and costs GPU memory on every frame. `setOpacity` is
+   * a property of the window the OS compositor already draws, so it is close to
+   * free - which is what was asked for.
+   */
+  windowOpacity: { def: 1, ok: (v) => Number.isFinite(v) && v >= 0.6 && v <= 1 },
+
+  /**
+   * Windows 11 only: let the OS paint its own blurred material behind the
+   * window. Cheaper than doing it ourselves, because the compositor is already
+   * blurring what is behind every other window on the system.
+   */
+  backgroundMaterial: { def: 'none', ok: (v) => ['none', 'acrylic', 'mica', 'tabbed'].includes(v) },
+  /**
+   * Stillness, on request. The OS setting is honoured regardless; this is for
+   * anyone whose machine is not set that way but who wants nothing moving here.
+   */
+  reduceMotion: { def: false,    ok: (v) => typeof v === 'boolean' },
+
   showMemoryMeter: { def: true,  ok: (v) => typeof v === 'boolean' },
   showTierDots: { def: true,     ok: (v) => typeof v === 'boolean' },
 
@@ -44,6 +76,24 @@ const SCHEMA = {
   // the tab cap, where 0 is itself a meaningful choice: it removes the cap.
   memoryBudgetMB: { def: null,   ok: (v) => v === null || (Number.isFinite(v) && v >= 256 && v <= 65536) },
   maxLiveTabs:  { def: null,     ok: (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 200) },
+
+  /**
+   * Whether the task manager explains itself.
+   *
+   * Off by default. The panel is a live instrument - what each tab is holding
+   * and why - and a wall of explanation beside a number you are trying to read
+   * is noise. The explanations did not deserve deleting either, so they moved
+   * here and appear on request.
+   */
+  showMemoryDetail: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
+   * Hardware acceleration. Off is a real diagnostic setting: a bad GPU driver
+   * shows up as flicker, blank views or a crash on launch, and this is the
+   * first thing to try. It cannot be applied live - Chromium decides at startup
+   * - so the settings page says a restart is needed rather than pretending.
+   */
+  hardwareAcceleration: { def: true, ok: (v) => typeof v === 'boolean' },
 
   /* --- Updates ---------------------------------------------------- */
   // Off means the browser never reaches the network to look for a version,
@@ -61,7 +111,9 @@ const SEARCH_ENGINES = {
   google:     { name: 'Google',     url: 'https://www.google.com/search?q=%s' },
   duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s' },
   bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=%s' },
-  brave:      { name: 'Brave',      url: 'https://search.brave.com/search?q=%s' },
+  // One of the few engines with an index of its own rather than a reseller of
+  // Google's or Bing's. Thinner on obscure queries, and that is the trade.
+  mojeek:     { name: 'Mojeek',     url: 'https://www.mojeek.com/search?q=%s' },
   startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/sp/search?query=%s' }
 };
 

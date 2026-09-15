@@ -32,4 +32,20 @@ function applyThemePrefs(prefs) {
   if (body.style.getPropertyValue('--accent') !== prefs.accent) {
     body.style.setProperty('--accent', prefs.accent);
   }
+
+  // The tab strip is its own colour, deliberately not the accent: it is the
+  // largest painted area in the chrome, and what works as a 3px focus ring is
+  // rarely what you want across the top of a window. 'mirror' is for anyone who
+  // would rather not choose twice.
+  const strip = prefs.tabBarColor === 'mirror' ? prefs.accent
+    : prefs.tabBarColor === 'default' ? '' : prefs.tabBarColor;
+  if (body.style.getPropertyValue('--strip') !== strip) {
+    if (strip) body.style.setProperty('--strip', strip);
+    else body.style.removeProperty('--strip');
+  }
+
+  // Motion is opt-out in the OS and opt-out here; `still` is also set while a
+  // page is off screen, because a throttled animation finishes in front of the
+  // user instead of before them.
+  body.classList.toggle('calm', prefs.reduceMotion === true);
 }

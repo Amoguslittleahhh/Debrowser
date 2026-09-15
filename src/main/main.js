@@ -143,6 +143,16 @@ for (const [name, value] of platform.chromiumSwitches(cfg)) {
   else app.commandLine.appendSwitch(name, value);
 }
 
+// Hardware acceleration has to be decided before the app starts - Chromium
+// reads it once, at launch - so the preferences file is read here rather than
+// in whenReady. `app.getPath('userData')` is available this early; nothing else
+// about the app has to be.
+const earlyPrefs = new Prefs(log);
+if (earlyPrefs.get('hardwareAcceleration') === false) {
+  app.disableHardwareAcceleration();
+  log('config', 'hardware acceleration disabled by preference');
+}
+
 // The browser's own pages live behind a real scheme, so they have origins,
 // URLs and history like any other page. Registration has to happen before the
 // app is ready; the handler is installed after it.
@@ -212,7 +222,7 @@ function main() {
     Menu.setApplicationMenu(null);
     pages.serve(log);
 
-    prefs = new Prefs(log);
+    prefs = earlyPrefs;
     applyPrefs(cfg, prefs, log);
 
     // Page images must never outlive the session that took them, and a crash
@@ -413,6 +423,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
       case 'set-pref': {
         if (!prefs.set(payload?.key, payload?.value)) break;
         applyPrefs(cfg, prefs, log);
+        shell.applyWindowPrefs();
         // The governor reads cfg on its next tick, so a budget or cap change
         // takes effect there. Everything else is the UI's to apply, and it gets
         // it from the state snapshot publish() is about to send.

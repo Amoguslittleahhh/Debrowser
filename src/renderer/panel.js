@@ -86,7 +86,18 @@ function render(state) {
 
   renderRows(state.tabs);
 
-  if (!proportional) {
+  // The explanations are off by default and live in Settings.
+  //
+  // This panel is a live instrument: what each tab is holding, right now, and
+  // why. A paragraph of prose beside a number that changes twice a second is
+  // noise in front of the thing you opened it to read. The text was worth
+  // keeping rather than deleting, so it appears on request - "Explain the
+  // memory figures" in Settings - and the label still says "over-counts" either
+  // way, because a wrong number with no warning is the one thing that is not
+  // acceptable.
+  const detail = state.prefs && state.prefs.showMemoryDetail;
+
+  if (detail && !proportional) {
     el.pressure.textContent +=
       ` Memory is counted as summed working set on this platform, which counts ` +
       `each shared page once per process - about 2x high, and more with more ` +
@@ -95,7 +106,7 @@ function render(state) {
   }
 
   const merging = state.pageMerging;
-  if (merging && merging.active) {
+  if (detail && merging && merging.active) {
     el.pressure.textContent += ` Page merging is active (KSM): ~${merging.profitMB} MB saved system-wide. ` +
       'Deduplication is a known timing side channel - see the README.';
   }

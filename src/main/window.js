@@ -80,6 +80,7 @@ class BrowserShell {
     this.placeholderTimer = null;
 
     this.createChrome();
+    this.applyWindowPrefs();
 
     // Layout is driven by resize, which is not the whole story on Windows.
     //
@@ -255,6 +256,53 @@ class BrowserShell {
   }
 
   /* ---------------------------------------------------------------- */
+
+  /**
+   * Personalisation that belongs to the window rather than to a stylesheet.
+   *
+   * Both of these are asked of the OS compositor, which is already drawing this
+   * window and every other one on the screen. Doing the same thing ourselves -
+   * a transparent window with a blurred backdrop painted in CSS - would mean an
+   * alpha surface and a blur pass on every frame, for a browser whose whole
+   * claim is about not spending resources it does not have to.
+   */
+  applyWindowPrefs() {
+    if (!this.prefs || this.window.isDestroyed()) return;
+
+    try {
+      this.window.setOpacity(this.prefs.get('windowOpacity'));
+    } catch (err) {
+      // Linux without a compositing window manager has no opacity to set.
+      this.log(`window opacity unavailable: ${err.message}`);
+    }
+
+    // Windows 11 only, and only where this build of Electron has the API. A
+    // silent no-op elsewhere is correct: the setting simply does not apply.
+    const material = this.prefs.get('backgroundMaterial');
+    if (typeof this.window.setBackgroundMaterial === 'function') {
+      try {
+        this.window.setBackgroundMaterial(material);
+      } catch (err) {
+        this.log(`background material unavailable: ${err.message}`);
+      }
+    }
+
+    // Keep the system's window buttons legible against whatever the strip is.
+    const strip = this.stripColour();
+    if (process.platform !== 'darwin' && typeof this.window.setTitleBarOverlay === 'function') {
+      try {
+        this.window.setTitleBarOverlay({ color: strip, symbolColor: '#9aa1b1', height: 40 });
+      } catch { /* no overlay on this platform */ }
+    }
+  }
+
+  /** What colour the tab strip is, resolving 'mirror' and 'default'. */
+  stripColour() {
+    const choice = this.prefs ? this.prefs.get('tabBarColor') : 'default';
+    if (choice === 'mirror') return this.prefs.get('accent');
+    if (choice === 'default') return '#16181d';
+    return choice;
+  }
 
   /* ---------------------------------------------------------------- */
 
