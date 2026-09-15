@@ -39,10 +39,11 @@ worth knowing before you plan a release around them.
 |---|---|---|---|
 | Linux artifacts | yes | partial | no |
 | Windows `.exe` | **yes, with Wine** | with Wine | yes |
+| …signed | **no** (see below) | yes | yes |
 | macOS `.zip` | yes (unsigned) | yes | no |
 | macOS `.dmg` | **no** | yes | no |
 
-Two hard stops, both discovered by hitting them:
+Two hard stops in the table above, both discovered by hitting them:
 
 - **The Windows NSIS installer needs Wine, including 32-bit support.** The
   installer *stub* is a 32-bit executable — deliberately, so it runs on any
@@ -64,26 +65,171 @@ Two hard stops, both discovered by hitting them:
   `.app`, so use `npx electron-builder --mac zip` on Linux — asking for the
   default target set gets you both zips and then an error on the dmg.
 
+A third, which only bites once you try to sign:
+
+- **electron-builder cannot sign a Windows binary from Linux on a current
+  distro.** It ships its own `osslsigncode` inside `winCodeSign-2.6.0`, and that
+  binary is linked against `libcrypto.so.1.1` — OpenSSL 1.1, which Ubuntu 24.04
+  and every other current distro replaced with OpenSSL 3. The build gets as far
+  as `signing file=…` and then dies with
+
+  ```
+  osslsigncode: error while loading shared libraries: libcrypto.so.1.1
+  ```
+
+  Signing on Windows (`signtool.exe`) and in CI on `windows-latest` is
+  unaffected. If you really need to sign from Linux, build unsigned and then
+  sign the finished `.exe` with the distro's own `osslsigncode`, which works
+  fine — that is how the self-signed demonstration further down was produced.
+
 The way around all of this is `.github/workflows/release.yml`, which builds each
 platform on its own runner. That is the only path that produces a real dmg, and
 the only one that can ever sign or notarize.
 
-## Signing — none of it is signed
+## Signing the Windows build
 
-This matters to whoever runs the result, so it is stated rather than buried.
+Builds are unsigned by default. The repository is wired so that supplying
+credentials is the *only* step — nothing in the config or the workflow needs
+editing — but the credentials themselves are the hard part, and the landscape
+changed in a way that makes most older advice wrong.
 
-- **Windows.** No code-signing certificate, so SmartScreen shows
-  "Windows protected your PC" on first run. More Info → Run anyway. The warning
-  is accurate: nothing vouches for this binary. Signing needs an OV or EV
-  certificate, set via `CSC_LINK` and `CSC_KEY_PASSWORD`.
+### What you cannot do any more
+
+**You cannot buy a code-signing certificate and download a `.pfx`.** Since June
+2023 the CA/Browser Forum has required the private key for any publicly-trusted
+code-signing certificate to live on certified hardware — a FIPS 140-2 Level 2
+token, or a CA's cloud HSM. Every "buy a cert, export a .pfx, set `CSC_LINK`"
+tutorial written before then describes something no CA will sell you now.
+
+So the file-based path below is real, but only for a certificate you already
+hold, an internal CA, or a self-signed certificate. New certificates arrive
+either on a USB token posted to you or behind a cloud signing API.
+
+### Signing does not immediately stop the SmartScreen warning
+
+Worth internalising before spending money, because it surprises people who have
+just paid. SmartScreen trusts *reputation*, not signatures:
+
+| | Cost | SmartScreen |
+|---|---|---|
+| Unsigned | — | Warns, forever |
+| **OV** certificate | ~$200–400/yr | Still warns at first. Reputation accrues over downloads and time. |
+| **EV** certificate | ~$300–600/yr | Clean from the first release |
+| **Azure Trusted Signing** | ~$10/month | Clean from the first release |
+
+An OV certificate buys a publisher name in the dialog and a reputation clock
+that starts ticking. It does not buy a clean first run. If the point of signing
+is that your users stop seeing the scary dialog, OV is not the thing to buy.
+
+### What to actually get
+
+**For an individual: Azure Trusted Signing.** It is Microsoft's own service, it
+is priced per month rather than per year, it signs through an API so there is no
+USB token to keep plugged into a build machine, and — the part that matters —
+it validates *individuals*, not just registered companies. Identity verification
+requires a history (roughly three years of verifiable identity) and takes some
+days. EV certificates from a traditional CA generally require a legal business
+entity with a D-U-N-S number, which is the wall most solo developers hit.
+
+**For a company:** an EV certificate from a traditional CA is the conventional
+answer and gives the same clean first run.
+
+### Turning it on
+
+Neither path needs a code change. Set repository secrets and the existing
+workflow signs.
+
+**Azure Trusted Signing** — secrets `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
+`AZURE_CLIENT_SECRET` (from an Azure AD app registration granted the *Trusted
+Signing Certificate Profile Signer* role), plus repository **variables**
+`AZURE_SIGN_ENDPOINT`, `AZURE_SIGN_ACCOUNT`, `AZURE_SIGN_PROFILE`. The workflow
+switches to the Azure step automatically once `AZURE_CLIENT_ID` exists.
+
+**A certificate file** — secrets `WINDOWS_CERT_BASE64` (the `.pfx`, base64
+encoded) and `WINDOWS_CERT_PASSWORD`:
+
+```bash
+base64 -w0 certificate.pfx    # paste the output as the secret
+```
+
+Locally, the same thing without CI:
+
+```bash
+export CSC_LINK=/path/to/certificate.pfx     # or its base64
+export CSC_KEY_PASSWORD='…'
+npm run dist:win
+```
+
+An empty value is treated as "no certificate", so a fork with no secrets still
+builds — unsigned, exactly as before.
+
+### Check that it worked
+
+The workflow prints the signature status of every `.exe` before uploading,
+because a release that is quietly unsigned (an expired secret, a typo'd
+variable) is the failure worth catching. By hand, on Windows:
+
+```powershell
+Get-AuthenticodeSignature .\Debrowser-1.0.0-win-x64.exe | Format-List
+```
+
+`Status: Valid` is what you want. `NotSigned` means the credentials never
+reached electron-builder; `UnknownError` usually means the chain does not
+terminate in a trusted root — which is what a self-signed certificate looks
+like.
+
+Anywhere, including Linux:
+
+```bash
+osslsigncode verify Debrowser-1.0.0-win-x64.exe
+```
+
+### Self-signed certificates
+
+You can make one in a minute, and it will produce a technically valid signature:
+
+```bash
+openssl req -x509 -newkey rsa:3072 -keyout key.pem -out cert.pem -days 365 -nodes \
+  -subj "/CN=Your Name/O=Your Org/C=US" \
+  -addext "keyUsage=digitalSignature" -addext "extendedKeyUsage=codeSigning"
+openssl pkcs12 -export -out cert.pfx -inkey key.pem -in cert.pem -passout pass:…
+```
+
+This was done against `Debrowser-1.0.0-win-x64.exe` while writing this page. The
+result verified cleanly on every count that does not involve a CA — SHA-256
+digest matched, a genuine RFC3161 countersignature came back from DigiCert's
+timestamp authority — and then failed with exactly one error:
+
+```
+Verify error: self-signed certificate
+Signature verification: failed
+```
+
+Which is the whole story. **Signing is free; trust is the thing that costs
+money.** A self-signed certificate is useful for testing the pipeline, and for
+internal distribution where you can install the certificate into Trusted Root on
+the target machines. For anyone else's computer it changes nothing — SmartScreen
+will warn exactly as it does now.
+
+### Timestamping
+
+Already configured (`rfc3161TimeStampServer` in `electron-builder.yml`) and
+worth knowing about: a signature without a timestamp stops validating the day
+the certificate expires. With one, Windows keeps trusting binaries signed while
+the certificate was valid. For a release you are not going to re-cut, that is
+the difference between "still works in three years" and "silently unsigned".
+
+## Signing on the other platforms
+
 - **macOS.** Not signed and not notarized, so Gatekeeper refuses the first
   launch outright. Right-click → Open (once), or
   `xattr -cr /Applications/Debrowser.app`. Proper signing needs an Apple
-  Developer account: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`,
+  Developer account ($99/yr): `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`,
   `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. `hardenedRuntime` and the
   entitlements in `build/entitlements.mac.plist` are already configured for it.
+  Unlike Windows, there is no reputation clock — notarizing works immediately.
 - **Linux.** Nothing to sign; the `.deb` is unsigned, which is normal outside a
-  repository.
+  distribution repository.
 
 An unsigned macOS build produced *on Linux* is doubly worth flagging: it has
 never been through `codesign` at all, so it is strictly for trying the app, not

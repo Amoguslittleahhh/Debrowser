@@ -44,10 +44,12 @@ compression: maximum
 ## a USB stick with nothing installed, which also happens to be the easiest way
 ## to try a browser you do not yet trust.
 ##
-## Unsigned. Windows SmartScreen will warn on first run, and that warning is
-## correct - there is no code-signing certificate behind this build. Signing
-## needs a certificate that cannot be committed to a repository; see
-## docs/PACKAGING.md.
+## Unsigned unless a certificate is supplied through the environment, and the
+## SmartScreen warning on an unsigned build is correct - nothing vouches for it.
+## Note that signing is not by itself the cure: an OV certificate has to *earn*
+## SmartScreen reputation over downloads, so the warning persists for a while
+## after you start paying. Only EV and Azure Trusted Signing carry it from the
+## first release. See docs/PACKAGING.md.
 win:
   target:
     - target: nsis
@@ -55,6 +57,33 @@ win:
     - target: portable
       arch: [x64]
   artifactName: ${productName}-${version}-win-${arch}.${ext}
+
+  ## Signing.
+  ##
+  ## No certificate is named here, deliberately. electron-builder reads
+  ## `CSC_LINK` (a path to a .pfx, or its base64) and `CSC_KEY_PASSWORD` from the
+  ## environment by itself, and treats an empty value as "no certificate" - so
+  ## signing turns on by setting two environment variables and the key never has
+  ## to touch this file, the repository, or a build log. Azure Trusted Signing
+  ## instead uses `azureSignOptions`, which CI passes on the command line when
+  ## its secrets exist; see docs/PACKAGING.md.
+  ##
+  ## What *is* pinned here are the two settings that are wrong-by-default often
+  ## enough to matter.
+  signtoolOptions:
+    ## Timestamp every signature, always.
+    ##
+    ## Without a timestamp a signature stops validating the moment the
+    ## certificate expires, and a release nobody is going to re-cut silently
+    ## becomes unsigned a year later. With one, Windows keeps trusting binaries
+    ## that were signed while the certificate was valid. This is the single
+    ## cheapest thing to get right and the most annoying to discover late.
+    rfc3161TimeStampServer: http://timestamp.digicert.com
+    ## SHA-256 only. Windows has distrusted SHA-1 code signatures since 2016, so
+    ## the dual-signing dance buys nothing on any supported version and only
+    ## doubles the signing time.
+    signingHashAlgorithms:
+      - sha256
 
 nsis:
   oneClick: false

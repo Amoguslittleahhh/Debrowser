@@ -100,11 +100,22 @@ not move; the win is residency, not smaller renderers.
   was not.
 - The Linux-only trim helper no longer ships inside the Windows installer.
 
-Nothing signed: no Windows certificate and no Apple Developer account, so
-SmartScreen and Gatekeeper both warn. Documented rather than worked around — see
-`docs/PACKAGING.md`, which also records what cross-building can and cannot do
-(the Windows installer needs Wine *including* 32-bit; the macOS `.dmg` cannot be
-built off macOS at all).
+Nothing is signed, but the build is now wired for it: set `CSC_LINK` and
+`CSC_KEY_PASSWORD` (or the Azure Trusted Signing secrets) and the release
+workflow signs, with no code or config change — an empty value means "no
+certificate", so a fork with no secrets still builds unsigned. Signatures are
+RFC3161-timestamped and SHA-256 only, and the workflow prints the signature
+status of every `.exe` before uploading, so a release that is quietly unsigned
+because a secret expired does not get past CI.
+
+`docs/PACKAGING.md` covers getting a certificate, and is worth reading before
+buying one: since 2023 no CA will sell a downloadable `.pfx`, and an OV
+certificate does not stop the SmartScreen warning by itself — only EV or Azure
+Trusted Signing clear it from the first release. It also records what
+cross-building can and cannot do (the Windows installer needs Wine *including*
+32-bit; the macOS `.dmg` cannot be built off macOS; and electron-builder cannot
+sign a Windows binary from Linux at all, because its vendored `osslsigncode`
+links against an OpenSSL no current distro ships).
 
 ### Verification
 

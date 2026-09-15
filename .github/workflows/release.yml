@@ -42,6 +42,14 @@ jobs:
               dist/*.tar.gz
 
     runs-on: ${{ matrix.os }}
+
+    # The `secrets` context is not available to a step-level `if`, but `env` is,
+    # so the "do we have Azure credentials" question is answered once here and
+    # read as a plain string below. Writing `if: secrets.X != ''` directly looks
+    # right and silently never matches.
+    env:
+      AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -78,8 +86,52 @@ jobs:
         if: matrix.os != 'ubuntu-latest'
         run: npm run smoke
 
+      # Signing is driven entirely by secrets, and their absence is a supported
+      # state rather than an error: electron-builder treats an empty CSC_LINK as
+      # "no certificate" and produces the same unsigned build as before. So this
+      # one step covers both, and a fork with no secrets still builds.
+      #
+      # Set WINDOWS_CERT_BASE64 (base64 of a .pfx) and WINDOWS_CERT_PASSWORD to
+      # sign with a file-based certificate. For Azure Trusted Signing - which is
+      # what an individual developer can actually get since the 2023 rule that
+      # code-signing keys live on certified hardware - set the AZURE_* secrets
+      # instead and the step below takes over. docs/PACKAGING.md has both.
       - name: Package
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          # macOS: without this, electron-builder hunts the runner's keychain for
+          # any signing identity and fails confusingly when it finds none.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        if: ${{ !(matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true') }}
         run: npx electron-builder ${{ matrix.platform }} --publish never
+
+      # Azure Trusted Signing. Windows only, and only when its secrets exist.
+      # The endpoint/account/profile are not secret, but they are deployment
+      # detail rather than source, so they are variables rather than literals.
+      - name: Package (Azure Trusted Signing)
+        if: ${{ matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true' }}
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: >
+          npx electron-builder --win --publish never
+          -c.win.azureSignOptions.endpoint=${{ vars.AZURE_SIGN_ENDPOINT }}
+          -c.win.azureSignOptions.codeSigningAccountName=${{ vars.AZURE_SIGN_ACCOUNT }}
+          -c.win.azureSignOptions.certificateProfileName=${{ vars.AZURE_SIGN_PROFILE }}
+
+      # Says plainly whether what is about to be uploaded is signed. A release
+      # that is silently unsigned because a secret expired is the failure this
+      # catches, and it costs one command.
+      - name: Report signature status
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/*.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "{0}: {1} {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
+          }
 
       - uses: actions/upload-artifact@v4
         with:
