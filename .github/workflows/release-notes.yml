@@ -1,0 +1,49 @@
+# Republish one release's notes, without rebuilding it.
+#
+# The release workflow can only write notes for the version it is building, so
+# fixing the body of an already-published release had no route at all: re-running
+# the build for an old tag would attach the *current* version's installers to it,
+# which is worse than the wrong prose.
+#
+# This exists because a Claude Code session's token is refused outright when it
+# tries to create or edit a release ("not permitted for this session type"), so
+# the edit has to be made by a workflow using the built-in GITHUB_TOKEN.
+#
+# Touches the body only. Tag, assets, draft state and release date are untouched.
+
+name: Update release notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to republish notes for, e.g. 1.0.1 (the matching ## section of CHANGELOG.md).'
+        required: true
+
+permissions:
+  contents: write        # editing a release is a write to repository contents
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same script the release workflow uses, so a republished body is
+      # byte-identical to what a fresh release of that version would have said.
+      - name: Build the release body
+        run: |
+          python3 .github/scripts/release-notes.py "${{ inputs.version }}" > RELEASE_NOTES.md
+          echo "--- release body ---"
+          cat RELEASE_NOTES.md
+
+      # Fails if the release does not exist, rather than creating an empty one
+      # at whatever commit this happens to run from.
+      - name: Publish it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ inputs.version }}
+        run: |
+          gh release view "$TAG" --json tagName > /dev/null
+          gh release edit "$TAG" --notes-file RELEASE_NOTES.md
+          echo "Updated the notes on $TAG" >> $GITHUB_STEP_SUMMARY

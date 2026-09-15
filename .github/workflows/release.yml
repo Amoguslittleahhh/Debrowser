@@ -226,26 +226,12 @@ jobs:
       #
       # Takes the first `## ` section and drops its heading, since the release
       # is already titled with its version.
-      - name: Extract this version's notes
+      # Both the body and its attribution footer come from one script, shared
+      # with the workflow that republishes notes for an already-published
+      # release. Two copies of this would drift.
+      - name: Build the release body
         run: |
-          awk '/^## /{n++; if (n==1) next} n==1' CHANGELOG.md > RELEASE_NOTES.md
-          # An empty body would publish a release that says nothing at all,
-          # which is a packaging mistake worth failing on rather than shipping.
-          test -s RELEASE_NOTES.md || { echo "no notes found at the top of CHANGELOG.md"; exit 1; }
-
-          # Credit both, side by side.
-          #
-          # A release's `author` is whoever's token created it, which is always
-          # `github-actions[bot]` here because the workflow publishes with the
-          # built-in GITHUB_TOKEN. That field cannot be set to a person, so the
-          # attribution goes in the body, which is the part anyone actually
-          # reads anyway.
-          # printf rather than a heredoc: a heredoc inside an indented YAML
-          # block carries that indentation into the file, and four or more
-          # leading spaces make Markdown render the line as a code block.
-          printf '\n---\n\nReleased by **Amoguslittleahhh** (<amogus36311@gmail.com>) and **`github-actions[bot]`**.\n' \
-            >> RELEASE_NOTES.md
-
+          python3 .github/scripts/release-notes.py > RELEASE_NOTES.md
           echo "--- release body ---"
           cat RELEASE_NOTES.md
 
