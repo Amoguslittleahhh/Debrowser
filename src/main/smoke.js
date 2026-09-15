@@ -193,11 +193,17 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // under the margin, and the check failed on a browser that was behaving
   // correctly. Waiting asserts the same property without asserting a rate of
   // convergence nobody promised.
+  // Sampled at the governor's own cadence, not faster. `percentCPUUsage` is a
+  // *rate* measured between calls, so polling it every 150ms asks "how busy was
+  // this process over the last 150ms" and can answer zero for a page whose
+  // worker is plainly running - which is what the macOS runner reported, busy
+  // and idle both at 0.00%. Sampling at tickMs gives the figure an interval it
+  // can actually be computed over.
   const cpuGap = () => busy.cpu - heavy.cpu;
   const distinguishable = await waitFor(async () => {
-    await settledSample(governor, 2, 150);
+    await settledSample(governor, 2, cfg.tickMs);
     return cpuGap() > 0.1;
-  }, { timeoutMs: 15_000, pollMs: 0 });
+  }, { timeoutMs: 20_000, pollMs: 0 });
   const busyCpuBefore = busy.cpu;
   check('a still-working hidden tab is distinguishable from a quiet one',
     distinguishable,
@@ -214,9 +220,9 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   // platform rather than about the sampling, which is what this distinguishes.
   await sleep(1500);
   const quiet = await waitFor(async () => {
-    await settledSample(governor, 2, 150);
+    await settledSample(governor, 2, cfg.tickMs);
     return busy.cpu < 1.0;
-  }, { timeoutMs: 15_000, pollMs: 0 });
+  }, { timeoutMs: 20_000, pollMs: 0 });
   check('freezing drops that tab to no measurable CPU', quiet,
     `${busyCpuBefore.toFixed(1)}% -> ${busy.cpu.toFixed(2)}% CPU`);
   check('a frozen tab keeps its renderer and its state', busy.isLive && busy.rssMB > 0,
