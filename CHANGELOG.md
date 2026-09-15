@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 The chrome rebuilt to Chrome's layout, and a settings page.
 
