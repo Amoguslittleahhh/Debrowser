@@ -130,17 +130,27 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   /* ---------------------------------------------------------------- */
   console.log('\n2. Idle ladder: hidden tabs demote on their own\n');
 
+  // The highest CPU this tab reports while hidden, tracked as we go rather than
+  // read once at the end. Freezing drives CPU to zero *by construction* - that
+  // is what it is for - so a reading taken after the fact says "quiet" about
+  // every frozen tab, including the ones that were frozen precisely because
+  // they were busy. Only a sample from before the decision can tell them apart.
+  let heavyPeakCpu = 0;
+  const notePeak = () => { heavyPeakCpu = Math.max(heavyPeakCpu, heavy.cpu); };
+
   // "At least COLD", not "exactly COLD". The tab passes *through* COLD on its
   // way down, so an equality test polled every 200ms can miss it entirely - and
   // does, on a slow or contended machine where the tab is still busy enough to
   // be frozen a moment later. The property is that an idle tab demotes itself
   // without being told; which rung it has reached by the time we look is not.
   const demoted = await waitFor(
-    () => tierRank(heavy.tier) >= tierRank(Tier.COLD), { timeoutMs: 8000 });
+    () => { notePeak(); return tierRank(heavy.tier) >= tierRank(Tier.COLD); },
+    { timeoutMs: 8000 });
   check('an idle hidden tab is demoted to discard-eligible on its own', demoted,
     `heavy tab reached ${heavy.tier}`);
 
   await settledSample(governor);
+  notePeak();
   const heavyAfterIdle = heavy.rssMB;
   const delta = heavyAfterIdle - heavyBaseline;
   // The COLD tier deliberately performs no action on the renderer: forcing a
@@ -151,17 +161,18 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `~${Math.round(heavyBaseline)}MB -> ~${Math.round(heavyAfterIdle)}MB ` +
     `(${delta >= 0 ? '+' : ''}${Math.round(delta)}MB)`);
 
-  // Conditional on the tab actually being quiet, which is the policy: freezing
-  // is for tabs still burning CPU out of sight. `heavy.html` is a DOM-heavy
-  // page and on a slow machine it can still be above the 0.8% threshold when
-  // the compressed freeze clock fires - at which point freezing it is *correct*
-  // and an unconditional assertion fails on the governor doing the right thing.
-  // Asserting the implication instead tests the rule rather than the fixture.
-  const heavyIsQuiet = heavy.cpu < cfg.freezeCpuThreshold;
+  // Conditional on the tab having actually been quiet, which is the policy:
+  // freezing is for tabs still burning CPU out of sight. `heavy.html` is a
+  // DOM-heavy page and on a slow machine it is still above the 0.8% threshold
+  // when the compressed freeze clock fires - at which point freezing it is
+  // *correct*, and an unconditional assertion fails on the governor doing the
+  // right thing. The condition uses the peak seen before the decision, not the
+  // current reading, for the reason given where `notePeak` is defined.
+  const heavyWasQuiet = heavyPeakCpu < cfg.freezeCpuThreshold;
   check('a quiet tab is not frozen, because freezing it would only cost memory',
-    !heavyIsQuiet || heavy.tier !== Tier.FROZEN,
-    `heavy tab at ${heavy.tier}, ${heavy.cpu.toFixed(2)}% CPU ` +
-    `(threshold ${cfg.freezeCpuThreshold}%)${heavyIsQuiet ? '' : ' - still busy, so freezing is correct'}`);
+    !heavyWasQuiet || heavy.tier !== Tier.FROZEN,
+    `heavy tab at ${heavy.tier}, peak ${heavyPeakCpu.toFixed(2)}% CPU ` +
+    `(threshold ${cfg.freezeCpuThreshold}%)${heavyWasQuiet ? '' : ' - it was busy, so freezing is correct'}`);
 
   /* ---------------------------------------------------------------- */
   console.log('\n3. A tab still burning CPU in the background is frozen\n');
