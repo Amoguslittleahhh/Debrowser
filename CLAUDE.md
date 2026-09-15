@@ -44,3 +44,18 @@ The release body is that version's notes and nothing else — the step takes the
 first `## ` section of `CHANGELOG.md` and drops its heading. Publishing the
 whole changelog means every download page repeats the notes for versions the
 reader already has, burying the one thing they came to read.
+
+### Do not hard-wrap changelog prose
+
+One paragraph or bullet is one line, however long. The rest of this repository
+wraps at about 80 columns, and `CHANGELOG.md` is the exception, because it is
+not only a file — it is the release body, rendered by GitHub, which reflows it
+to the reader's width.
+
+Wrapping it there buys nothing and breaks things: a wrap that lands inside a
+hyphenated compound renders with a stray hyphen and a space, which is exactly
+what happened to "double-click-to-maximise" on the 1.1.0 page and had to be
+fixed by hand after publishing.
+
+Entries above 1.1.0 are left wrapped. They are already published, and rewrapping
+them would change released notes to no benefit.

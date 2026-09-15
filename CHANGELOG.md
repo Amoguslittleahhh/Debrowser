@@ -13,47 +13,15 @@ The chrome rebuilt to Chrome's layout, and a settings page.
 | **Settings** | None at all | Theme, accent, tab width, meter and dot visibility, search engine, new-tab page, memory budget, live-tab cap |
 | **Theme** | Followed the OS, no way to override | System, light or dark — an explicit choice wins over the OS in both directions |
 
-- **The window's own title bar and the File/Edit/View/Window menu are gone.**
-  That menu was Electron's default, not anything this browser defines — there
-  was no File to open and no Window to manage — and it sat above the tabs
-  spending a row of screen on a name the user already knows. The tab strip is
-  the title bar now, as in every modern browser. The system still draws the real
-  minimise/maximise/close buttons over it, so snap layouts, double-click-to-
-  maximise and the accessibility behaviour that comes with them all still work;
-  the strip keeps clear of them through `env(titlebar-area-*)` rather than a
-  hard-coded inset, which would be wrong on one platform or the other.
-- **The new-tab button follows the last tab** instead of sitting against the far
-  right edge with a gulf of empty strip in between. The old rule made the tab
-  container claim the whole strip; it now hugs its tabs, and hands the overflow
-  back so tabs shrink rather than pushing the + off-screen.
-- **Back and forward grey out** when there is nowhere to go, and the reload
-  button becomes a stop button while a page loads — as a swapped icon path,
-  since the old code wrote text into a button that now holds an SVG and would
-  have deleted the icon on the first load.
-- **A settings page**, reached from the three-dot menu or Ctrl+,. Theme (system,
-  light or dark, with an explicit choice beating the OS in both directions),
-  accent colour, tab width, whether the memory meter and the tier dots are
-  shown, search engine, new-tab page, and the two resource limits — memory
-  budget and how many tabs may hold a renderer. Preferences live in `userData`,
-  which an update does not touch, and every value is validated against one
-  schema that guards both the settings page and the file on disk, because that
-  file reaches the governor and the Chromium command line.
-- **Empty is not zero.** Clearing a resource limit means "size it to this
-  machine" and returns to the automatic value; `0` for the tab cap means "no
-  cap". A value pinned on the command line outranks anything saved, which is
-  what the code claimed and did not do.
-- **No settings that do nothing.** Session restore, automatic updates and the
-  resource profile were drafted and cut: the first two are not built, and the
-  third cannot take effect without a restart.
-- The palette lived in three copies across the chrome, the panel and settings,
-  and had already drifted — the panel's light background was a different grey
-  for no reason anyone chose. It is one file now, and the theme choice reaches
-  the task manager as a result.
+- **The window's own title bar and the File/Edit/View/Window menu are gone.** That menu was Electron's default, not anything this browser defines — there was no File to open and no Window to manage — and it sat above the tabs spending a row of screen on a name the user already knows. The tab strip is the title bar now, as in every modern browser. The system still draws the real minimise/maximise/close buttons over it, so snap layouts, double-click-to-maximise and the accessibility behaviour that comes with them all still work; the strip keeps clear of them through `env(titlebar-area-*)` rather than a hard-coded inset, which would be wrong on one platform or the other.
+- **The new-tab button follows the last tab** instead of sitting against the far right edge with a gulf of empty strip in between. The old rule made the tab container claim the whole strip; it now hugs its tabs, and hands the overflow back so tabs shrink rather than pushing the + off-screen.
+- **Back and forward grey out** when there is nowhere to go, and the reload button becomes a stop button while a page loads — as a swapped icon path, since the old code wrote text into a button that now holds an SVG and would have deleted the icon on the first load.
+- **A settings page**, reached from the three-dot menu or Ctrl+,. Theme (system, light or dark, with an explicit choice beating the OS in both directions), accent colour, tab width, whether the memory meter and the tier dots are shown, search engine, new-tab page, and the two resource limits — memory budget and how many tabs may hold a renderer. Preferences live in `userData`, which an update does not touch, and every value is validated against one schema that guards both the settings page and the file on disk, because that file reaches the governor and the Chromium command line.
+- **Empty is not zero.** Clearing a resource limit means "size it to this machine" and returns to the automatic value; `0` for the tab cap means "no cap". A value pinned on the command line outranks anything saved, which is what the code claimed and did not do.
+- **No settings that do nothing.** Session restore, automatic updates and the resource profile were drafted and cut: the first two are not built, and the third cannot take effect without a restart.
+- The palette lived in three copies across the chrome, the panel and settings, and had already drifted — the panel's light background was a different grey for no reason anyone chose. It is one file now, and the theme choice reaches the task manager as a result.
 
-Verification: 43 checks, all green, including four new ones — that settings
-never becomes a governed tab, that the schema refuses values outside it, that
-clearing a limit returns to the automatic value while a pinned flag outranks a
-saved one, and that the menu builds from live state.
+Verification: 43 checks, all green, including four new ones — that settings never becomes a governed tab, that the schema refuses values outside it, that clearing a limit returns to the automatic value while a pinned flag outranks a saved one, and that the menu builds from live state.
 
 ## 1.0.1
 
