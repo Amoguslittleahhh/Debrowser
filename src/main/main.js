@@ -220,7 +220,9 @@ function main() {
     // have - so it was a row of screen spent on a menu that leads nowhere. Every
     // shortcut worth having is bound in the chrome renderer.
     Menu.setApplicationMenu(null);
-    pages.serve(log);
+    // Both the default session (chrome, panel) and the browsing partition
+    // that tabs run in, which has a protocol registry of its own.
+    pages.serve(log, ['persist:debrowser']);
 
     prefs = earlyPrefs;
     applyPrefs(cfg, prefs, log);
@@ -329,6 +331,7 @@ function main() {
     // The trim helper is a long-lived child process of ours. Nothing else ends
     // it, and it holds an open stdin on a pipe that outlives us.
     platform.stopTrimHelper();
+    platform.stopMeasureHelper();
     // Synchronous on purpose: quit does not wait for promises, and leaving
     // page screenshots on disk is the one cleanup that must not be best effort.
     sweepThumbnailsSync();
@@ -471,7 +474,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
  * two of them can disagree about what the current preferences are.
  */
 function openInternalPage(tabs, url) {
-  const existing = tabs.all().find((t) => t.url === url);
+  // Matched by page name, not by URL string. Once the page has loaded, the tab
+  // reports the URL Chromium normalised it to - `debrowser://settings/`, with a
+  // trailing slash - so string equality against the URL we opened stops
+  // matching the moment the page finishes loading, and every subsequent open
+  // makes another tab.
+  const wanted = pages.pageName(url);
+  const existing = tabs.all().find((t) => t.internal && pages.pageName(t.url) === wanted);
   if (existing) {
     tabs.activate(existing.id).catch(() => {});
     return existing;

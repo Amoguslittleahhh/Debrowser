@@ -26,7 +26,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { protocol, net } = require('electron');
+const { protocol, net, session } = require('electron');
 
 const SCHEME = 'debrowser';
 // The renderer directory itself, flat.
@@ -63,9 +63,21 @@ function registerScheme() {
   }]);
 }
 
-/** Serve the pages. Called once, after the app is ready. */
-function serve(log = () => {}) {
-  protocol.handle(SCHEME, async (request) => {
+/**
+ * Serve the pages, on every session that needs them.
+ *
+ * `protocol.handle` registers on the *default* session only. Tabs run in the
+ * `persist:debrowser` partition, which has a protocol registry of its own and
+ * inherits nothing - so registering once left every internal page failing with
+ * ERR_FAILED inside a tab while working perfectly in a default-session window,
+ * which is exactly how this was nearly missed: the standalone render harness
+ * used a default session and showed both pages correctly.
+ *
+ * @param {string[]} partitions - extra partitions to register on
+ */
+function serve(log = () => {}, partitions = []) {
+  const registries = [protocol, ...partitions.map((p) => session.fromPartition(p).protocol)];
+  const handler = async (request) => {
     const url = new URL(request.url);
     // The host names the page; the path names a file belonging to it, so
     // `debrowser://settings/settings.css` works without a second registration.
@@ -85,7 +97,16 @@ function serve(log = () => {}) {
     if (!fs.existsSync(full)) return new Response('Not found', { status: 404 });
 
     return net.fetch(`file://${full}`);
-  });
+  };
+
+  for (const registry of registries) {
+    try {
+      registry.handle(SCHEME, handler);
+    } catch (err) {
+      // Already registered on this session is harmless; anything else is not.
+      log('pages', `could not register ${SCHEME}: ${err.message}`);
+    }
+  }
 }
 
 /** Is this one of ours? */

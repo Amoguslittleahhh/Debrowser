@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * Build tools/mem-probe for whatever platform this is.
+ *
+ * A shell one-liner would not do: the Windows compiler is `cl` with entirely
+ * different flags and a different way of naming its output, and it only exists
+ * on PATH inside a Visual Studio developer environment. This picks the right
+ * one and fails loudly rather than leaving a missing binary for the browser to
+ * discover at runtime and report as an unavailable capability.
+ */
+
+const { spawnSync } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+const dir = __dirname;
+const src = path.join(dir, 'mem-probe.c');
+const out = path.join(dir, process.platform === 'win32' ? 'mem-probe.exe' : 'mem-probe');
+
+function run(cmd, args) {
+  const r = spawnSync(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+  return r.status === 0;
+}
+
+function have(cmd) {
+  const probe = process.platform === 'win32' ? ['where', cmd] : ['command', '-v', cmd];
+  return spawnSync(probe[0], probe.slice(1), { stdio: 'ignore', shell: true }).status === 0;
+}
+
+let ok = false;
+
+if (process.platform === 'win32') {
+  // psapi is where QueryWorkingSet lives. MSVC first, because that is what the
+  // release runner has; MinGW second, so a developer machine with it works too.
+  if (have('cl')) {
+    ok = run('cl', ['/nologo', '/O2', '/W3', src, '/link', 'psapi.lib', `/OUT:${out}`]);
+    for (const junk of ['mem-probe.obj']) {
+      try { fs.unlinkSync(path.join(process.cwd(), junk)); } catch { /* nothing to clean */ }
+    }
+  } else if (have('gcc')) {
+    ok = run('gcc', ['-O2', '-Wall', src, '-o', out, '-lpsapi']);
+  } else {
+    console.error('build:memprobe: no compiler found. Open a Visual Studio developer prompt, ' +
+                  'or run this from a job that has run ilammy/msvc-dev-cmd.');
+    process.exit(1);
+  }
+} else {
+  const cc = process.env.CC || (have('clang') ? 'clang' : 'gcc');
+  ok = run(cc, ['-O2', '-Wall', '-Wextra', src, '-o', out]);
+}
+
+if (!ok) {
+  console.error('build:memprobe: compilation failed');
+  process.exit(1);
+}
+console.log(`built ${out}`);

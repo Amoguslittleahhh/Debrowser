@@ -41,9 +41,44 @@ class Metrics {
     this.getTabs = getTabs;
     /** @type {Map<number, {rssMB:number, cpu:number, type:string}>} */
     this.byPid = new Map();
+    /**
+     * Last figure the native probe returned for each pid, on the platforms that
+     * need it. Empty on Linux, where smaps_rollup is read inline.
+     * @type {Map<number, {pssMB:number, privateMB:number}>}
+     */
+    this.probed = new Map();
+    /** True while a round of probes is outstanding, so ticks do not stack. */
+    this.probing = false;
     this.totalMB = 0;
     this.browserOverheadMB = 0;
     this.lastSampleAt = 0;
+  }
+
+  /**
+   * Ask the native probe for this tick's figures, for the next tick to use.
+   *
+   * Fire and forget on purpose. The sampler is synchronous and runs on the
+   * governor's tick; awaiting a child process here would put a pipe read on the
+   * critical path of every tier decision. One round at a time, so a slow helper
+   * cannot accumulate a backlog of requests for pids that have since exited.
+   */
+  refreshProbes(raw) {
+    if (accountingMode() === 'pss' || this.probing) return;
+    this.probing = true;
+
+    if (this.probeMechanism === undefined) {
+      this.probeMechanism = null;
+      platform.measureCapability()
+        .then((cap) => { this.probeMechanism = cap.available ? cap.mechanism : null; })
+        .catch(() => { /* stays null, and the mode stays 'rss' */ });
+    }
+    const pids = raw.map((proc) => proc.pid);
+    Promise.all(pids.map(async (pid) => {
+      const m = await platform.measureProcess(pid);
+      if (!m) { this.probed.delete(pid); return; }
+      this.probed.set(pid, { pssMB: m.pssBytes / MB, privateMB: m.privateBytes / MB });
+    })).catch(() => { /* a failed probe simply leaves the fallback in place */ })
+      .finally(() => { this.probing = false; });
   }
 
   /**
@@ -53,6 +88,7 @@ class Metrics {
    */
   sample() {
     const raw = this.app.getAppMetrics();
+    this.refreshProbes(raw);
     const seen = new Set();
     let total = 0;
     let overhead = 0;
@@ -71,8 +107,15 @@ class Metrics {
       // pss, rss and private together, and taking them from the same read also
       // means they describe the same instant.
       const detail = readProcessMemory(pid);
-      const footprint = detail ? detail.pssMB : rssMB;
-      const priv = detail ? detail.privateMB : null;
+      // Off Linux, `detail` is null and the native probe fills the gap. Its
+      // reading is from the previous tick, because the helper is a child
+      // process and this sampler is synchronous - a tick may not wait on a
+      // pipe. That staleness is bounded by the tick interval and is invisible
+      // next to the smoothing every figure here already goes through; blocking
+      // the governor for a fresher number would be the worse trade.
+      const probed = this.probed.get(pid) || null;
+      const footprint = detail ? detail.pssMB : (probed ? probed.pssMB : rssMB);
+      const priv = detail ? detail.privateMB : (probed ? probed.privateMB : null);
       const cpu = proc.cpu?.percentCPUUsage || 0;
 
       const prev = this.byPid.get(pid);
@@ -103,6 +146,7 @@ class Metrics {
     for (const pid of this.byPid.keys()) {
       if (seen.has(pid)) continue;
       this.byPid.delete(pid);
+      this.probed.delete(pid);
       platform.forgetProcess(pid);
     }
 
@@ -210,7 +254,12 @@ class Metrics {
 
   snapshot() {
     return {
-      accounting: accountingMode(),
+      // What the figures actually are, rather than what the platform can do in
+      // principle: 'probe' only once the native helper has answered for at
+      // least one process, so a helper that is missing or refused still reads
+      // as the fallback it is.
+      accounting: accountingMode() === 'pss' ? 'pss' : (this.probed.size ? 'probe' : 'rss'),
+      probeMechanism: this.probeMechanism || null,
       pageMerging: pageMergingStatus(),
       compression: compressionStatus(),
       totalMB: Math.round(this.totalMB),

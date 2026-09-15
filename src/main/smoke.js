@@ -15,6 +15,7 @@ const fs = require('fs');
 const { app } = require('electron');
 const { Tier, tierRank } = require('./config');
 const { applyPrefs } = require('./prefs');
+const platform = require('./platform');
 const fixtureServer = require('./fixture-server');
 
 /**
@@ -607,6 +608,15 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) 
   const settingsTab = tabs.create({ url: pages.SETTINGS_URL, activate: true, realise: true });
   await waitFor(() => settingsTab.isLive && !settingsTab.loading, { timeoutMs: 10_000 });
 
+  // That the renderer exists is not that the page loaded. `protocol.handle`
+  // registers on the default session only, and tabs run in their own
+  // partition - so this failed with ERR_FAILED in a tab while rendering
+  // perfectly in a default-session harness. Assert the document, not the view.
+  const settingsTitle = await settingsTab.wc.executeJavaScript('document.title').catch(() => null);
+  check('the browser\'s own pages load inside a tab, not only in the default session',
+    settingsTitle === 'Settings',
+    `document.title=${JSON.stringify(settingsTitle)}`);
+
   const other = tabs.all().find((t) => t !== settingsTab && !t.internal);
   await tabs.activate(other.id);
   await sleep(300);
@@ -624,9 +634,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) 
   // Opening it twice focuses the one that is open rather than making a second,
   // which could disagree with the first about what the preferences are.
   const before = tabs.all().length;
-  const again = tabs.all().find((t) => t.url === pages.SETTINGS_URL);
-  check('settings is a singleton', again === settingsTab && tabs.all().length === before,
-    `${tabs.all().length} tabs, one settings`);
+  const again = tabs.all().filter((t) => pages.pageName(t.url) === 'settings');
+  check('settings is a singleton, matched by page rather than by URL string',
+    again.length === 1 && again[0] === settingsTab && tabs.all().length === before,
+    `${again.length} settings tab(s) among ${tabs.all().length}, url=${settingsTab.url}`);
 
   tabs.close(settingsTab.id);
 
@@ -645,6 +656,26 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) 
   // the governor would make the memory numbers depend on whether a release
   // happened to be out. The capability report also has to name *why* it is off,
   // since a silently inert updater is indistinguishable from a broken one.
+  // Per-process memory, on the platforms that do not report it honestly.
+  //
+  // This check is the only one in the suite that matters more elsewhere than
+  // here: on Linux it asserts the helper correctly declines to exist, because
+  // smaps_rollup already reports Pss. On Windows and macOS - where CI runs the
+  // same suite - it asserts the native backend answered, which is the only
+  // signal available that code compiled for a platform this was not written on
+  // actually works.
+  const probeCap = await platform.measureCapability(() => {});
+  const probeSnap = governor.metrics.snapshot();
+  if (process.platform === 'linux') {
+    check('the memory probe stands down where the kernel already reports Pss',
+      probeCap.available === false && probeSnap.accounting === 'pss',
+      `${probeCap.reason} (accounting=${probeSnap.accounting})`);
+  } else {
+    check('per-process memory is measured natively rather than summed',
+      probeCap.available === true && probeSnap.accounting === 'probe' && probeSnap.totalMB > 0,
+      `mechanism=${probeCap.mechanism} accounting=${probeSnap.accounting} total=${probeSnap.totalMB}MB`);
+  }
+
   const { Updater } = require('./updater');
   const updateCap = new Updater({ log: () => {} }).capability();
   check('updates are inert outside a packaged build, and say why',

@@ -80,6 +80,19 @@ win:
       arch: [x64]
   artifactName: ${productName}-${version}-win-${arch}.${ext}
 
+  ## The measurement helper, and only on the platforms that need one.
+  ##
+  ## Linux is absent from this on purpose: smaps_rollup already reports a real
+  ## Pss line, read directly and more cheaply than a round trip through a child
+  ## process. Shipping a second path to the same number would be one more thing
+  ## to keep honest.
+  extraResources:
+    - from: tools
+      to: tools
+      filter:
+        - mem-probe.exe
+        - mem-probe.c
+
   ## Signing.
   ##
   ## No certificate is named here, deliberately. electron-builder reads
@@ -142,6 +155,14 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  ## Same helper, macOS build. `proc_pid_rusage` needs no task port and no
+  ## debugger entitlement, so the hardened runtime above does not block it.
+  extraResources:
+    - from: tools
+      to: tools
+      filter:
+        - mem-probe
+        - mem-probe.c
 
 dmg:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}

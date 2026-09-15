@@ -19,7 +19,8 @@
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
-    "dist:linux": "npm run build:memtrim && electron-builder --linux"
+    "dist:linux": "npm run build:memtrim && electron-builder --linux",
+    "build:memprobe": "node tools/build-memprobe.js"
   },
   "devDependencies": {
     "electron": "^44.0.0",

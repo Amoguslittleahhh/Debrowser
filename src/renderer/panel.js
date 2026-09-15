@@ -56,8 +56,21 @@ function render(state) {
   // them, so the figure runs roughly 2x high and climbs with process count.
   // Leaving that unsaid means a Windows user reads a number two to three times
   // the browser's real footprint with nothing to tell them.
-  const proportional = state.accounting === 'pss';
-  el.total.title = proportional
+  // 'probe' is the native helper: a true proportional figure on Windows, and
+  // the footprint macOS itself charges. Both are honest totals, so neither
+  // carries the over-counting warning.
+  const proportional = state.accounting === 'pss' || state.accounting === 'probe';
+  el.total.title = state.accounting === 'probe'
+    ? (state.probeMechanism === 'proc_pid_rusage'
+        ? 'Physical footprint, the figure macOS charges each process and shows in ' +
+          'Activity Monitor. It excludes clean file-backed pages - one copy of ' +
+          'Chromium in every renderer - which is where the over-counting came from. ' +
+          'It does not divide shared dirty pages, so it is not proportional set size.'
+        : 'Proportional set size, computed by walking each process\'s working set ' +
+          'and dividing every shared page by the number of processes sharing it. ' +
+          'Windows caps that share count at 7, so a page shared by more processes ' +
+          'is counted slightly high.')
+    : proportional
     ? 'Proportional set size: pages shared between processes are counted once, ' +
       'split across the processes sharing them. This is real physical memory.'
     : 'Summed working set. This platform offers no cheap proportional measure, ' +

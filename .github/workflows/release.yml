@@ -88,11 +88,26 @@ jobs:
         shell: bash
         run: node -e "require('electron')" > /dev/null || npm rebuild electron
 
-      # The trim helper is Linux-only and is the one artifact that needs a
-      # compiler. On the other two runners it is neither built nor shipped.
+      # The trim helper is Linux-only. On the other two runners it is neither
+      # built nor shipped.
       - name: Build the trim helper
         if: matrix.os == 'ubuntu-latest'
         run: npm run build:memtrim
+
+      # And the measurement helper is the exact opposite: needed only where the
+      # platform will not report per-process memory honestly by itself. Linux
+      # has smaps_rollup and does not build it.
+      #
+      # This is also the only place the Windows and macOS backends are ever
+      # compiled - they cannot be built or run in the container this was written
+      # in - so a compile error here is the first and only warning.
+      - name: Set up MSVC
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build the measurement helper
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run build:memprobe
 
       # Runs the real 41-check suite against real renderers before anything is
       # packaged, on the platform being packaged. This is the step that would

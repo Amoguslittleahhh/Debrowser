@@ -12,7 +12,7 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { HelperProcess, HELPER_GONE } = require('./helper-process');
 const { MB } = require('./config');
 const { compressionStatus } = require('./memory');
 
@@ -136,6 +136,17 @@ function helperPath(name) {
 }
 
 const TRIM_BINARY = helperPath('mem-trim');
+const PROBE_BINARY = helperPath(process.platform === 'win32' ? 'mem-probe.exe' : 'mem-probe');
+
+/**
+ * Measurement has a much tighter deadline than a trim.
+ *
+ * A trim is a syscall that may legitimately take a while paging a large heap
+ * out. A measurement is a walk of a working set, on the governor's tick, for
+ * every process - so a slow one must be abandoned and the tick completed with
+ * the fallback figure rather than waited on.
+ */
+const PROBE_TIMEOUT_MS = 400;
 const TRIM_TIMEOUT_MS = 2000;
 
 /**
@@ -177,19 +188,6 @@ const TRIM_TIMEOUT_BACKOFF_MAX_MS = 60_000;
 const TRIM_MAP_LIMIT = 256;
 
 /**
- * Resolution meaning "there is no helper", as distinct from "the helper did not
- * answer in time".
- *
- * The difference decides whether a failure is charged to the pid that happened
- * to ask. It cannot be inferred after the fact by looking at `this.child`: the
- * exit handler nulls it, resolves the pending request - which only *queues* the
- * continuation - and then synchronously restarts the helper, so by the time the
- * caller resumes, `this.child` is a live process again and the crash looks like
- * a per-pid timeout. Not a string any reply can be.
- */
-const HELPER_GONE = '\u0000helper-gone';
-
-/**
  * What a command or a reply is *about*, which is all the correlation this
  * protocol needs: `trim <pid>` is answered by `ok <pid> …` or `err <pid> …`,
  * and `caps` by `caps linux <0|1>`.
@@ -199,14 +197,24 @@ function replyId(line) {
   return verb === 'caps' ? 'caps' : second;
 }
 
-class TrimHelper {
+class TrimHelper extends HelperProcess {
   constructor(log = () => {}) {
-    this.log = log;
-    this.child = null;
-    this.pending = null;      // { id, resolve, timer } - one request at a time
-    this.queue = [];
-    this.restarts = 0;
-    this.stopped = false;
+    super({
+      name: 'mem-trim',
+      binary: TRIM_BINARY,
+      timeoutMs: TRIM_TIMEOUT_MS,
+      replyId,
+      precondition: () => (isLinux ? null : `not implemented on ${PLATFORM}`),
+      // Two different audiences, two different remedies. Telling someone with
+      // an installed build to run an npm script in a source tree they do not
+      // have is the same class of wrong answer as telling them to `setcap` a
+      // binary that was merely not executable.
+      missingHint: (binary) => (binary.includes('resources')
+        ? `helper missing from this build: ${binary}`
+        : 'tools/mem-trim not built (npm run build:memtrim)'),
+      log
+    });
+
     /**
      * Pids trimmed recently, and when.
      *
@@ -229,171 +237,6 @@ class TrimHelper {
     this.refused = new Map();
     /** null until the helper has been asked; then true/false. */
     this.canTrim = null;
-    this.reason = null;
-  }
-
-  /**
-   * Start the helper, once. It is deliberately long-lived: spawning a process
-   * per trim would cost more than the trim it performs saves, and tier
-   * transitions are frequent.
-   */
-  start() {
-    if (this.child || this.reason || this.stopped) return Boolean(this.child);
-    if (!isLinux) { this.reason = `not implemented on ${PLATFORM}`; return false; }
-    if (!fs.existsSync(TRIM_BINARY)) {
-      // Two different audiences, two different remedies. Telling someone with an
-      // installed build to run an npm script in a source tree they do not have
-      // is the same class of wrong answer as telling them to `setcap` a binary
-      // that was merely not executable.
-      this.reason = TRIM_BINARY.includes('resources')
-        ? `helper missing from this build: ${TRIM_BINARY}`
-        : 'tools/mem-trim not built (npm run build:memtrim)';
-      return false;
-    }
-    try {
-      this.child = spawn(TRIM_BINARY, [], { stdio: ['pipe', 'pipe', 'ignore'] });
-    } catch (err) {
-      this.reason = `could not start helper: ${err.message}`;
-      return false;
-    }
-
-    let buffer = '';
-    this.child.stdout.on('data', (chunk) => {
-      buffer += chunk.toString();
-      let nl;
-      while ((nl = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        // Every reply names what it answers - `ok <pid>`, `err <pid>`, `caps` -
-        // so a line that does not name the outstanding request is the late
-        // answer to one that already timed out. Dropping it on that basis is
-        // what stops the stale byte count for pid A being handed to the caller
-        // waiting on pid B; a timed-out request is never cancelled, because the
-        // helper is inside a syscall and will answer eventually.
-        if (!this.pending || replyId(line) !== this.pending.id) continue;
-        this.settle(line);
-      }
-    });
-    // Writing to a helper that has died raises EPIPE, and Node reports that as
-    // an asynchronous 'error' event on the stream rather than throwing from
-    // `write()` - so the try/catch in `send` never sees it, and an 'error' event
-    // with no listener is fatal to the *browser*. A dead memory-trim helper
-    // taking the whole browser down with it is the worst possible trade for an
-    // optimisation that is inert on most machines. Caught here, and reported as
-    // what it is: there is no helper, so nobody's pid is at fault.
-    const pipeFailed = (err) => {
-      this.log(`mem-trim pipe error: ${err.message}`);
-      this.settle(HELPER_GONE);
-    };
-    this.child.stdin.on('error', pipeFailed);
-    this.child.stdout.on('error', pipeFailed);
-
-    // An 'error' on the child itself is a different animal from a broken pipe:
-    // it means the process could not be *spawned* (EACCES on a binary that is
-    // not executable, ENOEXEC on one built for another architecture), and node
-    // does not promise an 'exit' after it - so nothing else will ever set
-    // `reason`, and the restart-once path would spin on a binary that cannot
-    // run. Recorded as the permanent, named failure it is, which is also what
-    // stops `probe` reporting it as a missing capability.
-    this.child.on('error', (err) => {
-      this.reason = `could not start helper: ${err.message}`;
-      this.child = null;
-      this.settle(HELPER_GONE);
-    });
-
-    // A helper that dies takes trim with it rather than the browser: every
-    // caller treats an unavailable trim as "do nothing", never as an error.
-    this.child.on('exit', () => {
-      this.child = null;
-      this.settle(HELPER_GONE);
-      if (this.stopped) return;      // we asked it to go
-      if (this.restarts++ === 0) {
-        this.log('mem-trim helper exited; restarting once');
-        this.start();
-      } else {
-        this.reason = 'helper exited repeatedly';
-      }
-    });
-    // The helper must never be the reason the browser will not exit, and must
-    // never be unreferenced while a reply is in flight - unreferencing stdout
-    // permanently means the event loop can exit before the answer arrives, and
-    // the request simply never resolves. So the handles are referenced only
-    // while a request is outstanding; see `hold` and `release`.
-    this.child.unref();
-    this.release();
-    return true;
-  }
-
-  /**
-   * Shut the helper down. Called on quit; safe to call when not running.
-   *
-   * The flag is the point: killing the child fires the `exit` handler, whose
-   * job is to bring a crashed helper back. Without it, shutting down spawned a
-   * fresh helper process on the way out of the browser.
-   */
-  stop() {
-    this.stopped = true;
-    const child = this.child;
-    this.child = null;
-    if (!child) return;
-    try {
-      child.stdin.end();
-      child.kill();
-    } catch { /* already gone */ }
-  }
-
-  /** Keep the event loop alive while waiting for a reply. */
-  hold() {
-    if (!this.child) return;
-    this.child.stdout.ref();
-    this.child.stdin.ref();
-  }
-
-  /** Stop holding it once nothing is outstanding. */
-  release() {
-    if (!this.child || this.pending || this.queue.length) return;
-    this.child.stdout.unref();
-    this.child.stdin.unref();
-  }
-
-  settle(line) {
-    const waiting = this.pending;
-    this.pending = null;
-    if (waiting) {
-      clearTimeout(waiting.timer);
-      waiting.resolve(line);
-    }
-    const next = this.queue.shift();
-    if (next) this.send(next.command, next.resolve);
-    else this.release();
-  }
-
-  send(command, resolve) {
-    if (!this.start()) return resolve(HELPER_GONE);
-    if (this.pending) {
-      this.queue.push({ command, resolve });
-      return undefined;
-    }
-    const timer = setTimeout(() => {
-      // A wedged helper must never stall a tier transition. Giving up here does
-      // not cancel the request; the stdout handler drops the late reply when it
-      // arrives, because it will not name the request outstanding by then.
-      this.log(`mem-trim timed out on "${command}"`);
-      this.settle(null);
-    }, TRIM_TIMEOUT_MS);
-    if (typeof timer.unref === 'function') timer.unref();
-    this.pending = { id: replyId(command), resolve, timer };
-    this.hold();
-    try {
-      this.child.stdin.write(`${command}\n`);
-    } catch {
-      this.settle(HELPER_GONE);
-    }
-    return undefined;
-  }
-
-  request(command) {
-    return new Promise((resolve) => this.send(command, resolve));
   }
 
   /** Bytes advised, or null if the trim did not happen. */
@@ -556,6 +399,88 @@ const trimHelper = (log) => (helper || (helper = new TrimHelper(log)));
  * unavailable platform, missing capability, dead helper. Never rejects: a failed
  * trim is a missed optimisation, not an error.
  */
+/**
+ * Per-process memory on the platforms that do not hand it out for free.
+ *
+ * Linux is not served by this: smaps_rollup already carries a real Pss line,
+ * read directly and more cheaply than a round trip through a helper. A second
+ * path to the same number would be one more thing to keep honest.
+ */
+class MeasureHelper extends HelperProcess {
+  constructor(log = () => {}) {
+    super({
+      name: 'mem-probe',
+      binary: PROBE_BINARY,
+      timeoutMs: PROBE_TIMEOUT_MS,
+      replyId,
+      precondition: () => (isLinux
+        ? 'not needed on Linux - smaps_rollup reports Pss directly'
+        : null),
+      missingHint: (binary) => (binary.includes('resources')
+        ? `helper missing from this build: ${binary}`
+        : 'tools/mem-probe not built (npm run build:memprobe)'),
+      log
+    });
+    /** null until the helper has been asked; then true/false. */
+    this.canMeasure = null;
+    this.mechanism = null;
+  }
+
+  /** `{ pssBytes, privateBytes }`, or null if this pid could not be measured. */
+  async measure(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    if (this.canMeasure === false) return null;
+
+    const reply = await this.request(`measure ${pid}`);
+    if (!reply || reply === HELPER_GONE) return null;
+
+    const parts = reply.split(' ');
+    if (parts[0] !== 'ok') return null;
+    const pssBytes = Number(parts[2]);
+    const privateBytes = Number(parts[3]);
+    if (!Number.isFinite(pssBytes) || pssBytes <= 0) return null;
+    return { pssBytes, privateBytes: Number.isFinite(privateBytes) ? privateBytes : 0 };
+  }
+
+  /** `{available, mechanism, reason}`, in the shape every capability uses. */
+  async capability() {
+    if (this.canMeasure !== null) {
+      return { available: this.canMeasure, mechanism: this.mechanism, reason: this.reason };
+    }
+    const reply = await this.request('caps');
+    if (!reply || reply === HELPER_GONE) {
+      this.canMeasure = false;
+      return { available: false, mechanism: null, reason: this.reason || 'helper did not answer' };
+    }
+    // `caps <mechanism> <0|1>`
+    const [, mechanism, supported] = reply.split(' ');
+    this.mechanism = mechanism || null;
+    this.canMeasure = supported === '1';
+    if (!this.canMeasure && !this.reason) {
+      this.reason = `no measurement backend built for ${PLATFORM}`;
+    }
+    return { available: this.canMeasure, mechanism: this.mechanism, reason: this.canMeasure ? null : this.reason };
+  }
+}
+
+let measureHelper = null;
+function getMeasureHelper(log) {
+  if (!measureHelper) measureHelper = new MeasureHelper(log);
+  return measureHelper;
+}
+
+function measureProcess(pid, log) {
+  return getMeasureHelper(log).measure(pid);
+}
+
+function measureCapability(log) {
+  return getMeasureHelper(log).capability();
+}
+
+function stopMeasureHelper() {
+  if (measureHelper) measureHelper.stop();
+}
+
 function trimProcessMemory(pid, log) {
   return trimHelper(log).trim(pid);
 }
@@ -815,6 +740,7 @@ function chromiumSwitches(cfg) {
 }
 
 module.exports = {
+  measureProcess, measureCapability, stopMeasureHelper,
   PLATFORM,
   isLinux,
   isMac,

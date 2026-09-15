@@ -528,16 +528,21 @@ tried, measured and removed — live on the `claude/research-build` branch.
   over every view with nothing to put them back. Fixed in 1.0.1: the layout
   refuses to compute from a minimised or zero-sized window, and re-runs on
   restore.
-- **The memory figure is proportional on Linux and summed working set
-  everywhere else, and the second one over-counts.** Windows and macOS expose no
-  cheap PSS equivalent, and Electron reports only `workingSetSize` per process
-  (its `private`/`shared` fields read zero), so every page shared between
-  processes — chiefly one copy of Chromium in each of them — is counted once per
-  process. Measured at **1.95x** the proportional figure across five processes,
-  and it rises with process count. The task manager now labels the number
-  "resident (over-counts)" there rather than leaving you to wonder why two tabs
-  look like a gigabyte. The budget is compared against the same inflated total,
-  so the governor reclaims earlier than it needs to rather than later.
+- **The memory figure is measured per platform, and each measure is named.**
+  Linux reads a real proportional figure (Pss) from `smaps_rollup`. Windows and
+  macOS have no such thing, so a small native helper ships beside the app and
+  is asked instead — the browser no longer sums working set and warns you about
+  it. Two caveats, both reported rather than hidden: on Windows the figure is a
+  true proportional set size, computed by walking each process's working set
+  and dividing every shared page by its share count, but that count is three
+  bits wide and saturates at seven — a page shared by more than seven processes
+  is counted slightly high, and a Chromium browser runs close to that many. On
+  macOS the figure is `phys_footprint`, the number the OS charges each process
+  and shows in Activity Monitor; it excludes the clean file-backed pages that
+  caused the over-counting, but it does not divide shared dirty pages, so it is
+  not proportional set size and is not described as though it were. If the
+  helper is missing or refused, the old summed-working-set figure returns with
+  its "over-counts" label intact.
 - Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web
