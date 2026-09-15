@@ -181,9 +181,17 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   check('a background tab that is still working gets frozen', busyFroze,
     `busy tab reached ${busy.tier}`);
 
+  // Waited for, not read once, for the same reason as the gap above: this is a
+  // smoothed average and a fixed number of samples asserts a rate of decay
+  // rather than the property. Given time to settle, a frozen tab's CPU is zero
+  // or the freeze did not work - and if it did not, that is a finding about the
+  // platform rather than about the sampling, which is what this distinguishes.
   await sleep(1500);
-  await settledSample(governor, 4);
-  check('freezing drops that tab to no measurable CPU', busy.cpu < 1.0,
+  const quiet = await waitFor(async () => {
+    await settledSample(governor, 2, 150);
+    return busy.cpu < 1.0;
+  }, { timeoutMs: 15_000, pollMs: 0 });
+  check('freezing drops that tab to no measurable CPU', quiet,
     `${busyCpuBefore.toFixed(1)}% -> ${busy.cpu.toFixed(2)}% CPU`);
   check('a frozen tab keeps its renderer and its state', busy.isLive && busy.rssMB > 0,
     `still resident at ~${Math.round(busy.rssMB)}MB`);
