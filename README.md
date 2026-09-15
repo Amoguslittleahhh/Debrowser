@@ -14,7 +14,52 @@ The interesting part is `src/main/governor/`.
 
 ---
 
-## Running it
+## Installing it
+
+Prebuilt installers are produced by `.github/workflows/release.yml` on a tagged
+push, or on demand from the Actions tab, and attached to the release.
+
+| | Download | Then |
+|---|---|---|
+| **Windows** | `Debrowser-1.0.0-win-x64.exe` | Run it. SmartScreen will warn — see below. |
+| **Windows** (no install) | `...-win-x64-portable.exe` | Run it from anywhere. Installs nothing. |
+| **macOS** | `Debrowser-1.0.0-mac-arm64.dmg` (or `-x64` on Intel) | Drag to Applications, then right-click → Open the first time. |
+| **Linux** | `Debrowser-1.0.0-linux-x86_64.AppImage` | `chmod +x` and run. |
+| **Debian/Ubuntu** | `Debrowser-1.0.0-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
+
+**None of it is signed.** Windows SmartScreen shows "Windows protected your PC"
+(More info → Run anyway) and macOS Gatekeeper refuses the first launch
+(right-click → Open, once). Those warnings are accurate: no certificate vouches
+for these binaries. Signing needs certificates that cannot live in a public
+repository — `docs/PACKAGING.md` has the details.
+
+**Hibernation needs one more step on Linux**, and only on the `.deb` or
+`.tar.gz`:
+
+```bash
+sudo setcap cap_sys_nice+ep /opt/Debrowser/resources/tools/mem-trim
+```
+
+It cannot work from an AppImage at all — a file capability cannot be set on a
+file inside a read-only mount. The task manager says so by name rather than
+quietly doing nothing.
+
+### Check the build you downloaded
+
+Every packaged build carries the full test suite and can run it against its own
+renderers, on your machine:
+
+```
+Debrowser.exe --smoke-test              # Windows
+/opt/Debrowser/debrowser --smoke-test   # Linux
+```
+
+41 checks on real pages. Worth doing here rather than taking it on trust: this
+project is tested on Linux and only *expected* to work on Windows and macOS.
+
+---
+
+## Running from source
 
 ```bash
 npm install

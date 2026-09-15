@@ -74,7 +74,40 @@ not move; the win is residency, not smaller renderers.
   rather than written untested. `trimCapability()` reports
   `available: false` with the reason.
 
+### Installers
+
+- **Installers for all three platforms.** Windows gets an NSIS installer and a
+  portable single-file `.exe`; macOS gets `.dmg` and `.zip` for both Intel and
+  Apple silicon; Linux gets AppImage, `.deb` and `.tar.gz`. Configured in
+  `electron-builder.yml`, built per-platform on native runners by
+  `.github/workflows/release.yml`, which runs the 41-check suite on each
+  platform *before* packaging it.
+- **The trim helper could never have worked in a packaged build.** It was
+  resolved relative to `__dirname`, which lands inside `app.asar` — and a binary
+  inside an asar archive cannot be executed, because the archive is one file the
+  runtime reads rather than a directory the kernel can exec from. Every
+  installed copy would have reported "mem-trim not built" forever, quoting a
+  build command that does not apply to an installed app. It now ships beside the
+  app and is found there.
+- **That "not built" message is now audience-aware**, since telling someone with
+  an installed build to run an npm script in a source tree they do not have is
+  the same class of wrong answer as the `setcap` misdiagnosis this release also fixes.
+- **Packaged builds can verify themselves.** `--smoke-test` works from an
+  install, because 12KB of fixture HTML ships in the asar. The project is tested
+  on Linux and only expected to work elsewhere, so the means to check travels
+  with it. The first packaged build failed seven checks by serving 404s with the
+  fixtures excluded — including one that looked like a privacy regression and
+  was not.
+- The Linux-only trim helper no longer ships inside the Windows installer.
+
+Nothing signed: no Windows certificate and no Apple Developer account, so
+SmartScreen and Gatekeeper both warn. Documented rather than worked around — see
+`docs/PACKAGING.md`, which also records what cross-building can and cannot do
+(the Windows installer needs Wine *including* 32-bit; the macOS `.dmg` cannot be
+built off macOS at all).
+
 ### Verification
 
 `npm run smoke` — 41 checks against real renderers and measured memory, all
-green. `npm run bench` for the memory comparison.
+green. `npm run bench` for the memory comparison. A packaged build can run the
+same suite against itself with `--smoke-test`.

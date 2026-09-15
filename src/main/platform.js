@@ -111,7 +111,31 @@ function canRaisePriority() {
  * force its compressor at all. Both report `available: false` with a reason.
  */
 
-const TRIM_BINARY = path.join(__dirname, '..', '..', 'tools', 'mem-trim');
+/**
+ * Where the trim helper lives, which is not the same place in a packaged app.
+ *
+ * A checkout runs it straight out of `tools/`. An installed build has the
+ * JavaScript inside `app.asar`, and a binary inside an asar archive **cannot be
+ * executed** - the archive is a single file the runtime reads, not a directory
+ * the kernel can exec from. So the packager copies the helper to the app's
+ * resources directory instead and this finds it there.
+ *
+ * Getting this wrong would not have crashed anything: `existsSync` would simply
+ * have failed and every packaged Linux install would have reported "mem-trim
+ * not built" forever, with a build instruction that does not apply to an
+ * installed app. A feature silently absent in every shipped copy while the
+ * source tree it was tested in works fine.
+ */
+function helperPath(name) {
+  // `resourcesPath` exists only under Electron, and the asar check distinguishes
+  // an installed build from a developer run, which is also under Electron.
+  if (process.resourcesPath && __dirname.includes(`app.asar${path.sep}`)) {
+    return path.join(process.resourcesPath, 'tools', name);
+  }
+  return path.join(__dirname, '..', '..', 'tools', name);
+}
+
+const TRIM_BINARY = helperPath('mem-trim');
 const TRIM_TIMEOUT_MS = 2000;
 
 /**
@@ -217,7 +241,13 @@ class TrimHelper {
     if (this.child || this.reason || this.stopped) return Boolean(this.child);
     if (!isLinux) { this.reason = `not implemented on ${PLATFORM}`; return false; }
     if (!fs.existsSync(TRIM_BINARY)) {
-      this.reason = 'tools/mem-trim not built (npm run build:memtrim)';
+      // Two different audiences, two different remedies. Telling someone with an
+      // installed build to run an npm script in a source tree they do not have
+      // is the same class of wrong answer as telling them to `setcap` a binary
+      // that was merely not executable.
+      this.reason = TRIM_BINARY.includes('resources')
+        ? `helper missing from this build: ${TRIM_BINARY}`
+        : 'tools/mem-trim not built (npm run build:memtrim)';
       return false;
     }
     try {

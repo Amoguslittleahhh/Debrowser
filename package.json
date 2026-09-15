@@ -14,9 +14,25 @@
     "build:ksm": "cc -O2 -Wall -o tools/ksm-launch tools/ksm-launch.c",
     "build:memtrim": "cc -O2 -Wall -o tools/mem-trim tools/mem-trim.c",
     "start:merged": "npm run build:ksm && tools/ksm-launch electron .",
-    "smoke:headless": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu"
+    "smoke:headless": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "npm run build:memtrim && electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^44.0.0"
-  }
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "author": {
+    "name": "amoguslittleahhh",
+    "email": "amoguslittleahhh@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/Amoguslittleahhh/Debrowser",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Amoguslittleahhh/Debrowser.git"
+  },
+  "desktopName": "debrowser.desktop"
 }
