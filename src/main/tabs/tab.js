@@ -90,6 +90,16 @@ class Tab {
      * whether the governor is allowed to touch this tab.
      */
     this.internal = pages.isInternal(url);
+    /**
+     * Which page this renderer was *built* for.
+     *
+     * Distinct from `internal`, which follows the current URL. A tab that
+     * started on the new tab page and was then navigated to a site keeps the
+     * preload it was realised with until the renderer is rebuilt - so privilege
+     * must never be decided from this. It exists so the governor and the UI can
+     * tell what a renderer is carrying.
+     */
+    this.realisedInternal = this.internal;
     this.title = this.internal ? pages.titleFor(url) : url;
     this.favicon = null;
     this.pinned = false;
@@ -279,6 +289,16 @@ class Tab {
 
     wc.on('did-navigate', (_e, url) => {
       this.url = url;
+      // `internal` follows the *current* URL, always.
+      //
+      // Every tab now opens on debrowser://newtab, and typing in its search box
+      // navigates that same tab to a website. Deciding this once in the
+      // constructor left every tab in the browser permanently marked internal -
+      // exempt from the governor, so nothing was ever frozen or discarded, and
+      // treated as privileged for the rest of its life. Privilege is never
+      // decided from this field either; see the sender checks in main.js, which
+      // read the live URL.
+      this.internal = pages.isInternal(url);
       // A new document means new load-time garbage, and the previous page's
       // heap estimates no longer describe anything.
       this.resetHeapState();
@@ -323,9 +343,15 @@ class Tab {
     wc.once('did-finish-load', () => {
       this.pid = safePid(wc);
       this.applySuspendedPageState();
-      this.emit('loaded');
       this.emit('updated');
     });
+
+    // Every load, not just the first. `once` above restores suspended state,
+    // which must happen exactly once per renderer; this is the opposite - it
+    // fires for each document, which is what anything reacting to "a page
+    // finished loading" needs. A saved sign-in is never on a renderer's first
+    // document, so hanging the fill off the `once` meant it never ran at all.
+    wc.on('did-finish-load', () => this.emit('loaded'));
 
     // New windows open as tabs rather than popups.
     wc.setWindowOpenHandler(({ url }) => {

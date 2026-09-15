@@ -66,7 +66,7 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
   return false;
 }
 
-async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, openInternalPage }) {
+async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, openInternalPage, senderPage }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -645,7 +645,57 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
     settingsTabs.length === 1 && settingsTabs[0] === settingsTab && tabs.all().length === before,
     `${settingsTabs.length} settings tab(s), ${tabs.all().length} tabs (was ${before}), url=${settingsTab.url}`);
 
+  // Settings is a tab, and tabs are not where `publish` used to send state.
+  // Both of the browser's own pages build their whole UI from that message, so
+  // when the overlay was replaced and publish was not updated, Settings
+  // rendered as a column of empty headings - and every check still passed,
+  // because they all asserted on the tab rather than on the page.
+  shell.publish(governor.snapshot());
+  await sleep(200);
+  const sawState = await settingsTab.wc.executeJavaScript(
+    'document.querySelectorAll("#appearance .row").length').catch(() => 0);
+  check('the browser\'s own pages are sent browser state',
+    sawState > 0, `${sawState} setting rows built from a published snapshot`);
+
   tabs.close(settingsTab.id);
+
+  /* ---------------------------------------------------------------- */
+  // The production path, which the offline fixtures do not exercise.
+  //
+  // Every tab opens on debrowser://newtab and its search box navigates that
+  // same tab to a website, so "is this tab one of ours?" is a question whose
+  // answer changes under the browser's feet. Deciding it once at construction
+  // left every tab in the browser permanently marked internal: exempt from the
+  // governor, so nothing was ever reclaimed, and treated as privileged for the
+  // rest of its life. None of the checks above could see it, because under
+  // --smoke-test the home page is a file:// fixture.
+  const fresh = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
+  await waitFor(() => fresh.isLive && !fresh.loading, { timeoutMs: 10_000 });
+  check('a tab on the new tab page is one of ours', fresh.internal === true,
+    `internal=${fresh.internal} url=${fresh.url}`);
+
+  const webUrl = pageUrl('idle.html');
+  await fresh.wc.loadURL(webUrl).catch(() => {});
+  await waitFor(() => !fresh.loading && fresh.url.startsWith('http'), { timeoutMs: 10_000 });
+
+  check('navigating a new tab to a website stops it being one of ours',
+    fresh.internal === false,
+    `internal=${fresh.internal} url=${fresh.url.slice(0, 48)}`);
+
+  // Which is what decides whether the governor may touch it at all.
+  check('a tab that navigated away is governed again',
+    governor.clampToProtections(fresh, Tier.DISCARDED, { discardAllowed: true }) !== Tier.ACTIVE,
+    `floor=${governor.clampToProtections(fresh, Tier.DISCARDED, { discardAllowed: true })}`);
+
+  // And the security consequence. The renderer still carries the preload it was
+  // realised with - that cannot be revoked - so privilege is decided from the
+  // sender's live URL instead. A site sitting in a renderer that used to be the
+  // new tab page must be refused.
+  check('a website cannot use a bridge it inherited from one of our pages',
+    senderPage(tabs, fresh.wc) === null,
+    `sender resolves to ${JSON.stringify(senderPage(tabs, fresh.wc))}`);
+
+  tabs.close(fresh.id);
 
   // The three-dot menu is built fresh on every open from live state, and it is
   // the one part of the chrome that is not a web page - a throw here would take

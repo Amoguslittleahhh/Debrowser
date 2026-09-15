@@ -115,8 +115,11 @@ class IpcHub {
       if (!payload || typeof payload !== 'object') return;
       if (typeof payload.password !== 'string' || !payload.password) return;
 
-      const username = typeof payload.username === 'string' ? payload.username.slice(0, 512) : '';
-      onOffer(tab, { username, password: payload.password.slice(0, 1024) });
+      // One below each limit, not exactly it: the store's validators are
+      // `< 512` and `< 1024`, so truncating *to* the limit produced a value the
+      // user had already agreed to save and the store then silently refused.
+      const username = typeof payload.username === 'string' ? payload.username.slice(0, 511) : '';
+      onOffer(tab, { username, password: payload.password.slice(0, 1023) });
     });
   }
 

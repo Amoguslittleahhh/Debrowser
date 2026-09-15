@@ -156,6 +156,14 @@ class Prefs {
     for (const [key, value] of Object.entries(raw)) {
       const spec = SCHEMA[key];
       if (!spec) continue;                       // a key from a newer version
+      if (key === 'searchEngine' && value === 'brave') {
+        // Brave was replaced by Mojeek. Without this the validator rejects the
+        // stored value and silently resets the user to Google - their setting
+        // changed on their behalf, explained only in a log line nobody reads.
+        values[key] = 'mojeek';
+        this.log('search engine "brave" is no longer offered; using Mojeek');
+        continue;
+      }
       if (!spec.ok(value)) {
         this.log(`preference "${key}" is not valid (${JSON.stringify(value)}); using the default`);
         continue;

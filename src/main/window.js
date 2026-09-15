@@ -380,6 +380,15 @@ class BrowserShell {
     if (this.updater) full.updates = this.updater.snapshot();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
+
+    // And the browser's own pages, which are tabs now rather than views. Both
+    // build their UI from this message, so without it Settings renders as a
+    // column of empty headings and the new tab page shows no figures - which is
+    // exactly what shipped when the overlay was replaced and this was not
+    // updated to follow.
+    for (const tab of this.tabs.all()) {
+      if (tab.internal && tab.isLive) send(tab.view, 'debrowser:state', full);
+    }
   }
 
   destroy() {

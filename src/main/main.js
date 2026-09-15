@@ -367,10 +367,7 @@ function main() {
 
 function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
   ipcMain.on('debrowser:command', (event, command, payload) => {
-    // Only our own chrome may issue commands. A page that somehow reached this
-    // channel is ignored: chrome renderers have no tab backing them.
-    const isChrome = !tabs.all().some((t) => t.wc && !t.wc.isDestroyed() && t.wc.id === event.sender.id);
-    if (!isChrome) return;
+    if (!senderMayCommand(tabs, event.sender)) return;
 
     const active = tabs.activeTab();
 
@@ -485,6 +482,36 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
 }
 
 /**
+ * Which of the browser's own surfaces a message came from, by its *live* URL.
+ *
+ * This is the security boundary, and it is deliberately not a flag on the tab
+ * or the preload the renderer happens to carry. Both of those are decided when
+ * a renderer is built and cannot be revoked afterwards: the new tab page is
+ * realised with a privileged preload and then navigates itself to whatever the
+ * user typed, so the site that loads inherits the bridge. Asking what the
+ * sender *is right now* is the only check that survives that.
+ *
+ * Returns 'chrome' for the browser UI views, the page name for one of our own
+ * pages, or null for anything else - which includes a website sitting in a
+ * renderer that used to be one of our pages.
+ */
+function senderPage(tabs, sender) {
+  const tab = tabs.all().find((t) => t.wc && !t.wc.isDestroyed() && t.wc.id === sender.id);
+  // No tab behind it: the chrome, the task manager. Those are ours.
+  if (!tab) return 'chrome';
+  // A tab, so it is only trusted while it is actually showing one of our pages.
+  // `sender.getURL()` rather than `tab.url`, because the tab's copy is updated
+  // from events and this must not depend on one having arrived yet.
+  const live = sender.getURL();
+  return pages.isInternal(live) ? pages.pageName(live) : null;
+}
+
+/** Commands are open to the chrome and to our own pages; nothing else. */
+function senderMayCommand(tabs, sender) {
+  return senderPage(tabs, sender) !== null;
+}
+
+/**
  * Questions the chrome asks and gets one answer to.
  *
  * Separate from the command channel because these return something. The
@@ -498,11 +525,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
  */
 function wireRequests({ tabs, credentials, log }) {
   ipcMain.handle('debrowser:request', (event, command, payload) => {
-    // Same guard as the command channel: a page that reached this has no tab
-    // backing it, and a tab-backed sender is not our chrome.
-    const isChrome = !tabs.all().some(
-      (t) => t.wc && !t.wc.isDestroyed() && t.wc.id === event.sender.id && !t.internal);
-    if (!isChrome) return null;
+    // Stricter than the command channel: only Settings may touch credentials.
+    // The new tab page has no business reading a password list, and neither has
+    // the chrome, so neither is allowed to ask.
+    const sender = senderPage(tabs, event.sender);
+    if (sender !== 'settings') return null;
 
     switch (command) {
       case 'list-credentials': {
@@ -531,10 +558,16 @@ function wireRequests({ tabs, credentials, log }) {
         });
 
       case 'fill-payment': {
-        // Click-to-fill only, and only into the tab the user is looking at.
+        // Into the page behind Settings, not into Settings.
+        //
+        // `activeTab()` is the Settings tab - it is the one the user just
+        // clicked in - so filling "the active tab" always refused. The target
+        // is the most recently used tab that is actually a web page.
         const record = credentials.reveal('payment', payload?.id);
-        const tab = tabs.activeTab();
-        if (!record || !tab || tab.internal) return false;
+        const tab = tabs.all()
+          .filter((t) => !t.internal && t.isLive)
+          .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+        if (!record || !tab) return false;
         tab.sendToPage('debrowser:payment-fill', record);
         log('credentials', 'filled payment details on request');
         return true;
@@ -555,9 +588,25 @@ function wireRequests({ tabs, credentials, log }) {
  *
  * Nothing is saved on the way in: the offer is held only long enough to ask.
  */
+let credentialPromptOpen = false;
+
 async function offerToSaveCredential({ tab, offer, credentials, shell, log }) {
   const origin = originOf(tab.url);
   if (!origin) return;                       // not a web page we can key on
+
+  // One at a time. The prompt is window-modal, and a page that submits a form
+  // in a loop would otherwise stack dialogs the user cannot get out from under
+  // - a page-triggered lockout of the whole browser.
+  if (credentialPromptOpen) return;
+  credentialPromptOpen = true;
+  try {
+    await askAndSave({ origin, offer, credentials, shell, log });
+  } finally {
+    credentialPromptOpen = false;
+  }
+}
+
+async function askAndSave({ origin, offer, credentials, shell, log }) {
 
   const cap = credentials.capability();
   if (!cap.available) {
@@ -754,7 +803,8 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
 
 function runSmokeTest({ tabs, governor, shell, prefs }) {
   const { runSmoke } = require('./smoke');
-  runSmoke({ tabs, governor, shell, app, cfg, prefs, appMenuTemplate, openInternalPage }).then((code) => {
+  runSmoke({ tabs, governor, shell, app, cfg, prefs, appMenuTemplate, openInternalPage,
+            senderPage: (t, sender) => senderPage(t, sender) }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);
@@ -762,4 +812,4 @@ function runSmokeTest({ tabs, governor, shell, prefs }) {
   });
 }
 
-module.exports = { normaliseUrl, appMenuTemplate, openInternalPage };
+module.exports = { normaliseUrl, appMenuTemplate, openInternalPage, senderPage };

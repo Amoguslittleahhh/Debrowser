@@ -320,9 +320,13 @@ class Credentials {
     this.load();
     if (!this.key) return false;
     const list = this.records[kind];
+    // A kind we do not have is a refusal, not a throw. Throwing rejects the
+    // renderer's request rather than answering it, and the caller cannot tell a
+    // rejection from a crash.
+    if (!Array.isArray(list) || typeof id !== 'string') return false;
     const before = list.length;
     this.records[kind] = kind === 'login'
-      ? list.filter((r) => `${r.origin} ${r.username}` !== id)
+      ? list.filter((r) => `${r.origin}\u0000${r.username}` !== id)
       : list.filter((r) => r.label !== id);
     if (this.records[kind].length === before) return false;
     return this.save(kind);
@@ -339,7 +343,7 @@ class Credentials {
     this.load();
     return {
       logins: this.records.login.map((r) => ({
-        id: `${r.origin} ${r.username}`,
+        id: `${r.origin}\u0000${r.username}`,
         origin: r.origin,
         username: r.username
       })),
@@ -365,7 +369,7 @@ class Credentials {
   reveal(kind, id) {
     this.load();
     if (kind === 'login') {
-      return this.records.login.find((r) => `${r.origin} ${r.username}` === id) || null;
+      return this.records.login.find((r) => `${r.origin}\u0000${r.username}` === id) || null;
     }
     return this.records.payment.find((r) => r.label === id) || null;
   }

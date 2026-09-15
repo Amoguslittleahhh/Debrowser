@@ -25,6 +25,7 @@
  */
 
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { protocol, net, session } = require('electron');
 
@@ -96,7 +97,10 @@ function serve(log = () => {}, partitions = []) {
     }
     if (!fs.existsSync(full)) return new Response('Not found', { status: 404 });
 
-    return net.fetch(`file://${full}`);
+    // pathToFileURL, not string concatenation: a `#` in an install path
+    // truncates the URL at the fragment and a `%` begins a broken escape, so
+    // every internal page would 404 for anyone whose folder contains one.
+    return net.fetch(pathToFileURL(full).href);
   };
 
   for (const registry of registries) {
