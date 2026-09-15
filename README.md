@@ -30,8 +30,14 @@ push, or on demand from the Actions tab, and attached to the release.
 **None of it is signed.** Windows SmartScreen shows "Windows protected your PC"
 (More info → Run anyway) and macOS Gatekeeper refuses the first launch
 (right-click → Open, once). Those warnings are accurate: no certificate vouches
-for these binaries. Signing needs certificates that cannot live in a public
-repository — `docs/PACKAGING.md` has the details.
+for these binaries.
+
+The build is wired for signing — set two repository secrets and the release
+workflow signs, with no code change. Getting the certificate is the hard part,
+and worth reading `docs/PACKAGING.md` before spending money on one: since 2023
+no CA will sell you a downloadable `.pfx`, and an OV certificate does **not**
+stop the SmartScreen warning on its own — only EV or Azure Trusted Signing
+clear it from the first release.
 
 **Hibernation needs one more step on Linux**, and only on the `.deb` or
 `.tar.gz`:
