@@ -66,7 +66,7 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
   return false;
 }
 
-async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) {
+async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, openInternalPage }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -633,11 +633,17 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) 
 
   // Opening it twice focuses the one that is open rather than making a second,
   // which could disagree with the first about what the preferences are.
+  // Actually ask for it a second time. Merely counting the tabs that exist
+  // would pass against the bug this guards: matching on the URL we opened stops
+  // matching once the page loads and Chromium normalises it to a trailing
+  // slash, and only a real second open reveals that.
   const before = tabs.all().length;
-  const again = tabs.all().filter((t) => pages.pageName(t.url) === 'settings');
-  check('settings is a singleton, matched by page rather than by URL string',
-    again.length === 1 && again[0] === settingsTab && tabs.all().length === before,
-    `${again.length} settings tab(s) among ${tabs.all().length}, url=${settingsTab.url}`);
+  openInternalPage(tabs, pages.SETTINGS_URL);
+  await sleep(300);
+  const settingsTabs = tabs.all().filter((t) => pages.pageName(t.url) === 'settings');
+  check('asking for settings twice focuses the open one rather than making another',
+    settingsTabs.length === 1 && settingsTabs[0] === settingsTab && tabs.all().length === before,
+    `${settingsTabs.length} settings tab(s), ${tabs.all().length} tabs (was ${before}), url=${settingsTab.url}`);
 
   tabs.close(settingsTab.id);
 

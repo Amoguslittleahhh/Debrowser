@@ -91,7 +91,9 @@ counted:
   *priv = 0;
   for (ULONG_PTR i = 0; i < ws->NumberOfEntries; i++) {
     PSAPI_WORKING_SET_BLOCK b = ws->WorkingSetInfo[i];
-    if (!b.Valid) continue;
+    /* No validity bit to test: that is PSAPI_WORKING_SET_EX_BLOCK's, and
+       QueryWorkingSet reports the working set, which is resident by
+       definition. */
     if (b.Shared) {
       unsigned n = b.ShareCount ? b.ShareCount : 1;
       *pss += page / n;
@@ -137,9 +139,16 @@ static int measure_pid(unsigned long pid, unsigned long long *pss,
     return -1;
   }
   *pss = ri.ri_phys_footprint;
-  /* No separate private figure is available from this call; reporting the same
-     number twice would invent a distinction that was never measured. */
-  *priv = ri.ri_phys_footprint;
+  /*
+   * No private figure, and zero means exactly that.
+   *
+   * Repeating the footprint here would be worse than useless: the heap limiter
+   * screens candidates on *private* bytes specifically because that is not a
+   * proportional figure, and handing it a PSS-style number would silently
+   * re-enable the screen the code documents as invalid. Zero is read as "not
+   * measured" by the caller and leaves the field null.
+   */
+  *priv = 0;
   return 0;
 }
 

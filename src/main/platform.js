@@ -448,9 +448,18 @@ class MeasureHelper extends HelperProcess {
       return { available: this.canMeasure, mechanism: this.mechanism, reason: this.reason };
     }
     const reply = await this.request('caps');
-    if (!reply || reply === HELPER_GONE) {
+    if (reply === HELPER_GONE) {
+      // No helper, and a named reason for it. Permanent.
       this.canMeasure = false;
-      return { available: false, mechanism: null, reason: this.reason || 'helper did not answer' };
+      return { available: false, mechanism: null, reason: this.reason || 'helper unavailable' };
+    }
+    if (!reply) {
+      // A timeout is not a verdict. The helper may simply have been slow to
+      // start - 400ms is a tight budget for a cold process - and latching the
+      // capability off here would disable native measurement for the rest of
+      // the session on the strength of one slow reply. Left unlatched so the
+      // next tick asks again.
+      return { available: false, mechanism: null, reason: 'helper did not answer in time' };
     }
     // `caps <mechanism> <0|1>`
     const [, mechanism, supported] = reply.split(' ');

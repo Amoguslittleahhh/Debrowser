@@ -17,8 +17,8 @@
     "smoke:headless": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
+    "dist:win": "npm run build:memprobe && electron-builder --win",
+    "dist:mac": "npm run build:memprobe && electron-builder --mac",
     "dist:linux": "npm run build:memtrim && electron-builder --linux",
     "build:memprobe": "node tools/build-memprobe.js"
   },

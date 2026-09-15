@@ -29,13 +29,23 @@ const { LatencyTracker } = require('../latency');
  */
 const SPECULATION_TTL_MS = 10_000;
 
+/**
+ * The one partition every tab runs in.
+ *
+ * Exported because `protocol.handle` registers per session: main has to give
+ * the same string to pages.serve, and a second literal that drifted from this
+ * one would silently reintroduce internal pages failing inside tabs while
+ * working everywhere else.
+ */
+const BROWSING_PARTITION = 'persist:debrowser';
+
 class TabManager {
   /**
    * @param {object} options - { partition, onEvent, log }
    */
   constructor({
     cfg,
-    partition = 'persist:debrowser',
+    partition = BROWSING_PARTITION,
     onEvent = () => {},
     onPresent = async () => {},
     onCover = () => false,
@@ -402,4 +412,4 @@ class TabManager {
   }
 }
 
-module.exports = { TabManager };
+module.exports = { BROWSING_PARTITION, TabManager };

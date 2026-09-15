@@ -46,6 +46,18 @@ if (process.platform === 'win32') {
                   'or run this from a job that has run ilammy/msvc-dev-cmd.');
     process.exit(1);
   }
+} else if (process.platform === 'darwin') {
+  // Universal, because one macOS runner builds both the x64 and the arm64
+  // artifact and would otherwise put its own architecture into each. The Intel
+  // .dmg would then carry an arm64 helper, `spawn` would fail with ENOEXEC, and
+  // memory accounting would silently fall back to the over-counted figure this
+  // helper exists to replace - on the machines least able to notice.
+  const cc = process.env.CC || 'clang';
+  ok = run(cc, ['-O2', '-Wall', '-Wextra', '-arch', 'x86_64', '-arch', 'arm64', src, '-o', out]);
+  if (ok) {
+    const lipo = spawnSync('lipo', ['-archs', out], { encoding: 'utf8' });
+    if (lipo.status === 0) console.log(`architectures: ${lipo.stdout.trim()}`);
+  }
 } else {
   const cc = process.env.CC || (have('clang') ? 'clang' : 'gcc');
   ok = run(cc, ['-O2', '-Wall', '-Wextra', src, '-o', out]);

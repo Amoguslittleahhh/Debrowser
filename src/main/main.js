@@ -14,7 +14,7 @@
 const { app, ipcMain, session, Menu } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
-const { TabManager } = require('./tabs/tab-manager');
+const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs } = require('./prefs');
@@ -220,9 +220,9 @@ function main() {
     // have - so it was a row of screen spent on a menu that leads nowhere. Every
     // shortcut worth having is bound in the chrome renderer.
     Menu.setApplicationMenu(null);
-    // Both the default session (chrome, panel) and the browsing partition
-    // that tabs run in, which has a protocol registry of its own.
-    pages.serve(log, ['persist:debrowser']);
+    // Both the default session (chrome, panel) and the browsing partition that
+    // tabs run in, which has a protocol registry of its own.
+    pages.serve(log, [BROWSING_PARTITION]);
 
     prefs = earlyPrefs;
     applyPrefs(cfg, prefs, log);
@@ -605,7 +605,7 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
 
 function runSmokeTest({ tabs, governor, shell, prefs }) {
   const { runSmoke } = require('./smoke');
-  runSmoke({ tabs, governor, shell, app, cfg, prefs, appMenuTemplate }).then((code) => {
+  runSmoke({ tabs, governor, shell, app, cfg, prefs, appMenuTemplate, openInternalPage }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);
@@ -613,4 +613,4 @@ function runSmokeTest({ tabs, governor, shell, prefs }) {
   });
 }
 
-module.exports = { normaliseUrl, appMenuTemplate };
+module.exports = { normaliseUrl, appMenuTemplate, openInternalPage };

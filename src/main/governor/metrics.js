@@ -66,11 +66,15 @@ class Metrics {
     if (accountingMode() === 'pss' || this.probing) return;
     this.probing = true;
 
-    if (this.probeMechanism === undefined) {
-      this.probeMechanism = null;
+    // Asked again until it is answered. One timed-out `caps` used to leave this
+    // null for the life of the process, and the panel then explained the wrong
+    // platform's measurement - a Windows share-count caveat on a Mac.
+    if (!this.probeMechanism && !this.askingMechanism) {
+      this.askingMechanism = true;
       platform.measureCapability()
-        .then((cap) => { this.probeMechanism = cap.available ? cap.mechanism : null; })
-        .catch(() => { /* stays null, and the mode stays 'rss' */ });
+        .then((cap) => { if (cap.available) this.probeMechanism = cap.mechanism; })
+        .catch(() => { /* try again next tick */ })
+        .finally(() => { this.askingMechanism = false; });
     }
     const pids = raw.map((proc) => proc.pid);
     Promise.all(pids.map(async (pid) => {
@@ -255,10 +259,16 @@ class Metrics {
   snapshot() {
     return {
       // What the figures actually are, rather than what the platform can do in
-      // principle: 'probe' only once the native helper has answered for at
-      // least one process, so a helper that is missing or refused still reads
-      // as the fallback it is.
-      accounting: accountingMode() === 'pss' ? 'pss' : (this.probed.size ? 'probe' : 'rss'),
+      // principle.
+      //
+      // Every process, not merely one. A partly-probed total is a mixture -
+      // proportional figures for the pids that answered, summed working set for
+      // the rest - and calling that 'probe' drops the "over-counts" warning from
+      // a number that is still over-counting. One slow renderer would have been
+      // enough. Mixtures read as the fallback they mostly are.
+      accounting: accountingMode() === 'pss'
+        ? 'pss'
+        : (this.byPid.size > 0 && this.probed.size >= this.byPid.size ? 'probe' : 'rss'),
       probeMechanism: this.probeMechanism || null,
       pageMerging: pageMergingStatus(),
       compression: compressionStatus(),
