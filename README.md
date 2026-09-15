@@ -522,6 +522,12 @@ tried, measured and removed — live on the `claude/research-build` branch.
 - A restored tab is covered by a thumbnail while it reloads. Pages carrying a
   password or payment field are never photographed, the images live in the OS
   temp directory, and they are deleted on close, on quit and again on startup.
+- Minimising and restoring the window used to bring it back empty on Windows —
+  no tab strip, no page, just the background colour. Minimising fires a resize
+  with a client area of zero, and laying out from that wrote zero-width bounds
+  over every view with nothing to put them back. Fixed in 1.0.1: the layout
+  refuses to compute from a minimised or zero-sized window, and re-runs on
+  restore.
 - **The memory figure is proportional on Linux and summed working set
   everywhere else, and the second one over-counts.** Windows and macOS expose no
   cheap PSS equivalent, and Electron reports only `workingSetSize` per process
