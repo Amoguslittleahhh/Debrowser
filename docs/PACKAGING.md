@@ -146,7 +146,12 @@ Signing Certificate Profile Signer* role), plus repository **variables**
 switches to the Azure step automatically once `AZURE_CLIENT_ID` exists.
 
 **A certificate file** — secrets `WINDOWS_CERT_BASE64` (the `.pfx`, base64
-encoded) and `WINDOWS_CERT_PASSWORD`:
+encoded) and `WINDOWS_CERT_PASSWORD`. The workflow passes the first as
+`WIN_CSC_LINK` rather than `CSC_LINK`, which matters more than it looks: an
+empty `CSC_LINK` is *not* treated as "no certificate" on macOS — electron-builder
+resolves it as a path and fails with `not a file` — so setting it for every
+platform breaks the macOS build on a repository that has no certificate at all.
+`WIN_CSC_LINK` is read only by the Windows signer.
 
 ```bash
 base64 -w0 certificate.pfx    # paste the output as the secret
@@ -155,7 +160,7 @@ base64 -w0 certificate.pfx    # paste the output as the secret
 Locally, the same thing without CI:
 
 ```bash
-export CSC_LINK=/path/to/certificate.pfx     # or its base64
+export WIN_CSC_LINK=/path/to/certificate.pfx   # or its base64
 export CSC_KEY_PASSWORD='…'
 npm run dist:win
 ```

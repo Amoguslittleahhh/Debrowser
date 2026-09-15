@@ -110,7 +110,16 @@ jobs:
       # instead and the step below takes over. docs/PACKAGING.md has both.
       - name: Package
         env:
-          CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          # WIN_CSC_LINK, not CSC_LINK, and the distinction is load-bearing.
+          # electron-builder's `getCscLink` returns an empty string as-is - the
+          # comment in its source says "allow to specify as empty string" - and
+          # only the *Windows* signer then guards against it. The macOS path
+          # takes the empty value as a certificate path, resolves it to the
+          # project directory, and dies with "not a file". Setting CSC_LINK for
+          # every platform broke the macOS build on a repository with no
+          # certificate at all. WIN_CSC_LINK is read only by the Windows signer,
+          # so macOS never sees it.
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
           # macOS: without this, electron-builder hunts the runner's keychain for
           # any signing identity and fails confusingly when it finds none.
