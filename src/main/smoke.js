@@ -637,6 +637,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) 
     labels.includes('Task manager'),
     labels.join(' / '));
 
+  // Updates must never run under a test: a background download competing with
+  // the governor would make the memory numbers depend on whether a release
+  // happened to be out. The capability report also has to name *why* it is off,
+  // since a silently inert updater is indistinguishable from a broken one.
+  const { Updater } = require('./updater');
+  const updateCap = new Updater({ log: () => {} }).capability();
+  check('updates are inert outside a packaged build, and say why',
+    updateCap.available === false && typeof updateCap.reason === 'string' && updateCap.reason.length > 0,
+    updateCap.reason || 'no reason given');
+
   const autoBudget = cfg.autoBudgetMB;
   prefs.set('memoryBudgetMB', 900);
   applyPrefs(cfg, prefs);

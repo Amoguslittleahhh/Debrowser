@@ -18,6 +18,7 @@ const { TabManager } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs } = require('./prefs');
+const { Updater } = require('./updater');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
@@ -159,6 +160,8 @@ function main() {
   let tabs = null;
   /** @type {Prefs|null} */
   let prefs = null;
+  /** @type {Updater|null} */
+  let updater = null;
 
   let publishQueued = false;
   const publish = () => {
@@ -255,6 +258,21 @@ function main() {
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
 
+    // Updates last, and never under a test or a benchmark: both assert on
+    // measured memory and CPU, and a background download competing with them
+    // would make the numbers depend on whether a release happened to be out.
+    if (!OFFLINE_MODE) {
+      updater = new Updater({
+        // Read live rather than captured, so turning it off in Settings takes
+        // effect at the next check instead of at the next launch.
+        enabled: () => prefs.get('autoUpdate'),
+        log,
+        window: () => (shell && !shell.window.isDestroyed() ? shell.window : null)
+      });
+      updater.start();
+      shell.updater = updater;
+    }
+
     if (SMOKE_TEST) {
       runSmokeTest({ tabs, governor, shell, prefs });
     } else if (argv.includes('--bench-test')) {
@@ -288,6 +306,7 @@ function main() {
   app.on('window-all-closed', () => app.quit());
 
   app.on('before-quit', () => {
+    if (updater) updater.stop();
     if (governor) governor.stop();
     if (tabs) tabs.closeAll();
     // The trim helper is a long-lived child process of ours. Nothing else ends

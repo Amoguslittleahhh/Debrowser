@@ -328,13 +328,64 @@ annotation when it fails, so a silently-degrading macOS build is still visible.
 
 ## Release process
 
-1. Bump `version` in `package.json`, update `CHANGELOG.md`.
+1. Bump `version` in `package.json`, and add the section to `CHANGELOG.md`.
+   Do **not** hard-wrap that section: it becomes the release body, GitHub
+   reflows it, and a wrap landing inside a hyphenated compound renders with a
+   stray hyphen. See `CLAUDE.md`.
 2. Commit, tag `vX.Y.Z`, push the tag.
 3. `.github/workflows/release.yml` builds all three platforms on native
-   runners, runs the smoke suite on each **before** packaging, and attaches
-   everything to a **draft** release.
-4. Check the draft, then publish.
+   runners, runs the smoke suite on each **before** packaging, and publishes
+   the release with the artifacts attached.
+
+The release body is that version's `## ` section alone, extracted by
+`.github/scripts/release-notes.py`, plus a footer crediting the owner and the
+bot. Publishing the whole changelog would make every download page repeat the
+notes for versions the reader already has.
 
 The workflow can also be run by hand from the Actions tab
-(`workflow_dispatch`), which builds and uploads the artifacts without creating
-a release — useful for testing a build on a platform you do not own.
+(`workflow_dispatch`). With the `tag` input filled in it creates the tag and
+the release from the runner, which is the only route available when the tag
+cannot be pushed from a workstation — a protected-tag ruleset, or a token
+scoped to branches only. Left empty, it builds and uploads artifacts without
+creating a release, which is useful for testing a build on a platform you do
+not own.
+
+Releases are published, not drafts. That is deliberate rather than an
+oversight: `electron-updater` cannot see a draft release, so a draft release is
+invisible to every installed copy.
+
+To correct the notes on a release that already exists, run the **Update release
+notes** workflow with the version number. It rewrites that release's body and
+touches nothing else — no rebuild, no change to the tag, the assets or the
+date. Re-running the release workflow against an old tag would attach the
+*current* version's installers to it, which is worse than bad prose.
+
+## Updates
+
+Installed copies update themselves through `electron-updater`, against the
+GitHub releases of this repository. The provider is recorded in
+`electron-builder.yml` under `publish:`, which is what puts `app-update.yml`
+inside the package; without it an installed build has nowhere to look and fails
+at runtime on a machine nobody is watching.
+
+**Downloads are differential.** electron-builder writes a `.blockmap` beside
+each installer describing its compressed stream in content-defined chunks, so
+the updater fetches only the blocks that changed and reuses the rest from the
+copy already installed. A full artifact is ~110MB and almost all of it is
+Chromium, which does not change between releases.
+
+Both the blockmaps and the `latest*.yml` manifests must reach the release, or
+the updater has nothing to read. They are generated into `dist/` automatically;
+what was missing for a long time was uploading them, since the workflow's
+per-platform `artifacts` globs listed only the installers themselves.
+
+| Target | Updates | Why |
+|---|---|---|
+| Windows NSIS | yes, differential | blockmap beside the installer |
+| Linux AppImage | yes, differential | blockmap embedded in the binary |
+| macOS | **no** | Squirrel.Mac validates that the update is signed by the same identity as the running app, and refuses when there is none. This build is unsigned. |
+| Windows `portable`, `.deb`, `.tar.gz` | no | not updatable formats; the user or the package manager owns those files |
+
+The first release carrying blockmaps cannot itself be delivered as a delta —
+there is no previous blockmap to diff against. Deltas begin with the release
+after it.

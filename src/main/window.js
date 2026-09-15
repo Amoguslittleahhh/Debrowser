@@ -34,9 +34,10 @@ class BrowserShell {
   /**
    * @param {object} deps - { tabManager, log, onCommand }
    */
-  constructor({ tabManager, prefs = null, log = () => {}, onCommand = () => {} }) {
+  constructor({ tabManager, prefs = null, updater = null, log = () => {}, onCommand = () => {} }) {
     this.tabs = tabManager;
     this.prefs = prefs;
+    this.updater = updater;
     this.log = log;
     this.onCommand = onCommand;
 
@@ -377,7 +378,8 @@ class BrowserShell {
   publish(state) {
     const full = this.prefs
       ? { ...state, prefs: this.prefs.all(), searchEngines: this.prefs.engines() }
-      : state;
+      : { ...state };
+    if (this.updater) full.updates = this.updater.snapshot();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
     send(this.settingsView, 'debrowser:state', full);

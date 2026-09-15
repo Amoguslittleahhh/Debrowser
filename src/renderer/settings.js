@@ -100,6 +100,17 @@ const SECTIONS = {
       min: 0,
       max: 200
     }
+  ],
+
+  updates: [
+    {
+      key: 'autoUpdate',
+      label: 'Install updates automatically',
+      hint: 'Downloads only the parts that changed rather than the whole browser. ' +
+            'Settings, open tabs and saved data are never touched by an update. ' +
+            'Off means the browser never checks.',
+      type: 'checkbox'
+    }
   ]
 };
 
@@ -274,8 +285,23 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') api.send('close-settings');
 });
 
+function renderUpdateState(u) {
+  const el = document.getElementById('update-state');
+  if (!el) return;
+  if (!u) { el.textContent = ''; return; }
+  if (!u.available) { el.textContent = `Updates are unavailable here: ${u.reason}.`; return; }
+  switch (u.state) {
+    case 'checking':    el.textContent = 'Checking for a new version…'; break;
+    case 'downloading': el.textContent = `Downloading ${u.version} — ${u.progress}%.`; break;
+    case 'ready':       el.textContent = `${u.version} is downloaded and installs when you restart.`; break;
+    case 'error':       el.textContent = `Last check failed: ${u.error}`; break;
+    default:            el.textContent = 'Up to date.';
+  }
+}
+
 api.onState((state) => {
   applyThemePrefs(state.prefs);
+  renderUpdateState(state.updates);
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) buildAll();

@@ -40,18 +40,24 @@ jobs:
         include:
           - os: windows-latest
             platform: --win
-            artifacts: dist/*.exe
+            artifacts: |
+              dist/*.exe
+              dist/*.blockmap
+              dist/latest.yml
           - os: macos-latest
             platform: --mac
             artifacts: |
               dist/*.dmg
               dist/*.zip
+              dist/*.blockmap
+              dist/latest-mac.yml
           - os: ubuntu-latest
             platform: --linux
             artifacts: |
               dist/*.AppImage
               dist/*.deb
               dist/*.tar.gz
+              dist/latest-linux.yml
 
     runs-on: ${{ matrix.os }}
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+Updates that download only what changed.
+
+| | Before | Now |
+|---|---|---|
+| **Getting a new version** | Re-download the whole ~110MB installer by hand | The browser fetches only the blocks that changed and offers to restart |
+| **Your data** | — | Untouched: settings, session and saved data live in `userData`, which an installer does not replace |
+| **Release pages** | Blockmaps and update manifests were generated but never uploaded | Both are attached, which is what makes a delta possible at all |
+
+- **Differential downloads.** electron-builder writes a blockmap beside each installer describing its compressed stream in content-defined chunks, so an update fetches only the blocks that differ and reuses the rest from the installed copy. Almost all of a 110MB artifact is Chromium, which does not change between our releases.
+- **The plumbing existed and was inert.** Blockmaps and `latest*.yml` manifests were already being generated into `dist/` on every build, but the workflow's per-platform artifact globs listed only the installers, so none of it ever reached a release. An installed copy had nothing to read even if it had known where to look — and it did not, because no `publish:` provider was configured, which is what writes `app-update.yml` into the package.
+- **Nothing installs behind your back.** The updater checks a minute after launch rather than during it, downloads in the background, and then asks. It never installs at quit: this installer is assisted rather than one-click, so it puts its own window on screen, and doing that unannounced during a restart nobody chose would lose the session to a surprise.
+- **macOS is honestly absent rather than quietly broken.** Squirrel.Mac validates that an update is signed by the same identity as the running app and refuses outright when there is none, so an unsigned build cannot self-update at all. The capability reports that by name, as does the settings page, in the same `{available, reason}` shape the hibernation backend uses — an inert feature that cannot say why is indistinguishable from a broken one. The same applies to `.deb`, `.tar.gz` and the Windows portable build, which are not updatable formats.
+- **A switch in Settings.** Off means the browser never reaches the network to look for a version, which is a privacy choice as much as a bandwidth one. It is read live, so turning it off takes effect at the next check rather than the next launch.
+
+Verification: 44 checks, all green, including one new — that the updater is inert outside a packaged build and names the reason. Packing was checked rather than assumed: this project's `files:` allow-list does not mention `node_modules`, so the new dependency could plausibly have been left out of the archive and crashed only on an installed copy. It is packed, and `app-update.yml` lands beside it.
+
 ## 1.1.0
 
 The chrome rebuilt to Chrome's layout, and a settings page.

@@ -542,6 +542,15 @@ tried, measured and removed — live on the `claude/research-build` branch.
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web
   Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
+- **Updates are differential on Windows and on the Linux AppImage, and absent
+  on macOS.** Only the changed blocks of the installer are downloaded rather
+  than the whole ~110MB, almost all of which is Chromium and identical between
+  releases. macOS is not a missing feature but a signing prerequisite:
+  Squirrel.Mac validates that an update is signed by the same identity as the
+  running app and refuses when there is none, and this build is unsigned. The
+  `.deb`, `.tar.gz` and Windows `portable` builds are not updatable formats.
+  Settings, the browsing session and saved data live in `userData`, which an
+  installer does not touch.
 - No extensions, no bookmarks, no history UI, no downloads UI. Chrome extension
   support is intended and not built. Settings covers appearance, search and the
   two resource limits; anything not listed there is not a setting yet, which is

@@ -34,5 +34,8 @@
     "type": "git",
     "url": "https://github.com/Amoguslittleahhh/Debrowser.git"
   },
-  "desktopName": "debrowser.desktop"
+  "desktopName": "debrowser.desktop",
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
 }

@@ -33,7 +33,29 @@ files:
   - '!**/*.map'
 
 ## Compression: maximum. The app is mostly Chromium and users download it once.
+##
+## Note this trades against differential updates: heavier compression means a
+## small source change can rewrite more of the compressed stream, so fewer
+## blocks are reusable between versions and a delta is larger than it could be.
+## Kept at maximum anyway, because the first download is the one every user
+## pays and the delta is still a fraction of a full re-download.
 compression: maximum
+
+## Where updates come from.
+##
+## Not decoration: electron-builder writes this into `app-update.yml` inside the
+## package, and that file is the only way the shipped app knows where to look
+## for a new version. Without it the updater has no provider and fails at
+## runtime on a machine nobody is watching - which is the worst place to find
+## out. It can be inferred from `repository` in package.json, but inference that
+## silently produces a broken installed app is worth being explicit about.
+##
+## Publishing is still driven by the CLI (`--publish never` in CI, which uploads
+## nothing); this block only records *where* an installed copy should check.
+publish:
+  provider: github
+  owner: Amoguslittleahhh
+  repo: Debrowser
 
 ## ---------------------------------------------------------------------------
 ## Windows

@@ -43,13 +43,17 @@ const SCHEMA = {
   // the user could pick, so it needs to be representable. It matters most for
   // the tab cap, where 0 is itself a meaningful choice: it removes the cap.
   memoryBudgetMB: { def: null,   ok: (v) => v === null || (Number.isFinite(v) && v >= 256 && v <= 65536) },
-  maxLiveTabs:  { def: null,     ok: (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 200) }
+  maxLiveTabs:  { def: null,     ok: (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 200) },
 
-  // Nothing here for session restore, automatic updates or the resource
-  // profile. The first two are not built yet and the third cannot take effect
-  // without a restart, since a profile decides Chromium switches that are
-  // applied before the app starts. A settings page whose controls do nothing is
-  // worse than one that is short, so they land when the features do.
+  /* --- Updates ---------------------------------------------------- */
+  // Off means the browser never reaches the network to look for a version,
+  // which is a privacy choice as much as a bandwidth one.
+  autoUpdate:   { def: true,     ok: (v) => typeof v === 'boolean' }
+
+  // Still nothing here for session restore or the resource profile: the first
+  // is not built, and the second cannot take effect without a restart, since a
+  // profile decides Chromium switches applied before the app starts. A settings
+  // page whose controls do nothing is worse than one that is short.
 };
 
 /** Search engines, as query templates. `%s` is the URL-encoded term. */
