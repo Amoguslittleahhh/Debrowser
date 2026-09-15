@@ -11,7 +11,7 @@
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session, Menu } = require('electron');
+const { app, ipcMain, session, Menu, dialog } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
@@ -19,6 +19,7 @@ const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs } = require('./prefs');
 const { Updater } = require('./updater');
+const { Credentials, originOf } = require('./credentials');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
@@ -178,6 +179,8 @@ function main() {
   let prefs = null;
   /** @type {Updater|null} */
   let updater = null;
+  /** @type {Credentials|null} */
+  let credentials = null;
 
   let publishQueued = false;
   const publish = () => {
@@ -195,6 +198,11 @@ function main() {
     switch (event) {
       case 'realised':
         if (shell) shell.attachTab(tab);
+        break;
+      case 'loaded':
+        // Fill on load, for passwords only. Payment details are never filled
+        // without a click; see the note on fillSavedLogin.
+        fillSavedLogin(tab, credentials, prefs, log);
         break;
       case 'activated':
         if (shell) shell.attachTab(tab);
@@ -250,6 +258,15 @@ function main() {
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
+    credentials = new Credentials(log);
+
+    // A submitted sign-in becomes a question, never a save. The origin comes
+    // from the tab, not from the page that sent the message.
+    ipcHub.wireCredentialOffer((tab, offer) => {
+      offerToSaveCredential({ tab, offer, credentials, shell, log }).catch(
+        (err) => log(`credential offer failed: ${err.message}`));
+    });
+
     shell = new BrowserShell({
       tabManager: tabs,
       prefs,
@@ -273,6 +290,7 @@ function main() {
     }
 
     wireCommands({ tabs, shell, governor, prefs, publish, log });
+    wireRequests({ tabs, credentials, log });
 
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
@@ -464,6 +482,137 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
 
     publish();
   });
+}
+
+/**
+ * Questions the chrome asks and gets one answer to.
+ *
+ * Separate from the command channel because these return something. The
+ * credential list in particular must not ride the state broadcast, which goes
+ * to three views on every governor tick.
+ *
+ * Secrets never cross this boundary except on an explicit reveal or fill. A
+ * settings page needs a site and a username to draw a row; handing it a
+ * password as well would leave one in a renderer's heap for as long as the page
+ * is open, for nothing.
+ */
+function wireRequests({ tabs, credentials, log }) {
+  ipcMain.handle('debrowser:request', (event, command, payload) => {
+    // Same guard as the command channel: a page that reached this has no tab
+    // backing it, and a tab-backed sender is not our chrome.
+    const isChrome = !tabs.all().some(
+      (t) => t.wc && !t.wc.isDestroyed() && t.wc.id === event.sender.id && !t.internal);
+    if (!isChrome) return null;
+
+    switch (command) {
+      case 'list-credentials': {
+        const cap = credentials.capability();
+        return { ...credentials.list(), available: cap.available, reason: cap.reason };
+      }
+
+      case 'delete-credential':
+        return credentials.remove(payload?.kind, payload?.id);
+
+      case 'reveal-credential': {
+        // Deliberate, one at a time, and never logged.
+        const record = credentials.reveal(payload?.kind, payload?.id);
+        if (!record) return null;
+        return payload?.kind === 'login'
+          ? { password: record.password }
+          : { number: record.number, holder: record.holder };
+      }
+
+      case 'save-payment':
+        return credentials.put('payment', {
+          label: String(payload?.label ?? ''),
+          number: String(payload?.number ?? '').replace(/\s+/g, ''),
+          expiry: String(payload?.expiry ?? ''),
+          holder: String(payload?.holder ?? '')
+        });
+
+      case 'fill-payment': {
+        // Click-to-fill only, and only into the tab the user is looking at.
+        const record = credentials.reveal('payment', payload?.id);
+        const tab = tabs.activeTab();
+        if (!record || !tab || tab.internal) return false;
+        tab.sendToPage('debrowser:payment-fill', record);
+        log('credentials', 'filled payment details on request');
+        return true;
+      }
+
+      default:
+        return null;
+    }
+  });
+}
+
+/**
+ * Ask whether to remember a sign-in that was just submitted.
+ *
+ * A dialog rather than anything in the page. A prompt drawn by the site's own
+ * renderer would be a prompt the site can see, style, cover, or imitate - and
+ * the one question that must never be imitable is "shall I keep your password".
+ *
+ * Nothing is saved on the way in: the offer is held only long enough to ask.
+ */
+async function offerToSaveCredential({ tab, offer, credentials, shell, log }) {
+  const origin = originOf(tab.url);
+  if (!origin) return;                       // not a web page we can key on
+
+  const cap = credentials.capability();
+  if (!cap.available) {
+    // Said once, in the log, rather than as a dialog on every sign-in. The
+    // settings page reports it permanently, which is where someone would look.
+    log('credentials', `not offering to save: ${cap.reason}`);
+    return;
+  }
+
+  // Already known, with the same password? Then there is nothing to ask.
+  const existing = credentials.forOrigin(origin)
+    .find((r) => r.username === offer.username);
+  if (existing && existing.password === offer.password) return;
+
+  const { response } = await dialog.showMessageBox(shell.window, {
+    type: 'question',
+    buttons: [existing ? 'Update' : 'Save', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    title: existing ? 'Update saved password?' : 'Save password?',
+    message: existing
+      ? `Update the saved password for ${offer.username || 'this account'} on ${origin}?`
+      : `Save the password for ${offer.username || 'this account'} on ${origin}?`,
+    detail: 'It is encrypted with a key held by your operating system, and never leaves this machine.'
+  });
+
+  if (response !== 0) return;
+  const stored = credentials.put('login', { origin, username: offer.username, password: offer.password });
+  log('credentials', stored ? `saved a sign-in for ${origin}` : `could not save a sign-in for ${origin}`);
+}
+
+/**
+ * Fill a saved sign-in once a page has loaded.
+ *
+ * Passwords only. Card numbers and addresses are never filled without a click,
+ * because a page can place a hidden or off-screen payment field and harvest
+ * whatever arrives in it - the attack that makes silent payment autofill a bad
+ * trade. A password is bound to an origin the user can see in the address bar;
+ * a card number is bound to nothing.
+ *
+ * Exactly one match fills. With several accounts on a site, picking one would
+ * be guessing, and guessing wrong signs the user into the wrong account.
+ */
+function fillSavedLogin(tab, credentials, prefs, log) {
+  if (!credentials || !tab || tab.internal) return;
+  if (!prefs || prefs.get('fillPasswords') === false) return;
+  if (!credentials.capability().available) return;
+
+  const matches = credentials.forOrigin(tab.url);
+  if (matches.length !== 1) return;
+
+  // Through sendToPage, which refuses a stopped renderer. Reaching past it to
+  // `wc.send` on a frozen tab segfaults the browser.
+  tab.sendToPage('debrowser:credential-fill', matches[0]);
+  log('credentials', `filled a saved sign-in on ${matches[0].origin}`);
 }
 
 /**

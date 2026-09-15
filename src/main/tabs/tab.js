@@ -323,6 +323,7 @@ class Tab {
     wc.once('did-finish-load', () => {
       this.pid = safePid(wc);
       this.applySuspendedPageState();
+      this.emit('loaded');
       this.emit('updated');
     });
 

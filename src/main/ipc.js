@@ -101,6 +101,25 @@ class IpcHub {
     });
   }
 
+  /**
+   * A page offering a sign-in it has just submitted.
+   *
+   * The origin is taken from the tab's own URL, never from the payload. A page
+   * that claimed someone else's origin would otherwise get a credential saved
+   * under it - and then offered back on the real site.
+   */
+  wireCredentialOffer(onOffer) {
+    ipcMain.on('debrowser:credential-offer', (event, payload) => {
+      const tab = this.tabForWebContents(event.sender.id);
+      if (!tab || tab.internal) return;
+      if (!payload || typeof payload !== 'object') return;
+      if (typeof payload.password !== 'string' || !payload.password) return;
+
+      const username = typeof payload.username === 'string' ? payload.username.slice(0, 512) : '';
+      onOffer(tab, { username, password: payload.password.slice(0, 1024) });
+    });
+  }
+
   tabForWebContents(webContentsId) {
     for (const tab of this.getTabs()) {
       if (tab.wc && !tab.wc.isDestroyed() && tab.wc.id === webContentsId) return tab;

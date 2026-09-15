@@ -29,7 +29,12 @@ const COMMANDS = new Set([
   'prefetch-tab',
   'open-menu',
   'open-settings',
-  'set-pref'
+  'set-pref',
+  'list-credentials',
+  'delete-credential',
+  'reveal-credential',
+  'save-payment',
+  'fill-payment'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {
@@ -40,6 +45,22 @@ contextBridge.exposeInMainWorld('debrowser', {
       return;
     }
     ipcRenderer.send('debrowser:command', command, payload ?? null);
+  },
+
+  /**
+   * Ask the browser something and get one answer back.
+   *
+   * Separate from `send` because the credential list must not ride the state
+   * broadcast: that goes to three views on every governor tick, and a list of
+   * the user's accounts has no business being pushed into a renderer twice a
+   * second on the chance someone has Settings open.
+   */
+  request(command, payload) {
+    if (!COMMANDS.has(command)) {
+      console.warn(`debrowser: refusing unknown request "${command}"`);
+      return Promise.resolve(null);
+    }
+    return ipcRenderer.invoke('debrowser:request', command, payload ?? null);
   },
 
   /**

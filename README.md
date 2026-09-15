@@ -565,4 +565,11 @@ tried, measured and removed — live on the `claude/research-build` branch.
   untested, and unable to do anything this project measures per-tab. See
   `legacy/README.md`.
 - Password and payment fields are deliberately never read into the session
-  store, so a discarded tab will not restore them.
+  store, so a discarded tab will not restore them. Saving one is a separate,
+  explicit act: the browser asks after you sign in, and stores nothing unless
+  you say yes. Records are AES-256-GCM under a key held by the OS keystore —
+  DPAPI, Keychain or libsecret — and if no real keystore is available the store
+  **refuses to save** rather than falling back to something weaker. Passwords
+  fill automatically only when exactly one saved sign-in matches the page's
+  origin; payment details are never filled without a click, because a page can
+  hide a card field and a card number is not bound to any one site.

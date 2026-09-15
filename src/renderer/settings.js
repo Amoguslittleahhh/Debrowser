@@ -150,6 +150,17 @@ const SECTIONS = {
     }
   ],
 
+  credentials: [
+    {
+      key: 'fillPasswords',
+      label: 'Fill saved passwords automatically',
+      hint: 'Only when exactly one saved sign-in matches the page\'s origin, and only ' +
+            'passwords. Payment details are never filled without a click, because a page ' +
+            'can hide a card field and a card number is not bound to any one site.',
+      type: 'checkbox'
+    }
+  ],
+
   advanced: [
     {
       key: 'showMemoryDetail',
@@ -429,11 +440,108 @@ function renderUpdateState(u) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Saved sign-ins and payment details                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Drawn from an explicit request, never from the state broadcast.
+ *
+ * That broadcast reaches three views on every governor tick, and a list of
+ * someone's accounts has no business being pushed into a renderer twice a
+ * second on the chance this page is open. Secrets are not in the list at all:
+ * a row needs a site and a username, and revealing is a separate deliberate
+ * call that fetches one record.
+ */
+async function renderCredentials() {
+  const host = document.getElementById('credential-list');
+  const state = document.getElementById('credential-state');
+  if (!host) return;
+
+  const data = await api.request('list-credentials');
+  if (!data) return;
+
+  if (!data.available) {
+    state.textContent = `Saving is unavailable: ${data.reason}. Nothing is written to disk ` +
+                        'unless it can be encrypted by the operating system.';
+    host.replaceChildren();
+    return;
+  }
+
+  const count = data.logins.length + data.payments.length;
+  state.textContent = count
+    ? 'Encrypted with a key held by your operating system. Nothing leaves this machine.'
+    : 'Nothing saved yet. Sign in to a site and the browser will offer to remember it.';
+
+  const rows = [];
+  for (const item of data.logins) rows.push(credentialRow('login', item.id, item.origin, item.username));
+  for (const item of data.payments) {
+    rows.push(credentialRow('payment', item.id, item.label, `•••• ${item.last4} · ${item.expiry}`));
+  }
+  host.replaceChildren(...rows);
+}
+
+function credentialRow(kind, id, title, subtitle) {
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const text = document.createElement('div');
+  text.className = 'row-text';
+  const label = document.createElement('span');
+  label.className = 'row-label';
+  label.textContent = title;
+  const hint = document.createElement('span');
+  hint.className = 'row-hint';
+  hint.textContent = subtitle || '(no username)';
+  text.append(label, hint);
+
+  const control = document.createElement('div');
+  control.className = 'row-control';
+
+  const reveal = document.createElement('button');
+  reveal.className = 'ghost-btn';
+  reveal.textContent = 'Show';
+  reveal.addEventListener('click', async () => {
+    if (reveal.dataset.shown === 'yes') {
+      hint.textContent = subtitle || '(no username)';
+      reveal.textContent = 'Show';
+      reveal.dataset.shown = 'no';
+      return;
+    }
+    const secret = await api.request('reveal-credential', { kind, id });
+    if (!secret) return;
+    hint.textContent = kind === 'login' ? secret.password : secret.number;
+    reveal.textContent = 'Hide';
+    reveal.dataset.shown = 'yes';
+  });
+
+  const remove = document.createElement('button');
+  remove.className = 'ghost-btn danger';
+  remove.textContent = 'Delete';
+  remove.addEventListener('click', async () => {
+    await api.request('delete-credential', { kind, id });
+    renderCredentials();
+  });
+
+  control.append(reveal, remove);
+  if (kind === 'payment') {
+    const fill = document.createElement('button');
+    fill.className = 'ghost-btn';
+    fill.textContent = 'Fill';
+    fill.title = 'Put these details into the page in the tab behind this one';
+    fill.addEventListener('click', () => api.request('fill-payment', { id }));
+    control.prepend(fill);
+  }
+
+  row.append(text, control);
+  return row;
+}
+
 api.onState((state) => {
   applyThemePrefs(state.prefs);
   renderUpdateState(state.updates);
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
-  if (!built) buildAll();
+  if (!built) { buildAll(); renderCredentials(); }
   for (const [key, control] of controls) control.write(state.prefs[key]);
 });

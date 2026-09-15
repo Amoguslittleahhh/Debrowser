@@ -95,6 +95,18 @@ const SCHEMA = {
    */
   hardwareAcceleration: { def: true, ok: (v) => typeof v === 'boolean' },
 
+  /**
+   * Fill a saved password automatically when a page loads and exactly one
+   * saved sign-in matches its origin.
+   *
+   * Passwords only, and that asymmetry is deliberate rather than unfinished:
+   * a password is bound to an origin the user can see in the address bar, and
+   * card numbers are bound to nothing, so a page can place a hidden payment
+   * field and harvest whatever arrives in it. Payment details are filled only
+   * on a click, always.
+   */
+  fillPasswords: { def: true, ok: (v) => typeof v === 'boolean' },
+
   /* --- Updates ---------------------------------------------------- */
   // Off means the browser never reaches the network to look for a version,
   // which is a privacy choice as much as a bandwidth one.

@@ -149,6 +149,29 @@ input[type="range"] {
 .row { transition: background-color var(--fast) ease; }
 .row:hover { background: color-mix(in srgb, var(--text) 3%, var(--bg)); }
 
+.ghost-btn {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+  transition: background-color var(--fast) ease, border-color var(--fast) ease;
+}
+.ghost-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.ghost-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
+
+/* A revealed secret is selectable - the point of showing one is usually to
+   copy it - and wraps rather than stretching the row off the page. */
+#credential-list .row-hint {
+  user-select: text;
+  cursor: text;
+  word-break: break-all;
+}
+
 .note {
   max-width: 620px;
   margin: 10px 2px 0;

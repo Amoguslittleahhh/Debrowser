@@ -148,10 +148,47 @@ function sample() {
  * page to a sign-in form without any navigation the main process would see, and
  * a stale `false` here would authorise a screenshot of the login page.
  */
+/**
+ * Is this one element a credential or payment field?
+ *
+ * The single definition, used by both the screenshot gate and the session
+ * snapshot. They had drifted into two: one matched the `autocomplete`
+ * *attribute* with an exact selector, the other the IDL property with `===`,
+ * and neither handled a token list - `autocomplete="cc-number webauthn"` is
+ * valid and matched nothing, so such a field would have been read into the
+ * session store and its page photographed.
+ *
+ * `autocomplete` is a space-separated token list by specification, so it is
+ * tokenised rather than compared. Payment tokens beyond the card number are
+ * included: a CVC or an expiry date is not less sensitive than the number.
+ */
+const PAYMENT_TOKENS = new Set([
+  'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-name', 'cc-type'
+]);
+
+function isSensitiveField(el) {
+  try {
+    if ((el.getAttribute('type') || '').toLowerCase() === 'password') return true;
+    const tokens = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/);
+    return tokens.some((t) => PAYMENT_TOKENS.has(t));
+  } catch {
+    return true;    // fail closed
+  }
+}
+
+/**
+ * Does this page show one right now?
+ *
+ * Re-queried rather than cached: a single-page app can route from a product
+ * page to a sign-in form without any navigation the main process would see, and
+ * a stale `false` here would authorise a screenshot of the login page.
+ */
 function hasSensitiveField() {
   try {
-    return document.querySelector(
-      'input[type="password"], input[autocomplete="cc-number"]') !== null;
+    for (const el of document.querySelectorAll('input')) {
+      if (isSensitiveField(el)) return true;
+    }
+    return false;
   } catch {
     // Fail closed: if the page cannot be inspected, treat it as sensitive.
     return true;
@@ -229,10 +266,13 @@ function captureState() {
     for (const el of fields) {
       index += 1;
       const type = (el.getAttribute('type') || '').toLowerCase();
+
       // Never read back credentials or payment fields, even into our own
       // in-memory session store. Their *presence* is still worth reporting:
       // a page with a password box is one we should not screenshot either.
-      if (type === 'password' || el.autocomplete === 'cc-number') {
+      // Saving one is a separate, explicit act - see credentials.js - and does
+      // not come through here.
+      if (isSensitiveField(el)) {
         state.sensitive = true;
         continue;
       }
@@ -289,4 +329,119 @@ ipcRenderer.on('debrowser:restore-state', (_event, state) => {
 
 // Expose nothing to the page itself; the bridge exists only so that
 // contextIsolation stays on with no main-world surface area.
+/* ------------------------------------------------------------------ */
+/* Saved sign-ins                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Offer to remember a sign-in, when the user submits one.
+ *
+ * Reads a password only at the moment the user has deliberately submitted it,
+ * and only to ask whether to keep it. Nothing is stored unless they say yes;
+ * the answer is taken in the browser process, not here, so a page cannot
+ * fabricate consent.
+ *
+ * This does not weaken the rule above. The session snapshot still never reads
+ * these fields, and a page carrying one is still never photographed - both are
+ * automatic mechanisms the user did not ask for, which is exactly why they must
+ * not touch credentials. This is the opposite kind of thing.
+ */
+function offerToSave(form) {
+  try {
+    const password = form.querySelector('input[type="password"]');
+    if (!password || !password.value) return;
+
+    // The username is whatever text-like field precedes the password, which is
+    // what every sign-in form looks like. Guessing wrong costs a wrong label on
+    // a row the user can edit; guessing at the password would be unforgivable,
+    // so that is never inferred.
+    let username = '';
+    const candidates = form.querySelectorAll('input');
+    for (const el of candidates) {
+      if (el === password) break;
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (['text', 'email', 'tel'].includes(type) && el.value) username = el.value;
+    }
+
+    ipcRenderer.send('debrowser:credential-offer', {
+      origin: location.origin,
+      username,
+      password: password.value
+    });
+  } catch { /* a page that cannot be inspected simply gets no offer */ }
+}
+
+window.addEventListener('submit', (event) => {
+  if (event.target instanceof HTMLFormElement) offerToSave(event.target);
+}, true);
+
+/**
+ * Fill a saved sign-in.
+ *
+ * Driven from the browser process, never from the page: a page cannot ask to be
+ * filled, it can only receive a fill the user's browser decided to perform.
+ *
+ * Synthetic `input` and `change` events are dispatched after setting the value.
+ * Without them a field set this way looks empty to every framework that tracks
+ * state outside the DOM - React, Vue, Angular - so the form would submit blank
+ * while appearing filled, which is worse than not filling it at all.
+ */
+ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
+  try {
+    if (!record || location.origin !== record.origin) return;   // never cross-origin
+    const password = document.querySelector('input[type="password"]');
+    if (!password) return;
+
+    const setValue = (el, value) => {
+      const proto = Object.getPrototypeOf(el);
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) setter.call(el, value); else el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    if (record.username) {
+      const form = password.form || document;
+      let user = null;
+      for (const el of form.querySelectorAll('input')) {
+        if (el === password) break;
+        const type = (el.getAttribute('type') || 'text').toLowerCase();
+        if (['text', 'email', 'tel'].includes(type)) user = el;
+      }
+      if (user) setValue(user, record.username);
+    }
+    setValue(password, record.password);
+  } catch { /* nothing fillable here */ }
+});
+
+/**
+ * Fill payment details, on a click the user made in the browser's own UI.
+ *
+ * Never on load. A page can place a payment field off-screen or at zero size
+ * and harvest whatever an autofill puts in it, and unlike a password there is
+ * no origin binding to make that safe - a card number is equally valid
+ * everywhere. So this only ever arrives because the user asked for it while
+ * looking at the page.
+ */
+ipcRenderer.on('debrowser:payment-fill', (_event, record) => {
+  try {
+    if (!record) return;
+    const pick = (token, fallback) =>
+      document.querySelector(`input[autocomplete~="${token}"]`) ||
+      (fallback ? document.querySelector(fallback) : null);
+
+    const setValue = (el, value) => {
+      if (!el || !value) return;
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+      if (setter) setter.call(el, value); else el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    setValue(pick('cc-number'), record.number);
+    setValue(pick('cc-name'), record.holder);
+    setValue(pick('cc-exp'), record.expiry);
+  } catch { /* nothing fillable here */ }
+});
+
 contextBridge.exposeInMainWorld('__debrowser', Object.freeze({ version: 1 }));

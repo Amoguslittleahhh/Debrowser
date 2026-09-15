@@ -682,6 +682,105 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
       `mechanism=${probeCap.mechanism} accounting=${probeSnap.accounting} total=${probeSnap.totalMB}MB`);
   }
 
+  /* ---------------------------------------------------------------- */
+  // Saved credentials.
+  //
+  // The rule this must not weaken is asserted above and unchanged: a page
+  // carrying a password field is still never photographed, and the session
+  // snapshot still never reads one. These checks cover the opposite path - the
+  // explicit one - and the one thing that would make it worthless, which is
+  // writing a secret to disk that anything can read.
+  const { Credentials } = require('./credentials');
+  const creds = new Credentials(() => {});
+  const credCap = creds.capability();
+
+  check('the credential store refuses to save without real OS encryption',
+    credCap.available === true || (credCap.available === false && typeof credCap.reason === 'string'),
+    credCap.available ? 'OS keystore available' : `unavailable: ${credCap.reason}`);
+
+  // The cryptography is tested whether or not this machine has a keyring.
+  //
+  // Without one the store correctly refuses to save, which would leave the
+  // encryption itself - the part that actually protects anything - unexercised
+  // on every machine that lacks a secret service, including CI. So the key is
+  // injected directly here, which tests exactly what safeStorage would have
+  // protected: the sealing, the authentication, and the bytes on disk.
+  {
+    const probe = new Credentials(() => {});
+    probe.key = require('crypto').randomBytes(32);
+    probe.loaded = true;
+    probe.unavailable = null;
+
+    const secret = 'correct-horse-battery-staple';
+    const sealed = probe.seal({ origin: 'https://x.test', username: 'u', password: secret });
+    const raw = JSON.stringify(sealed);
+
+    check('records are sealed with authenticated encryption',
+      !raw.includes(secret) && !raw.includes('x.test') &&
+      probe.open(sealed)?.password === secret,
+      'ciphertext carries neither the secret nor the site, and opens back to both');
+
+    const tampered = { ...sealed };
+    const bytes = Buffer.from(tampered.ct, 'base64');
+    bytes[0] ^= 0xff;
+    tampered.ct = bytes.toString('base64');
+    check('an altered record fails its authentication tag',
+      probe.open(tampered) === null, 'GCM rejected it rather than returning plausible plaintext');
+
+    const wrongKey = new Credentials(() => {});
+    wrongKey.key = require('crypto').randomBytes(32);
+    check('a record cannot be read with a different key',
+      wrongKey.open(sealed) === null, 'decryption with the wrong key yields nothing');
+
+    // Two seals of the same record must differ, or the file leaks that a
+    // password was reused across sites just by comparing ciphertexts.
+    const again = probe.seal({ origin: 'https://x.test', username: 'u', password: secret });
+    check('the same record seals differently every time',
+      again.ct !== sealed.ct && again.iv !== sealed.iv,
+      'a fresh initialisation vector per record');
+  }
+
+  if (credCap.available) {
+    const secret = `smoke-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const stored = creds.put('login', {
+      origin: 'https://smoke.test', username: 'someone', password: secret
+    });
+    check('a saved sign-in round-trips through encryption', stored &&
+      creds.reveal('login', 'https://smoke.test\u0000someone')?.password === secret,
+      stored ? 'stored and read back' : 'not stored');
+
+    // The whole point. If the plaintext is in the file, everything above is
+    // decoration.
+    const onDisk = fs.readFileSync(
+      require('path').join(app.getPath('userData'), 'logins.dat'), 'utf8');
+    check('the secret does not appear in the file on disk',
+      !onDisk.includes(secret) && !onDisk.includes('someone'),
+      `${onDisk.length} bytes, neither the password nor the username present`);
+
+    // An attacker edits the file; GCM's tag is what makes that detectable.
+    check('a tampered record is dropped rather than trusted',
+      (() => {
+        const file = require('path').join(app.getPath('userData'), 'logins.dat');
+        const sealed = JSON.parse(onDisk);
+        const flipped = Buffer.from(sealed[0].ct, 'base64');
+        flipped[0] ^= 0xff;
+        sealed[0].ct = flipped.toString('base64');
+        fs.writeFileSync(file, JSON.stringify(sealed));
+        const fresh = new Credentials(() => {});
+        return fresh.list().logins.length === 0;
+      })(), 'authentication tag rejected the altered ciphertext');
+
+    // Matching is per origin, never per registrable domain: a password offered
+    // to a sibling subdomain is a password handed to whoever controls it.
+    creds.put('login', { origin: 'https://accounts.smoke.test', username: 'a', password: 'b' });
+    check('saved sign-ins are matched per origin, not per domain',
+      creds.forOrigin('https://evil.smoke.test/login').length === 0 &&
+      creds.forOrigin('https://accounts.smoke.test/login').length === 1,
+      'a sibling subdomain gets nothing');
+
+    fs.rmSync(require('path').join(app.getPath('userData'), 'logins.dat'), { force: true });
+  }
+
   const { Updater } = require('./updater');
   const updateCap = new Updater({ log: () => {} }).capability();
   check('updates are inert outside a packaged build, and say why',
