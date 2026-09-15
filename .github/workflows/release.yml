@@ -52,6 +52,16 @@ jobs:
 
       - run: npm ci
 
+      # `npm ci` can report success while Electron's postinstall fails to place
+      # its binary, leaving node_modules/electron without the thing every later
+      # step needs. The smoke step then dies with "Electron failed to install
+      # correctly", three seconds in, which looks like a test failure and is
+      # not. Seen on the Linux runner while the same commit installed fine on
+      # Windows and macOS, so it is worth a cheap check rather than a re-run.
+      - name: Ensure the Electron binary is present
+        shell: bash
+        run: node -e "require('electron')" > /dev/null || npm rebuild electron
+
       # The trim helper is Linux-only and is the one artifact that needs a
       # compiler. On the other two runners it is neither built nor shipped.
       - name: Build the trim helper
