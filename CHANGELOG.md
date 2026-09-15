@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.1
+
+Two Windows reporting-and-rendering bugs, both reported from a real install.
+
+- **Minimising the window brought it back empty.** No tab strip, no page, just
+  the background colour and the native menu bar. Minimising on Windows fires
+  `resize` with a client area of zero, and the layout computed from it,
+  flattening every view to zero width — with nothing to restore them afterwards.
+  `layout()` now refuses to compute from a minimised or zero-sized window, and
+  `restore`/`show` re-run it and re-assert view visibility. Confirmed against
+  the old code, which flattened the chrome from 1280px to 0; the new code holds
+  it. Covered by a smoke check, since the failure cannot be reproduced under
+  xvfb where there is no window manager and `minimize()` is a no-op.
+- **The memory figure over-counts off Linux, and did not say so.** Windows and
+  macOS have no cheap proportional measure, so the total is summed working set,
+  which counts each page shared between processes — chiefly one copy of
+  Chromium in each — once per process. Measured at **1.95x** the proportional
+  figure across five processes, rising with process count: two open tabs could
+  read as 1098 MB. The panel now labels it "resident (over-counts)" there,
+  explains it on hover, and notes that the budget is compared against the same
+  inflated total so the governor reclaims earlier than it needs to. No better
+  number is available — Electron's `ProcessMemoryInfo` declares `private` and
+  `shared`, but `getAppMetrics()` populates only `workingSetSize`.
+
 ## 1.0.0 — first stable release
 
 A complete browser whose governor decides, every two seconds, how much memory

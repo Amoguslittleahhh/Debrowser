@@ -61,7 +61,22 @@ class BrowserShell {
     this.placeholderTimer = null;
 
     this.createChrome();
+
+    // Layout is driven by resize, which is not the whole story on Windows.
+    //
+    // Minimising fires `resize` with a client area of zero, so laying out from
+    // it collapses every view to nothing - and the good bounds are gone. If
+    // `resize` then does not fire again on restore, or fires before the window
+    // has its size back, the window comes back empty: no tab strip, no page,
+    // just the background colour. `layout` refuses to compute from a minimised
+    // or degenerate window for that reason, and `restore`/`show` re-run it so
+    // the views are sized again the moment there is something real to size
+    // them to.
     this.window.on('resize', () => this.layout());
+    this.window.on('restore', () => this.revive());
+    this.window.on('show', () => this.revive());
+    this.window.on('maximize', () => this.layout());
+    this.window.on('unmaximize', () => this.layout());
     this.window.once('ready-to-show', () => this.window.show());
   }
 
@@ -233,8 +248,32 @@ class BrowserShell {
     };
   }
 
+  /**
+   * Bring the window back after a minimise or a hide.
+   *
+   * Two things, because two different failures produce the same blank window.
+   * The layout may have been flattened by a zero-sized resize while minimised,
+   * and a view's compositor surface may not have been re-attached on the way
+   * back. Re-asserting visibility costs nothing and fixes the second; `layout`
+   * fixes the first.
+   */
+  revive() {
+    this.layout();
+    for (const tab of this.tabs.all()) {
+      if (tab.view) tab.setVisible(tab.visible);
+    }
+  }
+
   layout() {
+    // A minimised window has no client area to lay out against. Computing from
+    // it would write zero-sized bounds over the good ones, and nothing restores
+    // them afterwards - which is exactly how the window comes back empty.
+    if (this.window.isDestroyed() || this.window.isMinimized()) return;
+
     const { width, height } = this.window.getContentBounds();
+    // Belt and braces: a zero or negative client area is not a layout, it is a
+    // transient state to sit out.
+    if (width <= 0 || height <= 0) return;
 
     this.chromeView.setBounds({ x: 0, y: 0, width, height: CHROME_HEIGHT });
 

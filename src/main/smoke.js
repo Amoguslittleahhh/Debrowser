@@ -389,6 +389,44 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
   check('a discarded tab with a thumbnail can be covered while it reloads',
     covered === true, `placeholder shown=${covered}`);
 
+  // Minimising on Windows fires `resize` with a client area of zero. Laying out
+  // from that writes zero-width bounds over every view, and nothing puts them
+  // back - the window returns from the taskbar showing its background colour
+  // and the native menu bar, with no tab strip and no page. It cannot be
+  // reproduced under xvfb, where there is no window manager and `minimize()` is
+  // a no-op, so the states Windows reports are supplied directly and the real
+  // `layout()` is asked to survive them.
+  const realWindow = shell.window;
+  const healthy = { x: 0, y: 0, width: 1280, height: 820 };
+  const asWindow = (over) => ({
+    isDestroyed: () => false,
+    isMinimized: () => false,
+    getContentBounds: () => healthy,
+    contentView: realWindow.contentView,
+    ...over
+  });
+  try {
+    shell.window = asWindow();
+    shell.layout();
+    const good = shell.chromeView.getBounds().width;
+
+    shell.window = asWindow({ isMinimized: () => true,
+                              getContentBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }) });
+    shell.layout();
+    const afterMinimise = shell.chromeView.getBounds().width;
+
+    shell.window = asWindow({ getContentBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }) });
+    shell.layout();
+    const afterZeroResize = shell.chromeView.getBounds().width;
+
+    check('minimising does not flatten the window layout',
+      good > 0 && afterMinimise === good && afterZeroResize === good,
+      `chrome width ${good} -> ${afterMinimise} minimised -> ${afterZeroResize} on a 0x0 resize`);
+  } finally {
+    shell.window = realWindow;
+    shell.layout();
+  }
+
   /* ---------------------------------------------------------------- */
   console.log('\n9. Hibernation\n');
 
