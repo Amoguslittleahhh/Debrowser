@@ -7,8 +7,10 @@
 # also the only way the macOS build can ever be signed and notarized.
 #
 # Triggered by pushing a tag (v1.0.0, v1.1.0, …), or by hand from the Actions
-# tab. Artifacts are attached to a draft release, so nothing is published until
-# a human looks at it.
+# tab. A hand-run with the `tag` input filled in creates the tag *and* the
+# release from here, which is the only route available when the tag cannot be
+# pushed from a workstation - a protected-tag ruleset, or a token scoped to
+# branches only. Left empty, a hand-run just builds and uploads artifacts.
 
 name: Release
 
@@ -16,9 +18,19 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, e.g. v1.0.0. Leave empty to build artifacts only.'
+        required: false
+        default: ''
+      draft:
+        description: 'Create the release as a draft (not downloadable by the public).'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
-  contents: write        # needed to create the draft release
+  contents: write        # create the tag, the release, and upload its assets
 
 jobs:
   build:
@@ -142,16 +154,35 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A tag push, or a hand-run that named a tag. `inputs.tag` is empty on a
+    # tag push, and comparing it against '' is what keeps the two apart.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
     steps:
+      # Only for CHANGELOG.md, which becomes the release body. Generated notes
+      # on a first release are the entire commit history, which is not what
+      # anyone wants to read on a download page.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Draft release
+      # Fails loudly rather than publishing an empty release. A release job that
+      # succeeds with nothing attached is worse than one that fails: the tag
+      # exists, the page looks real, and every download link is missing.
+      - name: Check there is something to release
+        run: |
+          ls -lh artifacts/
+          test "$(ls -1 artifacts/ | wc -l)" -gt 0 || { echo "no artifacts"; exit 1; }
+
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true       # a human decides when it goes out
+          # On a hand-run the tag does not exist yet; the action creates it at
+          # this run's commit.
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          body_path: CHANGELOG.md
           files: artifacts/*
-          generate_release_notes: true
+          fail_on_unmatched_files: true
