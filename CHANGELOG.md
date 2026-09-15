@@ -4,6 +4,15 @@
 
 The chrome rebuilt to Chrome's layout, and a settings page.
 
+| | Before | Now |
+|---|---|---|
+| **Title bar** | A window title bar, and a File/Edit/View/Window menu under it | Gone. The tab strip is the title bar, with the system's own window buttons drawn over it |
+| **New-tab button** | Pinned to the far right, across a gulf of empty strip | Sits after the last tab and moves with it as tabs open and close |
+| **Back / forward** | Always lit, even with nowhere to go | Grey out when there is no history; reload turns into stop while a page loads |
+| **Toolbar icons** | Text glyphs | Drawn icons at one stroke weight, plus a three-dot menu |
+| **Settings** | None at all | Theme, accent, tab width, meter and dot visibility, search engine, new-tab page, memory budget, live-tab cap |
+| **Theme** | Followed the OS, no way to override | System, light or dark — an explicit choice wins over the OS in both directions |
+
 - **The window's own title bar and the File/Edit/View/Window menu are gone.**
   That menu was Electron's default, not anything this browser defines — there
   was no File to open and no Window to manage — and it sat above the tabs
