@@ -1,0 +1,95 @@
+# Build installers for all three platforms on native runners.
+#
+# Native runners are not a convenience here. macOS artifacts *cannot* be built
+# anywhere else - `dmg` needs `hdiutil`, which only exists on macOS - and
+# building Windows from Linux needs Wine plus a 32-bit loader for the NSIS
+# installer stub. Running each on its own runner removes both problems and is
+# also the only way the macOS build can ever be signed and notarized.
+#
+# Triggered by pushing a tag (v1.0.0, v1.1.0, …), or by hand from the Actions
+# tab. Artifacts are attached to a draft release, so nothing is published until
+# a human looks at it.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write        # needed to create the draft release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false   # a macOS failure must not hide a working Windows build
+      matrix:
+        include:
+          - os: windows-latest
+            platform: --win
+            artifacts: dist/*.exe
+          - os: macos-latest
+            platform: --mac
+            artifacts: |
+              dist/*.dmg
+              dist/*.zip
+          - os: ubuntu-latest
+            platform: --linux
+            artifacts: |
+              dist/*.AppImage
+              dist/*.deb
+              dist/*.tar.gz
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The trim helper is Linux-only and is the one artifact that needs a
+      # compiler. On the other two runners it is neither built nor shipped.
+      - name: Build the trim helper
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run build:memtrim
+
+      # Runs the real 41-check suite against real renderers before anything is
+      # packaged, on the platform being packaged. This is the step that would
+      # have caught every packaging bug found while writing this config.
+      - name: Smoke test (headless)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run smoke:headless
+      - name: Smoke test
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run smoke
+
+      - name: Package
+        run: npx electron-builder ${{ matrix.platform }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true       # a human decides when it goes out
+          files: artifacts/*
+          generate_release_notes: true

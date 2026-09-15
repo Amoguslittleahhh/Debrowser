@@ -1,0 +1,163 @@
+## Packaging.
+##
+## Kept in its own file rather than inside package.json because it is long and
+## because most of it is load-bearing rather than boilerplate - the notes below
+## are the reasons, and deleting a line here changes what a user gets.
+
+appId: dev.debrowser.app
+productName: Debrowser
+copyright: Debrowser
+
+directories:
+  output: dist
+  buildResources: build
+
+## What goes in the archive.
+##
+## `src` is the whole application. `docs/`, `bench/` and `legacy/` are absent:
+## measurement write-ups, a benchmark harness, and an MSHTML curiosity, none of
+## them reachable from a running browser.
+##
+## `test/pages` is the exception, and it is deliberate. It is 12KB of fixture
+## HTML, and including it is what makes an *installed* build able to run
+## `--smoke-test` against its own renderers - 41 checks on real pages, on the
+## machine that will actually run it. That matters more than usual here: this
+## project is tested on Linux and merely expected to work on Windows and macOS,
+## so shipping the means to check is worth twelve kilobytes. Leaving it out was
+## tried first, and the packaged suite failed seven checks by serving 404s -
+## including one that looked like a privacy regression and was not.
+files:
+  - src/**/*
+  - test/pages/**/*
+  - package.json
+  - '!**/*.map'
+
+## Compression: maximum. The app is mostly Chromium and users download it once.
+compression: maximum
+
+## ---------------------------------------------------------------------------
+## Windows
+## ---------------------------------------------------------------------------
+##
+## Two artifacts, because they answer different questions. The NSIS installer is
+## what most people want; `portable` is a single .exe that runs from a folder or
+## a USB stick with nothing installed, which also happens to be the easiest way
+## to try a browser you do not yet trust.
+##
+## Unsigned. Windows SmartScreen will warn on first run, and that warning is
+## correct - there is no code-signing certificate behind this build. Signing
+## needs a certificate that cannot be committed to a repository; see
+## docs/PACKAGING.md.
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false           # install per-user, so no UAC prompt
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false   # keep the user's session and settings
+
+portable:
+  artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
+
+## ---------------------------------------------------------------------------
+## macOS
+## ---------------------------------------------------------------------------
+##
+## Both architectures, because an Intel-only build runs under Rosetta on Apple
+## silicon and a browser is exactly the wrong place to pay that.
+##
+## Unsigned and un-notarized, so Gatekeeper will refuse the first launch and the
+## user has to right-click -> Open, or clear the quarantine attribute. That is
+## documented rather than worked around: notarization needs an Apple Developer
+## account, and pretending otherwise would ship something that looks broken.
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  category: public.app-category.productivity
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  ## The browser opens network connections and spawns renderers; the hardened
+  ## runtime needs to be told so if this is ever signed.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+
+## ---------------------------------------------------------------------------
+## Linux
+## ---------------------------------------------------------------------------
+##
+## AppImage runs anywhere without installing; .deb is for Debian and Ubuntu,
+## where it puts the app somewhere `setcap` can actually be applied.
+##
+## That difference matters here and is not cosmetic. Hibernation needs
+## CAP_SYS_NICE on the helper binary, and a capability cannot be set on a file
+## inside a mounted AppImage - so hibernation works from the .deb (after one
+## `setcap`) and never from the AppImage. The browser reports this by name
+## rather than silently doing nothing; see docs/PACKAGING.md.
+linux:
+  ## The trim helper, Linux-only and outside the asar.
+  ##
+  ## A binary inside app.asar cannot be executed - the archive is one file the
+  ## runtime reads, not a directory the kernel can exec from - so it is copied
+  ## beside the app, where `helperPath()` in src/main/platform.js looks for it.
+  ## The C source ships alongside so anyone can rebuild or audit the thing they
+  ## are about to grant CAP_SYS_NICE to.
+  ##
+  ## Declared here rather than at the top level, which shipped a Linux ELF
+  ## binary inside the Windows installer - harmless, but it is 17KB of a file
+  ## that platform.js will never look for on a platform where trimming is not
+  ## implemented.
+  extraResources:
+    - from: tools
+      to: tools
+      filter:
+        - mem-trim
+        - mem-trim.c
+        - ksm-launch.c
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: tar.gz
+      arch: [x64]
+  category: Network;WebBrowser
+  synopsis: A memory-adaptive web browser
+  description: >
+    A browser whose resource governor decides, every two seconds, how much
+    memory and CPU each tab is allowed to hold - so a tab you are not looking
+    at costs almost nothing, and you cannot tell.
+  ## Without this, desktop environments do not associate the running window with
+  ## the .desktop entry - the app appears as a generic window with no icon and
+  ## no way to pin it. Pairs with `desktopName` in package.json.
+  syncDesktopName: true
+  desktop:
+    entry:
+      Name: Debrowser
+      Categories: Network;WebBrowser;
+      MimeType: text/html;x-scheme-handler/http;x-scheme-handler/https;
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libsecret-1-0
