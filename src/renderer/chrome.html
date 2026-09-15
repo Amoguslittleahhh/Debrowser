@@ -3,35 +3,60 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data: https:;">
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:;">
   <title>Debrowser</title>
+  <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="chrome.css">
 </head>
 <body>
+  <!--
+    The tab strip is the title bar. `-webkit-app-region: drag` on the strip and
+    no-drag on everything interactive inside it, so empty space moves the window
+    the way the old title bar did, and the system's own minimise/maximise/close
+    sit over the reserved gutter on the right.
+  -->
   <div class="tabstrip" id="tabstrip">
     <div class="tabs" id="tabs"></div>
-    <button class="icon-btn new-tab" id="new-tab" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
+    <button class="new-tab" id="new-tab" title="New tab (Ctrl+T)" aria-label="New tab">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+    </button>
+    <div class="strip-filler"></div>
   </div>
 
   <div class="toolbar">
     <div class="nav">
-      <button class="icon-btn" id="back" title="Back" aria-label="Back">&#8249;</button>
-      <button class="icon-btn" id="forward" title="Forward" aria-label="Forward">&#8250;</button>
-      <button class="icon-btn" id="reload" title="Reload" aria-label="Reload">&#10227;</button>
+      <button class="icon-btn" id="back" title="Back (Alt+Left)" aria-label="Back">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5"/></svg>
+      </button>
+      <button class="icon-btn" id="forward" title="Forward (Alt+Right)" aria-label="Forward">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg>
+      </button>
+      <button class="icon-btn" id="reload" title="Reload (Ctrl+R)" aria-label="Reload">
+        <svg viewBox="0 0 16 16" aria-hidden="true" id="reload-icon">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2v3.2h-3.2"/>
+        </svg>
+      </button>
     </div>
 
-    <div class="omnibox">
+    <div class="omnibox" id="omnibox">
       <span class="scheme" id="scheme" aria-hidden="true"></span>
       <input id="url" type="text" spellcheck="false" autocomplete="off"
-             placeholder="Search, or enter an address" aria-label="Address and search bar">
+             placeholder="Search or type a URL" aria-label="Address and search bar">
     </div>
 
-    <button class="meter" id="meter" title="Resource governor - click for the task manager">
+    <button class="meter" id="meter" title="Resource governor — click for the task manager">
       <span class="meter-bar"><span class="meter-fill" id="meter-fill"></span></span>
       <span class="meter-text" id="meter-text">—</span>
     </button>
+
+    <button class="icon-btn" id="menu" title="Customise and control Debrowser" aria-label="Menu">
+      <svg viewBox="0 0 16 16" aria-hidden="true" class="dots">
+        <circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/>
+      </svg>
+    </button>
   </div>
 
+  <script src="theme.js"></script>
   <script src="chrome.js"></script>
 </body>
 </html>

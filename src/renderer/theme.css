@@ -1,0 +1,74 @@
+/*
+ * The palette, shared by every view the browser draws itself: the chrome, the
+ * task manager and settings.
+ *
+ * It lives in one file because it was previously copied into each of them, and
+ * a copied palette is one that drifts - the panel's light background was already
+ * a different grey from the chrome's for no reason anyone chose. Each view links
+ * this first and then its own layout rules.
+ *
+ * Nothing here costs anything at runtime: custom properties are resolved during
+ * style recalculation, and no rule below animates, filters or loads a resource.
+ */
+
+:root {
+  --bg: #16181d;
+  --bg-raised: #1e2128;
+  --bg-input: #24272f;
+  --border: #2c303a;
+  --text: #e6e8ee;
+  --text-dim: #9aa1b1;
+  --accent: #5b8cff;
+  --ok: #49c17d;
+  --warn: #e0a33e;
+  --crit: #e2564a;
+  --radius: 7px;
+}
+
+/*
+ * Three ways to reach the light palette, and they are not redundant.
+ *
+ * `prefers-color-scheme` follows the OS, which is the default and what most
+ * people want. But a user who explicitly picks Light in Settings must get it on
+ * a machine set to dark, and vice versa - a media query alone cannot express
+ * that, so an explicit choice is stamped on <body> and wins over the OS.
+ */
+@media (prefers-color-scheme: light) {
+  body:not([data-theme="dark"]) {
+    --bg: #f2f3f6;
+    --bg-raised: #ffffff;
+    --bg-input: #ffffff;
+    --border: #d8dbe2;
+    --text: #1a1d24;
+    --text-dim: #626a7a;
+  }
+}
+
+body[data-theme="light"] {
+  --bg: #f2f3f6;
+  --bg-raised: #ffffff;
+  --bg-input: #ffffff;
+  --border: #d8dbe2;
+  --text: #1a1d24;
+  --text-dim: #626a7a;
+}
+
+body[data-theme="dark"] {
+  --bg: #16181d;
+  --bg-raised: #1e2128;
+  --bg-input: #24272f;
+  --border: #2c303a;
+  --text: #e6e8ee;
+  --text-dim: #9aa1b1;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  user-select: none;
+  cursor: default;
+}

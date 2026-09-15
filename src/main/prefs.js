@@ -1,0 +1,191 @@
+'use strict';
+
+/**
+ * User preferences, on disk.
+ *
+ * Kept deliberately small and boring. Every key has a default, an explicit
+ * validator, and survives a file that has been hand-edited into nonsense - a
+ * browser that refuses to start because its settings file has a stray comma is
+ * a browser nobody can recover without a terminal.
+ *
+ * Lives in `userData`, which is the one directory an update does not touch. That
+ * is the whole reason settings, session and (later) saved credentials go here
+ * rather than beside the app: installing a new version replaces the program and
+ * leaves this alone.
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { app } = require('electron');
+
+/**
+ * Every setting, with its default and what counts as a valid value.
+ *
+ * The validator is not decoration. These values reach the governor and the
+ * Chromium command line, so "a number the user typed into a JSON file" is
+ * untrusted input: a budget of `-1` or a string where a boolean belongs would
+ * either crash a tick or silently disable a protection.
+ */
+const SCHEMA = {
+  /* --- Personalisation ------------------------------------------- */
+  theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
+  accent:       { def: '#5b8cff', ok: (v) => /^#[0-9a-f]{6}$/i.test(v) },
+  tabWidth:     { def: 'roomy',  ok: (v) => ['roomy', 'compact'].includes(v) },
+  showMemoryMeter: { def: true,  ok: (v) => typeof v === 'boolean' },
+  showTierDots: { def: true,     ok: (v) => typeof v === 'boolean' },
+
+  /* --- Browsing --------------------------------------------------- */
+  searchEngine: { def: 'google', ok: (v) => Object.hasOwn(SEARCH_ENGINES, v) },
+  homepage:     { def: '',       ok: (v) => typeof v === 'string' && v.length < 2048 },
+
+  /* --- Resources -------------------------------------------------- */
+  // Null means "size this to the machine", which is different from any number
+  // the user could pick, so it needs to be representable. It matters most for
+  // the tab cap, where 0 is itself a meaningful choice: it removes the cap.
+  memoryBudgetMB: { def: null,   ok: (v) => v === null || (Number.isFinite(v) && v >= 256 && v <= 65536) },
+  maxLiveTabs:  { def: null,     ok: (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 200) }
+
+  // Nothing here for session restore, automatic updates or the resource
+  // profile. The first two are not built yet and the third cannot take effect
+  // without a restart, since a profile decides Chromium switches that are
+  // applied before the app starts. A settings page whose controls do nothing is
+  // worse than one that is short, so they land when the features do.
+};
+
+/** Search engines, as query templates. `%s` is the URL-encoded term. */
+const SEARCH_ENGINES = {
+  google:     { name: 'Google',     url: 'https://www.google.com/search?q=%s' },
+  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s' },
+  bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=%s' },
+  brave:      { name: 'Brave',      url: 'https://search.brave.com/search?q=%s' },
+  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/sp/search?query=%s' }
+};
+
+class Prefs {
+  constructor(log = () => {}) {
+    this.log = log;
+    this.file = path.join(app.getPath('userData'), 'preferences.json');
+    this.values = this.load();
+  }
+
+  /** Defaults, overlaid with whatever of the file is valid. */
+  load() {
+    const values = {};
+    for (const [key, spec] of Object.entries(SCHEMA)) values[key] = spec.def;
+
+    let raw;
+    try {
+      raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+    } catch (err) {
+      // A missing file is the ordinary first run. Anything else is worth one
+      // line in the log, and then the defaults - never a failure to start.
+      if (err.code !== 'ENOENT') this.log(`preferences unreadable, using defaults: ${err.message}`);
+      return values;
+    }
+
+    if (!raw || typeof raw !== 'object') return values;
+
+    for (const [key, value] of Object.entries(raw)) {
+      const spec = SCHEMA[key];
+      if (!spec) continue;                       // a key from a newer version
+      if (!spec.ok(value)) {
+        this.log(`preference "${key}" is not valid (${JSON.stringify(value)}); using the default`);
+        continue;
+      }
+      values[key] = value;
+    }
+    return values;
+  }
+
+  get(key) { return this.values[key]; }
+  all() { return { ...this.values }; }
+
+  /**
+   * Set one preference. Returns whether it was accepted, so the UI can tell
+   * "rejected" from "applied and happened to look the same".
+   */
+  set(key, value) {
+    const spec = SCHEMA[key];
+    if (!spec || !spec.ok(value)) {
+      this.log(`refusing preference "${key}" = ${JSON.stringify(value)}`);
+      return false;
+    }
+    if (this.values[key] === value) return true;
+    this.values[key] = value;
+    this.save();
+    return true;
+  }
+
+  /** Write atomically: a crash mid-write must not leave a truncated file. */
+  save() {
+    const tmp = `${this.file}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.writeFileSync(tmp, JSON.stringify(this.values, null, 2));
+      fs.renameSync(tmp, this.file);
+    } catch (err) {
+      this.log(`could not save preferences: ${err.message}`);
+      try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    }
+  }
+
+  /**
+   * The chosen engine's query template, for whoever decides that a piece of
+   * omnibox input is a search.
+   *
+   * Deliberately *not* a resolveQuery() that also decides URL-vs-search:
+   * `normaliseUrl` in main.js already makes that call, and it is the kind of
+   * judgement that must be made in exactly one place or the address bar starts
+   * disagreeing with itself about what a bare hostname means.
+   */
+  /**
+   * The engines the settings page offers, by id and display name.
+   *
+   * Sent rather than hard-coded in the renderer so that adding an engine is one
+   * entry in SEARCH_ENGINES above, and so a label can never end up attached to
+   * a different engine's URL than the one it names.
+   */
+  engines() {
+    return Object.entries(SEARCH_ENGINES).map(([id, { name }]) => ({ id, name }));
+  }
+
+  searchTemplate() {
+    return (SEARCH_ENGINES[this.values.searchEngine] || SEARCH_ENGINES.google).url;
+  }
+}
+
+module.exports = { Prefs, SCHEMA, SEARCH_ENGINES };
+
+/**
+ * Fold saved preferences into the runtime config.
+ *
+ * Three sources want to set the same two numbers, and the order matters:
+ *
+ *   1. a command-line flag, which wins outright - someone who launched with
+ *      `--budget=1200` meant it for this run, and a stored preference quietly
+ *      overriding it would make the flag look broken
+ *   2. a saved preference
+ *   3. the automatic value, sized to this machine
+ *
+ * `null` is the third case, and it must survive a round trip: clearing the field
+ * in Settings has to go back to the machine-sized number, not leave whatever was
+ * there before. That is why the automatic values are kept on `cfg` rather than
+ * computed once at startup and forgotten - this runs again on every change.
+ */
+function applyPrefs(cfg, prefs, log = () => {}) {
+  const pinned = cfg.pinned || {};
+  const budget = prefs.get('memoryBudgetMB');
+  const liveTabs = prefs.get('maxLiveTabs');
+
+  if (!pinned.memoryBudgetMB) {
+    cfg.memoryBudgetMB = budget != null ? budget : cfg.autoBudgetMB;
+  }
+  if (!pinned.maxLiveTabs) {
+    cfg.maxLiveTabs = liveTabs != null ? liveTabs : cfg.autoLiveTabs;
+  }
+
+  log('prefs', `budget=${cfg.memoryBudgetMB}MB liveTabs=${cfg.maxLiveTabs} ` +
+               `theme=${prefs.get('theme')} search=${prefs.get('searchEngine')}`);
+}
+
+module.exports.applyPrefs = applyPrefs;

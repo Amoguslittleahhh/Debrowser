@@ -613,7 +613,13 @@ class Tab {
       cpu: Math.round((this.cpu || 0) * 10) / 10,
       sharesProcess: this.sharesProcess,
       idleMs: this.idleMs(),
-      hasDirtyInput: this.hasDirtyInput
+      hasDirtyInput: this.hasDirtyInput,
+      // So the toolbar can grey out back/forward rather than offering buttons
+      // that do nothing. A tab with no renderer has no live history to ask, and
+      // reports both as unavailable - which is honest: it cannot navigate
+      // anywhere until it is restored, and activating it is what restores it.
+      canGoBack: this.isLive ? this.wc.navigationHistory.canGoBack() : false,
+      canGoForward: this.isLive ? this.wc.navigationHistory.canGoForward() : false
     };
   }
 }

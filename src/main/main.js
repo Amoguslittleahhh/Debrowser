@@ -11,12 +11,13 @@
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session } = require('electron');
+const { app, ipcMain, session, Menu } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
 const { TabManager } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
+const { Prefs, applyPrefs } = require('./prefs');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
@@ -51,18 +52,23 @@ if (Number.isFinite(budgetArg) && budgetArg > 0) overrides.memoryBudgetMB = budg
 
 const cfg = loadConfig(argValue('profile') || 'balanced', overrides);
 
-// When the user has not pinned a budget, size it to the machine rather than
-// to a number chosen on someone else's hardware.
-if (overrides.memoryBudgetMB == null && cfg.profile === 'balanced') {
-  cfg.memoryBudgetMB = platform.recommendedBudgetMB();
-}
+// What these two settings mean when nobody has chosen a value: sized to this
+// machine rather than to a number chosen on someone else's hardware. Kept on
+// cfg rather than applied and forgotten, because clearing the field in Settings
+// has to come back here - see applyPrefs.
+cfg.autoBudgetMB = cfg.profile === 'balanced' ? platform.recommendedBudgetMB() : cfg.memoryBudgetMB;
+cfg.autoLiveTabs = cfg.profile === 'balanced' ? platform.recommendedLiveTabs() : cfg.maxLiveTabs;
 
-// Same treatment for the live-renderer cap: a figure fixed in the config would
-// be wrong at both ends of the hardware range. See `maxLiveTabs` in config.js
-// for why this is on at all, and platform.js for how the number is chosen.
-if (overrides.maxLiveTabs == null && cfg.profile === 'balanced') {
-  cfg.maxLiveTabs = platform.recommendedLiveTabs();
-}
+// A value pinned on the command line is for this run and outranks anything
+// saved. Recorded rather than just applied, so a later preference change cannot
+// quietly overwrite it and make the flag look broken.
+cfg.pinned = {
+  memoryBudgetMB: overrides.memoryBudgetMB != null,
+  maxLiveTabs: false
+};
+
+cfg.memoryBudgetMB = cfg.pinned.memoryBudgetMB ? cfg.memoryBudgetMB : cfg.autoBudgetMB;
+cfg.maxLiveTabs = cfg.autoLiveTabs;
 
 // Benchmark switch: lets the per-tab memory flag be measured rather than
 // assumed. Not something a user needs to touch.
@@ -75,7 +81,10 @@ if (argv.includes('--heap-limit')) cfg.heapLimit.enabled = true;
 const liveTabsRaw = argValue('max-live-tabs');
 if (liveTabsRaw !== null) {
   const parsed = Number(liveTabsRaw);
-  if (Number.isFinite(parsed) && parsed >= 0) cfg.maxLiveTabs = Math.round(parsed);
+  if (Number.isFinite(parsed) && parsed >= 0) {
+    cfg.maxLiveTabs = Math.round(parsed);
+    cfg.pinned.maxLiveTabs = true;
+  }
 }
 
 // Say it loudly and unconditionally, not behind the verbose flag: running
@@ -148,6 +157,8 @@ function main() {
   let governor = null;
   /** @type {TabManager|null} */
   let tabs = null;
+  /** @type {Prefs|null} */
+  let prefs = null;
 
   let publishQueued = false;
   const publish = () => {
@@ -182,6 +193,18 @@ function main() {
   };
 
   app.whenReady().then(() => {
+    // No application menu.
+    //
+    // Electron installs a default File/Edit/View/Window menu on every app that
+    // does not say otherwise. None of its items do anything this browser
+    // defines - there is no File to open, and Window manages windows we do not
+    // have - so it was a row of screen spent on a menu that leads nowhere. Every
+    // shortcut worth having is bound in the chrome renderer.
+    Menu.setApplicationMenu(null);
+
+    prefs = new Prefs(log);
+    applyPrefs(cfg, prefs, log);
+
     // Page images must never outlive the session that took them, and a crash
     // cannot be relied upon to have run the per-tab cleanup.
     sweepThumbnails();
@@ -207,8 +230,9 @@ function main() {
 
     shell = new BrowserShell({
       tabManager: tabs,
+      prefs,
       log,
-      onCommand: (name) => { if (name === 'chrome-ready') publish(); }
+      onCommand: (name) => { if (name === 'chrome-ready' || name === 'view-ready') publish(); }
     });
 
     // `--no-governor` runs the browser with every tab left fully resident, as
@@ -226,13 +250,13 @@ function main() {
       governor.start();
     }
 
-    wireCommands({ tabs, shell, governor, publish, log });
+    wireCommands({ tabs, shell, governor, prefs, publish, log });
 
-    tabs.create({ url: HOME_URL });
+    tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
 
     if (SMOKE_TEST) {
-      runSmokeTest({ tabs, governor, shell });
+      runSmokeTest({ tabs, governor, shell, prefs });
     } else if (argv.includes('--bench-test')) {
       const { runBench } = require('./bench');
       const tabCount = Number(argValue('tabs')) || 8;
@@ -284,7 +308,7 @@ function main() {
 /* Commands from the browser chrome                                    */
 /* ------------------------------------------------------------------ */
 
-function wireCommands({ tabs, shell, governor, publish, log }) {
+function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
   ipcMain.on('debrowser:command', (event, command, payload) => {
     // Only our own chrome may issue commands. A page that somehow reached this
     // channel is ignored: chrome renderers have no tab backing them.
@@ -295,7 +319,7 @@ function wireCommands({ tabs, shell, governor, publish, log }) {
 
     switch (command) {
       case 'new-tab':
-        tabs.create({ url: payload?.url || HOME_URL });
+        tabs.create({ url: payload?.url || newTabUrl(prefs) });
         break;
 
       case 'close-tab':
@@ -315,7 +339,7 @@ function wireCommands({ tabs, shell, governor, publish, log }) {
         break;
 
       case 'navigate': {
-        const target = normaliseUrl(payload?.url);
+        const target = normaliseUrl(payload?.url, prefs.searchTemplate());
         if (!target) break;
         const tab = payload?.id ? tabs.byId(payload.id) : active;
         if (!tab) break;
@@ -345,6 +369,32 @@ function wireCommands({ tabs, shell, governor, publish, log }) {
         shell.togglePanel();
         publish();
         break;
+
+      case 'open-menu':
+        // A native popup rather than an HTML dropdown, because the chrome view
+        // is clipped to its 84px strip: anything drawn in that renderer stops
+        // at the toolbar's bottom edge, and a menu that cannot overflow its own
+        // window is not a menu. The system one also gets keyboard navigation,
+        // screen-reader support and correct edge-flipping for free.
+        openAppMenu({ tabs, shell, prefs, payload, publish });
+        break;
+
+      case 'open-settings':
+        shell.toggleSettings(true);
+        break;
+
+      case 'close-settings':
+        shell.toggleSettings(false);
+        break;
+
+      case 'set-pref': {
+        if (!prefs.set(payload?.key, payload?.value)) break;
+        applyPrefs(cfg, prefs, log);
+        // The governor reads cfg on its next tick, so a budget or cap change
+        // takes effect there. Everything else is the UI's to apply, and it gets
+        // it from the state snapshot publish() is about to send.
+        break;
+      }
 
       case 'discard-tab': {
         // Manual discard from the task manager. Goes through the same tier
@@ -380,6 +430,92 @@ function wireCommands({ tabs, shell, governor, publish, log }) {
 }
 
 /**
+ * Where a new tab goes.
+ *
+ * The saved homepage, if there is one, otherwise the default - and never the
+ * homepage under `--smoke-test` or `--bench-test`, which must not depend on
+ * whatever the machine they run on has saved.
+ */
+function newTabUrl(prefs) {
+  if (OFFLINE_MODE) return HOME_URL;
+  const home = prefs?.get('homepage');
+  return (home && normaliseUrl(home)) || HOME_URL;
+}
+
+/* ------------------------------------------------------------------ */
+/* The three-dot menu                                                  */
+/* ------------------------------------------------------------------ */
+
+/** Zoom steps, matching the ones Chrome offers. */
+const ZOOM_FACTORS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+function stepZoom(tab, direction) {
+  if (!tab?.isLive) return;
+  const current = tab.wc.getZoomFactor();
+  // Nearest step to where we are, then move one along. Reading the factor back
+  // rather than tracking an index keeps this correct after a ctrl+scroll, which
+  // sets a factor this list does not contain.
+  const nearest = ZOOM_FACTORS.reduce(
+    (best, f) => (Math.abs(f - current) < Math.abs(best - current) ? f : best), 1);
+  const index = ZOOM_FACTORS.indexOf(nearest) + direction;
+  if (index < 0 || index >= ZOOM_FACTORS.length) return;
+  tab.wc.setZoomFactor(ZOOM_FACTORS[index]);
+}
+
+/**
+ * Build and pop the menu fresh on every open.
+ *
+ * Rebuilding rather than caching because half the items depend on the state at
+ * the moment the user clicked - whether the page can go back, what the zoom is,
+ * whether the task manager is already showing.
+ */
+function appMenuTemplate({ tabs, shell, prefs, publish = () => {} }) {
+  const active = tabs.activeTab();
+  const zoom = active?.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100;
+
+  return [
+    { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: () => { tabs.create({ url: newTabUrl(prefs) }); publish(); } },
+    { type: 'separator' },
+    {
+      label: 'Zoom',
+      submenu: [
+        { label: `${zoom}%`, enabled: false },
+        { type: 'separator' },
+        { label: 'Zoom in', accelerator: 'CmdOrCtrl+Plus', click: () => stepZoom(active, +1) },
+        { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => stepZoom(active, -1) },
+        { label: 'Reset zoom', accelerator: 'CmdOrCtrl+0', click: () => active?.isLive && active.wc.setZoomFactor(1) }
+      ]
+    },
+    { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => active?.isLive && active.wc.print() },
+    { type: 'separator' },
+    {
+      label: 'Task manager',
+      accelerator: 'CmdOrCtrl+M',
+      type: 'checkbox',
+      checked: shell.panelOpen,
+      click: () => { shell.togglePanel(); publish(); }
+    },
+    { label: 'Settings', click: () => shell.toggleSettings(true) },
+    { type: 'separator' },
+    { label: `Debrowser ${app.getVersion()}`, enabled: false }
+  ];
+}
+
+function openAppMenu({ tabs, shell, prefs, payload, publish }) {
+  const menu = Menu.buildFromTemplate(appMenuTemplate({ tabs, shell, prefs, publish }));
+
+  // Anchored under the button that opened it, as a menu attached to a control
+  // should be. The renderer sends its own coordinates because only it knows
+  // where the button ended up after the strip laid out.
+  const x = Number(payload?.x);
+  const y = Number(payload?.y);
+  menu.popup({
+    window: shell.window,
+    ...(Number.isFinite(x) && Number.isFinite(y) ? { x: Math.round(x), y: Math.round(y) } : {})
+  });
+}
+
+/**
  * Turn omnibox input into a URL.
  *
  * Anything that parses as a URL or looks like a hostname is treated as one;
@@ -387,7 +523,9 @@ function wireCommands({ tabs, shell, governor, publish, log }) {
  * between the two, and it errs toward navigation so that typing a bare
  * hostname never silently becomes a search query.
  */
-function normaliseUrl(input) {
+const DEFAULT_SEARCH = 'https://duckduckgo.com/?q=%s';
+
+function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
   if (typeof input !== 'string') return null;
   const text = input.trim();
   if (!text) return null;
@@ -399,16 +537,16 @@ function normaliseUrl(input) {
   if (looksLikeHost) return `https://${text}`;
   if (text === 'localhost' || text.startsWith('localhost:')) return `http://${text}`;
 
-  return `https://duckduckgo.com/?q=${encodeURIComponent(text)}`;
+  return searchTemplate.replace('%s', encodeURIComponent(text));
 }
 
 /* ------------------------------------------------------------------ */
 /* Smoke test - exercises the full lifecycle headlessly                */
 /* ------------------------------------------------------------------ */
 
-function runSmokeTest({ tabs, governor, shell }) {
+function runSmokeTest({ tabs, governor, shell, prefs }) {
   const { runSmoke } = require('./smoke');
-  runSmoke({ tabs, governor, shell, app, cfg }).then((code) => {
+  runSmoke({ tabs, governor, shell, app, cfg, prefs, appMenuTemplate }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);
@@ -416,4 +554,4 @@ function runSmokeTest({ tabs, governor, shell }) {
   });
 }
 
-module.exports = { normaliseUrl };
+module.exports = { normaliseUrl, appMenuTemplate };

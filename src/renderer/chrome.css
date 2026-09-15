@@ -9,42 +9,12 @@
  * compositor and never triggers layout.
  */
 
-:root {
-  --bg: #16181d;
-  --bg-raised: #1e2128;
-  --bg-input: #24272f;
-  --border: #2c303a;
-  --text: #e6e8ee;
-  --text-dim: #9aa1b1;
-  --accent: #5b8cff;
-  --ok: #49c17d;
-  --warn: #e0a33e;
-  --crit: #e2564a;
-  --radius: 7px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f2f3f6;
-    --bg-raised: #ffffff;
-    --bg-input: #ffffff;
-    --border: #d8dbe2;
-    --text: #1a1d24;
-    --text-dim: #626a7a;
-  }
-}
-
-* { box-sizing: border-box; }
+/* Palette, theme switching and the base reset are in theme.css, which every
+   view the browser draws for itself links first. */
 
 html, body {
-  margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
-  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
-  user-select: none;
-  cursor: default;
 }
 
 /* ---------------------------------------------------------------- */
@@ -54,45 +24,77 @@ html, body {
 .tabstrip {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
   height: 40px;
-  padding: 6px 8px 0;
   background: var(--bg);
+  /* Empty strip drags the window, because the strip *is* the title bar now. */
   -webkit-app-region: drag;
+
+  /*
+   * Keep clear of the system's window buttons.
+   *
+   * With `titleBarOverlay` the platform draws minimise/maximise/close *over*
+   * this strip, and Electron reports where through these env() values -
+   * left-inset on macOS, where the traffic lights are, and right-inset on
+   * Windows and Linux. Hard-coding either would put a tab under the close
+   * button on one platform and leave a gap on the other. The fallbacks make it
+   * behave when there is no overlay at all.
+   */
+  padding: 6px 0 0;
+  padding-left: calc(env(titlebar-area-x, 0px) + 8px);
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px);
 }
 
+/*
+ * Tabs hug their own width instead of filling the strip.
+ *
+ * This is what puts the + immediately after the last tab and slides it along as
+ * tabs open and close, the way Chrome does. The old rule was `flex: 1`, which
+ * made the container claim the whole strip and stranded the + against the far
+ * right edge with a gulf of empty space in between - the thing that made the
+ * chrome look unlike any browser the user has used.
+ *
+ * `max-width` hands the overflow back: once the tabs would reach the window
+ * controls, they shrink instead of pushing the + off-screen.
+ */
 .tabs {
   display: flex;
   gap: 3px;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   -webkit-app-region: no-drag;
 }
 
+/* Takes the leftover width so the strip's drag region reaches the controls. */
+.strip-filler { flex: 1 1 auto; min-width: 0; }
+
 .tab {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 44px;
-  max-width: 220px;
-  flex: 1 1 180px;
+  gap: 8px;
+  min-width: 52px;
+  max-width: 240px;
+  flex: 1 1 200px;
   height: 34px;
-  padding: 0 8px 0 10px;
-  border-radius: var(--radius) var(--radius) 0 0;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-bottom: none;
-  opacity: 0.62;
-  transition: opacity 120ms ease, background-color 120ms ease;
+  padding: 0 8px 0 11px;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
-.tab:hover { opacity: 0.85; }
+/* Inactive tabs are flat against the strip, as in Chrome; only hover and the
+   active tab get a surface. Borders on every tab made the strip look like a
+   spreadsheet. */
+.tab:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
 
 .tab.active {
-  opacity: 1;
   background: var(--bg-input);
+  color: var(--text);
 }
+
+body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; }
 
 .tab-title {
   flex: 1;
@@ -166,43 +168,81 @@ html, body {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 44px;
-  padding: 0 10px;
+  padding: 0 8px;
   background: var(--bg-input);
   border-bottom: 1px solid var(--border);
 }
 
-.nav { display: flex; gap: 2px; }
+.nav { display: flex; gap: 0; }
 
 .icon-btn {
-  width: 30px;
-  height: 30px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
   border: none;
-  border-radius: 6px;
+  border-radius: 50%;
   background: transparent;
   color: var(--text-dim);
-  font-size: 16px;
   cursor: default;
 }
 
-.icon-btn:hover { background: var(--border); color: var(--text); }
-.icon-btn:disabled { opacity: 0.3; }
-.new-tab { -webkit-app-region: no-drag; font-size: 18px; }
+.icon-btn:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.icon-btn:disabled { opacity: 0.32; }
+.icon-btn:disabled:hover { background: transparent; color: var(--text-dim); }
+
+/* One stroke weight for every glyph in the toolbar, so the row reads as a set
+   rather than as icons collected from different places. */
+.icon-btn svg, .new-tab svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-btn svg.dots { fill: currentColor; stroke: none; }
+
+/* The + rides with the tabs rather than sitting at the window edge. */
+.new-tab {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  margin: 0 0 3px 4px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+.new-tab:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
 
 .omnibox {
   display: flex;
   align-items: center;
   flex: 1;
   min-width: 0;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 15px;
+  height: 32px;
+  margin: 0 4px;
+  padding: 0 14px;
+  border-radius: 16px;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
 }
 
-.omnibox:focus-within { border-color: var(--accent); }
+.omnibox:hover { background: color-mix(in srgb, var(--bg) 80%, var(--text) 4%); }
+.omnibox:focus-within {
+  border-color: var(--accent);
+  background: var(--bg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
 
 .scheme {
   flex: none;
@@ -232,8 +272,8 @@ html, body {
   align-items: center;
   gap: 7px;
   height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
+  padding: 0 11px;
+  border: none;
   border-radius: 15px;
   background: transparent;
   color: var(--text-dim);
@@ -242,7 +282,9 @@ html, body {
   cursor: default;
 }
 
-.meter:hover { background: var(--bg-raised); color: var(--text); }
+.meter:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+body[data-meter="off"] .meter { display: none; }
+body[data-dots="off"] .tier { display: none; }
 
 .meter-bar {
   width: 46px;

@@ -30,7 +30,21 @@ const el = {
   scheme: document.getElementById('scheme'),
   meter: document.getElementById('meter'),
   meterFill: document.getElementById('meter-fill'),
-  meterText: document.getElementById('meter-text')
+  meterText: document.getElementById('meter-text'),
+  menu: document.getElementById('menu'),
+  reloadIcon: document.getElementById('reload-icon')
+};
+
+/**
+ * The reload button's two glyphs, as path data.
+ *
+ * Swapping `d` rather than the button's text, which is what this used to do:
+ * the button holds an SVG now, and writing `textContent` on it would delete the
+ * icon and leave a bare character behind for the rest of the session.
+ */
+const RELOAD_PATHS = {
+  reload: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
+  stop: ['M4.5 4.5l7 7', 'M11.5 4.5l-7 7']
 };
 
 /** Keyed tab elements, so an update never rebuilds the strip. */
@@ -39,6 +53,8 @@ const tabEls = new Map();
 /** True while the user is editing the address bar; we must not overwrite it. */
 let urlFocused = false;
 let lastActiveId = null;
+/** What the reload button currently shows, so it is only rewritten on a change. */
+let reloadShows = null;
 
 /* ------------------------------------------------------------------ */
 /* Rendering                                                           */
@@ -187,9 +203,18 @@ function renderToolbar(state) {
   }
   if (active) lastActiveId = active.id;
 
-  el.reload.textContent = active?.loading ? '×' : '⟳';
-  el.reload.title = active?.loading ? 'Stop' : 'Reload';
+  el.back.disabled = !active?.canGoBack;
+  el.forward.disabled = !active?.canGoForward;
+
+  const shows = active?.loading ? 'stop' : 'reload';
+  if (shows !== reloadShows) {
+    const paths = el.reloadIcon.querySelectorAll('path');
+    RELOAD_PATHS[shows].forEach((d, i) => paths[i].setAttribute('d', d));
+    el.reload.title = shows === 'stop' ? 'Stop' : 'Reload (Ctrl+R)';
+    reloadShows = shows;
+  }
 }
+
 
 function setAddress(url) {
   try {
@@ -221,8 +246,16 @@ function renderMeter(state) {
 el.newTab.addEventListener('click', () => api.send('new-tab'));
 el.back.addEventListener('click', () => api.send('back'));
 el.forward.addEventListener('click', () => api.send('forward'));
-el.reload.addEventListener('click', () => api.send(el.reload.textContent === '×' ? 'stop' : 'reload'));
+el.reload.addEventListener('click', () => api.send(reloadShows === 'stop' ? 'stop' : 'reload'));
 el.meter.addEventListener('click', () => api.send('toggle-panel'));
+
+// The menu is drawn by the OS, which cannot see where the button is. Send the
+// button's bottom-left corner so the menu hangs off it the way a menu attached
+// to a control should, rather than appearing wherever the pointer happened to be.
+el.menu.addEventListener('click', () => {
+  const box = el.menu.getBoundingClientRect();
+  api.send('open-menu', { x: Math.round(box.left), y: Math.round(box.bottom) });
+});
 
 el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); });
 el.url.addEventListener('blur', () => { urlFocused = false; });
@@ -246,12 +279,14 @@ window.addEventListener('keydown', (event) => {
     case 'r': api.send('reload'); break;
     case 'l': el.url.focus(); break;
     case 'm': api.send('toggle-panel'); break;
+    case ',': api.send('open-settings'); break;
     default: return;
   }
   event.preventDefault();
 });
 
 api.onState((state) => {
+  applyThemePrefs(state.prefs);
   renderTabs(state.tabs);
   renderToolbar(state);
   renderMeter(state);

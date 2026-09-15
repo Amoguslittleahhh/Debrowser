@@ -34,8 +34,9 @@ class BrowserShell {
   /**
    * @param {object} deps - { tabManager, log, onCommand }
    */
-  constructor({ tabManager, log = () => {}, onCommand = () => {} }) {
+  constructor({ tabManager, prefs = null, log = () => {}, onCommand = () => {} }) {
     this.tabs = tabManager;
+    this.prefs = prefs;
     this.log = log;
     this.onCommand = onCommand;
 
@@ -46,11 +47,39 @@ class BrowserShell {
       minHeight: 420,
       title: 'Debrowser',
       backgroundColor: '#16181d',
-      show: false
+      show: false,
+
+      // The tab strip *is* the title bar, as in every modern browser. A
+      // separate OS title bar above the tabs wastes a row of screen to display
+      // a name the user already knows, and the app menu that came with it -
+      // File/Edit/View/Window - was Electron's default rather than anything
+      // this browser does. Both are gone; see `app.applicationMenu` in main.js.
+      //
+      // `titleBarOverlay` keeps the real minimise/maximise/close buttons, drawn
+      // by the system in the system's own style, sitting over our strip. Rolling
+      // our own would mean reimplementing snap layouts, double-click-to-maximise
+      // and the accessibility behaviour that comes free with the real ones.
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 13 } }
+        : {
+            titleBarStyle: 'hidden',
+            titleBarOverlay: { color: '#16181d', symbolColor: '#9aa1b1', height: 40 }
+          })
     });
 
     this.panelView = null;
     this.panelOpen = false;
+
+    /**
+     * Settings, as a view covering the content area rather than a tab.
+     *
+     * A tab would be the Chrome-like thing to do, but a tab here is a governed
+     * object: it would count against the live-renderer cap, be eligible for
+     * discard, and could be frozen mid-edit. Settings is chrome, so it is built
+     * like the panel - created on open, destroyed on close, never resident.
+     * @type {Electron.WebContentsView|null}
+     */
+    this.settingsView = null;
 
     /**
      * One reused ImageView showing the outgoing tab's thumbnail while a
@@ -237,6 +266,46 @@ class BrowserShell {
 
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Show or hide the settings page.
+   *
+   * Sits above the tab views and below the chrome, so the tab strip and address
+   * bar stay live while it is open - settings covers the page, not the browser.
+   */
+  toggleSettings(open = !this.settingsView) {
+    if (Boolean(open) === Boolean(this.settingsView)) return Boolean(this.settingsView);
+
+    if (open) {
+      this.settingsView = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          backgroundThrottling: false
+        }
+      });
+      const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
+      this.window.contentView.addChildView(
+        this.settingsView, chromeIndex === -1 ? undefined : chromeIndex);
+      this.settingsView.webContents.loadFile(path.join(RENDERER_DIR, 'settings.html'));
+      // Same hand-off as the chrome: a view that has just loaded has nothing to
+      // render until someone sends it a snapshot, and only main owns one.
+      this.settingsView.webContents.once('did-finish-load', () => this.onCommand('view-ready'));
+    } else {
+      try {
+        this.window.contentView.removeChildView(this.settingsView);
+        this.settingsView.webContents.close();
+      } catch { /* already gone */ }
+      this.settingsView = null;
+    }
+
+    this.layout();
+    return Boolean(this.settingsView);
+  }
+
+  /* ---------------------------------------------------------------- */
+
   contentBounds() {
     const { width, height } = this.window.getContentBounds();
     const panelWidth = this.panelOpen ? PANEL_WIDTH : 0;
@@ -283,6 +352,7 @@ class BrowserShell {
     }
 
     if (this.placeholderView) this.placeholderView.setBounds(bounds);
+    if (this.settingsView) this.settingsView.setBounds(bounds);
 
     if (this.panelView) {
       this.panelView.setBounds({
@@ -296,14 +366,26 @@ class BrowserShell {
 
   /* ---------------------------------------------------------------- */
 
-  /** Push governor + tab state to the chrome and the panel. */
+  /**
+   * Push governor + tab state to every view that renders it.
+   *
+   * Preferences ride along on the same message rather than on a channel of
+   * their own: every consumer that wants one wants the other in the same paint,
+   * and two channels would mean the tab strip could briefly render new state
+   * under the old theme.
+   */
   publish(state) {
-    send(this.chromeView, 'debrowser:state', state);
-    send(this.panelView, 'debrowser:state', state);
+    const full = this.prefs
+      ? { ...state, prefs: this.prefs.all(), searchEngines: this.prefs.engines() }
+      : state;
+    send(this.chromeView, 'debrowser:state', full);
+    send(this.panelView, 'debrowser:state', full);
+    send(this.settingsView, 'debrowser:state', full);
   }
 
   destroy() {
     this.togglePanel(false);
+    this.toggleSettings(false);
     if (!this.window.isDestroyed()) this.window.destroy();
   }
 }

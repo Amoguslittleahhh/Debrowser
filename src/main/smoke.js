@@ -14,6 +14,7 @@
 const fs = require('fs');
 const { app } = require('electron');
 const { Tier, tierRank } = require('./config');
+const { applyPrefs } = require('./prefs');
 const fixtureServer = require('./fixture-server');
 
 /**
@@ -64,7 +65,7 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
   return false;
 }
 
-async function runSmoke({ tabs, governor, shell, cfg }) {
+async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -587,7 +588,83 @@ async function runSmoke({ tabs, governor, shell, cfg }) {
     `url=${revived.url}`);
 
   /* ---------------------------------------------------------------- */
-  console.log('\n12. Footprint\n');
+  /* ---------------------------------------------------------------- */
+  console.log('\n12. Settings and preferences\n');
+
+  // Settings is chrome, not a tab: it must not count against the live-renderer
+  // cap, be eligible for discard, or stay resident once closed. The last is the
+  // one worth asserting - a settings page that quietly holds a renderer for the
+  // life of the window would spend more than several tabs.
+  //
+  // The count that must not move is the *tab* count: a settings page that
+  // arrived as a tab would be counted against the cap and could be discarded
+  // mid-edit. The live-renderer count is not the test - the governor is free to
+  // reclaim an idle tab while this runs, and does.
+  const tabsBefore = tabs.all().length;
+  const liveBefore = tabs.all().filter((t) => t.isLive).length;
+  shell.toggleSettings(true);
+  const settingsOpened = Boolean(shell.settingsView);
+  await sleep(400);
+  const tabsDuring = tabs.all().length;
+  const liveDuring = tabs.all().filter((t) => t.isLive).length;
+  shell.toggleSettings(false);
+  check('settings opens and closes without becoming a governed tab',
+    settingsOpened && !shell.settingsView && tabsDuring === tabsBefore && liveDuring <= liveBefore,
+    `opened=${settingsOpened} tabs ${tabsBefore} -> ${tabsDuring}, live ${liveBefore} -> ${liveDuring}`);
+
+  // The file on disk is untrusted input - it reaches the governor and the
+  // Chromium command line - so the schema has to refuse nonsense rather than
+  // pass it through. Same validator guards the settings page and the file.
+  const rejected = [
+    prefs.set('memoryBudgetMB', -1),
+    prefs.set('theme', 'chartreuse'),
+    prefs.set('maxLiveTabs', 9999),
+    prefs.set('accent', 'javascript:alert(1)'),
+    prefs.set('nonexistent', true)
+  ];
+  check('a preference outside its schema is refused, not stored',
+    rejected.every((accepted) => accepted === false),
+    `${rejected.filter((a) => !a).length}/5 refused`);
+
+  // The three-dot menu is built fresh on every open from live state, and it is
+  // the one part of the chrome that is not a web page - a throw here would take
+  // the click with it and leave a button that does nothing.
+  const template = appMenuTemplate({ tabs, shell, prefs });
+  const menuBuilt = require('electron').Menu.buildFromTemplate(template);
+  const labels = template.map((item) => item.label).filter(Boolean);
+  check('the menu builds from live state and offers what it claims to',
+    Boolean(menuBuilt) && labels.includes('New tab') && labels.includes('Settings') &&
+    labels.includes('Task manager'),
+    labels.join(' / '));
+
+  const autoBudget = cfg.autoBudgetMB;
+  prefs.set('memoryBudgetMB', 900);
+  applyPrefs(cfg, prefs);
+  const tookEffect = cfg.memoryBudgetMB === 900;
+
+  // Clearing a setting must return to the machine-sized value, not leave the
+  // last number behind. Null and a number are different states and the config
+  // has to be able to get back from one to the other.
+  prefs.set('memoryBudgetMB', null);
+  applyPrefs(cfg, prefs);
+  check('a saved budget applies, and clearing it returns to the automatic value',
+    tookEffect && cfg.memoryBudgetMB === autoBudget,
+    `auto ${autoBudget}MB -> set 900MB (${tookEffect}) -> cleared ${cfg.memoryBudgetMB}MB`);
+
+  // A flag is for this run and outranks the file, or the flag looks broken.
+  cfg.pinned.memoryBudgetMB = true;
+  cfg.memoryBudgetMB = 1234;
+  prefs.set('memoryBudgetMB', 777);
+  applyPrefs(cfg, prefs);
+  check('a budget pinned on the command line outranks the saved one',
+    cfg.memoryBudgetMB === 1234, `${cfg.memoryBudgetMB}MB`);
+
+  cfg.pinned.memoryBudgetMB = false;
+  prefs.set('memoryBudgetMB', null);
+  applyPrefs(cfg, prefs);
+
+  /* ---------------------------------------------------------------- */
+  console.log('\n13. Footprint\n');
 
   governor.metrics.sample();
   const snap = governor.metrics.snapshot();

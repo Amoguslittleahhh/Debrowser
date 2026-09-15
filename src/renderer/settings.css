@@ -1,0 +1,140 @@
+/* Settings. Palette and base reset come from theme.css. */
+
+html, body { height: 100%; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-raised);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 { margin: 0; font-size: 17px; font-weight: 600; }
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: default;
+}
+.close:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.close svg {
+  width: 15px; height: 15px;
+  fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round;
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 28px 40px;
+}
+
+/* Centred rather than pinned to the left edge: the content has a fixed comfortable
+   width, and against a full window that leaves an empty half if it does not move. */
+section { max-width: 620px; margin: 24px auto 0; }
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.rows {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 13px 16px;
+  background: var(--bg);
+}
+.row + .row { border-top: 1px solid var(--border); }
+
+.row-text { flex: 1; min-width: 0; }
+.row-label { display: block; }
+.row-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.row-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+
+/* Beside the field, not under it. `.row-hint` is a block, which is right in the
+   label column and wrong here. */
+.unit { font-size: 11.5px; color: var(--text-dim); }
+
+select, input[type="text"], input[type="number"] {
+  height: 30px;
+  min-width: 150px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+select { cursor: default; }
+select:focus, input:focus { border-color: var(--accent); }
+
+/* A real checkbox, accented and sized up - a hand-rolled toggle would mean
+   reimplementing focus, keyboard activation and the accessibility tree. */
+input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  cursor: default;
+}
+
+/* The swatch row: the accent is the one setting where seeing it beats naming
+   it, so it is picked from colours rather than from a list of words. */
+.swatches { display: flex; gap: 7px; }
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: default;
+  padding: 0;
+}
+.swatch[aria-pressed="true"] { border-color: var(--text); }
+
+.note {
+  max-width: 620px;
+  margin: 10px 2px 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}

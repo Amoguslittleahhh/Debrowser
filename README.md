@@ -60,7 +60,7 @@ Debrowser.exe --smoke-test              # Windows
 /opt/Debrowser/debrowser --smoke-test   # Linux
 ```
 
-41 checks on real pages. Worth doing here rather than taking it on trust: this
+43 checks on real pages. Worth doing here rather than taking it on trust: this
 project is tested on Linux and only *expected* to work on Windows and macOS.
 
 ---
@@ -542,8 +542,10 @@ tried, measured and removed — live on the `claude/research-build` branch.
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web
   Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
-- No extensions, no bookmarks, no history UI, no downloads UI. This is a
-  resource-management browser, not a Chrome replacement.
+- No extensions, no bookmarks, no history UI, no downloads UI. Chrome extension
+  support is intended and not built. Settings covers appearance, search and the
+  two resource limits; anything not listed there is not a setting yet, which is
+  deliberate - a control that does nothing is worse than a short page.
 - `legacy/debrowser.hta` ports the residency model to MSHTML for machines that
   can only run an HTA. It is a curiosity, not a supported browser: unsandboxed,
   untested, and unable to do anything this project measures per-tab. See

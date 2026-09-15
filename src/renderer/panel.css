@@ -1,32 +1,9 @@
 /* Task manager panel. Same cost discipline as the chrome: no images, no
    filters, keyed updates, and nothing that animates while idle. */
 
-:root {
-  --bg: #16181d;
-  --bg-raised: #1e2128;
-  --border: #2c303a;
-  --text: #e6e8ee;
-  --text-dim: #9aa1b1;
-  --accent: #5b8cff;
-  --ok: #49c17d;
-  --warn: #e0a33e;
-  --crit: #e2564a;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f7f8fa;
-    --bg-raised: #ffffff;
-    --border: #d8dbe2;
-    --text: #1a1d24;
-    --text-dim: #626a7a;
-  }
-}
-
-* { box-sizing: border-box; }
+/* Palette and base reset: theme.css, linked first. */
 
 body {
-  margin: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;

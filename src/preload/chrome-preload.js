@@ -26,7 +26,11 @@ const COMMANDS = new Set([
   'set-budget',
   'discard-tab',
   'pin-tab',
-  'prefetch-tab'
+  'prefetch-tab',
+  'open-menu',
+  'open-settings',
+  'close-settings',
+  'set-pref'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {

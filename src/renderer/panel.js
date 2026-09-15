@@ -259,4 +259,7 @@ el.budgetInput.addEventListener('change', () => {
   api.send('set-budget', { mb: Number(el.budgetInput.value) });
 });
 
-api.onState(render);
+api.onState((state) => {
+  applyThemePrefs(state.prefs);
+  render(state);
+});
