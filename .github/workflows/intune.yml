@@ -114,15 +114,44 @@ jobs:
             dist-intune/*.intunewin
           if-no-files-found: error
 
+  # Verifying and publishing happen on Linux, away from the machine that built
+  # the bundle. That is partly so the check does not depend on what the Windows
+  # runner happens to have installed, and partly because a package is best
+  # checked after the round trip that will actually deliver it.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: intune
+          path: artifacts
+
+      - name: Check both halves arrived
+        run: |
+          ls -lh artifacts/
+          fail=0
+          for want in '*-intune.exe' '*.intunewin'; do
+            find artifacts/ -maxdepth 1 -type f -name "$want" | grep -q . \
+              || { echo "::error::no $want in artifacts/"; fail=1; }
+          done
+          exit $fail
+
+      # Opens the bundle the way a device would. Its payload is encrypted, so
+      # nothing short of decrypting it shows whether the installer is inside -
+      # and the failure this guards against is a correctly named, empty bundle.
+      - name: Verify the Intune bundle
+        run: python3 tools/verify-intunewin.py artifacts/*.intunewin
+
       # The release body is this version's changelog section, from the same
-      # script release.yml uses, plus a note saying what this release is and is
-      # not - because a version number carrying only an Intune package is not
-      # self-explanatory on a download page.
+      # script release.yml uses.
       - name: Build the release body
         if: github.event.inputs.tag != ''
-        shell: bash
         run: |
-          python .github/scripts/release-notes.py "$(node -p "require('./package.json').version")" > RELEASE_NOTES.md
+          version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          python3 .github/scripts/release-notes.py "$version" > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
       - name: Release
@@ -133,7 +162,5 @@ jobs:
           draft: ${{ github.event.inputs.draft == 'true' }}
           prerelease: true
           body_path: RELEASE_NOTES.md
-          files: |
-            dist-intune/*.exe
-            dist-intune/*.intunewin
+          files: artifacts/*
           fail_on_unmatched_files: true

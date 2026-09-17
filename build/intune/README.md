@@ -70,6 +70,17 @@ file that uploads cleanly and fails on a device.
 The `.exe` ships beside it. You need it to install by hand on a pilot device,
 because the copy inside the bundle is encrypted and cannot be run from it.
 
+Every release is opened before it is published. `tools/verify-intunewin.py`
+verifies the payload's HMAC, decrypts it with the keys from `Detection.xml`, and
+confirms the installer named by the metadata is really inside — which is the
+only way to tell, since the payload is encrypted and a bundle containing nothing
+looks entirely healthy from the outside. It runs on the release job and blocks
+publication. You can run it yourself on anything you download:
+
+```
+python3 tools/verify-intunewin.py Debrowser-1.2.1-win-x64-intune.intunewin
+```
+
 To rebuild the bundle yourself, on Windows, with only that installer in
 `.\payload`:
 
@@ -136,10 +147,27 @@ directories present Wine fails to load `kernel32.dll` at all. Removing them agai
 restores a working 64-bit prefix, which is how that was confirmed rather than
 assumed.
 
-A distribution that still carries a full i386 archive would not hit this. Whether
-it is worth the effort is a separate question: the packaging already runs on a
-real Windows runner in CI, and a second route that could silently emit a
-different bundle is a cost rather than a convenience.
+A distribution that still carries a full i386 archive would not hit this.
+
+### There is a Linux packager, and it works
+
+[LetsGoIntunePackager](https://github.com/michelbragaguimaraes/LetsGoIntunePackager)
+(MIT) implements the format in Go, so it runs natively and needs neither Wine
+nor .NET. It built this release's installer into a bundle **in 3.2 seconds**,
+and that bundle passes every check in `tools/verify-intunewin.py` — the same
+checks Microsoft's own output passes, including the HMAC and a full decrypt to
+the installer inside.
+
+Its metadata is not quite byte-faithful. `Name` drops the `.exe` that Microsoft's
+tool keeps, and `ToolVersion` reports `1.8.6.0`, which is not the version it is.
+Both look harmless and neither has been tested against a tenant.
+
+**CI still uses Microsoft's tool**, and not out of caution alone: the Intune job
+has to run on a Windows runner regardless, because that is where electron-builder
+builds the installer. Packaging there costs nothing extra, so the Go tool would
+buy no runner and only add a third-party implementation between this project and
+an undocumented service contract. Where it is genuinely useful is locally — it is
+the only way to produce a bundle off Windows for inspection.
 
 Patching the tool would presumably fix it and is not an option: Microsoft's
 licence prohibits decompiling and disassembling it (§4b) and working around

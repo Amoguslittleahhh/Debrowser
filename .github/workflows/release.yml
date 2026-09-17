@@ -341,6 +341,14 @@ jobs:
 
           exit $fail
 
+      # Opens the Intune bundle the way a device would, before anyone can
+      # download it. Its payload is encrypted, so no amount of looking at the
+      # file tells you the installer is inside: the check above confirms a
+      # `.intunewin` is present and plausibly sized, and this one confirms it
+      # is not a well-named box of nothing.
+      - name: Verify the Intune bundle
+        run: python3 tools/verify-intunewin.py artifacts/*.intunewin
+
       # The release page describes the release it is on, and nothing else.
       #
       # Publishing the whole CHANGELOG meant every download page repeated the
