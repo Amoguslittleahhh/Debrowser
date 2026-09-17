@@ -910,6 +910,67 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
     fs.rmSync(require('path').join(app.getPath('userData'), 'logins.dat'), { force: true });
   }
 
+  /* ---------------------------------------------------------------- */
+
+  // Bookmarks, and specifically the part that is a security boundary rather
+  // than a feature: an imported file is untrusted input. A bookmarks export is
+  // a plausible thing to be handed by someone else, and a "bookmarklet" in one
+  // is script that runs in whatever page is open when it is clicked, with that
+  // page's origin. Importing someone else's bookmarks must not be importing
+  // their code.
+  {
+    const bm = require('./bookmarks');
+    const tmpDir = require('fs').mkdtempSync(
+      require('path').join(require('os').tmpdir(), 'debrowser-bm-'));
+    const store = new bm.Bookmarks(() => {}, tmpDir);
+
+    const hostile = '<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p>' +
+      '<DT><H3>Imported</H3><DL><p>' +
+      '<DT><A HREF="https://good.example">Good</A>' +
+      '<DT><A HREF="javascript:fetch(\'//evil\')">Bookmarklet</A>' +
+      '<DT><A HREF="file:///etc/passwd">Local file</A>' +
+      '<DT><A HREF="data:text/html,<script>1</script>">Data URL</A>' +
+      '</DL><p></DL><p>';
+
+    const parsed = bm.parseNetscape(hostile);
+    const merged = store.merge(parsed);
+    const stored = store.all().map((b) => b.url);
+
+    check('an imported bookmark file cannot bring executable schemes with it',
+      merged.added === 1 && stored.length === 1 && stored[0].startsWith('https://') &&
+      !stored.some((u) => /^(javascript|file|data):/i.test(u)),
+      `parsed ${parsed.length}, kept ${merged.added}: ${stored.join(', ')}`);
+
+    // Folder names and entities are the part users notice, and the part a
+    // tokeniser gets wrong first.
+    const nested = bm.parseNetscape(
+      '<DL><p><DT><H3>Dev &amp; Tools</H3><DL><p>' +
+      '<DT><A HREF="https://a.example/?x=1&amp;y=2">A &amp; B</A></DL><p></DL><p>');
+    check('import keeps folder names and decodes entities',
+      nested.length === 1 && nested[0].folder === 'Dev & Tools' &&
+      nested[0].title === 'A & B' && nested[0].url === 'https://a.example/?x=1&y=2',
+      JSON.stringify(nested[0] || null));
+
+    // Chromium's timestamps are microseconds since 1601, not Unix seconds. Read
+    // wrong, every imported bookmark claims to predate the web.
+    const chromium = bm.parseChromium(JSON.stringify({
+      roots: { bar: { name: 'Bar', type: 'folder', children: [
+        { type: 'url', name: 'Example', url: 'https://example.com', date_added: '13350000000000000' }
+      ] } }
+    }));
+    const year = chromium.length ? new Date(chromium[0].addedAt).getFullYear() : 0;
+    check('a Chromium bookmark import reads its timestamps as Chromium wrote them',
+      chromium.length === 1 && year > 2000 && year < 2100, `year ${year}`);
+
+    // Re-importing the same file must not double the list.
+    const again = store.merge(parsed);
+    check('importing the same bookmarks twice does not duplicate them',
+      again.added === 0 && store.all().length === 1,
+      `second import added ${again.added}, list holds ${store.all().length}`);
+
+    require('fs').rmSync(tmpDir, { recursive: true, force: true });
+  }
+
   const { Updater } = require('./updater');
   const updateCap = new Updater({ log: () => {} }).capability();
   check('updates are inert outside a packaged build, and say why',

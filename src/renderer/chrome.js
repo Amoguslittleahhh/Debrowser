@@ -38,11 +38,41 @@ const el = {
   meterText: document.getElementById('meter-text'),
   menu: document.getElementById('menu'),
   reloadIcon: document.getElementById('reload-icon'),
-  progress: document.getElementById('progress')
+  progress: document.getElementById('progress'),
+  star: document.getElementById('star')
 };
 
 /** Whether the loading line is currently running, so it is only re-armed on a change. */
 let progressRunning = null;
+
+/**
+ * Whether the page in front of the user is bookmarked.
+ *
+ * Asked of the browser rather than tracked here, because the list can change
+ * from Settings - an import or a deletion has to move the star, and a copy kept
+ * in this renderer would go stale the moment it did.
+ */
+let starred = null;
+let starUrl = null;
+
+async function refreshStar(url) {
+  if (!url) { setStar(false); starUrl = null; return; }
+  if (url === starUrl) return;
+  starUrl = url;
+  const res = await api.request('list-bookmarks');
+  const items = (res && res.items) || [];
+  // Compared against the URL asked for, not the current one: the answer may
+  // arrive after the user has moved on, and applying it then would light the
+  // star for the wrong page.
+  if (starUrl === url) setStar(items.some((b) => b.url === url));
+}
+
+function setStar(on) {
+  if (on === starred) return;
+  starred = on;
+  el.star.classList.toggle('on', Boolean(on));
+  el.star.title = on ? 'Remove bookmark' : 'Bookmark this page (Ctrl+D)';
+}
 
 /**
  * The reload button's two glyphs, as path data.
@@ -235,6 +265,8 @@ function renderToolbar(state) {
     }
   }
 
+  refreshStar(active && !active.internal ? active.url : null);
+
   const shows = active?.loading ? 'stop' : 'reload';
   if (shows !== reloadShows) {
     const paths = el.reloadIcon.querySelectorAll('path');
@@ -276,6 +308,15 @@ el.newTab.addEventListener('click', () => api.send('new-tab'));
 el.back.addEventListener('click', () => api.send('back'));
 el.forward.addEventListener('click', () => api.send('forward'));
 el.reload.addEventListener('click', () => api.send(reloadShows === 'stop' ? 'stop' : 'reload'));
+
+el.star.addEventListener('click', async () => {
+  const res = await api.request('toggle-bookmark');
+  if (!res) return;
+  // The browser decides, and says so. Toggling optimistically here would light
+  // the star for a page that cannot be bookmarked at all - the store refuses
+  // anything that is not http, https or one of our own pages.
+  setStar(Boolean(res.bookmarked));
+});
 el.meter.addEventListener('click', () => api.send('toggle-panel'));
 
 // The menu is drawn by the OS, which cannot see where the button is. Send the

@@ -556,6 +556,166 @@ api.onState((state) => {
   renderUpdateState(state.updates);
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
-  if (!built) { buildAll(); renderCredentials(); }
+  if (!built) { buildAll(); renderCredentials(); renderBookmarks(); }
   for (const [key, control] of controls) control.write(state.prefs[key]);
 });
+
+/* ------------------------------------------------------------------ */
+/* Bookmarks                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The bookmark list and the import controls.
+ *
+ * Importing is deliberately two offers rather than one. "Import from a browser
+ * on this machine" is the path that needs no work from the user, and it is
+ * tried first; "open an exported file" is the one that always works, including
+ * for browsers whose bookmarks live in a database we will not read while it is
+ * locked. Offering only the first would strand Firefox, Zen and every fork of
+ * them; offering only the second would make the easy case needlessly manual.
+ */
+async function renderBookmarks() {
+  const host = document.getElementById('bookmark-list');
+  const actions = document.getElementById('bookmark-actions');
+  const state = document.getElementById('bookmark-state');
+  if (!host || !actions) return;
+
+  actions.replaceChildren(
+    bookmarkAction(
+      'Import from a browser on this machine',
+      'Looks for Chrome, Edge, Brave, Vivaldi, Arc, Firefox, Zen and their relatives.',
+      'Find browsers',
+      async (button) => {
+        button.disabled = true;
+        const res = await api.request('bookmark-profiles');
+        button.disabled = false;
+        const profiles = (res && res.profiles) || [];
+        if (!profiles.length) {
+          state.textContent = 'No other browser profiles found in the usual places. ' +
+            'Export a bookmarks file from that browser instead.';
+          return;
+        }
+        renderProfiles(profiles, state, host);
+      }),
+    bookmarkAction(
+      'Import an exported file',
+      'The bookmarks HTML that every browser exports, or a Chromium Bookmarks file.',
+      'Choose file…',
+      async (button) => {
+        button.disabled = true;
+        const res = await api.request('import-bookmark-file');
+        button.disabled = false;
+        if (!res || res.cancelled) return;
+        state.textContent = res.ok
+          ? `Imported ${res.added} from ${res.browser}${res.skipped ? `, skipped ${res.skipped} already saved or unsupported` : ''}.`
+          : `Could not import: ${res.reason}`;
+        renderBookmarks();
+      })
+  );
+
+  const res = await api.request('list-bookmarks');
+  const items = (res && res.items) || [];
+
+  if (!items.length) {
+    host.replaceChildren();
+    if (!state.textContent) {
+      state.textContent = 'Nothing saved yet. The star in the toolbar saves the page you are on.';
+    }
+    return;
+  }
+
+  host.replaceChildren(...items.slice(0, 500).map(bookmarkRow));
+  if (items.length > 500) {
+    const more = document.createElement('div');
+    more.className = 'row';
+    more.textContent = `…and ${items.length - 500} more, saved but not listed here.`;
+    host.appendChild(more);
+  }
+}
+
+function bookmarkAction(title, hint, buttonText, onClick) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const text = document.createElement('div');
+  text.className = 'row-text';
+  const label = document.createElement('span');
+  label.className = 'row-label';
+  label.textContent = title;
+  const sub = document.createElement('span');
+  sub.className = 'row-hint';
+  sub.textContent = hint;
+  text.append(label, sub);
+
+  const control = document.createElement('div');
+  control.className = 'row-control';
+  const button = document.createElement('button');
+  button.className = 'ghost-btn';
+  button.textContent = buttonText;
+  button.addEventListener('click', () => onClick(button));
+  control.append(button);
+
+  row.append(text, control);
+  return row;
+}
+
+/**
+ * One row per profile found, each with its own button.
+ *
+ * A Firefox-family profile gets a button too, and it explains rather than
+ * imports - saying "Zen: not supported" would be worse than useless when the
+ * answer is one export away, and the reason comes from the browser rather than
+ * being guessed at here.
+ */
+function renderProfiles(profiles, state, host) {
+  state.textContent = `Found ${profiles.length} profile${profiles.length === 1 ? '' : 's'}.`;
+  const rows = profiles.map((profile) => bookmarkAction(
+    profile.browser,
+    profile.kind === 'firefox' ? 'Firefox-family profile' : 'Chromium-family profile',
+    'Import',
+    async (button) => {
+      button.disabled = true;
+      const res = await api.request('import-from-profile', { path: profile.path });
+      button.disabled = false;
+      if (res && res.ok) {
+        state.textContent = `Imported ${res.added} from ${res.browser}` +
+          `${res.skipped ? `, skipped ${res.skipped} already saved or unsupported` : ''}.`;
+        renderBookmarks();
+      } else {
+        state.textContent = (res && res.reason) || 'That import did not work.';
+      }
+    }));
+  host.replaceChildren(...rows);
+}
+
+function bookmarkRow(item) {
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const text = document.createElement('div');
+  text.className = 'row-text';
+  const label = document.createElement('span');
+  label.className = 'row-label';
+  label.textContent = item.title;
+  const hint = document.createElement('span');
+  hint.className = 'row-hint';
+  hint.textContent = item.folder ? `${item.folder} — ${item.url}` : item.url;
+  text.append(label, hint);
+
+  const control = document.createElement('div');
+  control.className = 'row-control';
+  const open = document.createElement('button');
+  open.className = 'ghost-btn';
+  open.textContent = 'Open';
+  open.addEventListener('click', () => api.send('new-tab', { url: item.url }));
+  const remove = document.createElement('button');
+  remove.className = 'ghost-btn danger';
+  remove.textContent = 'Remove';
+  remove.addEventListener('click', async () => {
+    await api.request('remove-bookmark', { id: item.id });
+    renderBookmarks();
+  });
+  control.append(open, remove);
+
+  row.append(text, control);
+  return row;
+}

@@ -20,6 +20,7 @@ const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs } = require('./prefs');
 const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
+const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
@@ -181,6 +182,7 @@ function main() {
   let updater = null;
   /** @type {Credentials|null} */
   let credentials = null;
+  let bookmarks = null;
 
   let publishQueued = false;
   const publish = () => {
@@ -290,7 +292,8 @@ function main() {
     }
 
     wireCommands({ tabs, shell, governor, prefs, publish, log });
-    wireRequests({ tabs, shell, credentials, log });
+    bookmarks = new Bookmarks(log);
+    wireRequests({ tabs, shell, credentials, bookmarks, log });
 
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
@@ -555,13 +558,91 @@ function senderMayCommand(tabs, shell, sender) {
  * password as well would leave one in a renderer's heap for as long as the page
  * is open, for nothing.
  */
-function wireRequests({ tabs, shell, credentials, log }) {
+/**
+ * Requests the chrome may make as well as Settings.
+ *
+ * Everything else on this channel is credentials, which stay Settings-only:
+ * the new tab page has no business reading a password list and neither has the
+ * tab strip. Bookmarks are not secrets - they are a list the user curates and
+ * can read on disk - and the star in the toolbar has to be able to ask whether
+ * the page in front of it is already saved.
+ */
+const CHROME_REQUESTS = new Set(['list-bookmarks', 'toggle-bookmark', 'remove-bookmark']);
+
+function wireRequests({ tabs, shell, credentials, bookmarks, log }) {
   ipcMain.handle('debrowser:request', (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
-    // The new tab page has no business reading a password list, and neither has
-    // the chrome, so neither is allowed to ask.
     const sender = senderPage(tabs, shell, event.sender);
-    if (sender !== 'settings') return null;
+    if (sender !== 'settings' && !(sender === 'chrome' && CHROME_REQUESTS.has(command))) {
+      return null;
+    }
+
+    switch (command) {
+      case 'list-bookmarks':
+        return { items: bookmarks.all() };
+
+      // Star in the toolbar: saves the page in front of the user, or takes it
+      // back off if it is already saved. The URL comes from the tab, never from
+      // the payload - a renderer asking to bookmark an arbitrary address would
+      // be letting a page write to a list the user believes they curate.
+      case 'toggle-bookmark': {
+        const tab = tabs.activeTab();
+        if (!tab || !tab.url) return null;
+        if (bookmarks.has(tab.url)) {
+          bookmarks.remove(tab.url);
+          return { bookmarked: false };
+        }
+        const added = bookmarks.add({ url: tab.url, title: tab.title });
+        return { bookmarked: Boolean(added), unsupported: !added };
+      }
+
+      case 'remove-bookmark':
+        return { removed: bookmarks.remove(String(payload?.id ?? '')) };
+
+      case 'bookmark-profiles':
+        return { profiles: findProfiles() };
+
+      // Reads a profile this machine already has. Chromium-family files are
+      // JSON and are read directly; Firefox-family ones are named and refused
+      // with the reason, because places.sqlite is a live database.
+      case 'import-from-profile': {
+        const list = findProfiles();
+        const profile = list.find((p) => p.path === payload?.path);
+        if (!profile) return { ok: false, reason: 'that profile is no longer there' };
+        const read = readProfile(profile);
+        if (!read.ok) return { ok: false, reason: read.reason };
+        const result = bookmarks.merge(read.entries);
+        log('bookmarks', `imported ${result.added} from ${profile.browser}`);
+        return { ok: true, ...result, browser: profile.browser };
+      }
+
+      // An exported file the user picks. Read in main rather than in the
+      // renderer: the page never gets a file path, and the dialog is the only
+      // thing that decides which file is opened.
+      case 'import-bookmark-file': {
+        const picked = dialog.showOpenDialogSync({
+          title: 'Import bookmarks',
+          properties: ['openFile'],
+          filters: [
+            { name: 'Bookmarks', extensions: ['html', 'htm', 'json'] },
+            { name: 'All files', extensions: ['*'] }
+          ]
+        });
+        if (!picked || !picked.length) return { ok: false, cancelled: true };
+        let text;
+        try {
+          text = require('fs').readFileSync(picked[0], 'utf8');
+        } catch (err) {
+          return { ok: false, reason: `could not read that file: ${err.message}` };
+        }
+        const result = bookmarks.merge(parseExport(text));
+        log('bookmarks', `imported ${result.added} from ${picked[0]}`);
+        return { ok: true, ...result, browser: require('path').basename(picked[0]) };
+      }
+
+      default:
+        break;
+    }
 
     switch (command) {
       case 'list-credentials': {

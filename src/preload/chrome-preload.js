@@ -34,7 +34,13 @@ const COMMANDS = new Set([
   'delete-credential',
   'reveal-credential',
   'save-payment',
-  'fill-payment'
+  'fill-payment',
+  'list-bookmarks',
+  'toggle-bookmark',
+  'remove-bookmark',
+  'bookmark-profiles',
+  'import-from-profile',
+  'import-bookmark-file'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {
