@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1
+
+The Intune package, in the format Intune actually deploys. Windows only, and nothing else in the browser changes.
+
+- **1.2.0 shipped the Intune variant as a bare `.exe`, which cannot be deployed to Intune at all.** A Win32 app is a `.intunewin`: a bundle holding the installer encrypted with AES alongside a `Detection.xml` that the service reads when you upload it and the Intune Management Extension decrypts on the device. An `.exe` has none of that, so the portal rejects it at the upload step — the packaging was correct in every respect except the one that makes it usable.
+- **It is now built in CI, by Microsoft's own tool.** The Win32 Content Prep Tool is the only thing that produces the format; the encryption and the metadata are an undocumented contract with the service, and a reimplementation would produce a file that uploads cleanly and then fails on a device, which is the worst place to find out. The tool is pinned to an immutable commit and its SHA-256 is verified before it runs, because it executes in CI with the repository checked out.
+- **Both halves ship.** The `.intunewin` is the only deployable artifact, and the `.exe` is the only one you can install by hand to test, because the copy inside the bundle is encrypted. The release refuses to publish with either one missing.
+- **Published as a pre-release, deliberately.** It is still untested against a real tenant, and a pre-release is not GitHub's "latest", so it cannot be mistaken for the build an ordinary user should download. It carries no `latest.yml`, so the in-app updater never offers it either.
+- **The release workflow now carries the `.intunewin` too**, so this is the last version where the Intune deliverable and the normal one can drift apart.
+
+Nothing in the browser itself changed between 1.2.0 and 1.2.1. If you are not deploying through Intune, 1.2.0 is the release you want.
+
 ## 1.2.0
 
 Updates that download only what changed, the browser's own pages, saved sign-ins, honest memory figures off Linux, and a great deal more personalisation.

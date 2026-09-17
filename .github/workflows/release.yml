@@ -53,6 +53,7 @@ jobs:
             platform: --win
             artifacts: |
               dist/*.exe
+              dist/*.intunewin
               dist/*.blockmap
               dist/latest.yml
           - os: macos-latest
@@ -237,12 +238,30 @@ jobs:
       # Copied after both packaging steps so neither can clean it away, and
       # before the signature report so it is checked like any other installer.
       - name: Collect the Intune installer
+        id: intune
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $exe = Get-ChildItem dist-intune/*.exe -ErrorAction SilentlyContinue
-          if (-not $exe) { throw "no Intune installer in dist-intune/ - the packaging step produced nothing" }
-          $exe | ForEach-Object { Copy-Item $_.FullName dist/ -Force; "collected $($_.Name)" }
+          $ErrorActionPreference = 'Stop'
+          $exe = @(Get-ChildItem dist-intune/*.exe -ErrorAction SilentlyContinue)
+          if ($exe.Count -ne 1) { throw "expected exactly one installer in dist-intune/, found $($exe.Count)" }
+          Copy-Item $exe[0].FullName dist/ -Force
+          "collected $($exe[0].Name)"
+          # Emitted rather than reconstructed from the version: the name is
+          # electron-builder's to choose, and a guess at it is a build that
+          # fails the first time an artifact naming rule changes.
+          "exe=dist/$($exe[0].Name)" >> $env:GITHUB_OUTPUT
+
+      # An .exe is not deployable to Intune. A Win32 app is a `.intunewin`, and
+      # only Microsoft's tool produces one - see the action for why it is not
+      # reimplemented. The .exe ships too, because the .intunewin's payload is
+      # encrypted and so cannot be installed or inspected by hand to test it.
+      - name: Package for Intune (.intunewin)
+        if: matrix.os == 'windows-latest'
+        uses: ./.github/actions/intunewin
+        with:
+          installer: ${{ steps.intune.outputs.exe }}
+          out: dist
 
       # Says plainly whether what is about to be uploaded is signed. A release
       # that is silently unsigned because a secret expired is the failure this
@@ -311,9 +330,14 @@ jobs:
           done
 
           # The Intune variant is named distinctly and is easy to lose on its
-          # own, since it is the one file that is not built into dist/.
-          find artifacts/ -maxdepth 1 -type f -name '*intune*.exe' | grep -q . \
-            || { echo "::error::no Intune installer in artifacts/"; fail=1; }
+          # own, since it is the one file that is not built into dist/. Both
+          # halves are required: the .intunewin is the only thing deployable to
+          # Intune, and the .exe is the only way to test the payload by hand,
+          # because the one inside the .intunewin is encrypted.
+          for want in '*intune*.exe' '*.intunewin'; do
+            find artifacts/ -maxdepth 1 -type f -name "$want" | grep -q . \
+              || { echo "::error::no $want in artifacts/"; fail=1; }
+          done
 
           exit $fail
 

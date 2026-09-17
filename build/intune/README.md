@@ -49,24 +49,45 @@ Nothing else changes. Settings, the browsing session and saved credentials
 still live in each user's own `userData`, so they are per-user, they survive an
 upgrade, and one user cannot read another's.
 
-## Making the `.intunewin`
+## The `.intunewin` is built for you
 
-The Win32 content prep tool is Microsoft's and runs on Windows, so this cannot
-be produced here. On a Windows machine, with
-[IntuneWinAppUtil.exe](https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool):
+**Download `Debrowser-<version>-win-x64-intune.intunewin` from the release and
+upload it.** There is nothing to build.
+
+That file is what Intune deploys. A `.intunewin` is a bundle holding the
+installer encrypted with AES alongside a `Detection.xml` the service reads on
+upload and the Intune Management Extension decrypts on the device; a bare `.exe`
+has none of that and the portal rejects it. Releases up to and including 1.2.0
+shipped only the `.exe`, which could not be deployed at all.
+
+It is produced in CI by Microsoft's
+[Win32 Content Prep Tool](https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool),
+pinned to a commit and checked against a known SHA-256 before it runs. That tool
+is the only thing that produces the format — the encryption and the metadata are
+an undocumented contract with the service, so a reimplementation would produce a
+file that uploads cleanly and fails on a device.
+
+The `.exe` ships beside it. You need it to install by hand on a pilot device,
+because the copy inside the bundle is encrypted and cannot be run from it.
+
+To rebuild the bundle yourself, on Windows, with only that installer in
+`.\payload`:
 
 ```
-IntuneWinAppUtil.exe -c .\payload -s Debrowser-1.2.0-win-x64-intune.exe -o .\out
+IntuneWinAppUtil.exe -c .\payload -s Debrowser-1.2.1-win-x64-intune.exe -o .\out
 ```
 
-where `.\payload` contains only that installer.
+The source folder must contain **only** the installer: the tool bundles the
+whole folder, so pointing it at a build directory wraps every other installer
+in there — including the per-user build, which must never reach a device this
+way.
 
 ## App settings in Intune
 
 **Install command**
 
 ```
-Debrowser-1.2.0-win-x64-intune.exe /S
+Debrowser-1.2.1-win-x64-intune.exe /S
 ```
 
 **Uninstall command**
@@ -90,7 +111,7 @@ on the uninstall key's GUID, which changes between electron-builder versions:
 | File | `Debrowser.exe` |
 | Detection method | String (version) |
 | Operator | Greater than or equal to |
-| Value | `1.2.0` |
+| Value | `1.2.1` |
 
 Use the *version* comparison rather than "file exists", or the first upgrade
 will detect the old build as already installed and never deploy.

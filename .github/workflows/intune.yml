@@ -1,0 +1,139 @@
+# Build and publish the Intune package on its own, as a pre-release.
+#
+# Separate from `release.yml` because this ships one platform and one artifact
+# rather than all three. That workflow's release gate deliberately refuses to
+# publish unless every platform is present - a release missing a platform is
+# exactly the failure it exists to catch - so an Intune-only build cannot go
+# through it without weakening the check for everybody.
+#
+# Always a pre-release. The package is experimental and untested against a real
+# tenant (build/intune/README.md), and a pre-release is not GitHub's "latest",
+# so it cannot be mistaken for the build an ordinary user should download. It
+# also carries no `latest.yml`, so the in-app updater never sees it.
+#
+# The build steps mirror the Windows leg of release.yml. The part with any real
+# subtlety - fetching, verifying and driving Microsoft's content prep tool -
+# lives in one composite action that both workflows call.
+
+name: Intune package
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v1.2.1-intune-only. Leave empty to build only.'
+        required: false
+        default: ''
+      draft:
+        description: 'Create the release as a draft.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Ensure the Electron binary is present
+        shell: bash
+        run: node -e "require('electron')" > /dev/null || npm rebuild electron
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build the measurement helper
+        run: npm run build:memprobe
+
+      # The same gate the normal Windows build passes. An Intune deployment is
+      # the hardest place to notice a broken browser and the slowest to roll
+      # back, so it is the last place to skip the suite.
+      - name: Smoke test
+        run: npm run smoke
+
+      - name: Package the Intune variant
+        env:
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:intune
+
+      - name: Find the installer
+        id: intune
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = @(Get-ChildItem dist-intune/*.exe -ErrorAction SilentlyContinue)
+          if ($exe.Count -ne 1) { throw "expected exactly one installer in dist-intune/, found $($exe.Count)" }
+          "exe=dist-intune/$($exe[0].Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Package for Intune (.intunewin)
+        uses: ./.github/actions/intunewin
+        with:
+          installer: ${{ steps.intune.outputs.exe }}
+          out: dist-intune
+
+      - name: Report signature status
+        shell: pwsh
+        run: |
+          Get-ChildItem dist-intune/*.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "{0}: {1} {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
+          }
+
+      # Refuses to publish half the deliverable. The .intunewin alone cannot be
+      # tested by hand and the .exe alone cannot be deployed, so a release with
+      # one of them is not a release.
+      - name: Check both halves exist
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($pat in '*-intune.exe', '*.intunewin') {
+            $f = @(Get-ChildItem "dist-intune/$pat" -ErrorAction SilentlyContinue)
+            if ($f.Count -lt 1) { throw "nothing matching $pat in dist-intune/" }
+            $f | ForEach-Object { "{0,-48} {1,8:N1} MB" -f $_.Name, ($_.Length/1MB) }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: intune
+          path: |
+            dist-intune/*.exe
+            dist-intune/*.intunewin
+          if-no-files-found: error
+
+      # The release body is this version's changelog section, from the same
+      # script release.yml uses, plus a note saying what this release is and is
+      # not - because a version number carrying only an Intune package is not
+      # self-explanatory on a download page.
+      - name: Build the release body
+        if: github.event.inputs.tag != ''
+        shell: bash
+        run: |
+          python .github/scripts/release-notes.py "$(node -p "require('./package.json').version")" > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Release
+        if: github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          prerelease: true
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist-intune/*.exe
+            dist-intune/*.intunewin
+          fail_on_unmatched_files: true
