@@ -107,7 +107,17 @@ async function promote(tab, target, ctx) {
   // Undo freezing before anything else: a stopped page cannot run the script
   // that would repaint it, so showing it first would flash stale content.
   if (tab.cdp && tierRank(tab.tier) >= tierRank(Tier.FROZEN)) {
-    await tab.cdp.unfreeze();
+    // The answer matters. A CDP call that times out returns false, and
+    // reporting the tier anyway recorded the tab as ACTIVE while its document
+    // was still stopped - after which `tierRank(active) >= tierRank(FROZEN)` is
+    // false, so no later promotion ever tried the unfreeze again and the tab
+    // stayed dead for the rest of the session. Staying at the tier we are
+    // actually in leaves the next tick free to retry, which is the same posture
+    // freezing already takes when it fails.
+    if (!await tab.cdp.unfreeze()) {
+      log(`tab ${tab.id}: unfreeze did not take, staying ${tab.tier}`);
+      return tab.tier;
+    }
   }
 
   // The foreground tab needs no instrumentation: nothing freezes, collects or
@@ -169,7 +179,12 @@ async function demote(tab, target, ctx) {
   // below deliberately detached - paying ~2.4MB inside the renderer, on the
   // tier whose entire purpose is to give memory back, moments before trimming.
   if (tierRank(target) >= tierRank(Tier.FROZEN) && tierRank(tab.tier) < tierRank(Tier.FROZEN)) {
-    const frozen = await tab.cdp.freeze();
+    // Guarded like every other cdp use here. The `capturePageState` above is
+    // awaited, which is all the time a renderer needs to die - and teardown
+    // nulls `tab.cdp`, so this threw a TypeError straight out of the governor
+    // tick. A tab with no renderer is already holding nothing, so there is
+    // nothing to freeze and COLD is the honest answer.
+    const frozen = tab.cdp ? await tab.cdp.freeze() : false;
     if (!frozen) {
       // Freezing is the one step that can legitimately fail (DevTools
       // attached, page in an unfreezable state such as holding a lock). Stay

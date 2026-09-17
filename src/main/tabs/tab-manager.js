@@ -251,7 +251,17 @@ class TabManager {
     const done = () => {
       // If the user has already moved on, the placeholder belongs to whatever
       // they moved to; leave it to that activation to clear.
-      if (this.activeId === id) this.onUncover();
+      //
+      // Except that only holds when the tab they moved to raised one of its
+      // own. `activate` shows a placeholder only for a tab with no renderer, so
+      // switching from a still-restoring tab to a live one left the previous
+      // tab's screenshot sitting over a perfectly good page until the 1500ms
+      // ceiling in window.js expired. Clearing it whenever the tab that is now
+      // active is live costs nothing: a live tab has real content behind the
+      // placeholder by definition.
+      if (this.activeId === id) { this.onUncover(); return; }
+      const current = this.byId(this.activeId);
+      if (current && current.isLive) this.onUncover();
     };
     wc.once('did-stop-loading', done);
     wc.once('did-fail-load', done);

@@ -262,7 +262,17 @@ class Metrics {
     for (const [pid, tabs] of groups) {
       const proc = this.byPid.get(pid);
       if (!proc) {
-        for (const tab of tabs) { tab.rssMB = 0; tab.cpu = 0; }
+        // Every field, not just the two. `privateMB` left at its last reading
+        // is a measurement of a process that no longer exists, and both
+        // `shouldHibernate` and the heap-limit rule gate on it - so a tab whose
+        // renderer had just died could still be picked for an action against a
+        // number describing the dead one.
+        for (const tab of tabs) {
+          tab.rssMB = 0;
+          tab.cpu = 0;
+          tab.privateMB = null;
+          tab.sharesProcess = false;
+        }
         continue;
       }
 

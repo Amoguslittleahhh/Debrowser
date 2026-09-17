@@ -172,6 +172,13 @@ function createTabElement(id) {
   root.addEventListener('pointerleave', cancelDwell);
   // A click has already asked for the real thing; the speculation is redundant.
   root.addEventListener('mousedown', cancelDwell);
+  // Stopped on `mousedown`, not only on `click`.
+  //
+  // The tab root listens on mousedown, which fires first - so pressing x sent
+  // `activate-tab` before `close-tab` ever ran. On a discarded tab that rebuilt
+  // the renderer and started a page load purely so it could be torn down a
+  // moment later, which is the exact opposite of what this browser is for.
+  close.addEventListener('mousedown', (event) => event.stopPropagation());
   close.addEventListener('click', (event) => {
     event.stopPropagation();
     api.send('close-tab', { id });
@@ -349,6 +356,12 @@ window.addEventListener('keydown', (event) => {
     case 'r': api.send('reload'); break;
     case 'l': el.url.focus(); break;
     case 'm': api.send('toggle-panel'); break;
+    // The star's tooltip has advertised this since the star existed; it was
+    // never bound, so the one discoverable way to learn the shortcut taught it
+    // wrongly.
+    case 'd': api.request('toggle-bookmark').then((res) => {
+      if (res) setStar(Boolean(res.bookmarked));
+    }); break;
     case ',': api.send('open-settings'); break;
     default: return;
   }

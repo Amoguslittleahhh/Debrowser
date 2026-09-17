@@ -309,10 +309,20 @@ class Credentials {
       ? (r) => r.origin === record.origin && r.username === record.username
       : (r) => r.label === record.label;
 
+    // Written first, kept second. The list used to be mutated before `save`,
+    // and `save` swallows its own errors and returns false - so a disk that
+    // refused the write left the browser listing a credential it had not
+    // stored, or hiding one still on disk that came back at the next restart.
+    // Restoring the previous list on failure keeps what is in memory and what
+    // is on disk saying the same thing.
+    const previous = list.slice();
     const at = list.findIndex(same);
     if (at === -1) list.push(record);
     else list[at] = record;
-    return this.save(kind);
+
+    if (this.save(kind)) return true;
+    this.records[kind] = previous;
+    return false;
   }
 
   /** Remove by the same identity `put` matches on. */

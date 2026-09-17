@@ -57,7 +57,12 @@ function applyThemePrefs(prefs) {
   if (body.style.getPropertyValue('--strip-alpha') !== String(alpha)) {
     body.style.setProperty('--strip-alpha', String(alpha));
   }
-  body.dataset.translucent = alpha < 1 ? 'on' : 'off';
+  // Only on a change, like every other write in this file. Assigning a dataset
+  // property is a setAttribute on <body>, and this runs on every state
+  // broadcast - so an idle browser was touching an attribute twice a second for
+  // a value that had not moved since launch.
+  const translucent = alpha < 1 ? 'on' : 'off';
+  if (body.dataset.translucent !== translucent) body.dataset.translucent = translucent;
 
   // Motion is opt-out in the OS and opt-out here; `still` is also set while a
   // page is off screen, because a throttled animation finishes in front of the
