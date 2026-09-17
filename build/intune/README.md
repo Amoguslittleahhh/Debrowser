@@ -82,27 +82,50 @@ whole folder, so pointing it at a build directory wraps every other installer
 in there — including the per-user build, which must never reach a device this
 way.
 
-### It will not build on Linux, and it is not worth trying again
+### It will not build on Linux, and the reason is not the runtime
 
 `IntuneWinAppUtil.exe` is a managed .NET assembly rather than native code, so
-running it under Mono is ordinary use and very nearly works. It does not finish:
+running it off Windows is ordinary use and very nearly works. Two runtimes were
+tried, and both fail at the same instruction:
+
+| Runtime | Result |
+|---|---|
+| Mono 6.8 + `WindowsBase` | `NullReferenceException` in `ZipUtil.CreateFromDirectory` |
+| .NET 8.0.31 + `System.IO.Packaging` 8.0.0 from NuGet | **the same exception, in the same method** |
+
+The second row is the finding. The tool zips through `System.IO.Packaging`, and
+the obvious theory is that Mono's implementation of it is incomplete — but on
+.NET 8, with Microsoft's own supported cross-platform package supplying that
+namespace, it fails identically. So this is not a gap in anybody's
+reimplementation: the tool's own zip path depends on something that only holds
+on Windows, most likely path separators in the part URIs it builds.
+
+Running it needs no more than a `runtimeconfig.json` beside a copy and that one
+package — the binary is never modified:
 
 ```
-mono IntuneWinAppUtil.exe -c payload -s setup.exe -o out -q
-  INFO  Compressing the source folder 'payload' to '…/IntunePackage.intunewin'
+dotnet IntuneWinAppUtil.exe -c payload -s setup.exe -o out -q
   System.NullReferenceException
-    at …ZipUtil.CreateFromDirectory (…System.IO.Packaging.CompressionOption…)
+    at …ZipUtil.CreateFromDirectory(String, String, CompressionOption, Boolean, ReportProgress)
 ```
 
-The tool zips through `System.IO.Packaging`, from `WindowsBase`. Mono ships that
-assembly — without it the run dies earlier, on a `TypeLoadException` — but its
-implementation is incomplete, and the packaging call returns null. What lands in
-the output folder is a `.intunewin` of **zero bytes**, which is the failure worth
-knowing about: the file appears, with the right name, and is empty.
+**The failure is quiet, which is the part worth remembering.** A `.intunewin`
+appears in the output folder, correctly named, holding **zero bytes**. Any build
+script that checks only whether the file exists will publish nothing and call it
+a success, so `.github/actions/intunewin` asserts a plausible size instead.
 
-Getting past that would mean decompiling or patching the tool. Microsoft's
-licence prohibits both (§4a, §4b), so the bundle is built on a Windows runner in
-CI and that is the only supported route. `.github/actions/intunewin` does it.
+Wine is the one route left with a real chance, because it supplies Windows
+semantics rather than reimplementing the library — under it the Windows-only
+assumption would hold. It needs a 64-bit prefix, since the tool is PE32+ (a
+32-bit prefix reports only `Bad EXE format`), and then a .NET provider: wine-mono
+is Mono and would be expected to fail as above, so it would have to be a real
+.NET Framework. That was not tried. Given the packaging already runs on a Windows
+runner in CI, a second route that could silently emit a different bundle is a
+cost rather than a convenience.
+
+Patching the tool would presumably fix it and is not an option: Microsoft's
+licence prohibits decompiling and disassembling it (§4b) and working around
+technical limitations in it (§4a).
 
 ## App settings in Intune
 
