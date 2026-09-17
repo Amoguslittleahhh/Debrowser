@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Menu</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="menu.css">
+</head>
+<body class="menu-body">
+  <!--
+    The backdrop fills the window and is invisible. It is what catches the click
+    that dismisses the menu - the job a system popup does with a pointer grab
+    this cannot take - so it is an element rather than nothing.
+  -->
+  <div class="backdrop" id="backdrop"></div>
+  <div class="sheet" id="sheet" role="menu" tabindex="-1"
+       aria-label="Customise and control Debrowser"></div>
+
+  <script src="theme.js"></script>
+  <script src="menu.js"></script>
+</body>
+</html>

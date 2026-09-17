@@ -14,6 +14,34 @@
  * idle would touch the DOM twice a second forever.
  */
 
+/**
+ * A stable colour for a site, from its hostname.
+ *
+ * Used where a page has no favicon to show: the tab strip while one loads or
+ * never arrives, and the history list, which stores no icons at all. A letter
+ * on a coloured field is recognisable at a glance in a way that a grey
+ * placeholder is not, and it is why a strip of twenty tabs no longer reads as
+ * one long grey bar.
+ *
+ * Deliberately here rather than in either caller. Two hashes would mean the
+ * same site was one colour in the tab strip and another in history, which is
+ * worse than no colour at all - the whole value is that it is the same one
+ * everywhere.
+ *
+ * djb2, because it is four lines and its avalanche is good enough to keep
+ * neighbouring hostnames apart, which is the only property that matters here.
+ *
+ * @param {string} text - a hostname, or anything stable about the site
+ * @returns {number} a hue, 0-359
+ */
+/* eslint-disable-next-line no-unused-vars -- read by chrome.js and history.js */
+function siteHue(text) {
+  let hash = 5381;
+  const source = String(text || '');
+  for (let i = 0; i < source.length; i++) hash = ((hash << 5) + hash + source.charCodeAt(i)) | 0;
+  return Math.abs(hash) % 360;
+}
+
 /* eslint-disable-next-line no-unused-vars -- read by chrome.js, panel.js, settings.js */
 function applyThemePrefs(prefs) {
   if (!prefs) return;

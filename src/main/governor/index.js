@@ -639,6 +639,15 @@ class Governor {
 
     if (tab.pinned) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.COLD);
 
+    // A tab with developer tools open is a tab being worked on.
+    //
+    // WARM, not COLD: freezing the page stops the task queues the inspector is
+    // driving, so a frozen tab under DevTools is an inspector attached to
+    // something that will not answer. The user closes the tools and the tab
+    // rejoins the ladder like any other - and the cost of getting this wrong,
+    // losing a console session mid-debug, is worse than one resident renderer.
+    if (tab.devToolsOpen) cap(Tier.WARM);
+
     if (!discardAllowed) cap(Tier.HIBERNATED);
 
     return floor;

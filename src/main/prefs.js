@@ -90,6 +90,18 @@ const SCHEMA = {
   searchEngine: { def: 'google', ok: (v) => Object.hasOwn(SEARCH_ENGINES, v) },
   homepage:     { def: '',       ok: (v) => typeof v === 'string' && v.length < 2048 },
 
+  /**
+   * Whether visited pages are written to the history list.
+   *
+   * On, because a browser that cannot answer "what was that page yesterday" is
+   * missing something people rely on daily. Off stops recording immediately -
+   * it is read on every visit rather than captured at startup - and leaves
+   * whatever is already stored alone, because deleting the user's data is a
+   * separate decision from not adding to it. The history page has the button
+   * for that.
+   */
+  saveHistory:  { def: true,     ok: (v) => typeof v === 'boolean' },
+
   /* --- Resources -------------------------------------------------- */
   // Null means "size this to the machine", which is different from any number
   // the user could pick, so it needs to be representable. It matters most for

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>History</title>
+  <!--
+    Settings' stylesheet, then this page's own. The header, the rows and the
+    notes are the same components; linking them rather than copying them is why
+    a change to the row treatment lands on both pages at once.
+  -->
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="history.css">
+</head>
+<body>
+  <header>
+    <h1>History</h1>
+    <div class="head-tools">
+      <input id="q" type="search" spellcheck="false" autocomplete="off"
+             placeholder="Search history" aria-label="Search history">
+      <button class="ghost-btn danger" id="clear">Clear all</button>
+    </div>
+    <button class="close" id="close" title="Close history (Esc)" aria-label="Close history">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <div class="bar">
+      <!-- Wrapping the input *and* naming it with `for`. The wrap makes the
+           text a click target; the attribute is what gives the checkbox an
+           accessible name that tooling can find. -->
+      <label class="record" for="recording">
+        <input type="checkbox" id="recording">
+        <span>Record the pages I visit</span>
+      </label>
+      <span class="count" id="count"></span>
+    </div>
+
+    <div id="list" class="list"></div>
+    <p class="note" id="empty" hidden></p>
+  </main>
+
+  <script src="theme.js"></script>
+  <script src="history.js"></script>
+</body>
+</html>

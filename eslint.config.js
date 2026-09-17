@@ -100,6 +100,8 @@ module.exports = [
         // own <script> tag before its own file. A real shared global rather
         // than a missing import.
         applyThemePrefs: 'readonly',
+        siteHue: 'readonly',
+        URLSearchParams: 'readonly',
         // Preloads only.
         require: 'readonly',
         module: 'writable',

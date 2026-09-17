@@ -29,6 +29,33 @@ body[data-translucent="on"] { background: transparent; }
 /* Tab strip                                                         */
 /* ---------------------------------------------------------------- */
 
+/*
+ * One tint, derived from the accent, used everywhere a surface needs to be
+ * something other than another grey.
+ *
+ * The chrome used to be four values of the same neutral - strip, toolbar, tab,
+ * hover - and the result read as a wireframe of a browser rather than as one.
+ * Mixing a few percent of the accent into each surface, and more of it into the
+ * states that mean something (the active tab, a hover, focus), gives the chrome
+ * a colour identity that follows whatever accent the user picked, without
+ * adding a second thing to theme.
+ *
+ * `color-mix` resolves during style recalculation and paints as a flat colour,
+ * so none of this costs a frame - which is the constraint everything in this
+ * file is written to.
+ *
+ * On <body> rather than :root, for the reason written out in theme.css: these
+ * are defined in terms of other custom properties, and the light palette is an
+ * override on <body>. Declared on :root they would be mixed from the dark
+ * palette and stay dark in the light theme.
+ */
+body {
+  --tint-1: color-mix(in srgb, var(--accent) 6%, var(--strip));
+  --tint-2: color-mix(in srgb, var(--accent) 3%, var(--bg-input));
+  --wash: color-mix(in srgb, var(--accent) 13%, transparent);
+  --wash-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
 .tabstrip {
   display: flex;
   align-items: flex-end;
@@ -44,9 +71,15 @@ body[data-translucent="on"] { background: transparent; }
    *
    * `--strip-alpha` is 1 unless set, so the default build paints exactly as
    * before and the mix is a no-op.
+   *
+   * The gradient is the accent-tinted top fading into the strip's own colour.
+   * Both stops carry the alpha, because a translucent strip with an opaque
+   * gradient over it is an opaque strip.
    */
-  background: color-mix(in srgb,
-    var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--tint-1) calc(var(--strip-alpha, 1) * 100%), transparent),
+    color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent));
   /* Empty strip drags the window, because the strip *is* the title bar now. */
   -webkit-app-region: drag;
 
@@ -149,12 +182,38 @@ body[data-platform="linux"] { --caption-right: 146px; }
 /* Inactive tabs are flat against the strip, as in Chrome; only hover and the
    active tab get a surface. Borders on every tab made the strip look like a
    spreadsheet. */
-.tab:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.tab:hover { background: var(--wash-soft); color: var(--text); }
 
+/*
+ * The active tab, and the one place in the strip that is allowed to be loud.
+ *
+ * Three things say "this one", where there used to be one: a surface lifted out
+ * of the strip, a 2px bar in the accent along the edge the tab meets it on, and
+ * a label at full contrast. The bar is what makes the strip readable at a
+ * glance on a window of twenty tabs - a slightly different grey is not.
+ *
+ * `::before` rather than a border, because a border changes the box and would
+ * move the label by 2px when a tab becomes active.
+ */
 .tab.active {
-  background: var(--bg-input);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent) 16%, var(--bg-input)), var(--bg-input));
   color: var(--text);
+  position: relative;
 }
+
+.tab.active::before {
+  content: '';
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  top: 0;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--accent);
+}
+
+.tab.active .tab-title { font-weight: 550; }
 
 body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; }
 
@@ -172,6 +231,44 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   flex: none;
   border-radius: 3px;
   object-fit: contain;
+}
+
+/*
+ * What a tab shows before its favicon arrives, and for the many sites that
+ * never send one: the site's initial on a colour derived from its hostname.
+ *
+ * This is most of what stopped the strip reading as one long grey bar. A
+ * favicon takes a network round trip and is often 404, so a strip of tabs
+ * opened at once was previously twenty identical grey rows for as long as that
+ * took - and permanently, for any site without an icon. The colour comes from
+ * `siteHue` in theme.js, which the history page uses as well, so a site is the
+ * same colour in both.
+ */
+.tab-chip {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+  color: hsl(var(--hue, 220) 70% 74%);
+  background: hsl(var(--hue, 220) 42% 26%);
+}
+
+body[data-theme="light"] .tab-chip,
+body:not([data-theme="dark"]) .tab-chip {
+  color: hsl(var(--hue, 220) 55% 34%);
+  background: hsl(var(--hue, 220) 70% 90%);
+}
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .tab-chip {
+    color: hsl(var(--hue, 220) 70% 74%);
+    background: hsl(var(--hue, 220) 42% 26%);
+  }
 }
 
 /*
@@ -236,8 +333,10 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   gap: 6px;
   height: 44px;
   padding: 0 8px;
-  background: var(--bg-input);
-  border-bottom: 1px solid var(--border);
+  /* The same tint as the strip, a shade further along, so the toolbar reads as
+     the next band of one surface rather than as a different panel. */
+  background: var(--tint-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border));
 }
 
 .nav { display: flex; gap: 0; }
@@ -257,7 +356,9 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
               transform var(--fast) var(--ease);
 }
 
-.icon-btn:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+/* Hover is the accent at low strength, here and on every other control in the
+   chrome. A grey hover on a grey button is the state you have to look for. */
+.icon-btn:hover { background: var(--wash); color: var(--text); }
 /* A press that moves is the cheapest possible confirmation that it registered. */
 .icon-btn:active:not(:disabled) { transform: scale(0.92); }
 .new-tab:active { transform: scale(0.9); }
@@ -294,7 +395,7 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   transition: background-color var(--fast) ease, color var(--fast) ease,
               transform var(--fast) var(--ease);
 }
-.new-tab:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.new-tab:hover { background: var(--wash); color: var(--accent); }
 
 .omnibox {
   display: flex;
@@ -311,7 +412,7 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
               box-shadow var(--fast) ease;
 }
 
-.omnibox:hover { background: color-mix(in srgb, var(--bg) 80%, var(--text) 4%); }
+.omnibox:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); }
 .omnibox:focus-within {
   border-color: var(--accent);
   background: var(--bg);
@@ -360,7 +461,7 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   cursor: default;
 }
 
-.meter:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.meter:hover { background: var(--wash); color: var(--text); }
 body[data-meter="off"] .meter { display: none; }
 body[data-dots="off"] .tier { display: none; }
 
@@ -408,7 +509,10 @@ body[data-dots="off"] .tier { display: none; }
   right: 0;
   bottom: -1px;
   height: 2px;
-  background: var(--accent);
+  /* Brighter at the leading edge, so the line has a direction. One gradient on
+     one 2px element; it is painted once and then only transformed. */
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 55%, transparent), var(--accent));
   transform: scaleX(0);
   transform-origin: left center;
   opacity: 0;
@@ -544,6 +648,37 @@ body[data-layout="left"] .new-tab {
 }
 
 body[data-layout="left"] .strip-filler { flex: 1 1 auto; }
+
+/*
+ * The colour treatment, turned to face the other way.
+ *
+ * The tint fades out over the first couple of hundred pixels rather than over
+ * the whole column: across a 40px strip a top-to-bottom fade is a gradient, and
+ * down an 800px one it is a wash that never resolves into anything.
+ */
+body[data-layout="left"] .tabstrip {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--tint-1) calc(var(--strip-alpha, 1) * 100%), transparent) 0,
+    color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent) 260px);
+}
+
+/* A row in a list is marked down its leading edge, not along its top: that is
+   where the eye tracks a column, and it is what Arc and Zen both do. */
+body[data-layout="left"] .tab.active::before {
+  left: 0;
+  right: auto;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  height: auto;
+  border-radius: 0 2px 2px 0;
+}
+
+body[data-layout="left"] .tab.active {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 18%, var(--bg-input)), var(--bg-input) 60%);
+}
 
 /* ---------------------------------------------------------------- */
 /* Bookmark star                                                     */

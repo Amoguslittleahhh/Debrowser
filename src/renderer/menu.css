@@ -1,0 +1,200 @@
+/*
+ * The app menu.
+ *
+ * Drawn in a window-sized transparent view, so two rules matter more here than
+ * anywhere else in this project: the body must paint nothing, or the menu
+ * becomes a sheet over the whole browser, and every painted pixel must be
+ * inside `.sheet`.
+ *
+ * Palette and motion come from theme.css, as in every other view.
+ */
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  /* Not `var(--bg)`. See above - this page is a hole in the window with a menu
+     floating in it. */
+  background: transparent;
+}
+
+/* Invisible, full-window, and the thing that closes the menu when the user
+   clicks somewhere else. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+}
+
+.sheet {
+  position: fixed;
+  width: 268px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-raised);
+  color: var(--text);
+  /*
+   * The one shadow in this browser's own UI, and it earns its place: the menu
+   * floats over a page it has no other separation from. It costs a blur pass on
+   * a 268px box for the second or two the menu is open, on a view that is
+   * destroyed when it closes - unlike the chrome, which is live for the whole
+   * session and where a shadow would be permanent.
+   */
+  box-shadow: 0 10px 34px -8px rgba(0, 0, 0, 0.55), 0 2px 8px -2px rgba(0, 0, 0, 0.35);
+  animation: menu-in 130ms var(--ease);
+  transform-origin: top right;
+  outline: none;                 /* it holds focus so the keyboard reaches it */
+}
+
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+body.calm .sheet { animation: none; }
+
+/* ---------------------------------------------------------------- */
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--fast) ease, color var(--fast) ease;
+}
+
+/*
+ * Hover is a wash of the accent rather than a grey.
+ *
+ * The same decision as the tab strip's: a chrome tinted from one colour reads
+ * as designed, where an interface whose every state is a lighter grey reads as
+ * unfinished. 14% is enough to see and not enough to fight the label.
+ */
+.item:hover:not(:disabled),
+.item:focus-visible {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  outline: none;
+}
+.item:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.item:disabled { opacity: 0.38; }
+
+.item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The shortcut is a reminder, not a second label, so it recedes. */
+.accel {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.item svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-dim);
+}
+.item:hover:not(:disabled) svg, .item[aria-checked="true"] svg { color: var(--accent); }
+
+/* A checked item says so in its own colour rather than with a tick glyph that
+   would shift every label right by its width. */
+.item[aria-checked="true"] { color: var(--text); }
+.item[aria-checked="true"] .item-label { font-weight: 550; }
+
+.sep {
+  height: 1px;
+  margin: 5px 10px;
+  background: var(--border);
+}
+
+.note {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- */
+/* Zoom row                                                          */
+/* ---------------------------------------------------------------- */
+
+/*
+ * A stepper, not a submenu.
+ *
+ * Zoom was three items behind a chevron, which is four interactions to go from
+ * 100% to 125% and back. Here the current value is visible without opening
+ * anything and each step is one click, which is what the control is for. It is
+ * also the reason this menu is worth drawing ourselves: a platform menu item
+ * cannot hold a control.
+ */
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+}
+
+.zoom-label { flex: 1; color: var(--text); }
+
+.zoom-value {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.step {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: default;
+  transition: background-color var(--fast) ease, border-color var(--fast) ease;
+}
+.step:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.step:focus-visible { outline: none; border-color: var(--accent); }
+.step:disabled { opacity: 0.38; }
+
+/* Reset is a word rather than a third glyph: two symbols and a number is
+   already as much as a row this size can carry. */
+.zoom-reset {
+  flex: none;
+  padding: 0 8px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: default;
+}
+.zoom-reset:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.zoom-reset:disabled { opacity: 0.38; }

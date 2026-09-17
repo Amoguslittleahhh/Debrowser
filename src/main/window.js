@@ -86,6 +86,12 @@ class BrowserShell {
     this.panelOpen = false;
 
     /**
+     * The app menu, while it is open. See openMenu.
+     * @type {Electron.WebContentsView|null}
+     */
+    this.menuView = null;
+
+    /**
      * One reused ImageView showing the outgoing tab's thumbnail while a
      * restored tab loads. See showPlaceholder.
      * @type {Electron.ImageView|null}
@@ -106,7 +112,10 @@ class BrowserShell {
     // or degenerate window for that reason, and `restore`/`show` re-run it so
     // the views are sized again the moment there is something real to size
     // them to.
-    this.window.on('resize', () => this.layout());
+    // A resize with the menu open would leave it anchored to a button that has
+    // moved. Closed rather than re-anchored: the user is dragging a window
+    // edge, not reading a menu.
+    this.window.on('resize', () => { this.closeMenu(); this.layout(); });
     this.window.on('restore', () => this.revive());
     this.window.on('show', () => this.revive());
     this.window.on('maximize', () => this.layout());
@@ -235,6 +244,130 @@ class BrowserShell {
       // restore. The view itself is cheap; the image is not.
       this.placeholderView.setImage(nativeImage.createEmpty());
     } catch { /* view already gone */ }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* The app menu                                                      */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Open the three-dot menu, drawn by us.
+   *
+   * This used to be `Menu.popup()` - the platform's own menu - for a reason
+   * that was true: the chrome is a `WebContentsView` clipped to its 84px strip,
+   * so a dropdown drawn in that renderer stops at the toolbar's bottom edge,
+   * and a menu that cannot overflow its own window is not a menu.
+   *
+   * A second view is the way out of that. It is window-sized and transparent,
+   * so the menu can be drawn anywhere in the window while everything it is not
+   * covering shows through - and the empty part of it is what catches the click
+   * that dismisses the menu, which is what a system popup does with a grab we
+   * cannot take.
+   *
+   * What that buys, and the reason for changing something that worked: the
+   * menu is now ours to style, so it matches the browser instead of matching
+   * Win32; it can hold controls a menu item cannot, like the zoom stepper; and
+   * it themes, animates and rounds with the rest of the chrome. What it costs
+   * is the keyboard navigation and screen-reader behaviour the system menu had
+   * for free - so those are implemented in menu.js rather than lost, which is
+   * the part of this trade that has to be paid rather than assumed.
+   *
+   * Created on open and destroyed on close, like the task manager panel: a menu
+   * that held a renderer while shut would be an embarrassing thing for this
+   * browser to ship.
+   *
+   * @param {{x?: number, y?: number}} anchor - the button's bottom-left corner,
+   *   in window coordinates. The renderer sends it because only it knows where
+   *   the button ended up after the strip laid out.
+   */
+  openMenu(anchor = {}) {
+    if (this.window.isDestroyed()) return;
+    // Toggle: clicking the button with the menu open closes it, as it would
+    // with a system menu, where the click lands on the dismissing grab.
+    if (this.menuView) { this.closeMenu(); return; }
+
+    // The same toggle, for the ordering that actually happens.
+    //
+    // Pressing the button moves focus to the chrome, which blurs the menu view
+    // and closes the menu - *before* the click that follows arrives here. So by
+    // the time the command lands there is no menu to toggle, and the second
+    // press would reopen it: the button would look like it did nothing. A press
+    // this soon after a close is the closing half of a toggle, not a new open.
+    if (Date.now() - this.menuClosedAt < 250) return;
+
+    const x = Number(anchor?.x);
+    const y = Number(anchor?.y);
+    const right = Number(anchor?.right);
+
+    this.menuView = new WebContentsView({
+      webPreferences: {
+        preload: CHROME_PRELOAD,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false,
+        // Without this the view composites its own opaque white first, and the
+        // whole window flashes before the menu paints.
+        transparent: true
+      }
+    });
+    // The view is window-sized; only the menu itself is painted. Anything the
+    // page leaves untouched has to show what is behind it, or this covers the
+    // browser with a grey sheet.
+    try {
+      this.menuView.setBackgroundColor('#00000000');
+    } catch (err) {
+      this.log(`transparent menu unavailable: ${err.message}`);
+    }
+
+    this.window.contentView.addChildView(this.menuView);   // topmost, over the chrome
+    this.layoutMenu();
+
+    const wc = this.menuView.webContents;
+    wc.loadFile(path.join(RENDERER_DIR, 'menu.html'), {
+      query: {
+        x: String(Number.isFinite(x) ? Math.round(x) : 0),
+        y: String(Number.isFinite(y) ? Math.round(y) : 0),
+        // The button's right edge, which is what the menu aligns to. Passed
+        // through rather than derived: only the renderer knows how wide its own
+        // button ended up.
+        right: String(Number.isFinite(right) ? Math.round(right) : 0)
+      }
+      // A menu dismissed before it finished loading cancels its own load. That
+      // is an ordinary thing for a menu and not worth a line in the log.
+    }).catch((err) => { if (this.menuView) this.log(`menu failed to load: ${err.message}`); });
+
+    // Focused so it can take the keyboard, which is how the arrow keys and
+    // Escape reach it at all.
+    wc.once('did-finish-load', () => {
+      if (this.menuView && !wc.isDestroyed()) wc.focus();
+    });
+
+    // Clicking a page or the tab strip moves focus out of this view, and a menu
+    // that stays up after the user has gone somewhere else is a menu they have
+    // to dismiss twice. This is the backstop for the click-away the transparent
+    // backdrop already handles; both funnel into `closeMenu`.
+    wc.on('blur', () => this.closeMenu());
+  }
+
+  /** Take the menu away. Idempotent - every dismissal path ends here. */
+  closeMenu() {
+    if (!this.menuView) return;
+    const view = this.menuView;
+    this.menuView = null;
+    this.menuClosedAt = Date.now();
+    this.menuClosedAt = Date.now();
+    try {
+      this.window.contentView.removeChildView(view);
+      view.webContents.close();
+    } catch { /* already gone */ }
+  }
+
+  layoutMenu() {
+    if (!this.menuView || this.window.isDestroyed()) return;
+    const { width, height } = this.window.getContentBounds();
+    if (width <= 0 || height <= 0) return;
+    this.menuView.setBounds({ x: 0, y: 0, width, height });
   }
 
   /* ---------------------------------------------------------------- */
@@ -457,7 +590,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.panelView]) {
+    for (const view of [this.chromeView, this.panelView, this.menuView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }
@@ -503,6 +636,7 @@ class BrowserShell {
   }
 
   destroy() {
+    this.closeMenu();
     this.togglePanel(false);
     if (!this.window.isDestroyed()) this.window.destroy();
   }

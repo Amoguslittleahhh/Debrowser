@@ -151,6 +151,14 @@ function createTabElement(id) {
   favicon.alt = '';
   favicon.hidden = true;
 
+  // Shown until a favicon arrives, and for good on the many sites that never
+  // send one. Both elements exist for the life of the tab and one of them is
+  // hidden: swapping which element is in the DOM would relayout the strip every
+  // time an icon loaded.
+  const chip = document.createElement('span');
+  chip.className = 'tab-chip';
+  chip.setAttribute('aria-hidden', 'true');
+
   const audio = document.createElement('span');
   audio.className = 'audio-dot';
   audio.textContent = '▶';
@@ -164,7 +172,7 @@ function createTabElement(id) {
   close.textContent = '×';
   close.setAttribute('aria-label', 'Close tab');
 
-  root.append(tier, favicon, title, audio, close);
+  root.append(tier, favicon, chip, title, audio, close);
 
   root.addEventListener('mousedown', (event) => {
     if (event.button === 1) { api.send('close-tab', { id }); return; }
@@ -197,7 +205,7 @@ function createTabElement(id) {
     api.send('close-tab', { id });
   });
 
-  return { root, tier, favicon, title, audio, close, state: {} };
+  return { root, tier, favicon, chip, title, audio, close, state: {} };
 }
 
 /** Write only what changed - the cheapest update is the one we skip. */
@@ -213,7 +221,18 @@ function updateTabElement(node, tab) {
   if (prev.favicon !== tab.favicon) {
     if (tab.favicon) { node.favicon.src = tab.favicon; node.favicon.hidden = false; }
     else node.favicon.hidden = true;
+    node.chip.hidden = Boolean(tab.favicon);
     prev.favicon = tab.favicon;
+  }
+
+  // The chip only changes when the site does, which is far less often than the
+  // URL: a page moving between paths on one host keeps its letter and colour,
+  // and rewriting them on every navigation would be work for no visible change.
+  const host = siteOf(tab.url);
+  if (prev.host !== host) {
+    node.chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+    node.chip.style.setProperty('--hue', String(siteHue(host)));
+    prev.host = host;
   }
 
   if (prev.tier !== tab.tier) {
@@ -235,6 +254,19 @@ function updateTabElement(node, tab) {
   if (prev.audible !== tab.audible) {
     node.audio.hidden = !tab.audible;
     prev.audible = tab.audible;
+  }
+}
+
+/** The site a tab is on, for the fallback chip's letter and colour. */
+function siteOf(url) {
+  try {
+    const parsed = new URL(url);
+    // The browser's own pages are one "site" as far as this is concerned, so
+    // Settings and the new tab page do not each get a colour of their own.
+    if (parsed.protocol === 'debrowser:') return 'debrowser';
+    return parsed.hostname.replace(/^www\./, '') || parsed.protocol;
+  } catch {
+    return '';
   }
 }
 
@@ -339,12 +371,16 @@ el.star.addEventListener('click', async () => {
 });
 el.meter.addEventListener('click', () => api.send('toggle-panel'));
 
-// The menu is drawn by the OS, which cannot see where the button is. Send the
-// button's bottom-left corner so the menu hangs off it the way a menu attached
-// to a control should, rather than appearing wherever the pointer happened to be.
+// The menu is drawn in a view of its own, which cannot see where the button is.
+// Both edges are sent: the menu is eight times the button's width and hangs off
+// its *right* edge, so the left one alone would put it out past the window.
 el.menu.addEventListener('click', () => {
   const box = el.menu.getBoundingClientRect();
-  api.send('open-menu', { x: Math.round(box.left), y: Math.round(box.bottom) });
+  api.send('open-menu', {
+    x: Math.round(box.left),
+    y: Math.round(box.bottom),
+    right: Math.round(box.right)
+  });
 });
 
 el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); });
@@ -376,8 +412,19 @@ window.addEventListener('keydown', (event) => {
       if (res) setStar(Boolean(res.bookmarked));
     }); break;
     case ',': api.send('open-settings'); break;
+    case 'h': api.send('open-history'); break;
+    // Ctrl+Shift+I, the other half of F12. F12 itself needs no modifier and is
+    // handled below.
+    case 'i': if (event.shiftKey) api.send('toggle-devtools'); else return; break;
     default: return;
   }
+  event.preventDefault();
+});
+
+// Unmodified keys, which the loop above deliberately ignores.
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'F12') return;
+  api.send('toggle-devtools');
   event.preventDefault();
 });
 

@@ -1,0 +1,207 @@
+/*
+ * History. Layout, header and rows come from settings.css, which this page
+ * links first; everything below is what a list of visits needs and a list of
+ * settings does not.
+ */
+
+.head-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  justify-content: flex-end;
+  margin-right: 14px;
+}
+
+#q {
+  width: 260px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+#q:focus { border-color: var(--accent); }
+#q:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent); }
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 820px;
+  margin: 14px auto 6px;
+  padding: 0 2px;
+}
+
+.record {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-dim);
+  /* The label is the control's target as well as its name, so it is grown to a
+     comfortable height the same way the settings rows are. */
+  padding: 4px 0;
+  margin: -4px 0;
+}
+.record span { line-height: 18px; }
+
+.count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.list { max-width: 820px; margin: 0 auto 40px; }
+
+#empty { max-width: 820px; margin: 26px auto; }
+
+/*
+ * A date heading every time the day changes.
+ *
+ * Sticky, because the answer to "when did I look at this" is the one thing a
+ * flat list of times cannot give you once it has scrolled past its heading.
+ */
+.day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 16px 2px 7px;
+  background: var(--bg-raised);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/*
+ * A row is a container with two buttons in it, not one button.
+ *
+ * Opening the page and forgetting it are two actions, and a button inside a
+ * button is not valid HTML - the browser reparents it, and the inner one stops
+ * receiving clicks. The row is the hover surface; the buttons inside it are
+ * what the pointer and the keyboard actually land on.
+ */
+.visit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 10px 2px 0;
+  border-radius: 9px;
+  transition: background-color var(--fast) ease;
+}
+.visit:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.visit:has(.open:focus-visible) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  outline: none;
+}
+
+.time {
+  flex: none;
+  /* Wide enough for a 12-hour clock with its AM/PM on one line. At 48px it
+     wrapped, and a two-line timestamp beside a one-line title pushed every row
+     out of alignment with the next. */
+  width: 66px;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The site's letter, on the site's colour.
+ *
+ * No favicon is stored - keeping one per entry would mean thousands of images
+ * on disk for a list nobody looks at most days - so the colour is computed from
+ * the hostname instead, by the same function the tab strip uses. It costs one
+ * hash and no bytes, and it is what makes a long list scannable.
+ */
+.chip {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--hue) 70% 72%);
+  background: hsl(var(--hue) 45% 22%);
+  text-transform: uppercase;
+}
+
+body[data-theme="light"] .chip,
+body:not([data-theme="dark"]) .chip { color: hsl(var(--hue) 55% 32%); background: hsl(var(--hue) 70% 92%); }
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .chip { color: hsl(var(--hue) 70% 72%); background: hsl(var(--hue) 45% 22%); }
+}
+
+.visit-text { flex: 1; min-width: 0; }
+
+.visit-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visit-url {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many times this page has been opened. One visit says nothing worth a
+   badge, so it is only shown from two. */
+.visits {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.forget {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 4px;
+  margin: -4px;
+  box-sizing: content-box;
+  background-clip: content-box;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: default;
+  opacity: 0;
+}
+.visit:hover .forget, .forget:focus-visible { opacity: 1; }
+.forget:hover { background-color: var(--border); color: var(--text); }

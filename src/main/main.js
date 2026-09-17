@@ -21,6 +21,7 @@ const { Prefs, applyPrefs } = require('./prefs');
 const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
+const { History } = require('./history');
 const presence = require('./presence');
 const { DownloadManager } = require('./downloads');
 const { Governor } = require('./governor');
@@ -186,6 +187,11 @@ function main() {
   let credentials = null;
   let bookmarks = null;
   let downloads = null;
+  /** @type {History|null} */
+  let history = null;
+
+  /** The command dispatcher, once `wireCommands` has built it. */
+  let runCommand = () => {};
 
   let publishQueued = false;
   const publish = () => {
@@ -199,10 +205,30 @@ function main() {
     });
   };
 
+  /**
+   * Let the browser's shortcuts through while a page holds the keyboard.
+   *
+   * `before-input-event` is the only hook that sees a keystroke before the page
+   * does. Only keys in the table are taken - everything else, including every
+   * shortcut a web application defines for itself, is left alone.
+   */
+  const bindPageShortcuts = (tab) => {
+    if (!tab.isLive) return;
+    tab.wc.on('before-input-event', (event, input) => {
+      const command = pageShortcut(input);
+      if (!command) return;
+      event.preventDefault();
+      runCommand(command, null);
+    });
+  };
+
   const onTabEvent = (tab, event, payload) => {
     switch (event) {
       case 'realised':
         if (shell) shell.attachTab(tab);
+        // Per realisation, not per tab: a discarded tab comes back with a new
+        // renderer, and the listener died with the old one.
+        bindPageShortcuts(tab);
         break;
       case 'loaded':
         // Fill on load, for passwords only. Payment details are never filled
@@ -214,6 +240,12 @@ function main() {
         break;
       case 'open-tab':
         if (tabs && payload?.url) tabs.create({ url: payload.url, activate: false, realise: false });
+        break;
+      case 'visited':
+        if (history && payload?.url) history.record({ url: payload.url, title: tab.title });
+        break;
+      case 'titled':
+        if (history && payload?.url) history.retitle(payload.url, payload.title);
         break;
       case 'closed':
         if (shell) shell.detachTab(tab);
@@ -294,8 +326,17 @@ function main() {
       governor.start();
     }
 
-    wireCommands({ tabs, shell, governor, prefs, publish, log });
     bookmarks = new Bookmarks(log);
+    // Read live rather than captured, so switching recording off in the history
+    // page stops the very next navigation from being written down.
+    //
+    // Never under a test or a benchmark. Those run against the real profile
+    // directory and visit two dozen fixture pages per run, and writing them
+    // into the user's own history would be this browser filling their records
+    // with its own test suite.
+    history = new History(log, { enabled: () => !OFFLINE_MODE && prefs.get('saveHistory') });
+
+    runCommand = wireCommands({ tabs, shell, governor, prefs, publish, log });
 
     // Downloads are taken over from Chromium rather than added beside it.
     //
@@ -321,7 +362,7 @@ function main() {
       event.preventDefault();
       downloads.start(url);
     });
-    wireRequests({ tabs, shell, credentials, bookmarks, downloads, prefs, log });
+    wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log });
 
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
@@ -376,6 +417,9 @@ function main() {
   app.on('before-quit', () => {
     if (updater) updater.stop();
     if (governor) governor.stop();
+    // Writes are debounced by a few seconds, and quit does not wait for a
+    // timer, so the last few pages visited would be lost on every close.
+    if (history) history.flush();
     if (tabs) tabs.closeAll();
     // The trim helper is a long-lived child process of ours. Nothing else ends
     // it, and it holds an open stdin on a pipe that outlives us.
@@ -396,10 +440,16 @@ function main() {
 /* Commands from the browser chrome                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Wire the command channel, and hand back the dispatcher behind it.
+ *
+ * Returned rather than kept private because two things issue commands now: the
+ * browser's own renderers, over IPC, and the keyboard, which a *page* owns
+ * while it has focus. Both must mean the same thing by 'new-tab', so there is
+ * one switch and two ways in rather than a second copy for shortcuts.
+ */
 function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
-  ipcMain.on('debrowser:command', (event, command, payload) => {
-    if (!senderMayCommand(tabs, shell, event.sender)) return;
-
+  const runCommand = (command, payload) => {
     const active = tabs.activeTab();
 
     switch (command) {
@@ -480,18 +530,44 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
         publish();
         break;
 
+      // The menu is ours, drawn in a view of our own. See BrowserShell#openMenu
+      // for why it is a separate view rather than part of the chrome, and why
+      // it is no longer the system's popup.
       case 'open-menu':
-        // A native popup rather than an HTML dropdown, because the chrome view
-        // is clipped to its 84px strip: anything drawn in that renderer stops
-        // at the toolbar's bottom edge, and a menu that cannot overflow its own
-        // window is not a menu. The system one also gets keyboard navigation,
-        // screen-reader support and correct edge-flipping for free.
-        openAppMenu({ tabs, shell, prefs, payload, publish });
+        shell.openMenu(payload);
+        break;
+
+      case 'close-menu':
+        shell.closeMenu();
         break;
 
       case 'open-settings':
         openInternalPage(tabs, pages.SETTINGS_URL);
         publish();
+        break;
+
+      case 'open-history':
+        openInternalPage(tabs, pages.HISTORY_URL);
+        publish();
+        break;
+
+      case 'zoom':
+        if (payload?.direction === 'reset') {
+          if (active?.isLive) active.wc.setZoomFactor(1);
+        } else {
+          stepZoom(active, payload?.direction === 'out' ? -1 : +1);
+        }
+        break;
+
+      case 'print':
+        // Chromium's own print dialog. It fails on a page that cannot be
+        // printed rather than throwing into this handler, which would take the
+        // rest of the command switch with it.
+        if (active?.isLive) active.wc.print({}, () => {});
+        break;
+
+      case 'toggle-devtools':
+        toggleDevTools(active, log);
         break;
 
       case 'set-pref': {
@@ -534,7 +610,50 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
     }
 
     publish();
+  };
+
+  ipcMain.on('debrowser:command', (event, command, payload) => {
+    if (!senderMayCommand(tabs, shell, event.sender)) return;
+    runCommand(command, payload ?? null);
   });
+
+  return runCommand;
+}
+
+/**
+ * Keys a page must not keep to itself.
+ *
+ * A web page has the keyboard while it is focused, so every shortcut bound in
+ * the chrome renderer - which is a different renderer - stopped working the
+ * moment the user clicked into the page. That is most of the time. Chromium
+ * does not bind these itself either: they are the *browser's* shortcuts, and
+ * this browser has no application menu for Electron to take them from, so
+ * without this table F12 does nothing on the one surface it is for.
+ *
+ * Kept to commands that need no reply. Ctrl+L belongs on this list and is not
+ * on it, because focusing the address bar means moving focus into another view
+ * and telling it to select its field - a channel that does not exist yet, and
+ * inventing one here would be the wrong place to put it.
+ */
+function pageShortcut(input) {
+  if (input.type !== 'keyDown') return null;
+  const mod = process.platform === 'darwin' ? input.meta : input.control;
+  const key = String(input.key || '').toLowerCase();
+
+  if (key === 'f12') return 'toggle-devtools';
+  if (mod && input.shift && key === 'i') return 'toggle-devtools';
+  if (!mod || input.shift || input.alt) return null;
+
+  switch (key) {
+    case 't': return 'new-tab';
+    case 'w': return 'close-tab';
+    case 'r': return 'reload';
+    case 'm': return 'toggle-panel';
+    case 'h': return 'open-history';
+    case 'p': return 'print';
+    case ',': return 'open-settings';
+    default: return null;
+  }
 }
 
 /**
@@ -595,17 +714,70 @@ function senderMayCommand(tabs, shell, sender) {
  * can read on disk - and the star in the toolbar has to be able to ask whether
  * the page in front of it is already saved.
  */
-const CHROME_REQUESTS = new Set(['list-bookmarks', 'toggle-bookmark', 'remove-bookmark']);
+const CHROME_REQUESTS = new Set([
+  'list-bookmarks', 'toggle-bookmark', 'remove-bookmark',
+  // The menu draws itself from this. It is a request rather than part of the
+  // state broadcast because the menu is open for a second or two and the
+  // broadcast reaches three views twice a second - sending a menu's worth of
+  // labels to the tab strip forever, so that a dropdown can be current for the
+  // moment it exists, is the wrong way round.
+  'menu-model'
+]);
 
-function wireRequests({ tabs, shell, credentials, bookmarks, downloads, prefs, log }) {
+/**
+ * What the history page may ask for - its own list, and nothing else.
+ *
+ * It is one of our own pages, so without this it would inherit the Settings
+ * surface, credentials included. A page that lists URLs has no business being
+ * able to read a password store, and the list is short enough to enumerate.
+ */
+const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-history', 'set-pref']);
+
+function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
-    if (sender !== 'settings' && !(sender === 'chrome' && CHROME_REQUESTS.has(command))) {
-      return null;
-    }
+    const allowed =
+      sender === 'settings' ||
+      (sender === 'chrome' && CHROME_REQUESTS.has(command)) ||
+      (sender === 'history' && HISTORY_REQUESTS.has(command));
+    if (!allowed) return null;
 
     switch (command) {
+      // Preferences ride along because the menu view is created on open and
+      // destroyed on close: it never receives the state broadcast that carries
+      // them to the other views, and a menu that ignored the chosen theme for
+      // the life of its two seconds would be the most visible thing in the
+      // browser that did.
+      case 'menu-model':
+        return { items: menuModel({ tabs, shell }), prefs: prefs.all() };
+
+      // Newest first, filtered by the page's search box. Filtered here rather
+      // than in the renderer: ten thousand entries is a list worth not copying
+      // into another process on every keystroke.
+      case 'list-history':
+        return {
+          items: history ? history.search(payload?.query, payload?.limit) : [],
+          total: history ? history.all().length : 0,
+          recording: prefs.get('saveHistory')
+        };
+
+      case 'delete-history':
+        return { removed: Boolean(history && history.remove(String(payload?.id ?? ''))) };
+
+      case 'clear-history':
+        return { removed: history ? history.clear() : 0 };
+
+      // The history page's own recording switch, and only that one. Every other
+      // preference goes through the command channel in `wireCommands`, which
+      // re-applies the ones that change the window or the governor; this one
+      // changes neither, and it belongs beside the list it governs, which is
+      // where someone turning it off is looking.
+      case 'set-pref': {
+        if (sender !== 'history' || payload?.key !== 'saveHistory') return null;
+        return { ok: prefs.set('saveHistory', payload?.value) };
+      }
+
       case 'list-downloads':
         return { items: downloads ? downloads.list() : [] };
 
@@ -896,57 +1068,82 @@ function stepZoom(tab, direction) {
   tab.wc.setZoomFactor(ZOOM_FACTORS[index]);
 }
 
+/** How a shortcut is spelled in the menu on this platform. */
+const MOD = process.platform === 'darwin' ? '\u2318' : 'Ctrl';
+
 /**
- * Build and pop the menu fresh on every open.
+ * What the menu contains, as data.
  *
- * Rebuilding rather than caching because half the items depend on the state at
- * the moment the user clicked - whether the page can go back, what the zoom is,
- * whether the task manager is already showing.
+ * Built fresh on every open, because half of it depends on the state at the
+ * moment the user clicked - what the zoom is, whether the task manager is
+ * already showing, whether this page has developer tools open.
+ *
+ * Data rather than an Electron menu template, because the menu is drawn by a
+ * renderer of ours now and this has to cross IPC. Each item's `id` is the
+ * command the renderer sends back, which is what keeps the two halves from
+ * drifting: there is no second list saying what a label means.
  */
-function appMenuTemplate({ tabs, shell, prefs, publish = () => {} }) {
+function menuModel({ tabs, shell }) {
   const active = tabs.activeTab();
   const zoom = active?.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100;
+  const live = Boolean(active?.isLive);
 
   return [
-    { label: 'New tab', accelerator: 'CmdOrCtrl+T', click: () => { tabs.create({ url: newTabUrl(prefs) }); publish(); } },
-    { type: 'separator' },
+    { id: 'new-tab', label: 'New tab', accel: `${MOD}+T`, icon: 'plus' },
+    { kind: 'separator' },
+    { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live },
+    { id: 'print', label: 'Print\u2026', accel: `${MOD}+P`, icon: 'print', enabled: live },
+    { kind: 'separator' },
+    { id: 'open-history', label: 'History', accel: `${MOD}+H`, icon: 'clock' },
     {
-      label: 'Zoom',
-      submenu: [
-        { label: `${zoom}%`, enabled: false },
-        { type: 'separator' },
-        { label: 'Zoom in', accelerator: 'CmdOrCtrl+Plus', click: () => stepZoom(active, +1) },
-        { label: 'Zoom out', accelerator: 'CmdOrCtrl+-', click: () => stepZoom(active, -1) },
-        { label: 'Reset zoom', accelerator: 'CmdOrCtrl+0', click: () => active?.isLive && active.wc.setZoomFactor(1) }
-      ]
-    },
-    { label: 'Print…', accelerator: 'CmdOrCtrl+P', click: () => active?.isLive && active.wc.print() },
-    { type: 'separator' },
-    {
+      id: 'toggle-panel',
       label: 'Task manager',
-      accelerator: 'CmdOrCtrl+M',
-      type: 'checkbox',
-      checked: shell.panelOpen,
-      click: () => { shell.togglePanel(); publish(); }
+      accel: `${MOD}+M`,
+      icon: 'gauge',
+      kind: 'checkbox',
+      checked: shell.panelOpen
     },
-    { label: 'Settings', click: () => { openInternalPage(tabs, pages.SETTINGS_URL); publish(); } },
-    { type: 'separator' },
-    { label: `Debrowser ${app.getVersion()}`, enabled: false }
+    {
+      id: 'toggle-devtools',
+      label: 'Developer tools',
+      accel: 'F12',
+      icon: 'code',
+      kind: 'checkbox',
+      checked: Boolean(live && active.wc.isDevToolsOpened()),
+      enabled: live
+    },
+    { id: 'open-settings', label: 'Settings', accel: `${MOD}+,`, icon: 'gear' },
+    { kind: 'separator' },
+    { kind: 'note', label: `Debrowser ${app.getVersion()}` }
   ];
 }
 
-function openAppMenu({ tabs, shell, prefs, payload, publish }) {
-  const menu = Menu.buildFromTemplate(appMenuTemplate({ tabs, shell, prefs, publish }));
-
-  // Anchored under the button that opened it, as a menu attached to a control
-  // should be. The renderer sends its own coordinates because only it knows
-  // where the button ended up after the strip laid out.
-  const x = Number(payload?.x);
-  const y = Number(payload?.y);
-  menu.popup({
-    window: shell.window,
-    ...(Number.isFinite(x) && Number.isFinite(y) ? { x: Math.round(x), y: Math.round(y) } : {})
-  });
+/**
+ * Chromium's own developer tools, on the page in front of the user.
+ *
+ * The full suite - Elements, Console, Network, Performance, Sources - because
+ * it is already in the engine this browser is built on. Shipping a hand-made
+ * inspector beside it would be strictly worse at every one of those jobs.
+ *
+ * Detached rather than docked, deliberately. A docked panel would be a fourth
+ * kind of view sharing the content rectangle, and `setDevToolsWebContents`
+ * binds it to one renderer - so every tab switch, and every discard, would have
+ * to tear it down and build it again. A separate window is also the one the
+ * user can drag to another monitor, and it costs nothing while it is closed.
+ */
+function toggleDevTools(tab, log = () => {}) {
+  if (!tab?.isLive) return false;
+  try {
+    if (tab.wc.isDevToolsOpened()) {
+      tab.wc.closeDevTools();
+      return false;
+    }
+    tab.wc.openDevTools({ mode: 'detach', activate: true });
+    return true;
+  } catch (err) {
+    log(`devtools failed for tab ${tab.id}: ${err.message}`);
+    return false;
+  }
 }
 
 /**
@@ -980,7 +1177,7 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
 
 function runSmokeTest({ tabs, governor, shell, prefs }) {
   const { runSmoke } = require('./smoke');
-  runSmoke({ tabs, governor, shell, app, cfg, prefs, appMenuTemplate, openInternalPage,
+  runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage,
             senderPage: (t, sender) => senderPage(t, shell, sender) }).then((code) => {
     app.exit(code);
   }).catch((err) => {
@@ -989,4 +1186,4 @@ function runSmokeTest({ tabs, governor, shell, prefs }) {
   });
 }
 
-module.exports = { normaliseUrl, appMenuTemplate, openInternalPage, senderPage };
+module.exports = { normaliseUrl, menuModel, openInternalPage, senderPage };

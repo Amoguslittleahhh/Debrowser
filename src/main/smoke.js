@@ -66,7 +66,8 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
   return false;
 }
 
-async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, openInternalPage, senderPage }) {
+async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
+                          openInternalPage, senderPage }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -755,16 +756,141 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
 
   tabs.close(spinner.id);
 
-  // The three-dot menu is built fresh on every open from live state, and it is
-  // the one part of the chrome that is not a web page - a throw here would take
-  // the click with it and leave a button that does nothing.
-  const template = appMenuTemplate({ tabs, shell, prefs });
-  const menuBuilt = require('electron').Menu.buildFromTemplate(template);
-  const labels = template.map((item) => item.label).filter(Boolean);
-  check('the menu builds from live state and offers what it claims to',
-    Boolean(menuBuilt) && labels.includes('New tab') && labels.includes('Settings') &&
-    labels.includes('Task manager'),
-    labels.join(' / '));
+  // The menu is built fresh on every open from live state. It is drawn by a
+  // renderer of ours now rather than by the platform, so what has to hold is
+  // that the model is complete and serialisable: every item the renderer can
+  // act on carries an `id`, and anything that cannot survive IPC - a function,
+  // as the old Electron template's `click` handlers were - would be silently
+  // dropped on the way across and leave a row that does nothing.
+  const model = menuModel({ tabs, shell });
+  const labels = model.map((item) => item.label).filter(Boolean);
+  const ids = model.filter((item) => item.id).map((item) => item.id);
+  const survivesIpc = JSON.stringify(model) === JSON.stringify(JSON.parse(JSON.stringify(model)));
+  check('the menu model is built from live state, and all of it survives IPC',
+    survivesIpc && labels.includes('New tab') && labels.includes('Settings') &&
+    labels.includes('Task manager') && labels.includes('History') &&
+    labels.includes('Developer tools') &&
+    model.some((item) => item.kind === 'zoom' && typeof item.value === 'number'),
+    `${ids.length} commands: ${ids.join(' / ')}`);
+
+  // Every command the menu can send has to be one the bridge will carry. A typo
+  // here is invisible until someone clicks the item, at which point the preload
+  // drops it with a console warning nobody is reading.
+  //
+  // Read out of the preload's source rather than imported from it. A sandboxed
+  // preload may only require `electron` and Node's own builtins, so the
+  // allowlist cannot live in a module both sides share - and a second copy of
+  // it here to compare against would be the drift this check is looking for.
+  const preloadSource = fs.readFileSync(
+    require('path').join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
+  const unknown = ids.filter((id) => !preloadSource.includes(`'${id}'`));
+  check('every item in the menu names a command the bridge allows',
+    unknown.length === 0,
+    unknown.length ? `not allowed: ${unknown.join(', ')}` : `${ids.length} checked`);
+
+  // The menu view itself: created on open, on top of everything, and gone
+  // afterwards. The last of those is the one worth a test - the menu is a
+  // renderer, and a browser that leaves one running behind a closed dropdown
+  // would be spending a process on nothing, which is the thing this project
+  // exists to avoid.
+  {
+    shell.openMenu({ x: 100, y: 84, right: 132 });
+    const view = shell.menuView;
+    const children = shell.window.contentView.children;
+    const onTop = Boolean(view) && children[children.length - 1] === view;
+    const covers = Boolean(view) &&
+      view.getBounds().width === shell.window.getContentBounds().width;
+    const wc = view && view.webContents;
+
+    shell.closeMenu();
+    // `webContents.close()` is a graceful close, so the renderer is still there
+    // for a moment afterwards. Waited for rather than read straight back: the
+    // question is whether it goes away, not whether it goes away synchronously.
+    const released = await waitFor(() => !wc || wc.isDestroyed(), { timeoutMs: 5000 });
+    const gone = shell.menuView === null && released;
+    check('the menu is drawn over the whole window and its renderer is destroyed on close',
+      onTop && covers && gone,
+      `on top: ${onTop}, window-sized: ${covers}, renderer released: ${gone}`);
+  }
+
+  /* ---------------------------------------------------------------- */
+  // History: what was visited, and what deliberately was not.
+  //
+  // The browser's own pages are excluded by the store's scheme list rather than
+  // by a caller remembering to skip them, which is the part worth asserting -
+  // a history full of "New tab" is the failure mode, and it would be invisible
+  // until someone opened the page.
+  {
+    const { History } = require('./history');
+    const dir = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'debrowser-hist-'));
+    let recording = true;
+    const hist = new History(() => {}, { dir, enabled: () => recording });
+
+    hist.record({ url: 'https://example.test/one', title: 'One' });
+    hist.record({ url: 'https://example.test/two', title: 'Two' });
+    hist.record({ url: 'https://example.test/one', title: 'One again' });
+    const internal = hist.record({ url: 'debrowser://settings', title: 'Settings' });
+    const script = hist.record({ url: 'javascript:alert(1)', title: 'no' });
+
+    const one = hist.all().find((e) => e.url === 'https://example.test/one');
+    check('a revisit updates one entry rather than adding another',
+      hist.all().length === 2 && one.visits === 2 && one.title === 'One again' &&
+      hist.all()[0].url === 'https://example.test/one',
+      `${hist.all().length} entries, /one visited ${one.visits}x, newest first`);
+
+    check('the browser\'s own pages and script URLs are never written to history',
+      internal === null && script === null, 'both refused');
+
+    check('history is searchable by title and by address',
+      hist.search('two').length === 1 && hist.search('example.test').length === 2 &&
+      hist.search('nothing-like-this').length === 0,
+      `title=${hist.search('two').length} host=${hist.search('example.test').length}`);
+
+    recording = false;
+    const whileOff = hist.record({ url: 'https://example.test/three', title: 'Three' });
+    recording = true;
+    check('recording can be switched off, and stops the very next visit',
+      whileOff === null && hist.all().length === 2, `${hist.all().length} entries still`);
+
+    // Written where it is asked to be, and readable back - the store is
+    // debounced, so a browser that only ever flushed on a timer would lose
+    // everything visited in the last few seconds before a quit.
+    hist.flush();
+    const reread = new History(() => {}, { dir });
+    const cleared = hist.clear();
+    check('history survives a flush and reload, and clearing empties it',
+      reread.all().length === 2 && cleared === 2 && hist.all().length === 0,
+      `reloaded ${reread.all().length}, cleared ${cleared}`);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  /* ---------------------------------------------------------------- */
+  // Developer tools, and the one thing they must do to the governor.
+  //
+  // A tab being inspected has to stay live: freezing it stops the task queues
+  // the inspector is driving, and discarding it throws away the session. The
+  // floor is asserted directly rather than by waiting out the idle ladder,
+  // which would add ten seconds to the suite to observe the same rule.
+  {
+    const target = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true });
+    await waitFor(() => target.isLive && !target.loading, { timeoutMs: 10_000 });
+
+    const opened = toggleDevTools(target);
+    const seen = await waitFor(() => target.devToolsOpen, { timeoutMs: 5000 });
+    const floor = governor.clampToProtections(target, Tier.DISCARDED);
+    toggleDevTools(target);
+    const closed = await waitFor(() => !target.devToolsOpen, { timeoutMs: 5000 });
+    const floorAfter = governor.clampToProtections(target, Tier.DISCARDED);
+
+    check('developer tools open on the page, and close again',
+      opened === true && seen && closed, `opened=${seen} closed=${closed}`);
+    check('a tab under the inspector is not frozen or discarded',
+      floor === Tier.WARM && floorAfter === Tier.DISCARDED,
+      `with tools: ${floor}, without: ${floorAfter}`);
+
+    tabs.close(target.id);
+  }
 
   // Updates must never run under a test: a background download competing with
   // the governor would make the memory numbers depend on whether a release

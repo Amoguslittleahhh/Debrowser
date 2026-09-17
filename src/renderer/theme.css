@@ -23,11 +23,24 @@
   --warn: #e0a33e;
   --crit: #e2564a;
   --radius: 7px;
-
-  /* The tab strip's own colour. Falls back to the window background unless a
-     choice has been set on <body> by theme.js. */
-  --strip: var(--bg);
 }
+
+/*
+ * Anything defined in terms of another custom property belongs on <body>, not
+ * on :root, and this is not a detail.
+ *
+ * `var()` inside a custom property is substituted where the property is
+ * *declared*, not where it is used. Both palette overrides below are on <body>,
+ * so a `--strip: var(--bg)` declared on :root computes against the root's
+ * value - the dark one - and inherits that down even when the light palette is
+ * in force. The tab strip was painted dark in the light theme for exactly that
+ * reason, on every view that draws one. Declared here, it resolves against the
+ * palette that actually applies.
+ *
+ * An explicit strip colour set in Settings is written to `body.style` by
+ * theme.js, which is an inline declaration and outranks this.
+ */
+body { --strip: var(--bg); }
 
 /*
  * Motion, in one place.

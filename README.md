@@ -143,7 +143,12 @@ above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 ### Keyboard
 
 `Ctrl/Cmd+T` new tab · `+W` close · `+R` reload · `+L` address bar ·
-`+M` task manager
+`+D` bookmark · `+H` history · `+M` task manager · `+,` settings ·
+`F12` or `Ctrl+Shift+I` developer tools
+
+All of these work while a page has the keyboard, not only while the chrome
+does — `+L` is the exception, and the one place that is written down is
+`pageShortcut` in `main.js`, which says why.
 
 ---
 
@@ -170,6 +175,7 @@ Against that sit the protections, which always win:
 - A tab holding text you typed is never discarded — it is frozen, and its
   cold pages compressed, instead.
 - A tab you left moments ago is never discarded, at any pressure.
+- A tab with developer tools open is never frozen or discarded.
 - A tab already near its floor is left alone entirely.
 
 ### Animation-aware boosting
@@ -519,6 +525,20 @@ tried, measured and removed — live on the `claude/research-build` branch.
   how many tabs hold a renderer, never how many can be open: past the cap the
   least-recently-used tab is discarded, and returning to it reloads the page
   behind a picture of how you left it. `--max-live-tabs=0` turns it off.
+- **History is plain JSON in your profile directory, not a secret store.** It is
+  the one record here that is deliberately readable: encrypting a list of the
+  pages you visited would hide it from you and from nobody else, since anything
+  that can read the file can also reach the key. It keeps one row per page
+  rather than one per visit — with a counter and the last time — so it stays
+  proportional to the number of distinct pages seen, and it is capped at ten
+  thousand of them. `debrowser://history` searches it, forgets single entries,
+  clears all of it, and has the switch that stops it recording; turning that off
+  leaves what is already stored alone, because not adding to a record and
+  deleting one are different decisions.
+- Developer tools are Chromium's own, opened detached. The tab being inspected
+  is held at `WARM` for as long as they are open — never frozen, never
+  discarded — because freezing a page stops the task queues the inspector is
+  driving. That is one resident renderer for as long as you are debugging.
 - A restored tab is covered by a thumbnail while it reloads. Pages carrying a
   password or payment field are never photographed, the images live in the OS
   temp directory, and they are deleted on close, on quit and again on startup.

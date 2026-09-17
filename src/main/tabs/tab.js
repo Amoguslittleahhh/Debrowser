@@ -193,6 +193,24 @@ class Tab {
     return this.tier === Tier.DISCARDED;
   }
 
+  /**
+   * Whether an inspector is attached to this page.
+   *
+   * Asked of the renderer rather than tracked as a flag here, because DevTools
+   * can be closed from its own window - by its close button, or by the user
+   * closing it as a window - and nothing tells us when that happens. A flag
+   * would go stale in the direction that matters: a tab held out of the reclaim
+   * ladder forever by tools that are no longer open.
+   */
+  get devToolsOpen() {
+    if (!this.isLive) return false;
+    try {
+      return this.wc.isDevToolsOpened();
+    } catch {
+      return false;
+    }
+  }
+
   /** Milliseconds since the user last had this tab in front of them. */
   idleMs(now = Date.now()) {
     return this.visible ? 0 : now - this.lastActiveAt;
@@ -285,6 +303,11 @@ class Tab {
 
     wc.on('page-title-updated', (_e, title) => {
       this.title = title;
+      // Separate from 'updated', which fires for loading, audio and favicon
+      // changes too. The history store answers this one by searching its list
+      // for the URL, and doing that on every state change would be a scan of
+      // ten thousand entries several times per page load.
+      this.emit('titled', { url: this.url, title });
       this.emit('updated');
     });
 
@@ -325,10 +348,15 @@ class Tab {
       // A new document means new load-time garbage, and the previous page's
       // heap estimates no longer describe anything.
       this.resetHeapState();
+      this.emit('visited', { url });
       this.emit('updated');
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
-      if (isMainFrame) { this.url = url; this.emit('updated'); }
+      // Recorded like any other navigation. A single-page application changes
+      // the address bar and the document without a load, and a history that
+      // held only the entry point would have one row for a site the user spent
+      // an hour moving around inside.
+      if (isMainFrame) { this.url = url; this.emit('visited', { url }); this.emit('updated'); }
     });
 
     // Audible tabs are protected from freezing and discarding: silencing a
