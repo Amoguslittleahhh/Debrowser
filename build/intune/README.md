@@ -49,10 +49,24 @@ Nothing else changes. Settings, the browsing session and saved credentials
 still live in each user's own `userData`, so they are per-user, they survive an
 upgrade, and one user cannot read another's.
 
-## The `.intunewin` is built for you
+## Where to get the `.intunewin`
 
-**Download `Debrowser-<version>-win-x64-intune.intunewin` from the release and
-upload it.** There is nothing to build.
+**It is not in the normal releases.** Deploying a browser through Intune is a
+narrow case, and a release aimed at people installing Debrowser on their own
+machine has no reason to carry an artifact none of them can use — the Intune
+installer needs SYSTEM, so a person cannot run it even with admin rights.
+
+It is built on demand by the `Intune package` workflow and published as a
+**pre-release**, tagged like `v1.2.1-intune-only`. Pre-releases are never
+GitHub's "latest", so nobody lands on one by accident.
+
+Keeping it off the release path also keeps the release path independent of
+Microsoft's Win32 Content Prep Tool, which has to be fetched and hash-checked to
+build a bundle at all. On the shared path, an upstream file moving would have
+failed every platform's release over an artifact none of them contain.
+
+**Download `Debrowser-<version>-win-x64-intune.intunewin` from that pre-release
+and upload it.** There is nothing to build.
 
 That file is what Intune deploys. A `.intunewin` is a bundle holding the
 installer encrypted with AES alongside a `Detection.xml` the service reads on

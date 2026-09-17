@@ -1,10 +1,20 @@
 # Build and publish the Intune package on its own, as a pre-release.
 #
-# Separate from `release.yml` because this ships one platform and one artifact
-# rather than all three. That workflow's release gate deliberately refuses to
-# publish unless every platform is present - a release missing a platform is
-# exactly the failure it exists to catch - so an Intune-only build cannot go
-# through it without weakening the check for everybody.
+# On demand, and never as part of a normal release. Deploying a browser through
+# Intune is a narrow case, and a normal release has no reason to carry an
+# artifact almost nobody downloading it can use.
+#
+# The stronger reason is fragility. Packaging a `.intunewin` means fetching
+# Microsoft's Win32 Content Prep Tool and checking it against a pinned hash, so
+# doing that on the release path made shipping the browser to ordinary users
+# depend on a third-party binary staying reachable and unchanged. A moved file
+# or a new upstream release would have failed every platform's release over an
+# artifact none of them contain. That dependency belongs here, where its
+# failure costs only the thing that needs it.
+#
+# It also ships one platform and one artifact rather than all three, and
+# `release.yml`'s gate deliberately refuses to publish unless every platform is
+# present - so this could not go through it without weakening that check.
 #
 # Always a pre-release. The package is experimental and untested against a real
 # tenant (build/intune/README.md), and a pre-release is not GitHub's "latest",

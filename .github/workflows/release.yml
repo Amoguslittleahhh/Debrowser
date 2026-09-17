@@ -43,17 +43,15 @@ jobs:
           # upload-artifact keeps the least common ancestor of the paths it is
           # given. List only `dist/...` and that ancestor is `dist/`, so the
           # files arrive flat; add one path outside it - `dist-intune/*.exe`
-          # did exactly this - and the ancestor becomes the workspace root, so
-          # the whole leg arrives nested a directory deeper than the other two.
-          # The release job's `files: artifacts/*` is not recursive, so it then
-          # matched two directories, skipped them, and published a release with
-          # no Windows build in it at all. The Intune installer is copied into
-          # `dist/` below rather than uploaded from where it is built.
+          # once did exactly this - and the ancestor becomes the workspace root,
+          # so the whole leg arrives nested a directory deeper than the other
+          # two. The release job's `files: artifacts/*` is not recursive, so it
+          # then matched two directories, skipped them, and published a release
+          # with no Windows build in it at all.
           - os: windows-latest
             platform: --win
             artifacts: |
               dist/*.exe
-              dist/*.intunewin
               dist/*.blockmap
               dist/latest.yml
           - os: macos-latest
@@ -192,23 +190,6 @@ jobs:
         if: ${{ !(matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true') }}
         run: npx electron-builder ${{ matrix.platform }} --publish never
 
-      # The Intune variant: the same browser, per-machine and silent.
-      #
-      # A second pass rather than a second target, because both differences are
-      # nsis settings and electron-builder takes one nsis block per build. It
-      # writes to its own output directory so it cannot overwrite latest.yml -
-      # that manifest describes the *updatable* build, and a machine-wide
-      # install does not update itself.
-      #
-      # Experimental and untestable here: see build/intune/README.md.
-      - name: Package the Intune variant
-        if: matrix.os == 'windows-latest'
-        env:
-          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run dist:intune
-
       # Azure Trusted Signing. Windows only, and only when its secrets exist.
       # The endpoint/account/profile are not secret, but they are deployment
       # detail rather than source, so they are variables rather than literals.
@@ -223,45 +204,6 @@ jobs:
           -c.win.azureSignOptions.endpoint=${{ vars.AZURE_SIGN_ENDPOINT }}
           -c.win.azureSignOptions.codeSigningAccountName=${{ vars.AZURE_SIGN_ACCOUNT }}
           -c.win.azureSignOptions.certificateProfileName=${{ vars.AZURE_SIGN_PROFILE }}
-
-      # Collect the Intune installer into `dist/` for upload.
-      #
-      # It is *built* in its own directory so that its run of electron-builder
-      # cannot overwrite `dist/latest.yml` - that manifest describes the
-      # updatable build, and a machine-wide install does not update itself. That
-      # reason applies to building it, not to shipping it, and the matrix note
-      # above is why it cannot be uploaded from where it is built.
-      #
-      # Only the installer moves. Any blockmap beside it is deliberately left
-      # behind: it exists to serve differential updates, which this variant does
-      # not do, and uploading one would advertise an update path that is off.
-      # Copied after both packaging steps so neither can clean it away, and
-      # before the signature report so it is checked like any other installer.
-      - name: Collect the Intune installer
-        id: intune
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = @(Get-ChildItem dist-intune/*.exe -ErrorAction SilentlyContinue)
-          if ($exe.Count -ne 1) { throw "expected exactly one installer in dist-intune/, found $($exe.Count)" }
-          Copy-Item $exe[0].FullName dist/ -Force
-          "collected $($exe[0].Name)"
-          # Emitted rather than reconstructed from the version: the name is
-          # electron-builder's to choose, and a guess at it is a build that
-          # fails the first time an artifact naming rule changes.
-          "exe=dist/$($exe[0].Name)" >> $env:GITHUB_OUTPUT
-
-      # An .exe is not deployable to Intune. A Win32 app is a `.intunewin`, and
-      # only Microsoft's tool produces one - see the action for why it is not
-      # reimplemented. The .exe ships too, because the .intunewin's payload is
-      # encrypted and so cannot be installed or inspected by hand to test it.
-      - name: Package for Intune (.intunewin)
-        if: matrix.os == 'windows-latest'
-        uses: ./.github/actions/intunewin
-        with:
-          installer: ${{ steps.intune.outputs.exe }}
-          out: dist
 
       # Says plainly whether what is about to be uploaded is signed. A release
       # that is silently unsigned because a secret expired is the failure this
@@ -329,25 +271,7 @@ jobs:
             [ "$n" -gt 0 ] || { echo "::error::no $want in artifacts/"; fail=1; }
           done
 
-          # The Intune variant is named distinctly and is easy to lose on its
-          # own, since it is the one file that is not built into dist/. Both
-          # halves are required: the .intunewin is the only thing deployable to
-          # Intune, and the .exe is the only way to test the payload by hand,
-          # because the one inside the .intunewin is encrypted.
-          for want in '*intune*.exe' '*.intunewin'; do
-            find artifacts/ -maxdepth 1 -type f -name "$want" | grep -q . \
-              || { echo "::error::no $want in artifacts/"; fail=1; }
-          done
-
           exit $fail
-
-      # Opens the Intune bundle the way a device would, before anyone can
-      # download it. Its payload is encrypted, so no amount of looking at the
-      # file tells you the installer is inside: the check above confirms a
-      # `.intunewin` is present and plausibly sized, and this one confirms it
-      # is not a well-named box of nothing.
-      - name: Verify the Intune bundle
-        run: python3 tools/verify-intunewin.py artifacts/*.intunewin
 
       # The release page describes the release it is on, and nothing else.
       #
