@@ -82,6 +82,28 @@ whole folder, so pointing it at a build directory wraps every other installer
 in there — including the per-user build, which must never reach a device this
 way.
 
+### It will not build on Linux, and it is not worth trying again
+
+`IntuneWinAppUtil.exe` is a managed .NET assembly rather than native code, so
+running it under Mono is ordinary use and very nearly works. It does not finish:
+
+```
+mono IntuneWinAppUtil.exe -c payload -s setup.exe -o out -q
+  INFO  Compressing the source folder 'payload' to '…/IntunePackage.intunewin'
+  System.NullReferenceException
+    at …ZipUtil.CreateFromDirectory (…System.IO.Packaging.CompressionOption…)
+```
+
+The tool zips through `System.IO.Packaging`, from `WindowsBase`. Mono ships that
+assembly — without it the run dies earlier, on a `TypeLoadException` — but its
+implementation is incomplete, and the packaging call returns null. What lands in
+the output folder is a `.intunewin` of **zero bytes**, which is the failure worth
+knowing about: the file appears, with the right name, and is empty.
+
+Getting past that would mean decompiling or patching the tool. Microsoft's
+licence prohibits both (§4a, §4b), so the bundle is built on a Windows runner in
+CI and that is the only supported route. `.github/actions/intunewin` does it.
+
 ## App settings in Intune
 
 **Install command**
