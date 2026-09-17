@@ -44,6 +44,16 @@ function applyThemePrefs(prefs) {
     else body.style.removeProperty('--strip');
   }
 
+  // Translucency applies to the strip, not the window. See chrome.css; the
+  // short version is that fading the whole window fades the page text with it.
+  // `data-translucent` is separate from the number because the body only drops
+  // its own background while there is actually something to see through to.
+  const alpha = typeof prefs.windowOpacity === 'number' ? prefs.windowOpacity : 1;
+  if (body.style.getPropertyValue('--strip-alpha') !== String(alpha)) {
+    body.style.setProperty('--strip-alpha', String(alpha));
+  }
+  body.dataset.translucent = alpha < 1 ? 'on' : 'off';
+
   // Motion is opt-out in the OS and opt-out here; `still` is also set while a
   // page is off screen, because a throttled animation finishes in front of the
   // user instead of before them.

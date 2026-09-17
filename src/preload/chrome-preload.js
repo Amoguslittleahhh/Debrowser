@@ -38,6 +38,15 @@ const COMMANDS = new Set([
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {
+  /**
+   * Which OS this is, so the chrome can reserve the right gutter for the
+   * system's window buttons.
+   *
+   * Reading it here rather than inferring it from the user agent, and exposing
+   * the string only - nothing about `process` itself crosses the bridge.
+   */
+  platform: process.platform,
+
   /** Fire a UI command. Unknown commands are dropped here, not in main. */
   send(command, payload) {
     if (!COMMANDS.has(command)) {

@@ -378,6 +378,16 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
 
       case 'close-tab':
         tabs.close(payload?.id ?? tabs.activeId);
+        // Closing the last tab closes the browser, the way every other browser
+        // behaves. An empty window with a tab strip holding nothing is a state
+        // with no way forward except opening a tab or closing the window, so
+        // offering it is offering a dead end.
+        //
+        // The window is closed rather than the app quit directly: the
+        // `window-all-closed` handler already owns quitting, and `before-quit`
+        // does real work - session state is written there - which a quit from
+        // here would be racing.
+        if (tabs.all().length === 0) shell.close();
         break;
 
       case 'activate-tab':

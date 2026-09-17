@@ -13,6 +13,11 @@
 
 const api = window.debrowser;
 
+// Tells the stylesheet how much room the system's window buttons need on the
+// right. Set before first paint rather than on load, so the strip is never laid
+// out once without the gutter and then reflowed with it.
+if (api && api.platform) document.body.dataset.platform = api.platform;
+
 /**
  * How long the pointer must rest on a tab before its renderer is rebuilt
  * speculatively. Long enough that sweeping across the strip costs nothing,

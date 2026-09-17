@@ -17,6 +17,14 @@ html, body {
   overflow: hidden;
 }
 
+/*
+ * The chrome's own page is transparent where nothing is painted, so a
+ * translucent strip shows the window's backdrop rather than the body colour
+ * sitting immediately behind it. Only while translucency is asked for: opaque
+ * is the cheaper surface to composite, and it is what the default build gets.
+ */
+body[data-translucent="on"] { background: transparent; }
+
 /* ---------------------------------------------------------------- */
 /* Tab strip                                                         */
 /* ---------------------------------------------------------------- */
@@ -25,7 +33,20 @@ html, body {
   display: flex;
   align-items: flex-end;
   height: 40px;
-  background: var(--strip);
+  /*
+   * Translucency lives here and nowhere else.
+   *
+   * It used to be `window.setOpacity()`, which fades every pixel of the window
+   * including page text - so a translucent browser was an unreadable one, with
+   * whatever sat behind it showing through unblurred. Mica and Acrylic fade
+   * only the backdrop; this matches that by putting the alpha on the one
+   * surface the user asked to see through, and leaving pages fully opaque.
+   *
+   * `--strip-alpha` is 1 unless set, so the default build paints exactly as
+   * before and the mix is a no-op.
+   */
+  background: color-mix(in srgb,
+    var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent);
   /* Empty strip drags the window, because the strip *is* the title bar now. */
   -webkit-app-region: drag;
 
@@ -41,8 +62,38 @@ html, body {
    */
   padding: 6px 0 0;
   padding-left: calc(env(titlebar-area-x, 0px) + 8px);
-  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px);
+  /*
+   * `max()`, because env() alone was not reserving anything here.
+   *
+   * The Window Controls Overlay variables are exposed to a *window's top-level
+   * document*. This chrome is a WebContentsView inside a BaseWindow, so there
+   * is no top-level document for them to attach to and they resolve to their
+   * fallbacks - at which point this calc collapses to 8px and the strip is free
+   * to grow under the buttons. Past roughly eight tabs at 1400px, or four at
+   * 700px, that is exactly what happened: the tabs expanded into the gutter and
+   * carried the + underneath minimise/maximise/close, where it could not be
+   * clicked.
+   *
+   * So the floor below is the mechanism, not the backup, and env() is kept for
+   * the case where a future Electron does attach it - whichever reserves more
+   * wins, which is the safe direction to be wrong in.
+   */
+  padding-right: max(
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px),
+    var(--caption-right, 0px)
+  );
 }
+
+/*
+ * Width of the system's window buttons, reserved at the right of the strip.
+ *
+ * Windows 11 draws three 46px buttons; Linux under `titleBarOverlay` is close
+ * enough that the same figure holds. macOS puts its traffic lights on the
+ * *left*, where `titlebar-area-x` already accounts for them, so the right
+ * gutter there is zero and the padding-left above does the work.
+ */
+body[data-platform="win32"],
+body[data-platform="linux"] { --caption-right: 146px; }
 
 /*
  * Tabs hug their own width instead of filling the strip.

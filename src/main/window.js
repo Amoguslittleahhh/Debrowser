@@ -269,8 +269,21 @@ class BrowserShell {
   applyWindowPrefs() {
     if (!this.prefs || this.window.isDestroyed()) return;
 
+    // Pinned at 1, and set rather than skipped.
+    //
+    // This used to be `setOpacity(windowOpacity)`, which fades the *entire
+    // window* - every pixel of every page, text included. That is not what
+    // translucency means anywhere else: Mica and Acrylic fade and blur the
+    // backdrop while content stays fully opaque. At 0.6 the result was a
+    // browser you could not read, with whatever was behind it showing through
+    // razor sharp because nothing was blurring it either.
+    //
+    // Translucency now lives on the tab strip alone, painted in the chrome's
+    // own CSS. Assigning 1 here rather than leaving the call out matters for
+    // anyone upgrading with a low value already saved: the setting would
+    // otherwise stay applied to the whole window for the life of that install.
     try {
-      this.window.setOpacity(this.prefs.get('windowOpacity'));
+      this.window.setOpacity(1);
     } catch (err) {
       // Linux without a compositing window manager has no opacity to set.
       this.log(`window opacity unavailable: ${err.message}`);
@@ -278,7 +291,31 @@ class BrowserShell {
 
     // Windows 11 only, and only where this build of Electron has the API. A
     // silent no-op elsewhere is correct: the setting simply does not apply.
-    const material = this.prefs.get('backgroundMaterial');
+    //
+    // A translucent strip needs something behind it to show. Where the user has
+    // asked for translucency and not picked a material, acrylic is chosen for
+    // them - the alternative is a setting that visibly does nothing, because
+    // without a material there is only the window's own background colour
+    // behind the chrome and the strip just tints towards it.
+    let material = this.prefs.get('backgroundMaterial');
+    const translucent = this.prefs.get('windowOpacity') < 1;
+    if (material === 'none' && translucent) material = 'acrylic';
+
+    // A translucent strip shows whatever is behind it, and behind it is the
+    // window's own background unless that is cleared too. Both the window and
+    // the chrome's view have to give way, or the alpha in the stylesheet just
+    // blends towards an opaque colour and the setting looks broken.
+    //
+    // Only while translucency is asked for. An opaque surface is cheaper to
+    // composite, and a transparent window on a desktop with no compositor is a
+    // window with artefacts rather than a window with a view.
+    const sheer = translucent ? '#00000000' : '#16181d';
+    try {
+      this.window.setBackgroundColor(sheer);
+      this.chromeView.setBackgroundColor(sheer);
+    } catch (err) {
+      this.log(`transparent chrome unavailable: ${err.message}`);
+    }
     if (typeof this.window.setBackgroundMaterial === 'function') {
       try {
         this.window.setBackgroundMaterial(material);
@@ -405,6 +442,18 @@ class BrowserShell {
     for (const tab of this.tabs.all()) {
       if (tab.internal && tab.isLive) send(tab.view, 'debrowser:state', full);
     }
+  }
+
+  /**
+   * Ask the window to close, the way the title bar's close button does.
+   *
+   * Deliberately `close()` and not `destroy()`: closing emits `close` and then
+   * `window-all-closed`, which is where quitting and the session write are
+   * hung. `destroy()` skips both, so a browser that quit itself would lose the
+   * session a browser the user quit would have kept.
+   */
+  close() {
+    if (!this.window.isDestroyed()) this.window.close();
   }
 
   destroy() {

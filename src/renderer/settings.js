@@ -72,9 +72,11 @@ const SECTIONS = {
     },
     {
       key: 'windowOpacity',
-      label: 'Window translucency',
-      hint: 'Asked of the system compositor, which is already drawing this window, ' +
-            'so it costs essentially nothing. Needs a desktop that composites.',
+      label: 'Tab bar translucency',
+      hint: 'The strip alone, never the page - fading a whole window fades the text on it. ' +
+            'Painted by the system compositor, which is already drawing this window, so it ' +
+            'costs essentially nothing. Turns on a window material to show through to, and ' +
+            'needs a desktop that composites.',
       type: 'range',
       min: 0.6,
       max: 1,
