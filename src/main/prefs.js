@@ -52,6 +52,16 @@ const SCHEMA = {
   windowOpacity: { def: 1, ok: (v) => Number.isFinite(v) && v >= 0.6 && v <= 1 },
 
   /**
+   * Where the tab strip lives.
+   *
+   * 'left' is the Arc/Zen shape: a column down the side, where a tab's title
+   * has room to be read and thirty tabs do not shrink each other to a favicon.
+   * It costs horizontal space, which is why it is not the default - most pages
+   * are laid out for width, and most windows are wider than they are tall.
+   */
+  tabBarPosition: { def: 'top', ok: (v) => v === 'top' || v === 'left' },
+
+  /**
    * Windows 11 only: let the OS paint its own blurred material behind the
    * window. Cheaper than doing it ourselves, because the compositor is already
    * blurring what is behind every other window on the system.

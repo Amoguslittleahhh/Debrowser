@@ -22,6 +22,11 @@ function applyThemePrefs(prefs) {
   const flags = {
     theme: prefs.theme,
     tabs: prefs.tabWidth,
+    // Which way the chrome is laid out. The main process has already given the
+    // view the matching rectangle; this is the stylesheet's half of the same
+    // decision, and the two are read from one preference so they cannot
+    // disagree about which shape the window is.
+    layout: prefs.tabBarPosition === 'left' ? 'left' : 'top',
     meter: prefs.showMemoryMeter ? 'on' : 'off',
     dots: prefs.showTierDots ? 'on' : 'off'
   };

@@ -20,6 +20,20 @@ const { BaseWindow, WebContentsView, ImageView, nativeImage, shell } = require('
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
 
+/** Width of the chrome when it runs down the side instead of across the top. */
+const SIDEBAR_WIDTH = 240;
+
+/**
+ * Height of the band left clear above the content in sidebar mode.
+ *
+ * The system draws minimise/maximise/close at the *window's* top right, and in
+ * sidebar mode the chrome is nowhere near there - so without this band those
+ * buttons would be painted straight over the web page, covering its top-right
+ * corner and making it unclickable. The band is window background, which is
+ * also what gives the buttons something to sit on.
+ */
+const SIDEBAR_TOP_BAND = 40;
+
 /**
  * Hard ceiling on how long a restore placeholder may stay up. Generous enough
  * to cover a slow page, short enough that a page which never paints does not
@@ -324,6 +338,15 @@ class BrowserShell {
       }
     }
 
+    // Moving the strip changes every view's rectangle, not just the chrome's,
+    // so the whole layout is re-asserted. Only when it actually changed: this
+    // runs on every preference write, and re-laying out on a colour change
+    // would resize every live tab for nothing.
+    if (this.laidOutVertical !== this.vertical()) {
+      this.laidOutVertical = this.vertical();
+      this.layout();
+    }
+
     // Keep the system's window buttons legible against whatever the strip is.
     const strip = this.stripColour();
     if (process.platform !== 'darwin' && typeof this.window.setTitleBarOverlay === 'function') {
@@ -343,9 +366,24 @@ class BrowserShell {
 
   /* ---------------------------------------------------------------- */
 
+  /** True when the tab strip runs down the side rather than across the top. */
+  vertical() {
+    return this.prefs ? this.prefs.get('tabBarPosition') === 'left' : false;
+  }
+
   contentBounds() {
     const { width, height } = this.window.getContentBounds();
     const panelWidth = this.panelOpen ? PANEL_WIDTH : 0;
+
+    if (this.vertical()) {
+      return {
+        x: SIDEBAR_WIDTH,
+        y: SIDEBAR_TOP_BAND,
+        width: Math.max(0, width - SIDEBAR_WIDTH - panelWidth),
+        height: Math.max(0, height - SIDEBAR_TOP_BAND)
+      };
+    }
+
     return {
       x: 0,
       y: CHROME_HEIGHT,
@@ -381,7 +419,12 @@ class BrowserShell {
     // transient state to sit out.
     if (width <= 0 || height <= 0) return;
 
-    this.chromeView.setBounds({ x: 0, y: 0, width, height: CHROME_HEIGHT });
+    // One rectangle either way, so sidebar mode costs no extra view and no
+    // extra renderer. Full height on the left, which puts the chrome's own top
+    // corner beside the window buttons rather than under them.
+    this.chromeView.setBounds(this.vertical()
+      ? { x: 0, y: 0, width: SIDEBAR_WIDTH, height }
+      : { x: 0, y: 0, width, height: CHROME_HEIGHT });
 
     const bounds = this.contentBounds();
     for (const tab of this.tabs.all()) {
@@ -391,11 +434,14 @@ class BrowserShell {
     if (this.placeholderView) this.placeholderView.setBounds(bounds);
 
     if (this.panelView) {
+      // Sits beside the content, so it starts below whatever the content
+      // starts below - the top band in sidebar mode, the chrome otherwise.
+      const top = this.vertical() ? SIDEBAR_TOP_BAND : CHROME_HEIGHT;
       this.panelView.setBounds({
         x: width - PANEL_WIDTH,
-        y: CHROME_HEIGHT,
+        y: top,
         width: PANEL_WIDTH,
-        height: Math.max(0, height - CHROME_HEIGHT)
+        height: Math.max(0, height - top)
       });
     }
   }

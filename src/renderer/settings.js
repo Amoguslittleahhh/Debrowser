@@ -53,6 +53,18 @@ const SECTIONS = {
     },
     { key: 'accent', label: 'Accent colour', type: 'accent' },
     {
+      key: 'tabBarPosition',
+      label: 'Tab bar position',
+      hint: 'Down the side, a tab keeps its title however many are open, because the ' +
+            'column divides height rather than a fixed width. It costs some width, ' +
+            'which is why across the top is the default.',
+      type: 'select',
+      options: [
+        { value: 'top', name: 'Across the top' },
+        { value: 'left', name: 'Down the left' }
+      ]
+    },
+    {
       key: 'tabWidth',
       label: 'Tab width',
       hint: 'Compact fits more tabs on the strip before they start shrinking.',

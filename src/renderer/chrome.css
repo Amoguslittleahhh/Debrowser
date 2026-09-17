@@ -104,8 +104,13 @@ body[data-platform="linux"] { --caption-right: 146px; }
  * right edge with a gulf of empty space in between - the thing that made the
  * chrome look unlike any browser the user has used.
  *
- * `max-width` hands the overflow back: once the tabs would reach the window
- * controls, they shrink instead of pushing the + off-screen.
+ * Overflow is handed back by shrinking, not by a `max-width` - an earlier
+ * version of this comment described one and there has never been such a rule.
+ * `flex: 0 1 auto` with `min-width: 0` lets this container give up width, and
+ * `overflow: hidden` clips what will not fit, so the + keeps its place after
+ * the last tab. That only holds while the strip's own padding reserves the
+ * window buttons' gutter; when it did not, this container grew under them and
+ * took the + with it.
  */
 .tabs {
   display: flex;
@@ -376,3 +381,99 @@ body[data-dots="off"] .tier { display: none; }
 .meter[data-pressure="critical"] .meter-fill { background: var(--crit); }
 
 .meter-text { font-size: 11px; }
+
+/* ---------------------------------------------------------------- */
+/* Sidebar layout                                                    */
+/* ---------------------------------------------------------------- */
+
+/*
+ * The tab strip down the side, Arc/Zen style.
+ *
+ * The main process gives this view a tall narrow rectangle instead of a short
+ * wide one; everything below is the stylesheet turning the same markup to face
+ * the other way. No elements are added or removed, so there is one tab strip
+ * with one set of behaviours, not two that drift.
+ *
+ * Why anyone would want it: a horizontal strip divides a fixed width by the
+ * number of tabs, so the twentieth tab is a favicon and a sliver. A column
+ * divides height instead, and windows have height to spare - thirty tabs still
+ * show their titles. It costs horizontal space, which is why `top` stays the
+ * default: most pages are laid out for width.
+ */
+body[data-layout="left"] {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * The toolbar goes above the tabs and wraps, so the address bar gets the
+ * column's full width rather than a third of it next to the nav buttons.
+ */
+body[data-layout="left"] .toolbar {
+  order: 1;
+  flex-wrap: wrap;
+  height: auto;
+  padding: 8px;
+  row-gap: 8px;
+  border-bottom: none;
+  background: transparent;
+  /* Clear of the window buttons, which the system draws at the top of the
+     window - in this layout that is above the sidebar's own top corner. */
+  padding-top: calc(env(titlebar-area-y, 0px) + 8px);
+}
+
+body[data-layout="left"] .omnibox {
+  order: 3;
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+body[data-layout="left"] .nav { order: 1; }
+body[data-layout="left"] .meter { order: 2; margin-left: auto; }
+body[data-layout="left"] #menu { order: 2; }
+
+/* The strip becomes the column: tabs stacked, + beneath them, filler last so
+   the empty space below is still draggable. */
+body[data-layout="left"] .tabstrip {
+  order: 2;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  min-height: 0;
+  padding: 0 8px 8px;
+}
+
+/* A column scrolls rather than shrinking its children. Thirty tabs at full
+   height is the point of this layout, so they keep their height and the
+   overflow becomes a scrollbar. */
+body[data-layout="left"] .tabs {
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Full width, fixed height, square-ish corners: a row in a list rather than a
+   folder tab, because nothing sits underneath it to be a tab *of*. */
+body[data-layout="left"] .tab {
+  flex: none;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 32px;
+  border-radius: var(--radius);
+}
+
+/* Full width too, so it reads as the next row in the list - which is where the
+   eye already is after the last tab. */
+body[data-layout="left"] .new-tab {
+  width: 100%;
+  height: 30px;
+  margin: 4px 0 0;
+  border-radius: var(--radius);
+  place-items: center;
+}
+
+body[data-layout="left"] .strip-filler { flex: 1 1 auto; }

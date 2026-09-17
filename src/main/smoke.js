@@ -942,6 +942,26 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
   prefs.set('memoryBudgetMB', null);
   applyPrefs(cfg, prefs);
 
+  // Moving the tab strip to the side moves every view in the window, not just
+  // the chrome's, so the property worth asserting is where the *content* ends
+  // up - a sidebar that is drawn but not made room for is a sidebar painted
+  // over the page. Measured through the real shell rather than by recomputing
+  // the arithmetic here, which would only prove this test can add up.
+  const topBounds = shell.contentBounds();
+  prefs.set('tabBarPosition', 'left');
+  shell.applyWindowPrefs();
+  const sideBounds = shell.contentBounds();
+  prefs.set('tabBarPosition', 'top');
+  shell.applyWindowPrefs();
+  const backBounds = shell.contentBounds();
+
+  check('moving the tab strip to the side makes room for it, and moving it back gives it up',
+    topBounds.x === 0 && sideBounds.x > 0 && sideBounds.y < topBounds.y &&
+    sideBounds.width < topBounds.width && backBounds.x === 0 &&
+    backBounds.width === topBounds.width,
+    `top x=${topBounds.x} w=${topBounds.width} · side x=${sideBounds.x} w=${sideBounds.width} ` +
+    `· back x=${backBounds.x} w=${backBounds.width}`);
+
   /* ---------------------------------------------------------------- */
   console.log('\n13. Footprint\n');
 
