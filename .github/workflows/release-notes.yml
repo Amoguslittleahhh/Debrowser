@@ -10,6 +10,12 @@
 # the edit has to be made by a workflow using the built-in GITHUB_TOKEN.
 #
 # Touches the body only. Tag, assets, draft state and release date are untouched.
+#
+# With `announcement`, it instead publishes a release that is only notes: no
+# files, and no label - not "Latest", not "Pre-release". That is for saying what
+# changed at a tag that carries nothing to download, where attaching installers
+# would be wrong and marking it Latest would push the real release off the top
+# of the page.
 
 name: Update release notes
 
@@ -17,8 +23,21 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to republish notes for, e.g. 1.0.1 (the matching ## section of CHANGELOG.md).'
+        description: 'Version to publish notes for, e.g. 1.0.1 (the matching ## section of CHANGELOG.md).'
         required: true
+      tag:
+        description: 'Tag to publish at. Defaults to v<version>.'
+        required: false
+        default: ''
+      title:
+        description: 'Release title. Defaults to the tag.'
+        required: false
+        default: ''
+      announcement:
+        description: 'Create a notes-only release (no files, no Latest label) if the tag has no release yet.'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write        # editing a release is a write to repository contents
@@ -37,13 +56,54 @@ jobs:
           echo "--- release body ---"
           cat RELEASE_NOTES.md
 
-      # Fails if the release does not exist, rather than creating an empty one
-      # at whatever commit this happens to run from.
+      # An existing release has its body replaced and nothing else touched.
+      #
+      # A missing one is an error unless `announcement` was asked for, because
+      # the default job here is fixing prose on a release that exists - quietly
+      # creating an empty release at whatever commit this ran from would be a
+      # surprising way to answer a typo in a tag name.
       - name: Publish it
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v${{ inputs.version }}
+          TAG: ${{ inputs.tag || format('v{0}', inputs.version) }}
+          TITLE: ${{ inputs.title }}
+          ANNOUNCEMENT: ${{ inputs.announcement }}
         run: |
-          gh release view "$TAG" --json tagName > /dev/null
-          gh release edit "$TAG" --notes-file RELEASE_NOTES.md
-          echo "Updated the notes on $TAG" >> $GITHUB_STEP_SUMMARY
+          set -euo pipefail
+
+          if gh release view "$TAG" --json tagName > /dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file RELEASE_NOTES.md
+            echo "Updated the notes on \`$TAG\`." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          if [ "$ANNOUNCEMENT" != "true" ]; then
+            echo "::error::no release at $TAG. Pass announcement=true to create a notes-only one."
+            exit 1
+          fi
+
+          # --latest=false is the whole point: without it GitHub decides, and an
+          # announcement carrying no files would take the Latest badge off the
+          # release people actually download. No --prerelease either, so the
+          # release shows no label at all. No files are passed, so none attach.
+          gh release create "$TAG" \
+            --title "${TITLE:-$TAG}" \
+            --notes-file RELEASE_NOTES.md \
+            --latest=false
+          echo "Published the notes-only release \`$TAG\`." >> $GITHUB_STEP_SUMMARY
+
+      # Says what the release actually is, rather than trusting that the flags
+      # did what they were meant to.
+      - name: Report what was published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || format('v{0}', inputs.version) }}
+        run: |
+          gh release view "$TAG" \
+            --json tagName,name,isLatest,isPrerelease,isDraft,assets \
+            --template '{{.tagName}} — "{{.name}}"
+          latest:     {{.isLatest}}
+          prerelease: {{.isPrerelease}}
+          draft:      {{.isDraft}}
+          assets:     {{len .assets}}
+          '

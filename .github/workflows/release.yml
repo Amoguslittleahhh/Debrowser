@@ -16,7 +16,18 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    # Version tags only. The negations matter: not every `v*` tag is a build.
+    #
+    # `v1.2.1-intune-only` and `v1.2.1-announcements` are published by other
+    # workflows - one ships a single Windows artifact, the other ships no files
+    # at all - and both would otherwise match `v*` and start a full
+    # three-platform build that overwrote them. A tag created by a workflow's
+    # own GITHUB_TOKEN does not trigger another workflow, so this has never
+    # fired; it exists for the day someone pushes one of those tags by hand.
+    tags:
+      - 'v*'
+      - '!v*-intune-only'
+      - '!v*-announcements'
   workflow_dispatch:
     inputs:
       tag:
