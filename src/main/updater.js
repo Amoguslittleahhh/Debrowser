@@ -245,9 +245,19 @@ class Updater {
     }
   }
 
-  /** For the task manager, in the same shape as the other capability reports. */
+  /**
+   * For the task manager, in the same shape as the other capability reports.
+   *
+   * The capability is computed once and kept. It probes whether the install
+   * directory is writable by creating and deleting a file in it, and this is
+   * called from `BrowserShell.publish` - on every governor tick and every
+   * coalesced tab event. A packaged build was writing a probe file into Program
+   * Files thirty times a minute, synchronously, on the main thread, against
+   * `capability()`'s own comment saying it runs once at startup.
+   */
   snapshot() {
-    const cap = this.capability();
+    if (!this.cachedCapability) this.cachedCapability = this.capability();
+    const cap = this.cachedCapability;
     return {
       available: cap.available,
       reason: cap.reason,

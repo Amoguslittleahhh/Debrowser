@@ -40,6 +40,16 @@ const platform = require('../platform');
 /** Refresh per-tab heap/CPU every N ticks; each needs a CDP round trip. */
 const HEAP_SAMPLE_EVERY = 3;
 
+/**
+ * Shortest gap between two forced collections on the same tab.
+ *
+ * A collection lowers the live set, which lowers the limit derived from it,
+ * while the committed total V8 has not handed back stays where it was - so
+ * without a floor the tab is immediately "over limit" again and gets collected
+ * on every qualifying tick, forever.
+ */
+const HEAP_COLLECT_FLOOR_MS = 60_000;
+
 class Governor {
   /**
    * @param {object} deps - { app, cfg, tabManager, ipcHub, log, onUpdate }
@@ -281,6 +291,16 @@ class Governor {
 
     for (const tab of this.tabs.all()) {
       if (!this.heapLimiter.worthMeasuring(tab)) continue;
+      // Before the skip, not after. `shouldSkip` returns early for a tab with
+      // no renderer, and this is the only place outside `activate` that clears
+      // a speculation - so a tab that was speculated on and never became live
+      // (queued behind the admission limit and then closed, or OOM-killed) left
+      // `speculatingId` set for the rest of the session, silently disabling
+      // every future speculative restore with nothing in the log to say why.
+      if (tab.speculativeUntil && now > tab.speculativeUntil && !tab.everVisible && !tab.isLive) {
+        this.tabs.clearSpeculation(tab);
+      }
+
       if (this.shouldSkip(tab)) continue;
       if (tab.heapTotalBytes == null) continue; // not sampled yet
 
@@ -291,12 +311,34 @@ class Governor {
       const backlog = !tab.heapBacklogCollected;
       if (!backlog && !this.heapLimiter.isOverLimit(tab)) continue;
 
+      // The interval floor the heap limiter's own header promises, which was
+      // never actually applied here.
+      //
+      // Collecting drops `liveHeapBytes` to the live set, so the limit derived
+      // from it drops too - while `heapTotalBytes` stays at the committed size
+      // V8 has not handed back. `isOverLimit` is therefore true again
+      // immediately, and every qualifying hidden tab was collected forever on
+      // a roughly six-second cycle. A forced collection is not free; doing it
+      // in a loop costs more than the heap it is chasing.
+      const sinceLast = Date.now() - (tab.lastHeapCollectionAt || 0);
+      if (!backlog && sinceLast < HEAP_COLLECT_FLOOR_MS) continue;
+      tab.lastHeapCollectionAt = Date.now();
+
       const beforeTotal = tab.heapTotalBytes;
       const result = await tab.cdp.collectGarbage();
       if (!result) continue;
 
       // Re-read so L is the live set measured just after collecting. The
       // limiter owns every heap field on the tab; nothing is assigned here.
+      //
+      // Guarded, because `collectGarbage` is awaited with a five-second ceiling
+      // and a renderer can die inside that window - the tab closed, or the
+      // process OOM-killed - which nulls `tab.cdp` in teardown. Unguarded, this
+      // threw a TypeError straight out of the tick, and the tick is where
+      // `enforceLiveTabCap` and `enforceBudget` run: the browser quietly
+      // stopped reclaiming at the exact moment memory pressure killed a
+      // renderer. tiers.js already guards the identical pattern.
+      if (!tab.cdp) continue;
       const after = await tab.cdp.pageMetrics();
       this.heapLimiter.recordCollection(tab, {
         beforeTotal,
@@ -324,6 +366,16 @@ class Governor {
         if (tab.tier !== Tier.ACTIVE) await applyTier(tab, Tier.ACTIVE, this.ctx());
         else refreshPriority(tab, this.cfg);
         continue;
+      }
+
+      // Before the skip, not after. `shouldSkip` returns early for a tab with
+      // no renderer, and this is the only place outside `activate` that clears
+      // a speculation - so a tab that was speculated on and never became live
+      // (queued behind the admission limit and then closed, or OOM-killed) left
+      // `speculatingId` set for the rest of the session, silently disabling
+      // every future speculative restore with nothing in the log to say why.
+      if (tab.speculativeUntil && now > tab.speculativeUntil && !tab.everVisible && !tab.isLive) {
+        this.tabs.clearSpeculation(tab);
       }
 
       if (this.shouldSkip(tab)) continue;

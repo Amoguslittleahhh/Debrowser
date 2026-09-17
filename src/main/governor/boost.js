@@ -43,6 +43,8 @@ class BoostController {
     /** Tabs whose priority we raised, so we can always put them back. */
     this.yieldedPids = new Set();
     this.warnedAboutPrivileges = false;
+    /** True while the only thing making the active tab heavy is its audio. */
+    this.audioOnly = false;
   }
 
   /**
@@ -57,13 +59,27 @@ class BoostController {
     // Audible media is always heavy: dropping audio is more noticeable than
     // dropping frames, and it is the one signal that is reliable even when
     // the page is doing its work off the main thread.
-    if (tab.audible) return Demand.HEAVY;
-
     let fromCpu = Demand.IDLE;
     if (cpu >= CPU_HEAVY_PCT) fromCpu = Demand.HEAVY;
     else if (cpu >= CPU_LIGHT_PCT) fromCpu = Demand.LIGHT;
 
-    return maxDemand(reported, fromCpu);
+    const drawn = maxDemand(reported, fromCpu);
+    if (!tab.audible) { this.audioOnly = false; return drawn; }
+
+    // Audio is remembered separately from the level it produces.
+    //
+    // It still forces HEAVY - dropping audio is more noticeable than dropping
+    // frames, and it is the one signal that stays reliable when a page does its
+    // work off the main thread. But a tab that is *only* audible is not
+    // animating, and `quiesceRequested` exists to defer reclaim while frames
+    // are being drawn. Without this distinction a foreground tab playing music
+    // refreshed the boost on every tick and stood the entire governor down -
+    // budget enforcement, the live-tab cap, heap limits, hibernation and
+    // speculation - for the whole of playback. That is the same session-wide
+    // stand-down the stale-boost fix below was written to prevent, reached by a
+    // different route.
+    this.audioOnly = drawn !== Demand.HEAVY;
+    return Demand.HEAVY;
   }
 
   /**
@@ -219,7 +235,9 @@ class BoostController {
    * True while anything is animating in front of the user.
    */
   get quiesceRequested() {
-    return this.boostedTabId !== null;
+    // A boost held only because a tab is making noise is not a reason to stop
+    // reclaiming memory. Nothing is being drawn, so nothing can stutter.
+    return this.boostedTabId !== null && !this.audioOnly;
   }
 
   /** Tabs that have now been quiet long enough to count as settled. */

@@ -18,7 +18,7 @@
 
 const { session: electronSession } = require('electron');
 const { Tab } = require('./tab');
-const { Tier } = require('../config');
+const { Tier, isStopped } = require('../config');
 const { LatencyTracker } = require('../latency');
 
 /**
@@ -191,6 +191,13 @@ class TabManager {
     // the end: a restore and a switch are the same code path and differ only in
     // whether there was a renderer to begin with.
     const wasLive = tab.isLive;
+    // A frozen tab is live, and promoting it costs a real CDP round trip to
+    // restart its task queues. Counting that as a "switch" made one series out
+    // of two different operations: switching to a running tab, which should be
+    // immediate because there is nothing to do, and thawing one, which has
+    // unavoidable work in it. The combined p95 was then whichever thaw happened
+    // to be slowest, and said nothing about whether a switch blocks.
+    const wasStopped = wasLive && isStopped(tab.tier);
     const stop = this.latency.start('switch');
 
     this.activeId = id;
@@ -216,13 +223,15 @@ class TabManager {
     // The user may have switched away again while we were promoting. The sample
     // is still recorded: the work was done and the time was spent, and dropping
     // it would quietly exclude exactly the slow restores a user gave up on.
+    const series = !wasLive ? 'restore' : (wasStopped ? 'thaw' : 'switch');
+
     if (this.activeId !== id) {
-      stop(wasLive ? 'switch' : 'restore');
+      stop(series);
       return tab;
     }
 
     tab.setVisible(true);
-    stop(wasLive ? 'switch' : 'restore');
+    stop(series);
     this.clearSpeculation(tab);
     this.onEvent(tab, 'activated');
     return tab;

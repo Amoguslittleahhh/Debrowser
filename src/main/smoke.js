@@ -1210,12 +1210,15 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
   const fmtLat = (name) => (lat[name]
     ? `${name} p50 ${lat[name].p50}ms / p95 ${lat[name].p95}ms (n=${lat[name].n})`
     : null);
-  const shown = ['restore', 'switch', 'content'].map(fmtLat).filter(Boolean);
+  const shown = ['restore', 'thaw', 'switch', 'content'].map(fmtLat).filter(Boolean);
   if (shown.length) console.log(`  what it cost the user: ${shown.join(', ')}`);
 
-  // Switching to a tab that already has a renderer is the one thing in this
-  // browser that must be instant - there is nothing to load, nothing to
-  // unfreeze, nothing to wait for. It was not: re-activating the foreground tab
+  // Switching to a tab that is already running is the one thing in this browser
+  // that must be instant - there is nothing to load, nothing to unfreeze,
+  // nothing to wait for. Thawing a frozen tab is a separate series, because it
+  // has a CDP round trip in it that no amount of care removes, and mixing the
+  // two produced a p95 that was simply the slowest thaw. It was not instant:
+  // re-activating the foreground tab
   // routed through the demotion path and waited out a 400ms page-state capture,
   // so one switch in twenty stalled for four tenths of a second while the p50
   // sat at 0.3ms. The average hid it completely, which is why the assertion is

@@ -61,9 +61,24 @@ class IpcHub {
       if (demand === 'heavy') tab.lastHeavyAt = Date.now();
     });
 
-    ipcMain.on('debrowser:capture-result', (_event, requestId, state) => {
+    ipcMain.on('debrowser:capture-result', (event, requestId, state) => {
       const entry = this.pending.get(requestId);
       if (!entry) return;
+
+      // The reply has to come from the renderer that was asked.
+      //
+      // Request ids are a counter, so they are guessable, and this resolved on
+      // the id alone - which let any renderer answer another tab's capture. The
+      // forged reply is not inert: `applySuspendedPageState` writes the fields
+      // back with `el.innerHTML = field.value` into whatever document the real
+      // tab restores, so one compromised page could put markup into a different
+      // origin's DOM. Every other channel in this file already checks the
+      // sender; this one said it did and did not.
+      if (event.sender.id !== entry.senderId) {
+        this.log(`ignored a capture reply for ${requestId} from the wrong renderer`);
+        return;
+      }
+
       clearTimeout(entry.timer);
       this.pending.delete(requestId);
       entry.resolve(state);
@@ -89,7 +104,9 @@ class IpcHub {
       }, timeoutMs);
       if (typeof timer.unref === 'function') timer.unref();
 
-      this.pending.set(requestId, { resolve, timer });
+      // The id alone is not proof of who is answering. Recorded with the
+      // renderer it was sent to, so the reply can be checked against it.
+      this.pending.set(requestId, { resolve, timer, senderId: webContents.id });
 
       try {
         webContents.send('debrowser:capture', requestId);

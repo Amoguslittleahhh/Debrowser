@@ -82,8 +82,12 @@ function serve(log = () => {}, partitions = []) {
     const url = new URL(request.url);
     // The host names the page; the path names a file belonging to it, so
     // `debrowser://settings/settings.css` works without a second registration.
+    // `hasOwn`, because a bare index reaches the prototype chain:
+    // `debrowser://__proto__` and `debrowser://constructor` both resolved to
+    // something truthy, sailed past the `!file` guard below, and made
+    // `path.resolve` throw out of an async handler instead of returning 404.
     const file = url.pathname === '/' || url.pathname === ''
-      ? PAGES[url.hostname]
+      ? (Object.hasOwn(PAGES, url.hostname) ? PAGES[url.hostname] : null)
       : url.pathname.slice(1);
 
     if (!file) return new Response('Not found', { status: 404 });
