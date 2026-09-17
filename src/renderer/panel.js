@@ -61,8 +61,19 @@ function render(state) {
   // carries the over-counting warning.
   // 'mixed' is deliberately not counted as proportional: part of the total is
   // still summed working set, so the over-count warning stays up.
+  // 'suspect' is the helper running, covering every process, and returning a
+  // total that is not meaningfully below summed working set - so whatever it
+  // is reporting, it is not a proportional figure, and claiming one would be
+  // worse than the plain over-count it replaced.
   const proportional = state.accounting === 'pss' || state.accounting === 'probe';
-  el.total.title = state.accounting === 'probe'
+  el.total.title = state.accounting === 'suspect'
+    ? 'The native helper ran and covered every process, but its total is not ' +
+      `meaningfully below summed working set (${state.probeRatio}x of it), so it is ` +
+      'not delivering a proportional figure. On Windows the likely cause is that ' +
+      'the share count a page carries is three bits wide and saturates at seven: ' +
+      'a system DLL mapped into a hundred processes is charged at a seventh to ' +
+      'each of ours rather than a hundredth. Treat this as an over-count.'
+    : state.accounting === 'probe'
     ? (state.probeMechanism === 'proc_pid_rusage'
         ? 'Physical footprint, the figure macOS charges each process and shows in ' +
           'Activity Monitor. It excludes clean file-backed pages - one copy of ' +
@@ -81,6 +92,18 @@ function render(state) {
       'proportional figure, rising with process count. The browser is holding ' +
       'meaningfully less than this number says.';
   el.totalLabel.textContent = proportional ? 'resident' : 'resident (over-counts)';
+
+  // Private working set has no sharing to argue about, so printing it beside
+  // the total turns "is this figure inflated?" from a judgement into a
+  // subtraction anyone can do. It is also the column Task Manager shows, which
+  // is what someone checking this by hand will have in front of them.
+  if (state.privateTotalMB != null && state.rssTotalMB) {
+    el.totalLabel.title =
+      `${state.totalMB} MB reported · ${state.rssTotalMB} MB summed working set · ` +
+      `${state.privateTotalMB} MB private. Private is what Task Manager's Memory ` +
+      'column shows and involves no shared pages at all, so the gap between it and ' +
+      'the total is the shared memory being attributed to this browser.';
+  }
 
   el.budget.textContent = `${state.budgetMB} MB`;
   el.renderers.textContent = state.maxLiveTabs

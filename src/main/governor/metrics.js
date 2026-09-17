@@ -31,6 +31,16 @@ const EMA_ALPHA = 0.35;
 /** Overhead attributed to a renderer regardless of page content. */
 const RENDERER_BASE_MB = 12;
 
+/**
+ * How far below summed working set a proportional total must land to be
+ * believed, and how many processes must be running before the question is
+ * worth asking. 0.8 is the plan's "moved by less than 20% from summed working
+ * set" turned into a runtime check; below four processes there is too little
+ * sharing for the comparison to mean anything.
+ */
+const MAX_PROPORTIONAL_RATIO = 0.8;
+const MIN_PIDS_FOR_SHARING = 4;
+
 class Metrics {
   /**
    * @param {Electron.App} app
@@ -51,6 +61,17 @@ class Metrics {
     this.probing = false;
     this.totalMB = 0;
     this.browserOverheadMB = 0;
+    /**
+     * Summed working set, kept beside the proportional total rather than
+     * replaced by it.
+     *
+     * A proportional measure is only worth the helper it costs if it lands
+     * meaningfully below this. Keeping both is what lets the browser check
+     * that instead of assuming it - see `snapshot()`.
+     */
+    this.rssTotalMB = 0;
+    /** Summed private working set, where the platform reports it. */
+    this.privateTotalMB = null;
     this.lastSampleAt = 0;
   }
 
@@ -96,6 +117,9 @@ class Metrics {
     const seen = new Set();
     let total = 0;
     let overhead = 0;
+    let rssTotal = 0;
+    let privateTotal = 0;
+    let privateKnown = 0;
 
     for (const proc of raw) {
       const pid = proc.pid;
@@ -140,6 +164,15 @@ class Metrics {
       this.byPid.set(pid, smoothed);
       total += smoothed.rssMB;
       if (proc.type !== 'Tab') overhead += smoothed.rssMB;
+
+      // Unsmoothed on purpose: this is the yardstick the proportional figure is
+      // measured against, and smoothing it would let the comparison drift with
+      // the thing it is checking.
+      rssTotal += rssMB;
+      if (smoothed.privateMB != null) {
+        privateTotal += smoothed.privateMB;
+        privateKnown++;
+      }
     }
 
     // Drop processes that have exited so stale memory never inflates the total.
@@ -164,8 +197,38 @@ class Metrics {
 
     this.totalMB = total;
     this.browserOverheadMB = overhead;
+    this.rssTotalMB = rssTotal;
+    this.privateTotalMB = privateKnown ? privateTotal : null;
     this.lastSampleAt = Date.now();
     return this.totalMB;
+  }
+
+  /**
+   * Is the native probe actually delivering a proportional figure?
+   *
+   * A probe that runs, returns, and covers every process still proves nothing
+   * about what it returned. The whole reason for it is that summing working
+   * set counts one copy of Chromium in every renderer; if its total is not
+   * meaningfully below that sum, it is reporting the same over-count under a
+   * better name - and the panel would say "resident" where it used to say
+   * "resident (over-counts)", which is worse than the fault it replaced.
+   *
+   * This check was in the plan for the helper and never written. On Windows,
+   * `ShareCount` is three bits wide and saturates at seven, so a page mapped
+   * into a hundred processes - every system DLL - is charged at a seventh
+   * rather than a hundredth, to each of our processes in turn. That inflates
+   * the total in exactly the way the helper exists to prevent, and it looks
+   * like success from the inside.
+   *
+   * Only asked once there are enough processes for sharing to be worth
+   * measuring. With one or two, PSS legitimately sits close to RSS because
+   * there is little to share, and failing it there would be a false alarm.
+   *
+   * @returns {boolean}
+   */
+  probeIsProportional() {
+    if (this.byPid.size < MIN_PIDS_FOR_SHARING || this.rssTotalMB <= 0) return true;
+    return this.totalMB <= this.rssTotalMB * MAX_PROPORTIONAL_RATIO;
   }
 
   /**
@@ -282,7 +345,13 @@ class Metrics {
       accounting: accountingMode() === 'pss'
         ? 'pss'
         : this.probed.size === 0 ? 'rss'
-        : this.probed.size >= this.byPid.size ? 'probe' : 'mixed',
+        : this.probed.size < this.byPid.size ? 'mixed'
+        : this.probeIsProportional() ? 'probe' : 'suspect',
+      probeRatio: this.rssTotalMB > 0
+        ? Math.round((this.totalMB / this.rssTotalMB) * 100) / 100
+        : null,
+      rssTotalMB: Math.round(this.rssTotalMB),
+      privateTotalMB: this.privateTotalMB == null ? null : Math.round(this.privateTotalMB),
       probeMechanism: this.probeMechanism || null,
       pageMerging: pageMergingStatus(),
       compression: compressionStatus(),

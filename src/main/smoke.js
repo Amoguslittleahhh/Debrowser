@@ -942,6 +942,25 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
   prefs.set('memoryBudgetMB', null);
   applyPrefs(cfg, prefs);
 
+  // The measurement has to be checked against something, or "it ran" gets read
+  // as "it worked". A probe that returns a total no lower than summed working
+  // set is reporting the same over-count under a better name, and the panel
+  // would then drop the warning that used to be there - a strictly worse state
+  // than not having the helper at all.
+  //
+  // Runs on every platform. On Linux it asserts the property that makes the
+  // whole exercise worthwhile - that Pss really is below summed RSS across a
+  // browser full of tabs - and on Windows and macOS it is the gate on the
+  // native helper's arithmetic.
+  governor.metrics.sample();
+  const acct = governor.metrics.snapshot();
+  const sharingVisible = acct.processCount >= 4 && acct.rssTotalMB > 0;
+  check('the memory total is a smaller number than summing every process would give',
+    !sharingVisible || acct.accounting === 'rss' || acct.probeRatio <= 0.8,
+    `${acct.accounting}: ${acct.totalMB}MB reported vs ${acct.rssTotalMB}MB summed ` +
+    `(${acct.probeRatio}x) across ${acct.processCount} processes` +
+    (sharingVisible ? '' : ' — too few processes to tell, skipped'));
+
   // Moving the tab strip to the side moves every view in the window, not just
   // the chrome's, so the property worth asserting is where the *content* ends
   // up - a sidebar that is drawn but not made room for is a sidebar painted
