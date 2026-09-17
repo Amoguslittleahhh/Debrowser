@@ -44,6 +44,7 @@ jobs:
               dist/*.exe
               dist/*.blockmap
               dist/latest.yml
+              dist-intune/*.exe
           - os: macos-latest
             platform: --mac
             artifacts: |
@@ -179,6 +180,23 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         if: ${{ !(matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true') }}
         run: npx electron-builder ${{ matrix.platform }} --publish never
+
+      # The Intune variant: the same browser, per-machine and silent.
+      #
+      # A second pass rather than a second target, because both differences are
+      # nsis settings and electron-builder takes one nsis block per build. It
+      # writes to its own output directory so it cannot overwrite latest.yml -
+      # that manifest describes the *updatable* build, and a machine-wide
+      # install does not update itself.
+      #
+      # Experimental and untestable here: see build/intune/README.md.
+      - name: Package the Intune variant
+        if: matrix.os == 'windows-latest'
+        env:
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:intune
 
       # Azure Trusted Signing. Windows only, and only when its secrets exist.
       # The endpoint/account/profile are not secret, but they are deployment

@@ -360,6 +360,24 @@ touches nothing else — no rebuild, no change to the tag, the assets or the
 date. Re-running the release workflow against an old tag would attach the
 *current* version's installers to it, which is worse than bad prose.
 
+## Deploying with Intune
+
+`build/intune/README.md` covers it, including the `.intunewin` step, the install
+and uninstall commands, and the detection rule. Two things belong here as well,
+because they are packaging facts rather than deployment ones:
+
+- The Intune artifact is built by a **second electron-builder pass**
+  (`npm run dist:intune`), writing to `dist-intune/` so it cannot overwrite
+  `dist/latest.yml`. That manifest describes the updatable build, and publishing
+  this one's would tell every ordinary install to fetch an installer it cannot
+  run. The config is generated from `electron-builder.yml` rather than written
+  separately, so the two cannot drift.
+- It differs only in being **per-machine and silent**, because the Intune
+  Management Extension runs install commands as SYSTEM.
+
+**It is experimental and has never been tested against a real tenant.** It was
+written with no access to Windows or Intune.
+
 ## Updates
 
 Installed copies update themselves through `electron-updater`, against the

@@ -76,12 +76,51 @@ class Updater {
       // saying so is better than an updater that fails on every check forever.
       return { available: false, reason: 'macOS updates need a signed app; this build is unsigned' };
     }
+    // A machine-wide install cannot update itself, and must not try.
+    //
+    // Two cases, one test. An Intune or other managed deployment installs into
+    // Program Files as SYSTEM: the browser then runs as an ordinary user who
+    // cannot write there, so every download would end in an access denial the
+    // user can do nothing about. And in a managed estate updates are the
+    // administrator's to schedule - an app quietly replacing itself from GitHub
+    // is the opposite of what the deployment is for.
+    //
+    // Asking whether we can write to our own directory answers both without
+    // needing a build flag, and stays true if the app is later moved.
+    if (!this.canWriteInstallDir()) {
+      return {
+        available: false,
+        reason: 'installed for all users - updates are handled by whoever deployed it'
+      };
+    }
+
     if (process.platform === 'linux' && !process.env.APPIMAGE) {
       // .deb and .tar.gz have no in-place update path - the package manager or
       // the user owns those files, not us.
       return { available: false, reason: 'in-app updates work from the AppImage; use your package manager' };
     }
     return { available: true, reason: null };
+  }
+
+  /**
+   * Can this process write where it is installed?
+   *
+   * `fs.accessSync(W_OK)` is unreliable on Windows for directories - it reports
+   * the read-only *attribute* rather than the ACL - so this actually tries to
+   * create a file and remove it again. One syscall pair, once, at startup.
+   */
+  canWriteInstallDir() {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.dirname(app.getPath('exe'));
+    const probe = path.join(dir, `.debrowser-write-test-${process.pid}`);
+    try {
+      fs.writeFileSync(probe, '');
+      fs.unlinkSync(probe);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   start() {

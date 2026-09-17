@@ -547,6 +547,14 @@ tried, measured and removed — live on the `claude/research-build` branch.
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web
   Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
+- **An Intune-shaped Windows installer exists and is experimental.** It is
+  per-machine and silent, because the Intune Management Extension runs install
+  commands as SYSTEM. It has never been run against a real tenant — it was built
+  with no access to Windows or Intune — and being unsigned is likely to be the
+  actual blocker in any estate enforcing WDAC or Smart App Control. See
+  `build/intune/README.md`. A machine-wide install turns its own updater off,
+  since it cannot write to its install directory and update scheduling belongs
+  to whoever deployed it.
 - **Updates are differential on Windows and on the Linux AppImage, and absent
   on macOS.** Only the changed blocks of the installer are downloaded rather
   than the whole ~110MB, almost all of which is Chromium and identical between

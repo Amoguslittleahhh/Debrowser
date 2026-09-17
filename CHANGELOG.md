@@ -1,14 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
-Updates that download only what changed.
+Updates that download only what changed, the browser's own pages, saved sign-ins, honest memory figures off Linux, and a great deal more personalisation.
 
 | | Before | Now |
 |---|---|---|
-| **Getting a new version** | Re-download the whole ~110MB installer by hand | The browser fetches only the blocks that changed and offers to restart |
-| **Your data** | — | Untouched: settings, session and saved data live in `userData`, which an installer does not replace |
-| **Release pages** | Blockmaps and update manifests were generated but never uploaded | Both are attached, which is what makes a delta possible at all |
+| **Updating** | Re-download the whole ~110MB installer by hand | Only the blocks that changed, then it offers to restart |
+| **Memory on Windows and macOS** | Summed working set — measured at 1.95x reality, labelled "over-counts" | Measured natively per process, and the measure is named |
+| **Settings** | An overlay that trapped the browser on it | A real page at `debrowser://settings`, with a URL and a tab |
+| **New tab** | example.com | `debrowser://newtab` — ours, empty, no network requests |
+| **Passwords** | Nothing could be saved | Saved on request, encrypted by the OS keystore |
+| **Personalisation** | Accent colour | Tab strip colour, translucency, window material, motion, hardware acceleration |
+
+### Updates
 
 - **Differential downloads.** electron-builder writes a blockmap beside each installer describing its compressed stream in content-defined chunks, so an update fetches only the blocks that differ and reuses the rest from the installed copy. Almost all of a 110MB artifact is Chromium, which does not change between our releases.
 - **The plumbing existed and was inert.** Blockmaps and `latest*.yml` manifests were already being generated into `dist/` on every build, but the workflow's per-platform artifact globs listed only the installers, so none of it ever reached a release. An installed copy had nothing to read even if it had known where to look — and it did not, because no `publish:` provider was configured, which is what writes `app-update.yml` into the package.
@@ -16,11 +21,15 @@ Updates that download only what changed.
 - **macOS is honestly absent rather than quietly broken.** Squirrel.Mac validates that an update is signed by the same identity as the running app and refuses outright when there is none, so an unsigned build cannot self-update at all. The capability reports that by name, as does the settings page, in the same `{available, reason}` shape the hibernation backend uses — an inert feature that cannot say why is indistinguishable from a broken one. The same applies to `.deb`, `.tar.gz` and the Windows portable build, which are not updatable formats.
 - **A switch in Settings.** Off means the browser never reaches the network to look for a version, which is a privacy choice as much as a bandwidth one. It is read live, so turning it off takes effect at the next check rather than the next launch.
 
+### The browser's own pages
+
 - **Settings no longer traps the browser on it.** Opening Settings covered every tab with a view that nothing dismissed, so switching tabs appeared to do nothing and the browser looked frozen on a page with no way out. It was not frozen: it was drawing the page behind a lid with no handle. The fix is not a dismiss call in more places — it is that the browser's own pages are now *pages*, served under a real `debrowser://` scheme, with URLs, titles, tab strip entries, history, and back and forward that work. There is no lid because there is no overlay. Covered by a check that would fail against the old design.
 - **A new tab page of our own**, at `debrowser://newtab`, instead of example.com. Deliberately close to empty: it is the most-opened page in the browser, and a start page of tiles and feeds would also be the most expensive one. No network requests at all — no fonts, no favicons, no suggestions — and it shows what the browser is actually for, the current total and the per-tab figure.
 - **The browser's own pages are exempt from the governor.** Every tier below ACTIVE is wrong for them: freezing one stops the page servicing the controls being operated, and discarding one throws away a half-filled form and reloads as though the browser had crashed.
 - **A privileged page can never become a privileged web page.** Internal pages carry the command bridge in their preload, so a link in Settings that navigated the same renderer to a site would hand that site's JavaScript the run of the browser. Navigation away from `debrowser://` is cancelled and handed to an ordinary tab, which is also what a user wants from a link in Settings. The protocol handler resolves every path and refuses anything outside the directory it serves.
 - **Animations wait until the page is on screen.** A view that is not composited has its animation frames throttled hard, so an entrance animation started while a tab is realised in the background is still part-way through when the tab is finally shown — the page arrives half-faded and settles afterwards, which reads as a rendering fault. This browser realises tabs in the background routinely, so that was the common case rather than the odd one. Found by looking at a screenshot rather than by reasoning about it.
+
+### Appearance and settings
 
 - **Personalisation beyond the accent colour.** The tab strip gets its own colour, deliberately separate: it is the largest painted area in the window, and what works as a 3px focus ring rarely works across the top of a screen. A "match the accent" option is there for anyone who would rather not choose twice. Window translucency is a slider, and on Windows 11 the system can paint its own blurred material behind the window.
 - **Translucency costs essentially nothing**, which is why it is done this way. Real per-element transparency means a window with an alpha channel and a blur pass on every frame; this asks the OS compositor, which is already drawing this window and every other one on the screen, to draw it slightly differently.
@@ -29,10 +38,14 @@ Updates that download only what changed.
 - **The task manager stopped explaining itself.** It is a live instrument — what each tab is holding, right now, and why — and a paragraph of prose beside a number that changes twice a second is noise in front of the thing you opened it to read. The explanations moved into Settings behind "Explain the memory figures", off by default. The "over-counts" label stays visible either way, because a wrong number with no warning is the one thing that is not acceptable.
 - **Mojeek replaces Brave** in the search engine list. Both crawl their own index rather than reselling Google's or Bing's results, so the list keeps an independent option; Mojeek's index is smaller, which shows on obscure queries.
 
+### Memory, measured honestly everywhere
+
 - **Memory is measured natively on Windows and macOS instead of being summed and apologised for.** Summing each process's working set counts a shared page once per process that maps it, and the largest shared thing in a Chromium browser is Chromium itself, mapped into every renderer — measured at 1.95x the proportional figure across five processes and rising with process count, so two open tabs could read as 1098 MB. A small helper now ships beside the app: on Windows it walks each process's working set and divides every shared page by its share count, which is proportional set size computed the only way Windows offers; on macOS it reads `phys_footprint`, the figure the OS charges each process and Activity Monitor shows. Linux is untouched and does not build it — `smaps_rollup` already reports Pss, and a second path to the same number would be one more thing to keep honest.
 - **Both new figures are approximations, and say which kind.** Windows caps a page's share count at seven, so a page shared by more processes is counted slightly high — and a Chromium browser runs close to seven processes, so that is not hypothetical. macOS's footprint excludes the clean file-backed pages that caused the over-count but does not divide shared dirty pages, so it is not proportional set size. The panel names the mechanism on hover rather than presenting either as exact.
 - **The child-process machinery is now written once.** The trim helper's spawn, line protocol, timeout, restart and EPIPE handling were the subtlest code in the project and every unusual line in them exists because something broke. A second helper meant either a second copy to keep correct or extracting the first; it is extracted, and the trim path was re-verified against the real binary afterwards.
 - **Two bugs the tests caught, both of which would have shipped.** `protocol.handle` registers on the default session only, and tabs run in their own partition — so the browser's own pages failed to load inside a tab while rendering perfectly in a default-session harness. And once a page loads, the tab reports the URL Chromium normalised it to, with a trailing slash, so matching "is settings already open?" by URL string stopped matching the instant the page finished loading and every subsequent open would have made another tab.
+
+### Saved sign-ins
 
 - **Saved sign-ins and payment details, encrypted by the operating system.** The browser asks after you sign in and stores nothing unless you say yes — a dialog drawn by the browser, not by the page, because the one question that must never be imitable is "shall I keep your password". Records are AES-256-GCM under a 32-byte key held by DPAPI, Keychain or libsecret; the key never exists in plaintext on disk, and whole records are encrypted rather than just the secret, so the file does not publish which services you have accounts with.
 - **No weaker fallback, ever.** Where no real keystore exists the store refuses to save and says so. On Linux, Electron reports encryption as "available" while quietly using a basic-text backend that only obfuscates; that case is detected by name and refused, because saving credentials under it while telling you the OS protects them would be a lie the UI told on the browser's behalf.
@@ -41,6 +54,8 @@ Updates that download only what changed.
 - **Fills dispatch real input events.** Setting `value` directly leaves a field looking empty to React, Vue and Angular, which track state outside the DOM — the form would submit blank while appearing filled, which is worse than not filling it.
 - **One definition of "sensitive field", where there were two that disagreed.** The screenshot gate matched the `autocomplete` attribute with an exact selector; the session snapshot matched the IDL property with `===`. Neither handled a token list, so `autocomplete="cc-number webauthn"` — which is valid — matched nothing, and such a field would have been read into the session store and its page photographed. Now tokenised, and covering CVC and expiry as well as the number.
 - **The manager never receives secrets.** A row needs a site and a username; revealing one is a separate call for a single record. It is also fetched on request rather than riding the state broadcast, which reaches three views on every governor tick.
+
+### Found in review, before any of it shipped
 
 - **A website could have read every saved password.** The omnibox navigates with `loadURL`, which does not fire `will-navigate`, so the confinement on internal pages did not apply to it — and because every tab now opens on `debrowser://newtab`, every tab was built with the privileged preload and marked as one of the browser's own pages for the rest of its life. A site loaded into one inherited the bridge and passed the check guarding the credential store. Privilege is now decided from the sender's **live URL** rather than from a flag or from whichever preload a renderer happens to carry, because neither of those can be revoked once a renderer exists. Found in review before release; no build carrying it was ever published.
 - **Every tab was also exempt from the governor**, for the same reason: `internal` was computed once from the URL a tab was created with, and every tab is created on the new tab page. Nothing would ever have been frozen or discarded. The flag now follows the current URL.
@@ -54,6 +69,13 @@ Updates that download only what changed.
 - **A closing tab could impersonate the browser UI.** "No tab matches this sender, so it must be the chrome" is not safe: a tab is removed from the list before its renderer is torn down, and in that window a website could land a command — `set-pref` on the homepage persists, which is a durable hijack. The chrome views are identified by name now. Credentials were never reachable this way; that channel demands Settings specifically.
 - **Typing a `debrowser://` address into the omnibox produced a dead page**, because the preload is fixed when a renderer is built and a tab realised on a website has the page probe rather than the command bridge. Internal addresses now go through the page opener, which focuses the existing Settings tab or makes a new one.
 - **Also:** `--no-governor` crashed the IPC handler on a manual discard or a budget change, and the error page interpolated the failing URL into an inline script with `JSON.stringify`, which does not escape `</script>` — the comment beside it claimed injection was impossible.
+
+### Deploying with Intune — experimental
+
+- **An Intune-shaped Windows installer**, `Debrowser-1.2.0-win-x64-intune.exe`, alongside the normal one. It differs in exactly two ways, both forced by how the Intune Management Extension works: it installs **per machine** rather than per user, and it is **silent**. The IME runs install commands as SYSTEM, so a per-user installer lands in SYSTEM's own profile where no real user will ever find it, and an installer that waits for someone to click Next never finishes because nobody is there.
+- **This has never been run against a real tenant.** It was written on Linux, in a container with no Windows, no Intune and no way to test any of it — the install commands and detection rules are derived from documented IME behaviour, not from a deployment anyone watched succeed. `build/intune/README.md` carries the full disclaimer, the `.intunewin` packaging step, the detection rule, and the failures worth checking first. Pilot it on a test device.
+- **Unsigned is likely to be the real blocker**, not the packaging. WDAC, Smart App Control and AppLocker refuse an unsigned binary installed by SYSTEM, and no packaging works around that.
+- **The browser notices it is managed.** A machine-wide install cannot write to its own directory as an ordinary user, so the built-in updater turns itself off and says so in Settings rather than failing a download every six hours against a permission the user cannot grant. In a managed estate the update schedule belongs to whoever runs the estate. Settings, session and saved credentials stay per user, so they survive upgrades and one user cannot read another's.
 
 Verification: 59 checks, all green, including these — that the updater is inert outside a packaged build and names the reason. Packing was checked rather than assumed: this project's `files:` allow-list does not mention `node_modules`, so the new dependency could plausibly have been left out of the archive and crashed only on an installed copy. It is packed, and `app-update.yml` lands beside it.
 
