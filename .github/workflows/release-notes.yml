@@ -94,16 +94,28 @@ jobs:
 
       # Says what the release actually is, rather than trusting that the flags
       # did what they were meant to.
+      #
+      # `isLatest` is not a --json field on gh release view, so which release
+      # holds the Latest badge is asked of the endpoint that decides it. That is
+      # the reading worth having: --latest=false is here to stop a notes-only
+      # release taking the badge from the one people download, and this is the
+      # only way to see whether it did.
       - name: Report what was published
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || format('v{0}', inputs.version) }}
         run: |
+          set -euo pipefail
           gh release view "$TAG" \
-            --json tagName,name,isLatest,isPrerelease,isDraft,assets \
+            --json tagName,name,isPrerelease,isDraft,assets \
             --template '{{.tagName}} — "{{.name}}"
-          latest:     {{.isLatest}}
-          prerelease: {{.isPrerelease}}
-          draft:      {{.isDraft}}
-          assets:     {{len .assets}}
+            prerelease: {{.isPrerelease}}
+            draft:      {{.isDraft}}
+            assets:     {{len .assets}}
           '
+          latest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || echo '(none)')
+          echo "  Latest badge is on: $latest"
+          {
+            echo "Published \`$TAG\` with $(gh release view "$TAG" --json assets --jq '.assets | length') asset(s)."
+            echo "The Latest badge is on \`$latest\`."
+          } >> $GITHUB_STEP_SUMMARY
