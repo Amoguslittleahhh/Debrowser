@@ -95,7 +95,8 @@ counted:
        QueryWorkingSet reports the working set, which is resident by
        definition. */
     if (b.Shared) {
-      unsigned n = b.ShareCount ? b.ShareCount : 1;
+      /* Three bits wide, so the narrowing is safe; cast to say so. */
+      unsigned n = (unsigned)(b.ShareCount ? b.ShareCount : 1);
       *pss += page / n;
     } else {
       *pss += page;

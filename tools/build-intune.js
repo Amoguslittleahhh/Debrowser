@@ -62,13 +62,42 @@ const config = {
 const file = path.join(os.tmpdir(), `debrowser-intune-${process.pid}.json`);
 fs.writeFileSync(file, JSON.stringify(config, null, 2));
 
+// Run electron-builder's JS entry point with this Node, rather than shelling
+// out to `npx`.
+//
+// On Windows `npx` is `npx.cmd`, and since the fix for CVE-2024-27980 Node
+// refuses to spawn a .cmd or .bat without `shell: true`. spawnSync then returns
+// `{ error: ..., status: null }` rather than throwing - so the first version of
+// this exited 1 having printed absolutely nothing, which is the least useful
+// failure a build step can produce. Resolving the CLI removes the shell, the
+// PATH lookup and the platform difference in one go.
+const cli = require.resolve('electron-builder/cli.js');
+
+// The code is decided first and the process exits last, because `process.exit`
+// inside a `try` skips its `finally` - so exiting from where the failure is
+// noticed would leave the generated config behind on every failing build.
+let code = 0;
 try {
   const r = spawnSync(
-    process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['electron-builder', '--win', '--config', file, '--publish', 'never'],
+    process.execPath,
+    [cli, '--win', '--config', file, '--publish', 'never'],
     { stdio: 'inherit', cwd: root }
   );
-  process.exit(r.status === null ? 1 : r.status);
+
+  // Never fail silently. A spawn that fails to start reports through `error`,
+  // not through a non-zero status, and saying nothing about it is how a build
+  // step comes back as a bare "exit code 1" with no output at all.
+  if (r.error) {
+    console.error(`build:intune: could not run electron-builder: ${r.error.message}`);
+    code = 1;
+  } else if (r.signal) {
+    console.error(`build:intune: electron-builder killed by ${r.signal}`);
+    code = 1;
+  } else if (r.status !== 0) {
+    console.error(`build:intune: electron-builder exited ${r.status}`);
+    code = r.status === null ? 1 : r.status;
+  }
 } finally {
   try { fs.unlinkSync(file); } catch { /* already gone */ }
 }
+process.exit(code);
