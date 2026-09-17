@@ -88,17 +88,23 @@ way.
 running it off Windows is ordinary use and very nearly works. Two runtimes were
 tried, and both fail at the same instruction:
 
-| Runtime | Result |
-|---|---|
-| Mono 6.8 + `WindowsBase` | `NullReferenceException` in `ZipUtil.CreateFromDirectory` |
-| .NET 8.0.31 + `System.IO.Packaging` 8.0.0 from NuGet | **the same exception, in the same method** |
+| Runtime | Windows path semantics? | Result |
+|---|---|---|
+| Mono 6.8 + `WindowsBase` | no | `NullReferenceException` in `ZipUtil.CreateFromDirectory` |
+| .NET 8.0.31 + `System.IO.Packaging` 8.0.0 from NuGet | no | the same exception, same method |
+| wine-mono 11.0 under Wine 11 (win64 prefix) | **yes** | the same exception, same method |
 
-The second row is the finding. The tool zips through `System.IO.Packaging`, and
-the obvious theory is that Mono's implementation of it is incomplete — but on
-.NET 8, with Microsoft's own supported cross-platform package supplying that
-namespace, it fails identically. So this is not a gap in anybody's
-reimplementation: the tool's own zip path depends on something that only holds
-on Windows, most likely path separators in the part URIs it builds.
+The tool zips through `System.IO.Packaging`, so the first theory is that Mono's
+implementation of it is incomplete. Row two kills that: on .NET 8, with
+Microsoft's own supported cross-platform package supplying the namespace, it
+fails identically. The next theory is that the tool builds its part URIs with
+Windows path separators. Row three kills that too — under Wine the code sees
+`C:\…` paths and backslashes throughout, and still fails in the same place.
+
+What the three have in common is not the operating system and not the path
+shape: it is that none of them is **.NET Framework's** `WindowsBase`. The tool
+depends on some behaviour specific to that implementation, which neither Mono
+nor Microsoft's own .NET Core port of `System.IO.Packaging` reproduces.
 
 Running it needs no more than a `runtimeconfig.json` beside a copy and that one
 package — the binary is never modified:
@@ -114,14 +120,26 @@ appears in the output folder, correctly named, holding **zero bytes**. Any build
 script that checks only whether the file exists will publish nothing and call it
 a success, so `.github/actions/intunewin` asserts a plausible size instead.
 
-Wine is the one route left with a real chance, because it supplies Windows
-semantics rather than reimplementing the library — under it the Windows-only
-assumption would hold. It needs a 64-bit prefix, since the tool is PE32+ (a
-32-bit prefix reports only `Bad EXE format`), and then a .NET provider: wine-mono
-is Mono and would be expected to fail as above, so it would have to be a real
-.NET Framework. That was not tried. Given the packaging already runs on a Windows
-runner in CI, a second route that could silently emit a different bundle is a
-cost rather than a convenience.
+That leaves exactly one untried configuration: **Wine with a genuine .NET
+Framework**, which is the only way to get the real `WindowsBase` outside Windows.
+It was not reachable here, and the reason is worth recording so the next attempt
+starts further along.
+
+Wine itself is fine — 64-bit is required, since the tool is PE32+ and a 32-bit
+prefix reports only `Bad EXE format`. The .NET Framework installer, however, is
+32-bit, so the prefix needs its WoW64 half, and on Ubuntu 24.04 that is where it
+stops: WineHQ's `wine-stable` depends on an i386 chain that reaches `libgd3:i386`,
+which Ubuntu no longer publishes for i386, so the package cannot install. Merging
+the i386 libraries in by hand does not work either — the `wine-stable-i386`
+package ships `wine-preloader` but not the 32-bit loader, and with those
+directories present Wine fails to load `kernel32.dll` at all. Removing them again
+restores a working 64-bit prefix, which is how that was confirmed rather than
+assumed.
+
+A distribution that still carries a full i386 archive would not hit this. Whether
+it is worth the effort is a separate question: the packaging already runs on a
+real Windows runner in CI, and a second route that could silently emit a
+different bundle is a cost rather than a convenience.
 
 Patching the tool would presumably fix it and is not an option: Microsoft's
 licence prohibits decompiling and disassembling it (§4b) and working around
