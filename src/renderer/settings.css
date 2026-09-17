@@ -84,6 +84,11 @@ h2 {
   display: block;
   font-weight: 550;
   letter-spacing: -0.003em;
+  /* A row's label is also its control's target - clicking it toggles the
+     checkbox - so it is grown to 26px tall and the space handed straight back,
+     leaving the text exactly where it was and the hint's gap unchanged. */
+  padding: 4px 0;
+  margin: -4px 0;
 }
 
 /* Held to a readable measure rather than the full row. A hint running the whole
@@ -169,14 +174,23 @@ input[type="checkbox"] {
   accent-color: var(--accent);
   cursor: default;
 }
+/* A 17px box is under the 24px comfortable minimum and cannot be grown here:
+   Chromium ignores padding on an `appearance: auto` checkbox, so the padding +
+   negative-margin trick used on the tab's close cross leaves the border box at
+   17px (measured). The target that does the work is the row's `<label for>`,
+   widened just below. */
 
 /* The swatch row: the accent is the one setting where seeing it beats naming
    it, so it is picked from colours rather than from a list of words. */
 .swatches { display: flex; gap: 7px; }
 
 .swatch {
-  width: 22px;
-  height: 22px;
+  /* 24px, not 22, because 24 is the smallest comfortable target and a swatch
+     has no label to fall back on. The padding trick used on the tab's close
+     cross is wrong here: this control's ring *is* its border, so padding would
+     grow the circle rather than the space around it. */
+  width: 24px;
+  height: 24px;
   /* Always outlined, never transparent. A swatch whose colour matches the row
      it sits on - the dark "Default" one, against the dark surface - is
      otherwise invisible, so the choice looks like it is missing. */
@@ -231,4 +245,14 @@ input[type="range"] {
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+
+/*
+ * A slider's track is thin by design, and a thin track is a thin target. The
+ * padding grows the element the pointer has to find without changing the line
+ * it draws, so the control looks identical and is twice as easy to grab.
+ */
+input[type="range"] {
+  padding: 8px 0;
+  box-sizing: content-box;
 }

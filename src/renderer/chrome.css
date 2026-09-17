@@ -215,7 +215,10 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
 }
 
 .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
-.tab-close:hover { background: var(--border); color: var(--text); }
+/* `background-color`, not the `background` shorthand: the shorthand resets
+   `background-clip`, which is what keeps the hover square the size of the
+   cross rather than the size of the target. See "Hit targets" below. */
+.tab-close:hover { background-color: var(--border); color: var(--text); }
 
 .audio-dot {
   flex: none;
@@ -325,6 +328,10 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
 #url {
   flex: 1;
   min-width: 0;
+  /* Fills the pill rather than sitting as a 20px line inside it. Centred text
+     looked the same either way; the difference is that a click 8px below the
+     baseline now lands on the field instead of on its container. */
+  align-self: stretch;
   border: none;
   background: transparent;
   color: var(--text);
@@ -560,3 +567,31 @@ body[data-layout="left"] .strip-filler { flex: 1 1 auto; }
   100% { transform: scale(1); }
 }
 body.calm .star.on svg { animation: none; }
+
+/* ---------------------------------------------------------------- */
+/* Hit targets                                                       */
+/* ---------------------------------------------------------------- */
+
+/*
+ * Some controls are drawn smaller than they can comfortably be hit.
+ *
+ * The close cross is 18px because a bigger cross would dominate the tab, and
+ * the answer is not to draw it larger but to make the *target* larger than the
+ * paint. Three declarations do that without moving a pixel of the design:
+ * padding grows the box the pointer has to find, the matching negative margin
+ * hands the space back to the layout, and `background-clip` keeps the hover
+ * square on the cross. 18px painted, 26px clickable, which clears the 24px
+ * minimum.
+ *
+ * Not a transparent `::after`, which is the usual trick and does not work
+ * here: Chromium hit-tests a <button> as one box and never consults generated
+ * content overflowing it, so the pseudo-element is painted and unclickable.
+ * Measured - `elementFromPoint` one pixel outside the border box returned the
+ * container, not the button.
+ */
+.tab-close {
+  padding: 4px;
+  margin: -4px;
+  box-sizing: content-box;
+  background-clip: content-box;
+}

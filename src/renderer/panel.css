@@ -63,7 +63,15 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
   padding: 0 14px 8px;
   color: var(--text-dim);
 }
-.budget-row input { flex: 1; accent-color: var(--accent); }
+/* Vertical padding, not height: the slider draws the same thin track and the
+   pointer gets a 32px band to find it in. `content-box` keeps `flex: 1` sizing
+   the track rather than the track plus its padding. */
+.budget-row input {
+  flex: 1;
+  accent-color: var(--accent);
+  padding: 8px 0;
+  box-sizing: content-box;
+}
 .budget-row output { font-variant-numeric: tabular-nums; min-width: 54px; text-align: right; }
 
 .pressure {

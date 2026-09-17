@@ -39,8 +39,21 @@ const el = {
   menu: document.getElementById('menu'),
   reloadIcon: document.getElementById('reload-icon'),
   progress: document.getElementById('progress'),
-  star: document.getElementById('star')
+  star: document.getElementById('star'),
+  omnibox: document.getElementById('omnibox')
 };
+
+// The whole pill focuses the address bar, not just the text inside it.
+//
+// The input is 20px tall inside a 32px pill, so six pixels along the top and
+// bottom of the widest control in the browser did nothing at all when clicked -
+// which reads as the address bar ignoring you rather than as a near miss.
+el.omnibox.addEventListener('mousedown', (event) => {
+  if (event.target === el.url) return;      // let the caret land where it was aimed
+  event.preventDefault();                   // no focus flash on the pill itself
+  el.url.focus();
+  el.url.select();
+});
 
 /** Whether the loading line is currently running, so it is only re-armed on a change. */
 let progressRunning = null;
