@@ -366,6 +366,22 @@ class BrowserShell {
   /* ---------------------------------------------------------------- */
 
   /**
+   * Is this webContents one of the browser's own chrome views?
+   *
+   * Asked by name rather than inferred from "no tab matches it". TabManager
+   * removes a tab from its list before the renderer is torn down, and in that
+   * window a website would pass a negative test and be treated as the chrome.
+   */
+  isChromeSender(sender) {
+    if (!sender) return false;
+    for (const view of [this.chromeView, this.panelView]) {
+      const wc = view && view.webContents;
+      if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
+    }
+    return false;
+  }
+
+  /**
    * Push governor + tab state to every view that renders it.
    *
    * Preferences ride along on the same message rather than on a channel of

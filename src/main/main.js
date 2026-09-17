@@ -290,7 +290,7 @@ function main() {
     }
 
     wireCommands({ tabs, shell, governor, prefs, publish, log });
-    wireRequests({ tabs, credentials, log });
+    wireRequests({ tabs, shell, credentials, log });
 
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
@@ -367,7 +367,7 @@ function main() {
 
 function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
   ipcMain.on('debrowser:command', (event, command, payload) => {
-    if (!senderMayCommand(tabs, event.sender)) return;
+    if (!senderMayCommand(tabs, shell, event.sender)) return;
 
     const active = tabs.activeTab();
 
@@ -395,6 +395,21 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
       case 'navigate': {
         const target = normaliseUrl(payload?.url, prefs.searchTemplate());
         if (!target) break;
+
+        // One of our own pages always goes through the page opener, never into
+        // whatever tab happens to be in front.
+        //
+        // The preload is fixed when a renderer is built, so a tab realised on a
+        // website has the page probe and not the command bridge. Loading
+        // Settings into it produced a page with no `window.debrowser` at all:
+        // settings.js throws on its first call and the page renders dead. The
+        // opener focuses the existing Settings tab or makes a new one, which is
+        // both correct and what the user meant.
+        if (pages.isInternal(target)) {
+          openInternalPage(tabs, target);
+          break;
+        }
+
         const tab = payload?.id ? tabs.byId(payload.id) : active;
         if (!tab) break;
         if (!tab.isLive) tab.realise();
@@ -452,7 +467,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
         // Manual discard from the task manager. Goes through the same tier
         // machinery as an automatic one, protections included.
         const tab = tabs.byId(payload?.id);
-        if (tab && !tab.visible) {
+        if (governor && tab && !tab.visible) {
           governor.enforceManualDiscard(tab).catch((e) => log(`manual discard failed: ${e.message}`));
         }
         break;
@@ -466,7 +481,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
 
       case 'set-budget': {
         const mb = Number(payload?.mb);
-        if (Number.isFinite(mb) && mb >= 256) {
+        if (governor && Number.isFinite(mb) && mb >= 256) {
           governor.cfg.memoryBudgetMB = Math.round(mb);
           log(`budget set to ${governor.cfg.memoryBudgetMB}MB`);
         }
@@ -495,20 +510,27 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
  * pages, or null for anything else - which includes a website sitting in a
  * renderer that used to be one of our pages.
  */
-function senderPage(tabs, sender) {
-  const tab = tabs.all().find((t) => t.wc && !t.wc.isDestroyed() && t.wc.id === sender.id);
-  // No tab behind it: the chrome, the task manager. Those are ours.
-  if (!tab) return 'chrome';
-  // A tab, so it is only trusted while it is actually showing one of our pages.
-  // `sender.getURL()` rather than `tab.url`, because the tab's copy is updated
-  // from events and this must not depend on one having arrived yet.
+function senderPage(tabs, shell, sender) {
+  // The chrome views are named, never inferred.
+  //
+  // "No tab matches, so it must be the chrome" is not safe: TabManager.close()
+  // splices the tab out of the list *before* the renderer is torn down, and in
+  // that window a website - which carries the command bridge, since every tab
+  // is realised on the new tab page - resolves to 'chrome' and can issue
+  // commands. `set-pref` on the homepage persists, which is a durable hijack of
+  // the browser by a page that was being closed.
+  if (shell && shell.isChromeSender(sender)) return 'chrome';
+
+  // Anything else is only trusted while it is actually showing one of our
+  // pages. `sender.getURL()` rather than `tab.url`, because the tab's copy is
+  // updated from events and this must not wait on one arriving.
   const live = sender.getURL();
   return pages.isInternal(live) ? pages.pageName(live) : null;
 }
 
 /** Commands are open to the chrome and to our own pages; nothing else. */
-function senderMayCommand(tabs, sender) {
-  return senderPage(tabs, sender) !== null;
+function senderMayCommand(tabs, shell, sender) {
+  return senderPage(tabs, shell, sender) !== null;
 }
 
 /**
@@ -523,12 +545,12 @@ function senderMayCommand(tabs, sender) {
  * password as well would leave one in a renderer's heap for as long as the page
  * is open, for nothing.
  */
-function wireRequests({ tabs, credentials, log }) {
+function wireRequests({ tabs, shell, credentials, log }) {
   ipcMain.handle('debrowser:request', (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
     // The new tab page has no business reading a password list, and neither has
     // the chrome, so neither is allowed to ask.
-    const sender = senderPage(tabs, event.sender);
+    const sender = senderPage(tabs, shell, event.sender);
     if (sender !== 'settings') return null;
 
     switch (command) {
@@ -804,7 +826,7 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
 function runSmokeTest({ tabs, governor, shell, prefs }) {
   const { runSmoke } = require('./smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, appMenuTemplate, openInternalPage,
-            senderPage: (t, sender) => senderPage(t, sender) }).then((code) => {
+            senderPage: (t, sender) => senderPage(t, shell, sender) }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

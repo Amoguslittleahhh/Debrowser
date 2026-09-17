@@ -210,6 +210,15 @@ class Tab {
    */
   confineToInternalPages() {
     this.wc.on('will-navigate', (event, url) => {
+      // Only while this tab is actually showing one of our pages.
+      //
+      // The handler is installed once, when the renderer is realised, and every
+      // tab is realised on the new tab page - so without this test it went on
+      // cancelling navigations for the rest of the tab's life. Every link click
+      // and every GET form submission on every website was hijacked into a new
+      // tab. It survived the tests because they navigate with `loadURL`, which
+      // does not fire `will-navigate` at all.
+      if (!this.internal) return;
       if (pages.isInternal(url)) return;
       event.preventDefault();
       this.onEvent(this, 'open-tab', { url });
@@ -370,7 +379,11 @@ class Tab {
    */
   showError(url, description) {
     this.title = 'Problem loading page';
-    const payload = JSON.stringify({ url: String(url || ''), description: String(description || '') });
+    // `</script>` escaped, because JSON.stringify does not do it: a URL
+    // containing that sequence closes the element early and the rest is parsed
+    // as markup. The comment above used to claim this was impossible.
+    const payload = JSON.stringify({ url: String(url || ''), description: String(description || '') })
+      .replace(/</g, '\\u003c');
     const html = `<!doctype html><meta charset="utf-8">
 <title>Problem loading page</title>
 <style>

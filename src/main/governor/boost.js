@@ -79,6 +79,23 @@ class BoostController {
       return;
     }
 
+    // A boost belongs to the tab the user is looking at. Everything below only
+    // ever released one when the boosted tab *was* the active tab, so switching
+    // away from an animating page left the boost in place permanently - and
+    // with it `quiesceRequested`, which stands the governor down. Budget
+    // enforcement, the live-tab cap, heap limits, hibernation and speculation
+    // all stopped for the rest of the session, and closing the tab made it
+    // unrecoverable because nothing was left to match against.
+    if (this.boostedTabId !== null && this.boostedTabId !== activeTab.id) {
+      const stale = [...allTabs].find((t) => t.id === this.boostedTabId);
+      if (stale) this.release(stale, allTabs);
+      else {
+        // The tab is gone. Clear directly and put everyone else back.
+        this.boostedTabId = null;
+        this.unyieldOthers(allTabs);
+      }
+    }
+
     const demand = this.demandFor(activeTab);
     activeTab.demand = demand;
 

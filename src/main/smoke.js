@@ -695,7 +695,45 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
     senderPage(tabs, fresh.wc) === null,
     `sender resolves to ${JSON.stringify(senderPage(tabs, fresh.wc))}`);
 
+  // The confinement on internal pages is installed once, when the renderer is
+  // realised, and every renderer is realised on the new tab page. Without a
+  // live check it went on cancelling navigations for the tab's whole life, so
+  // every link click and GET form submission on every website was hijacked into
+  // a new tab. `loadURL` does not fire `will-navigate`, which is why the checks
+  // above could not see it - this one drives a real link click.
+  const tabsBeforeClick = tabs.all().length;
+  await fresh.wc.executeJavaScript(`
+    const a = document.createElement('a');
+    a.href = ${JSON.stringify(pageUrl('form.html'))};
+    document.body.appendChild(a);
+    a.click();
+  `).catch(() => {});
+  await sleep(600);
+  check('a link on a website navigates in place rather than opening a tab',
+    tabs.all().length === tabsBeforeClick,
+    `${tabs.all().length} tabs (was ${tabsBeforeClick}); url=${fresh.url.slice(0, 44)}`);
+
   tabs.close(fresh.id);
+
+  /* ---------------------------------------------------------------- */
+  // A boost belongs to the tab in front of the user.
+  //
+  // Releasing it only when the boosted tab was also the active tab meant that
+  // switching away from an animating page left it boosted forever - and with it
+  // `quiesceRequested`, which stands the whole governor down. Nothing after
+  // that point would have been reclaimed for the rest of the session.
+  const spinner = tabs.create({ url: pageUrl('animated.html'), activate: true, realise: true });
+  await waitFor(() => spinner.isLive && !spinner.loading, { timeoutMs: 10_000 });
+  const gotBoost = await waitFor(() => governor.boost.boostedTabId === spinner.id,
+    { timeoutMs: 8000 });
+
+  await tabs.activate(home.id);
+  const boostDropped = await waitFor(() => governor.boost.boostedTabId === null, { timeoutMs: 8000 });
+  check('a boost is released when the user switches away from the tab holding it',
+    gotBoost && boostDropped,
+    `boosted=${gotBoost}, released=${boostDropped}, boostedTabId=${governor.boost.boostedTabId}`);
+
+  tabs.close(spinner.id);
 
   // The three-dot menu is built fresh on every open from live state, and it is
   // the one part of the chrome that is not a web page - a throw here would take
