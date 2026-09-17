@@ -995,6 +995,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
     : null);
   const shown = ['restore', 'switch', 'content'].map(fmtLat).filter(Boolean);
   if (shown.length) console.log(`  what it cost the user: ${shown.join(', ')}`);
+
+  // Switching to a tab that already has a renderer is the one thing in this
+  // browser that must be instant - there is nothing to load, nothing to
+  // unfreeze, nothing to wait for. It was not: re-activating the foreground tab
+  // routed through the demotion path and waited out a 400ms page-state capture,
+  // so one switch in twenty stalled for four tenths of a second while the p50
+  // sat at 0.3ms. The average hid it completely, which is why the assertion is
+  // on p95.
+  //
+  // The threshold is loose on purpose. It is not a performance target, it is a
+  // tripwire for a blocking call finding its way back onto this path, and a
+  // contended CI runner should not have an opinion about it.
+  if (lat.switch) {
+    check('switching to a tab that is already live does not block',
+      lat.switch.p95 < 100,
+      `p50 ${lat.switch.p50}ms / p95 ${lat.switch.p95}ms over ${lat.switch.n} switches`);
+  }
   console.log(`  reclaimed so far: ~${Math.round(governor.stats.reclaimedMB)}MB ` +
               `across ${governor.stats.freezes} freezes and ` +
               `${governor.stats.discards} discards`);

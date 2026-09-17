@@ -57,7 +57,21 @@ async function applyTier(tab, target, ctx) {
     return null;
   }
 
-  const goingUp = tierRank(target) < tierRank(current);
+  // `<=`, not `<`, and the difference is 400ms on the tab-switch path.
+  //
+  // ACTIVE is deliberately exempt from the early return above, so that
+  // re-activating the foreground tab still re-asserts its priority and detaches
+  // the protocol agents. But with a strict `<`, ACTIVE -> ACTIVE is not "going
+  // up", so it fell through to `demote` - which captures page state, waits up
+  // to 400ms for the renderer to answer, and on a page that never does, waits
+  // all of it. Measured: switch p50 0.3ms, p95 401ms, the p95 being entirely
+  // this. Nothing about re-activating the tab already in front of the user
+  // needs a snapshot; that is what demotion takes one for.
+  //
+  // Every other same-tier case returned above, so this only ever routes ACTIVE
+  // -> ACTIVE, where `promote` is a no-op that reaches the tier it started at
+  // and is discarded as unmoved.
+  const goingUp = tierRank(target) <= tierRank(current);
   const reached = goingUp
     ? await promote(tab, target, ctx)
     : await demote(tab, target, ctx);
