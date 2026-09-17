@@ -166,6 +166,14 @@ const SECTIONS = {
 
   credentials: [
     {
+      key: 'requirePresence',
+      label: 'Ask for Windows Hello or Touch ID first',
+      hint: 'Before a saved password or card is shown or filled. The store is already ' +
+            'encrypted by the OS, so this is not about the file - it is about someone ' +
+            'sitting at an unlocked machine and pressing Show.',
+      type: 'checkbox'
+    },
+    {
       key: 'fillPasswords',
       label: 'Fill saved passwords automatically',
       hint: 'Only when exactly one saved sign-in matches the page\'s origin, and only ' +
@@ -467,6 +475,38 @@ function renderUpdateState(u) {
  * a row needs a site and a username, and revealing is a separate deliberate
  * call that fetches one record.
  */
+/**
+ * Turn the presence control off where nothing can satisfy it.
+ *
+ * A checkbox that locks the user out of their own passwords is worse than no
+ * checkbox, so it is disabled with the reason attached where the machine has no
+ * Hello or Touch ID - and labelled experimental where it has one this has never
+ * been able to test against.
+ */
+async function renderPresence() {
+  const control = controls.get('requirePresence');
+  if (!control || !control.input) return;
+  const cap = await api.request('presence-capability');
+  const row = control.input.closest('.row');
+  const hint = row ? row.querySelector('.row-hint') : null;
+  if (!cap) return;
+
+  if (!cap.available) {
+    control.input.disabled = true;
+    control.input.checked = false;
+    if (hint) hint.textContent = `Not available: ${cap.reason}.`;
+    return;
+  }
+  control.input.disabled = false;
+  if (hint && cap.experimental) {
+    hint.textContent = `Uses ${cap.mechanism}. This has never been run against real ` +
+      'hardware, so try it before relying on it — if the prompt does not appear, the ' +
+      'check refuses rather than letting the secret through.';
+  } else if (hint) {
+    hint.textContent = `Uses ${cap.mechanism}, before a saved password or card is shown or filled.`;
+  }
+}
+
 async function renderCredentials() {
   const host = document.getElementById('credential-list');
   const state = document.getElementById('credential-state');
@@ -556,7 +596,7 @@ api.onState((state) => {
   renderUpdateState(state.updates);
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
-  if (!built) { buildAll(); renderCredentials(); renderBookmarks(); }
+  if (!built) { buildAll(); renderCredentials(); renderBookmarks(); renderPresence(); }
   for (const [key, control] of controls) control.write(state.prefs[key]);
 });
 

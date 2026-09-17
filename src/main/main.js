@@ -21,6 +21,7 @@ const { Prefs, applyPrefs } = require('./prefs');
 const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
+const presence = require('./presence');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
@@ -570,7 +571,7 @@ function senderMayCommand(tabs, shell, sender) {
 const CHROME_REQUESTS = new Set(['list-bookmarks', 'toggle-bookmark', 'remove-bookmark']);
 
 function wireRequests({ tabs, shell, credentials, bookmarks, log }) {
-  ipcMain.handle('debrowser:request', (event, command, payload) => {
+  ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
     if (sender !== 'settings' && !(sender === 'chrome' && CHROME_REQUESTS.has(command))) {
@@ -653,8 +654,26 @@ function wireRequests({ tabs, shell, credentials, bookmarks, log }) {
       case 'delete-credential':
         return credentials.remove(payload?.kind, payload?.id);
 
+      case 'presence-capability':
+        return presence.capability();
+
       case 'reveal-credential': {
         // Deliberate, one at a time, and never logged.
+        //
+        // Gated on a presence check where the machine can make one and the user
+        // has asked for it. `verify` returns true only on an observed success -
+        // a helper that will not start, a throw, a timeout and an unrecognised
+        // answer are all refusals - so an error here denies the reveal rather
+        // than waving it through. A check that fails open is not a check.
+        if (prefs.get('requirePresence')) {
+          const allowed = await presence.verify(
+            'Show a saved password',
+            shell && !shell.window.isDestroyed() ? shell.window : null);
+          if (!allowed) {
+            log('credentials', 'reveal refused: presence check not satisfied');
+            return { denied: true };
+          }
+        }
         const record = credentials.reveal(payload?.kind, payload?.id);
         if (!record) return null;
         return payload?.kind === 'login'
@@ -671,6 +690,15 @@ function wireRequests({ tabs, shell, credentials, bookmarks, log }) {
         });
 
       case 'fill-payment': {
+        if (prefs.get('requirePresence')) {
+          const allowed = await presence.verify(
+            'Fill saved payment details',
+            shell && !shell.window.isDestroyed() ? shell.window : null);
+          if (!allowed) {
+            log('credentials', 'payment fill refused: presence check not satisfied');
+            return false;
+          }
+        }
         // Into the page behind Settings, not into Settings.
         //
         // `activeTab()` is the Settings tab - it is the one the user just

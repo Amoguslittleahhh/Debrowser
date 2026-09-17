@@ -52,6 +52,16 @@ const SCHEMA = {
   windowOpacity: { def: 1, ok: (v) => Number.isFinite(v) && v >= 0.6 && v <= 1 },
 
   /**
+   * Ask for a fingerprint, face or PIN before a saved secret is shown or filled.
+   *
+   * Off by default, and that is not timidity: the check is only as good as the
+   * machine's support for it, and turning it on where nothing can satisfy it
+   * would lock the user out of their own passwords. Settings turns it on only
+   * where `presence.capability()` reports something usable.
+   */
+  requirePresence: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
    * Where the tab strip lives.
    *
    * 'left' is the Arc/Zen shape: a column down the side, where a tab's title

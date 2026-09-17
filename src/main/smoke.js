@@ -971,6 +971,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
     require('fs').rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // The presence check exists to stop someone at an unlocked machine pressing
+  // Show. Its one load-bearing property is that it fails *closed*: a helper
+  // that will not start, a throw, a timeout or an answer nobody recognises must
+  // all deny. A check that fails open is not a check, it is a delay - and the
+  // failure mode is that the protection silently stops existing while Settings
+  // still advertises it.
+  {
+    const presence = require('./presence');
+    const cap = await presence.capability();
+    check('the presence check reports what this machine can do, and why not when it cannot',
+      typeof cap.available === 'boolean' &&
+      (cap.available ? typeof cap.mechanism === 'string'
+                     : typeof cap.reason === 'string' && cap.reason.length > 0),
+      cap.available ? `${cap.mechanism}${cap.experimental ? ' (experimental)' : ''}` : cap.reason);
+
+    // On a machine with nothing to ask, verify must refuse rather than pass by
+    // default. This is the assertion that would catch a refactor turning the
+    // gate into a no-op everywhere it is not supported.
+    if (!cap.available) {
+      const allowed = await presence.verify('smoke test', null);
+      check('a machine with no presence check refuses rather than allowing',
+        allowed === false, `verify() returned ${allowed}`);
+    }
+  }
+
   const { Updater } = require('./updater');
   const updateCap = new Updater({ log: () => {} }).capability();
   check('updates are inert outside a packaged build, and say why',
