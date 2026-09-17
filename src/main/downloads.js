@@ -63,10 +63,11 @@ class Download {
    * @param {(...a:any[]) => void} opts.log
    * @param {(d: Download) => void} [opts.onChange]
    */
-  constructor({ url, dir, connections, log = () => {}, onChange = () => {} }) {
+  constructor({ url, dir, connections, session = null, log = () => {}, onChange = () => {} }) {
     this.id = `dl-${Date.now().toString(36)}-${(nextId += 1).toString(36)}`;
     this.url = url;
     this.dir = dir;
+    this.session = session;
     this.wanted = clampConnections(connections);
     this.log = log;
     this.onChange = onChange;
@@ -123,6 +124,12 @@ class Download {
       // a write past the end still works, but the file grows in whatever order
       // the segments happen to finish, and the size on disk lies until it ends.
       if (this.total > 0) await this.handle.truncate(this.total);
+
+      // Cancelling during the open or the truncate - which on a large file is
+      // not instant - used to be overwritten by the assignment below, and the
+      // second Cancel was then a no-op because `cancelled` was already set. The
+      // download ran to completion with the UI saying it had stopped.
+      if (this.cancelled) return;
 
       const canSplit = probe.acceptsRanges && this.total >= MIN_SEGMENTED_BYTES && this.wanted > 1;
       this.segments = canSplit ? Math.min(this.wanted, MAX_CONNECTIONS) : 1;
@@ -187,11 +194,19 @@ class Download {
     return {
       total: Number.isFinite(total) && total > 0 ? total : 0,
       acceptsRanges,
-      // If-Range wants a strong validator. Either is accepted by servers; the
-      // ETag is preferred because Last-Modified has one-second resolution and a
-      // file rewritten within the same second looks unchanged.
-      validator: header(headers, 'etag') || header(headers, 'last-modified') || null,
-      filename: filenameFor(this.url, header(headers, 'content-disposition')),
+      // If-Range is compared *strongly*, so a weak ETag - `W/"..."`, which is
+      // what nginx emits for anything it gzips - can never match. Sent anyway,
+      // the server ignores the Range, answers 200, and this code reads that as
+      // "the file changed": every segmented download from such a server failed
+      // on a file that had not changed at all. Weak validators are dropped and
+      // Last-Modified is used instead, which is compared strongly and does
+      // match.
+      validator: strongValidator(header(headers, 'etag'))
+        || header(headers, 'last-modified') || null,
+      // From the URL the redirects actually landed on. `/get/latest?os=win`
+      // redirecting to a CDN is the common shape, and naming the file from the
+      // first URL saves an installer as "latest" with no extension.
+      filename: filenameFor(res.finalUrl || this.url, header(headers, 'content-disposition')),
       finalUrl: res.finalUrl || this.url
     };
   }
@@ -206,7 +221,22 @@ class Download {
       if (start > end) break;
       jobs.push(this.fetchRange(probe.finalUrl, start, end, probe.validator));
     }
-    await Promise.all(jobs);
+
+    // `allSettled`, not `all`, and this is a crash rather than a nicety.
+    //
+    // `Promise.all` rejects the moment one segment does, so `start()` ran its
+    // `finally` - closing the file handle and setting it to null - while the
+    // other three were still streaming. Their next `data` event called
+    // `this.handle.write(...)` on null, and a TypeError thrown inside a stream
+    // listener takes the whole main process down. One 503 on one connection was
+    // enough to close the browser.
+    //
+    // Settling all of them first means nothing is still writing when the handle
+    // goes; the first real failure is then re-thrown, so the download still
+    // fails for the right reason.
+    const results = await Promise.allSettled(jobs);
+    const failure = results.find((r) => r.status === 'rejected');
+    if (failure && !this.cancelled) throw failure.reason;
   }
 
   /** No ranges on offer: one stream, written as it arrives. */
@@ -247,14 +277,24 @@ class Download {
       let ended = false;
       const settleIfDone = () => { if (ended && pending === 0) resolve(); };
 
+      // A destroyed Readable emits no `end`, and may emit no `error` either -
+      // so the two paths below that call `res.destroy()` used to leave this
+      // promise pending forever, wedging the whole download in `running` with
+      // its file handle open. Both now say how they finished.
+      let done = false;
+      const succeed = () => { if (!done) { done = true; ended = true; settleIfDone(); } };
+      const fail = (err) => { if (!done) { done = true; reject(err); } };
+
       res.on('data', (chunk) => {
-        if (this.cancelled) { res.destroy(); return; }
+        if (this.cancelled) { res.destroy(); fail(new Error('cancelled')); return; }
         const at = offsetOf();
         // A server that sends more than it was asked for must not be allowed to
         // write past its segment and over the next one's bytes.
         if (limit !== null && at + chunk.length - 1 > limit) {
           chunk = chunk.subarray(0, limit - at + 1);
-          if (chunk.length === 0) { res.destroy(); return; }
+          // Everything asked for has arrived; the rest is the server being
+          // generous. Stop reading and call the segment complete.
+          if (chunk.length === 0) { res.destroy(); succeed(); return; }
         }
         advance(chunk.length);
         pending++;
@@ -265,9 +305,13 @@ class Download {
           settleIfDone();
         }, (err) => { pending--; reject(err); });
       });
-      res.on('error', reject);
-      res.on('end', () => { ended = true; settleIfDone(); });
-      res.on('aborted', () => reject(new Error('the connection was closed early')));
+      res.on('error', fail);
+      res.on('end', succeed);
+      res.on('aborted', () => fail(new Error('the connection was closed early')));
+      // Last resort: a stream that closes having emitted neither would
+      // otherwise hang here, and a hung segment is indistinguishable from a
+      // slow one until the user gives up.
+      res.on('close', () => { if (!done) fail(new Error('the connection closed unexpectedly')); });
     });
   }
 
@@ -284,12 +328,29 @@ class Download {
 
       let req;
       try {
-        req = net.request({ url, method: 'GET', redirect: 'manual' });
+        // `session` matters: `will-download` fired inside the browsing session,
+        // where the user is signed in. Re-fetching from the default session
+        // sends no cookies, so a download behind a login quietly saves the
+        // sign-in page under the real filename - the right size, the wrong file,
+        // and no error anywhere.
+        req = net.request({
+          url,
+          method: 'GET',
+          redirect: 'manual',
+          session: this.session || undefined,
+          useSessionCookies: true
+        });
       } catch (err) {
         reject(err);
         return;
       }
       for (const [name, value] of Object.entries(headers)) req.setHeader(name, value);
+      // Identity, always. Chromium decodes a compressed body transparently,
+      // while Content-Length and every byte range describe the *encoded*
+      // stream - so a gzipped download would write decoded bytes at offsets
+      // computed for compressed ones, and fail its own length check while
+      // silently interleaving segments wrongly.
+      req.setHeader('Accept-Encoding', 'identity');
 
       this.requests.add(req);
       const done = () => this.requests.delete(req);
@@ -346,9 +407,12 @@ class Download {
 /* ------------------------------------------------------------------ */
 
 class DownloadManager {
-  constructor({ dir, connections = () => 4, log = () => {}, onChange = () => {} }) {
+  constructor({ dir, connections = () => 4, session = null, log = () => {}, onChange = () => {} }) {
     this.dir = dir;
     this.connections = connections;
+    // The session the download was started from, so the refetch carries the
+    // cookies the original request would have.
+    this.session = session;
     this.log = log;
     this.onChange = onChange;
     /** @type {Map<string, Download>} */
@@ -371,6 +435,7 @@ class DownloadManager {
       url: clean,
       dir: this.dir,
       connections: this.connections(),
+      session: this.session,
       log: this.log,
       onChange: () => this.onChange(this.list())
     });
@@ -410,6 +475,20 @@ function clampConnections(value) {
   const n = Math.round(Number(value));
   if (!Number.isFinite(n)) return 4;
   return Math.max(1, Math.min(MAX_CONNECTIONS, n));
+}
+
+/**
+ * An ETag only if it is a strong one.
+ *
+ * `If-Range` is compared with strong comparison, so `W/"abc"` can never match
+ * and the server answers with the whole file instead of the range. Since this
+ * code reads an unexpected 200 as "the file changed underneath us", a weak ETag
+ * turned every segmented download from nginx-with-gzip into a failure on a file
+ * that had not changed at all.
+ */
+function strongValidator(etag) {
+  if (typeof etag !== 'string') return null;
+  return /^\s*W\//i.test(etag) ? null : etag;
 }
 
 /** Header lookup that does not care about case, and flattens arrays. */
@@ -463,7 +542,7 @@ function filenameFor(url, disposition) {
  * as a path by Windows.
  */
 function sanitiseName(raw) {
-  let name = String(raw || '').replace(/[ -]/g, '');
+  let name = String(raw || '').replace(/[\x00-\x1f\x7f]/g, '');
   name = name.split('/').pop();
   name = name.split('\\').pop();
   name = name.replace(/^\.+/, '');                       // no dotfiles, no ".."
@@ -492,6 +571,7 @@ module.exports = {
   Download,
   sanitiseName,
   filenameFor,
+  strongValidator,
   clampConnections,
   MIN_SEGMENTED_BYTES,
   MAX_CONNECTIONS

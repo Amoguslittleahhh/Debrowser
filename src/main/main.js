@@ -306,6 +306,9 @@ function main() {
     downloads = new DownloadManager({
       dir: app.getPath('downloads'),
       connections: () => prefs.get('downloadConnections'),
+      // Same session the cancelled download came from, so a file behind a
+      // sign-in still fetches as the signed-in user.
+      session: session.fromPartition(BROWSING_PARTITION),
       log,
       onChange: () => publish()
     });

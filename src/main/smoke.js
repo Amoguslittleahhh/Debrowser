@@ -1074,6 +1074,49 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
       `${item2.segments} segment(s), ${got2.length} bytes${item2.error ? ` — ${item2.error}` : ''}`);
     plain.close();
 
+    // --- one segment fails: the others must not be writing into a closed file ---
+    //
+    // This crashed the browser. `Promise.all` rejects on the first failure, so
+    // the download's `finally` closed the file handle and set it to null while
+    // the other three segments were still streaming - and their next write
+    // threw a TypeError inside a stream listener, which takes the main process
+    // with it. One 503 on one connection was enough to close the browser.
+    let servedRanges = 0;
+    const flaky = http.createServer((req, res) => {
+      const range = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
+      if (!range) { res.writeHead(200, { 'Content-Length': payload.length, ETag: '"v1"' }); res.end(payload); return; }
+      servedRanges++;
+      // Fail one of the middle segments, after the probe and after the others
+      // have started, which is the ordering that produced the crash.
+      if (servedRanges === 3) { res.writeHead(503); res.end(); return; }
+      const start = Number(range[1]);
+      const end = range[2] ? Number(range[2]) : payload.length - 1;
+      res.writeHead(206, {
+        'Content-Range': `bytes ${start}-${end}/${payload.length}`,
+        'Content-Length': end - start + 1,
+        'Accept-Ranges': 'bytes',
+        ETag: '"v1"'
+      });
+      res.end(payload.subarray(start, end + 1));
+    });
+    const flakyPort = await listen(flaky);
+    const mgr3 = new dl.DownloadManager({ dir: outDir, connections: () => 4, log: () => {} });
+    const item3 = mgr3.start(`http://127.0.0.1:${flakyPort}/flaky.bin`);
+    await finished(item3);
+    // Reaching this line at all is most of the assertion: a crash here takes
+    // the suite down with the browser.
+    check('one failing segment fails the download instead of crashing the browser',
+      item3.state === 'failed' && typeof item3.error === 'string' && item3.handle === null,
+      `state=${item3.state}, error=${item3.error || 'none'}, handle ${item3.handle === null ? 'closed' : 'STILL OPEN'}`);
+    flaky.close();
+
+    // A weak ETag can never match a strong If-Range comparison, so sending one
+    // makes the server answer 200 and the download report that the file
+    // changed - on a file that had not changed at all.
+    check('a weak ETag is not used as a range validator',
+      dl.strongValidator('W/"abc"') === null && dl.strongValidator('"abc"') === '"abc"',
+      `W/"abc" -> ${dl.strongValidator('W/"abc"')}, "abc" -> ${dl.strongValidator('"abc"')}`);
+
     // A server chooses the filename, so a server can try to choose a path.
     check('a download cannot be talked into writing outside its directory',
       dl.sanitiseName('../../etc/passwd') === 'passwd' &&
