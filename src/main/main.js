@@ -22,6 +22,7 @@ const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const presence = require('./presence');
+const { DownloadManager } = require('./downloads');
 const { Governor } = require('./governor');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
@@ -184,6 +185,7 @@ function main() {
   /** @type {Credentials|null} */
   let credentials = null;
   let bookmarks = null;
+  let downloads = null;
 
   let publishQueued = false;
   const publish = () => {
@@ -294,7 +296,29 @@ function main() {
 
     wireCommands({ tabs, shell, governor, prefs, publish, log });
     bookmarks = new Bookmarks(log);
-    wireRequests({ tabs, shell, credentials, bookmarks, log });
+
+    // Downloads are taken over from Chromium rather than added beside it.
+    //
+    // Electron's own download path is one connection, start to finish, and
+    // there is no way to ask it for more - so `will-download` is cancelled and
+    // the URL is handed to our manager. Cancelled rather than left running: two
+    // downloads of the same file would race for the same name on disk.
+    downloads = new DownloadManager({
+      dir: app.getPath('downloads'),
+      connections: () => prefs.get('downloadConnections'),
+      log,
+      onChange: () => publish()
+    });
+    session.fromPartition(BROWSING_PARTITION).on('will-download', (event, item) => {
+      const url = item.getURL();
+      // Only what a download can mean. A blob: or data: URL has no server to
+      // ask for ranges and nothing for our manager to fetch, so Chromium keeps
+      // those - taking them over would break them to no purpose.
+      if (!/^https?:/i.test(url)) return;
+      event.preventDefault();
+      downloads.start(url);
+    });
+    wireRequests({ tabs, shell, credentials, bookmarks, downloads, log });
 
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
@@ -570,7 +594,7 @@ function senderMayCommand(tabs, shell, sender) {
  */
 const CHROME_REQUESTS = new Set(['list-bookmarks', 'toggle-bookmark', 'remove-bookmark']);
 
-function wireRequests({ tabs, shell, credentials, bookmarks, log }) {
+function wireRequests({ tabs, shell, credentials, bookmarks, downloads, log }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
@@ -579,6 +603,15 @@ function wireRequests({ tabs, shell, credentials, bookmarks, log }) {
     }
 
     switch (command) {
+      case 'list-downloads':
+        return { items: downloads ? downloads.list() : [] };
+
+      case 'cancel-download':
+        return { cancelled: Boolean(downloads && downloads.cancel(String(payload?.id ?? ''))) };
+
+      case 'clear-download':
+        return { removed: Boolean(downloads && downloads.remove(String(payload?.id ?? ''))) };
+
       case 'list-bookmarks':
         return { items: bookmarks.all() };
 

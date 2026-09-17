@@ -164,6 +164,19 @@ const SECTIONS = {
     }
   ],
 
+  downloads: [
+    {
+      key: 'downloadConnections',
+      label: 'Connections per download',
+      hint: 'Asks the server for several byte ranges at once instead of one stream. ' +
+            'Helps where a single connection is not the bottleneck, and does nothing ' +
+            'where it is. Servers that refuse ranges are downloaded whole. 1 turns it off.',
+      type: 'number',
+      min: 1,
+      max: 16
+    }
+  ],
+
   credentials: [
     {
       key: 'requirePresence',
@@ -597,6 +610,7 @@ api.onState((state) => {
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) { buildAll(); renderCredentials(); renderBookmarks(); renderPresence(); }
+  renderDownloads();
   for (const [key, control] of controls) control.write(state.prefs[key]);
 });
 
@@ -614,6 +628,70 @@ api.onState((state) => {
  * locked. Offering only the first would strand Firefox, Zen and every fork of
  * them; offering only the second would make the easy case needlessly manual.
  */
+/**
+ * The downloads list.
+ *
+ * Re-rendered from the browser's state rather than kept here, because progress
+ * arrives on the state broadcast and a copy in this page would be a second
+ * thing to keep in step with it.
+ */
+async function renderDownloads() {
+  const host = document.getElementById('download-list');
+  if (!host) return;
+  const res = await api.request('list-downloads');
+  const items = (res && res.items) || [];
+  if (!items.length) { host.replaceChildren(); return; }
+  host.replaceChildren(...items.map(downloadRow));
+}
+
+function downloadRow(item) {
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const text = document.createElement('div');
+  text.className = 'row-text';
+  const label = document.createElement('span');
+  label.className = 'row-label';
+  label.textContent = item.filename || item.url;
+  const hint = document.createElement('span');
+  hint.className = 'row-hint';
+  hint.textContent = describeDownload(item);
+  text.append(label, hint);
+
+  const control = document.createElement('div');
+  control.className = 'row-control';
+  const button = document.createElement('button');
+  const running = item.state === 'running' || item.state === 'starting';
+  button.className = running ? 'ghost-btn danger' : 'ghost-btn';
+  button.textContent = running ? 'Cancel' : 'Clear';
+  button.addEventListener('click', async () => {
+    await api.request(running ? 'cancel-download' : 'clear-download', { id: item.id });
+    renderDownloads();
+  });
+  control.append(button);
+
+  row.append(text, control);
+  return row;
+}
+
+function describeDownload(item) {
+  const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
+  switch (item.state) {
+    case 'done':
+      return `Finished — ${mb(item.received)} over ${item.segments} connection${item.segments === 1 ? '' : 's'}`;
+    case 'failed':
+      return `Failed — ${item.error}`;
+    case 'cancelled':
+      return 'Cancelled';
+    default: {
+      const rate = item.bytesPerSecond ? `, ${mb(item.bytesPerSecond)}/s` : '';
+      return item.total
+        ? `${mb(item.received)} of ${mb(item.total)} over ${item.segments} connection${item.segments === 1 ? '' : 's'}${rate}`
+        : `${mb(item.received)}${rate}`;
+    }
+  }
+}
+
 async function renderBookmarks() {
   const host = document.getElementById('bookmark-list');
   const actions = document.getElementById('bookmark-actions');

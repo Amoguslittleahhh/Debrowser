@@ -996,6 +996,94 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
     }
   }
 
+  /* ---------------------------------------------------------------- */
+
+  // Segmented downloading, against a real server over real sockets.
+  //
+  // The property is not "it went faster" - that depends on the network and is
+  // not a thing a test can assert. It is that a file fetched in pieces is the
+  // same file: reassembly at offsets is exactly the kind of code that produces
+  // something the right *size* and the wrong *contents*, and a length check
+  // would not notice.
+  {
+    const http = require('http');
+    const dl = require('./downloads');
+    const crypto = require('crypto');
+    const osmod = require('os');
+    const pathmod = require('path');
+
+    // Big enough to be split rather than taken whole, and incompressible so a
+    // proxy cannot quietly re-encode it.
+    const payload = crypto.randomBytes(dl.MIN_SEGMENTED_BYTES + 100_000);
+    const digest = crypto.createHash('sha256').update(payload).digest('hex');
+    let rangeRequests = 0;
+
+    const serve = (allowRanges) => http.createServer((req, res) => {
+      const range = allowRanges ? /bytes=(\d+)-(\d*)/.exec(req.headers.range || '') : null;
+      if (range) {
+        rangeRequests++;
+        const start = Number(range[1]);
+        const end = range[2] ? Number(range[2]) : payload.length - 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${payload.length}`,
+          'Content-Length': end - start + 1,
+          'Accept-Ranges': 'bytes',
+          ETag: '"v1"'
+        });
+        res.end(payload.subarray(start, end + 1));
+        return;
+      }
+      res.writeHead(200, { 'Content-Length': payload.length, ETag: '"v1"' });
+      res.end(payload);
+    });
+
+    const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+    const outDir = fs.mkdtempSync(pathmod.join(osmod.tmpdir(), 'debrowser-dl-'));
+    const finished = (item) => waitFor(() => item.state === 'done' || item.state === 'failed', { timeoutMs: 30_000 });
+
+    // --- a server that serves ranges: expect several segments, same bytes ---
+    const ranged = serve(true);
+    const rangedPort = await listen(ranged);
+    const mgr = new dl.DownloadManager({ dir: outDir, connections: () => 4, log: () => {} });
+    const item = mgr.start(`http://127.0.0.1:${rangedPort}/big.bin`);
+    await finished(item);
+
+    const got = item.state === 'done' ? fs.readFileSync(pathmod.join(outDir, item.filename)) : Buffer.alloc(0);
+    const gotDigest = crypto.createHash('sha256').update(got).digest('hex');
+
+    check('a download split across connections reassembles byte for byte',
+      item.state === 'done' && gotDigest === digest,
+      `${item.segments} segment(s), ${got.length}/${payload.length} bytes, ` +
+      `digest ${gotDigest === digest ? 'matches' : 'DIFFERS'}${item.error ? ` — ${item.error}` : ''}`);
+
+    check('a server offering ranges is actually asked for several',
+      item.segments > 1 && rangeRequests > 2, `${item.segments} segments, ${rangeRequests} range requests`);
+    ranged.close();
+
+    // --- a server that refuses ranges: expect one connection, same bytes ---
+    const plain = serve(false);
+    const plainPort = await listen(plain);
+    const mgr2 = new dl.DownloadManager({ dir: outDir, connections: () => 8, log: () => {} });
+    const item2 = mgr2.start(`http://127.0.0.1:${plainPort}/whole.bin`);
+    await finished(item2);
+    const got2 = item2.state === 'done' ? fs.readFileSync(pathmod.join(outDir, item2.filename)) : Buffer.alloc(0);
+
+    check('a server that refuses ranges is downloaded whole rather than failing',
+      item2.state === 'done' && item2.segments === 1 &&
+      crypto.createHash('sha256').update(got2).digest('hex') === digest,
+      `${item2.segments} segment(s), ${got2.length} bytes${item2.error ? ` — ${item2.error}` : ''}`);
+    plain.close();
+
+    // A server chooses the filename, so a server can try to choose a path.
+    check('a download cannot be talked into writing outside its directory',
+      dl.sanitiseName('../../etc/passwd') === 'passwd' &&
+      dl.sanitiseName('..\\..\\evil.exe') === 'evil.exe' &&
+      !dl.sanitiseName('/abs/x').includes('/'),
+      'traversal, backslashes and absolute paths all reduced to a bare name');
+
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+
   const { Updater } = require('./updater');
   const updateCap = new Updater({ log: () => {} }).capability();
   check('updates are inert outside a packaged build, and say why',

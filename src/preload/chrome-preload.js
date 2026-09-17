@@ -41,7 +41,10 @@ const COMMANDS = new Set([
   'bookmark-profiles',
   'import-from-profile',
   'import-bookmark-file',
-  'presence-capability'
+  'presence-capability',
+  'list-downloads',
+  'cancel-download',
+  'clear-download'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {

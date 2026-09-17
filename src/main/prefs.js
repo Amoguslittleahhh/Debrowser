@@ -127,6 +127,22 @@ const SCHEMA = {
    */
   fillPasswords: { def: true, ok: (v) => typeof v === 'boolean' },
 
+  /* --- Downloads -------------------------------------------------- */
+
+  /**
+   * How many connections a download may open at once.
+   *
+   * The IDM idea: ask for byte ranges in parallel rather than pulling one
+   * stream end to end. It helps where a single connection is not the
+   * bottleneck - a server shaping per-connection, a long fat path one TCP flow
+   * never fills - and does nothing where it is. 1 turns it off.
+   *
+   * Four rather than eight or sixteen because past a handful the gain flattens
+   * while the cost to the server does not, and a browser that opens sixteen
+   * sockets per file is a browser that gets rate-limited.
+   */
+  downloadConnections: { def: 4, ok: (v) => Number.isInteger(v) && v >= 1 && v <= 16 },
+
   /* --- Updates ---------------------------------------------------- */
   // Off means the browser never reaches the network to look for a version,
   // which is a privacy choice as much as a bandwidth one.
