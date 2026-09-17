@@ -46,10 +46,13 @@ main {
 
 /* Centred rather than pinned to the left edge: the content has a fixed comfortable
    width, and against a full window that leaves an empty half if it does not move. */
-section { max-width: 620px; margin: 24px auto 0; }
+/* More air above a group than inside it, so the eye reads the page as a few
+   groups rather than one long list of equally-spaced rows. */
+section { max-width: 620px; margin: 34px auto 0; }
+section:first-of-type { margin-top: 18px; }
 
 h2 {
-  margin: 0 0 10px;
+  margin: 0 0 12px 2px;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -73,20 +76,42 @@ h2 {
 .row + .row { border-top: 1px solid var(--border); }
 
 .row-text { flex: 1; min-width: 0; }
-.row-label { display: block; }
+
+/* The label has to outrank the hint by more than colour. At the same size and
+   weight they read as one paragraph, and the eye has to parse the sentence to
+   find out what the setting is called. */
+.row-label {
+  display: block;
+  font-weight: 550;
+  letter-spacing: -0.003em;
+}
+
+/* Held to a readable measure rather than the full row. A hint running the whole
+   620px reads as documentation that happens to be in a settings window; kept
+   near 50 characters it reads as a caption. */
 .row-hint {
   display: block;
+  max-width: 52ch;
   margin-top: 3px;
   font-size: 11.5px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--text-dim);
 }
 
+/*
+ * Controls share a column instead of each ending wherever it likes.
+ *
+ * With `flex: none` alone every control was its own width, so a dropdown, a
+ * slider and a row of swatches left a ragged right edge down the page - the
+ * single clearest sign that a layout was assembled rather than designed.
+ */
 .row-control {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 7px;
   flex: none;
+  min-width: 172px;
 }
 
 /* Beside the field, not under it. `.row-hint` is a block, which is right in the
@@ -105,8 +130,36 @@ select, input[type="text"], input[type="number"] {
   outline: none;
   user-select: text;
 }
-select { cursor: default; }
+/*
+ * The chevron is ours, because the platform's is not.
+ *
+ * Left alone, a <select> keeps the operating system's own arrow and well - a
+ * Win32 combo box on Windows, a different one again on GTK - dropped into a
+ * panel styled like none of them. It is the loudest remaining sign that the
+ * controls were placed rather than drawn.
+ *
+ * The data URI is the one image in this project and is deliberate: it is 200
+ * bytes, arrives with the stylesheet, hits no network and decodes no file. A
+ * pure-CSS triangle would need a pseudo-element, which <select> does not
+ * reliably render. Its colour is fixed rather than `currentColor`, which a data
+ * URI cannot see - `--text-dim` is chosen to read on both palettes.
+ */
+select {
+  cursor: default;
+  appearance: none;
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa1b1' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+
 select:focus, input:focus { border-color: var(--accent); }
+
+/* Focus has to be visible without being a second border that shifts the layout,
+   so it is a ring outside the box rather than a thicker edge. */
+select:focus-visible, input:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
 
 /* A real checkbox, accented and sized up - a hand-rolled toggle would mean
    reimplementing focus, keyboard activation and the accessibility tree. */

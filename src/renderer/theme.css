@@ -102,4 +102,28 @@ body {
   font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
   user-select: none;
   cursor: default;
+  /* Text this small on a dark background gains more from lighter stems than it
+     loses in weight. Only affects macOS, where the default is heavier. */
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Figures that change keep their width.
+ *
+ * This browser puts a memory reading in the chrome and updates it twice a
+ * second. In a proportional face a 1 is narrower than a 0, so every update
+ * shifts the digits around and the number appears to twitch even when it has
+ * barely moved. Tabular figures pin each digit to the same advance width, so a
+ * changing number changes in place.
+ *
+ * Applied to the elements that hold live numbers rather than globally: tabular
+ * figures are wider and slightly stiffer, which is right for data and wrong for
+ * a sentence.
+ */
+.meter-text,
+.stat-value,
+.row-mem,
+.stat {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
