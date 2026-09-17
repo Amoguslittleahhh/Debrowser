@@ -38,13 +38,23 @@ jobs:
       fail-fast: false   # a macOS failure must not hide a working Windows build
       matrix:
         include:
+          # Every path here must sit under `dist/`, on all three legs.
+          #
+          # upload-artifact keeps the least common ancestor of the paths it is
+          # given. List only `dist/...` and that ancestor is `dist/`, so the
+          # files arrive flat; add one path outside it - `dist-intune/*.exe`
+          # did exactly this - and the ancestor becomes the workspace root, so
+          # the whole leg arrives nested a directory deeper than the other two.
+          # The release job's `files: artifacts/*` is not recursive, so it then
+          # matched two directories, skipped them, and published a release with
+          # no Windows build in it at all. The Intune installer is copied into
+          # `dist/` below rather than uploaded from where it is built.
           - os: windows-latest
             platform: --win
             artifacts: |
               dist/*.exe
               dist/*.blockmap
               dist/latest.yml
-              dist-intune/*.exe
           - os: macos-latest
             platform: --mac
             artifacts: |
@@ -213,6 +223,27 @@ jobs:
           -c.win.azureSignOptions.codeSigningAccountName=${{ vars.AZURE_SIGN_ACCOUNT }}
           -c.win.azureSignOptions.certificateProfileName=${{ vars.AZURE_SIGN_PROFILE }}
 
+      # Collect the Intune installer into `dist/` for upload.
+      #
+      # It is *built* in its own directory so that its run of electron-builder
+      # cannot overwrite `dist/latest.yml` - that manifest describes the
+      # updatable build, and a machine-wide install does not update itself. That
+      # reason applies to building it, not to shipping it, and the matrix note
+      # above is why it cannot be uploaded from where it is built.
+      #
+      # Only the installer moves. Any blockmap beside it is deliberately left
+      # behind: it exists to serve differential updates, which this variant does
+      # not do, and uploading one would advertise an update path that is off.
+      # Copied after both packaging steps so neither can clean it away, and
+      # before the signature report so it is checked like any other installer.
+      - name: Collect the Intune installer
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist-intune/*.exe -ErrorAction SilentlyContinue
+          if (-not $exe) { throw "no Intune installer in dist-intune/ - the packaging step produced nothing" }
+          $exe | ForEach-Object { Copy-Item $_.FullName dist/ -Force; "collected $($_.Name)" }
+
       # Says plainly whether what is about to be uploaded is signed. A release
       # that is silently unsigned because a secret expired is the failure this
       # catches, and it costs one command.
@@ -248,13 +279,43 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # Fails loudly rather than publishing an empty release. A release job that
-      # succeeds with nothing attached is worse than one that fails: the tag
-      # exists, the page looks real, and every download link is missing.
+      # Fails loudly rather than publishing an incomplete release. A release job
+      # that succeeds with the wrong things attached is worse than one that
+      # fails: the tag exists, the page looks real, and a whole platform is
+      # missing from it.
+      #
+      # Counting entries was not enough, and v1.2.0 is why. The Windows leg
+      # arrived nested in two subdirectories rather than flat, `files:
+      # artifacts/*` matched those directories and skipped them, and this check
+      # counted two and passed - publishing a release with no Windows build in
+      # it. So it now names what it expects, per platform, and it refuses a
+      # directory: anything that is not a plain file at the top level means an
+      # upload leg changed shape and will not be matched by the upload glob.
       - name: Check there is something to release
         run: |
           ls -lh artifacts/
-          test "$(ls -1 artifacts/ | wc -l)" -gt 0 || { echo "no artifacts"; exit 1; }
+
+          fail=0
+          for d in artifacts/*/; do
+            [ -e "$d" ] || continue
+            echo "::error::artifacts/$(basename "$d") is a directory - an upload leg is nested, so its files will not be released"
+            fail=1
+          done
+
+          # One per platform. Each is the thing a person actually downloads, so
+          # a missing one is a platform that silently did not ship.
+          for want in '*.exe' '*.dmg' '*.AppImage'; do
+            n=$(find artifacts/ -maxdepth 1 -type f -name "$want" | wc -l)
+            echo "$want: $n"
+            [ "$n" -gt 0 ] || { echo "::error::no $want in artifacts/"; fail=1; }
+          done
+
+          # The Intune variant is named distinctly and is easy to lose on its
+          # own, since it is the one file that is not built into dist/.
+          find artifacts/ -maxdepth 1 -type f -name '*intune*.exe' | grep -q . \
+            || { echo "::error::no Intune installer in artifacts/"; fail=1; }
+
+          exit $fail
 
       # The release page describes the release it is on, and nothing else.
       #
