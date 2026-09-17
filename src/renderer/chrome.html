@@ -54,6 +54,15 @@
         <circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/>
       </svg>
     </button>
+
+    <!--
+      Loading line. Chromium reports that a page is loading, not how far along
+      it is, so this creeps towards nearly-done and completes when the load
+      does - which is what every browser does, because a bar that sits still is
+      worse than no bar. It is a scaleX on one element: no layout, no repaint
+      of anything around it.
+    -->
+    <div class="progress" id="progress" aria-hidden="true"></div>
   </div>
 
   <script src="theme.js"></script>

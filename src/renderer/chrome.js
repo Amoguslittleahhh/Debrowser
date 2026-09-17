@@ -37,8 +37,12 @@ const el = {
   meterFill: document.getElementById('meter-fill'),
   meterText: document.getElementById('meter-text'),
   menu: document.getElementById('menu'),
-  reloadIcon: document.getElementById('reload-icon')
+  reloadIcon: document.getElementById('reload-icon'),
+  progress: document.getElementById('progress')
 };
+
+/** Whether the loading line is currently running, so it is only re-armed on a change. */
+let progressRunning = null;
 
 /**
  * The reload button's two glyphs, as path data.
@@ -210,6 +214,26 @@ function renderToolbar(state) {
 
   el.back.disabled = !active?.canGoBack;
   el.forward.disabled = !active?.canGoForward;
+
+  // Only touched when it actually changes. This runs on every state broadcast,
+  // twice a second, and restarting a CSS animation on each one would keep the
+  // line pinned at its first frame forever - which is a bar that never moves,
+  // the one thing worse than no bar.
+  const loading = Boolean(active?.loading);
+  if (loading !== progressRunning) {
+    progressRunning = loading;
+    if (loading) {
+      // Rewind before re-arming. Removing and re-adding a class in the same
+      // frame is coalesced away, so without forcing a reflow between them a
+      // second navigation would resume the first one's animation part-way.
+      el.progress.classList.remove('loading', 'done');
+      void el.progress.offsetWidth;
+      el.progress.classList.add('loading');
+    } else {
+      el.progress.classList.remove('loading');
+      el.progress.classList.add('done');
+    }
+  }
 
   const shows = active?.loading ? 'stop' : 'reload';
   if (shows !== reloadShows) {

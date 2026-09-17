@@ -383,6 +383,66 @@ body[data-dots="off"] .tier { display: none; }
 .meter-text { font-size: 11px; }
 
 /* ---------------------------------------------------------------- */
+/* Loading line                                                      */
+/* ---------------------------------------------------------------- */
+
+/*
+ * Sits on the toolbar's bottom edge, which is the boundary between the browser
+ * and the page - so it reads as the page arriving rather than as a widget.
+ *
+ * `scaleX` on a positioned element, so it never touches layout and never
+ * repaints the toolbar around it. `will-change` is deliberately absent: it
+ * would keep a compositor layer alive for the whole life of the window to save
+ * a promotion that happens once per navigation.
+ */
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toolbar { position: relative; }
+
+/*
+ * The creep. Fast at first, then slower and slower, never quite arriving -
+ * because arriving before the page has would be a lie, and stopping dead looks
+ * like a hang. 12s to reach 92%, which no real page outlasts.
+ */
+.progress.loading {
+  opacity: 1;
+  animation: progress-creep 12s cubic-bezier(0, 0.6, 0.2, 1) forwards;
+}
+
+/*
+ * Done: snap to full, then fade. The width transition is quick because the
+ * page is already on screen by now - this is an acknowledgement, not a wait.
+ */
+.progress.done {
+  opacity: 0;
+  transform: scaleX(1);
+  transition: transform 120ms ease-out, opacity 220ms ease-out 120ms;
+}
+
+@keyframes progress-creep {
+  0%   { transform: scaleX(0); }
+  20%  { transform: scaleX(0.35); }
+  50%  { transform: scaleX(0.65); }
+  100% { transform: scaleX(0.92); }
+}
+
+/* Reduced motion keeps the information and drops the movement: the line is
+   there while loading, gone when not, with no creep and no fade. */
+body.calm .progress.loading { animation: none; transform: scaleX(0.5); }
+body.calm .progress.done { transition: none; }
+
+/* ---------------------------------------------------------------- */
 /* Sidebar layout                                                    */
 /* ---------------------------------------------------------------- */
 
