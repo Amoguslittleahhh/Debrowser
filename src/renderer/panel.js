@@ -127,8 +127,17 @@ function render(state) {
   }
 
   const s = state.stats;
+  // Both counts, each under its own name.
+  //
+  // This said "N process(es)" and printed `rendererCount`, which counts only
+  // processes of type Tab - so the browser, GPU and network processes were
+  // missing from a number labelled as every process. On a fresh window it read
+  // "2 process(es)" beside a total of 510MB, which makes the total look
+  // impossible rather than merely high, and sends anyone reading it after the
+  // wrong bug.
   let line =
-    `${state.profile} profile · ${state.rendererCount} process(es) · ` +
+    `${state.profile} profile · ${state.processCount} process(es), ` +
+    `${state.rendererCount} renderer(s) · ` +
     `${s.freezes} frozen · ${s.discards} discarded · ~${s.reclaimedMB} MB reclaimed`;
   // Only shown once the heap limit rule has actually acted, so the line stays
   // quiet in the default configuration where the rule is off.
@@ -143,7 +152,13 @@ function render(state) {
     el.pressure.textContent += ` Hibernation unavailable: ${hib.reason}.`;
     // Name the fix, not just the fault. "No swap" is something the user can act
     // on in one command; "unavailable" on its own is not.
-    if (state.compression && !state.compression.available) {
+    //
+    // Only where the fix is the fix, though. Off Linux the mechanism is not
+    // implemented at all, so a missing compressor is not what is stopping it,
+    // and this line used to follow "not implemented on win32" with "enabling
+    // zram or swap would turn it on" - contradicting the sentence before it and
+    // sending the user after something that would not have helped.
+    if (state.compression && state.compression.applicable && !state.compression.available) {
       el.pressure.textContent += ' Enabling zram or swap would turn it on.';
     }
   } else if (hib && hib.disabled) {

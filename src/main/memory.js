@@ -333,10 +333,18 @@ function processType(pid) {
  * because the pages stay in RAM compressed, which is what the measured 4-12ms
  * resume assumes.
  *
- * @returns {{available:boolean, compressor:string|null, swapMB:number, zramMB:number}}
+ * `applicable` separates "there is no compressor" from "a compressor is not the
+ * question here". Off Linux the trim mechanism does not exist at all, so an
+ * absent compressor is not the reason and configuring one would change nothing.
+ * Without this the panel read the bare `available: false` as a missing
+ * compressor and told Windows users to enable zram, immediately after telling
+ * them the feature is not implemented on their platform - advice that was both
+ * self-contradicting and impossible to act on.
+ *
+ * @returns {{available:boolean, applicable:boolean, compressor:string|null, swapMB:number, zramMB:number}}
  */
 function compressionStatus() {
-  const none = { available: false, compressor: null, swapMB: 0, zramMB: 0 };
+  const none = { available: false, applicable: isLinux, compressor: null, swapMB: 0, zramMB: 0 };
   if (!isLinux) return none;
 
   let text;
@@ -361,6 +369,7 @@ function compressionStatus() {
 
   return {
     available: swapMB > 0,
+    applicable: true,
     compressor: swapMB === 0 ? null : (zramMB > 0 ? 'zram' : 'swap'),
     swapMB: Math.round(swapMB),
     zramMB: Math.round(zramMB)
