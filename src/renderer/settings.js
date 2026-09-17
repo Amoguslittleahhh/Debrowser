@@ -506,8 +506,22 @@ async function renderPresence() {
 
   if (!cap.available) {
     control.input.disabled = true;
-    control.input.checked = false;
-    if (hint) hint.textContent = `Not available: ${cap.reason}.`;
+    // Turned off for real, not just unticked.
+    //
+    // Unticking alone left the saved preference true, so the next state
+    // broadcast re-ticked it from prefs - and a profile carrying
+    // `requirePresence: true` onto a machine with no Hello or Touch ID locked
+    // the user out of their own saved passwords with no control left enabled to
+    // clear it. Writing it back is the only way out that does not require
+    // editing the file by hand.
+    if (control.input.checked) {
+      control.input.checked = false;
+      api.send('set-pref', { key: 'requirePresence', value: false });
+    }
+    if (hint) {
+      hint.textContent = `Not available: ${cap.reason}. Turned off, so your saved ` +
+        'passwords stay reachable.';
+    }
     return;
   }
   control.input.disabled = false;
@@ -577,6 +591,14 @@ function credentialRow(kind, id, title, subtitle) {
     }
     const secret = await api.request('reveal-credential', { kind, id });
     if (!secret) return;
+    // A refused presence check answers `{ denied: true }`, which is an object
+    // and therefore truthy - so it sailed past the guard above and rendered the
+    // literal word "undefined" where the password goes, with the button flipped
+    // to Hide. A refusal has to look like a refusal.
+    if (secret.denied) {
+      hint.textContent = 'Not shown — the identity check was not completed.';
+      return;
+    }
     hint.textContent = kind === 'login' ? secret.password : secret.number;
     reveal.textContent = 'Hide';
     reveal.dataset.shown = 'yes';

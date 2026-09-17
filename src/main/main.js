@@ -321,7 +321,7 @@ function main() {
       event.preventDefault();
       downloads.start(url);
     });
-    wireRequests({ tabs, shell, credentials, bookmarks, downloads, log });
+    wireRequests({ tabs, shell, credentials, bookmarks, downloads, prefs, log });
 
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
@@ -597,7 +597,7 @@ function senderMayCommand(tabs, shell, sender) {
  */
 const CHROME_REQUESTS = new Set(['list-bookmarks', 'toggle-bookmark', 'remove-bookmark']);
 
-function wireRequests({ tabs, shell, credentials, bookmarks, downloads, log }) {
+function wireRequests({ tabs, shell, credentials, bookmarks, downloads, prefs, log }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);

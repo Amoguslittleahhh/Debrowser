@@ -291,16 +291,6 @@ class Governor {
 
     for (const tab of this.tabs.all()) {
       if (!this.heapLimiter.worthMeasuring(tab)) continue;
-      // Before the skip, not after. `shouldSkip` returns early for a tab with
-      // no renderer, and this is the only place outside `activate` that clears
-      // a speculation - so a tab that was speculated on and never became live
-      // (queued behind the admission limit and then closed, or OOM-killed) left
-      // `speculatingId` set for the rest of the session, silently disabling
-      // every future speculative restore with nothing in the log to say why.
-      if (tab.speculativeUntil && now > tab.speculativeUntil && !tab.everVisible && !tab.isLive) {
-        this.tabs.clearSpeculation(tab);
-      }
-
       if (this.shouldSkip(tab)) continue;
       if (tab.heapTotalBytes == null) continue; // not sampled yet
 

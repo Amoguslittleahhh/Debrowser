@@ -21,11 +21,13 @@
     "dist:mac": "npm run build:memprobe && electron-builder --mac",
     "dist:linux": "npm run build:memtrim && electron-builder --linux",
     "build:memprobe": "node tools/build-memprobe.js",
-    "dist:intune": "npm run build:memprobe && node tools/build-intune.js"
+    "dist:intune": "npm run build:memprobe && node tools/build-intune.js",
+    "lint": "eslint src tools bench"
   },
   "devDependencies": {
     "electron": "^44.0.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.0.0"
   },
   "author": {
     "name": "amoguslittleahhh",

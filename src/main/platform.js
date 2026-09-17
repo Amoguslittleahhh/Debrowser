@@ -11,7 +11,6 @@
 
 const os = require('os');
 const path = require('path');
-const fs = require('fs');
 const { HelperProcess, HELPER_GONE } = require('./helper-process');
 const { MB } = require('./config');
 const { compressionStatus } = require('./memory');

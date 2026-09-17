@@ -293,6 +293,20 @@ class Tab {
       this.emit('updated');
     });
 
+    // A new document has not been probed yet, so nothing is known about it.
+    //
+    // `hasSensitiveFields` is the gate that stops a page with a password field
+    // being photographed, and it was left at the previous document's answer
+    // until the new one's first probe arrived. Navigating from a safe page to a
+    // sign-in page and switching tabs inside that window wrote a thumbnail of
+    // the login page to disk - the exact thing the gate exists to prevent.
+    // Assumed sensitive until a probe says otherwise, because the failure has
+    // to be a missing thumbnail rather than a leaked one.
+    wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+      if (!isMainFrame || isInPlace) return;
+      this.hasSensitiveFields = true;
+      this.lastProbeAt = 0;
+    });
     wc.on('did-start-loading', () => { this.loading = true; this.emit('updated'); });
     wc.on('did-stop-loading', () => { this.loading = false; this.emit('updated'); });
 

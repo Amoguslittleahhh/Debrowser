@@ -130,9 +130,19 @@ jobs:
         if: matrix.os != 'ubuntu-latest'
         run: npm run build:memprobe
 
-      # Runs the real 41-check suite against real renderers before anything is
-      # packaged, on the platform being packaged. This is the step that would
-      # have caught every packaging bug found while writing this config.
+      # Cheap, and it catches the one class of fault this project has shipped
+      # twice: a name used in a scope that does not have it. Under 'use strict'
+      # that is a ReferenceError on whatever path touches it - so `node --check`
+      # passes, the app starts, the suite goes green, and the function is simply
+      # broken for anyone who calls it. Runs before the suite because it takes
+      # two seconds and the suite takes a minute.
+      - name: Lint
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint
+
+      # Runs the real suite against real renderers before anything is packaged,
+      # on the platform being packaged. This is the step that would have caught
+      # every packaging bug found while writing this config.
       - name: Smoke test (headless)
         if: matrix.os == 'ubuntu-latest'
         run: npm run smoke:headless

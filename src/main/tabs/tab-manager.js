@@ -296,8 +296,13 @@ class TabManager {
 
     const timer = setTimeout(() => {
       wc.removeListener('did-stop-loading', done);
-      this.latency.record('content', ceilingMs);
-      stop();  // consumed, so the listener below cannot also record
+      // `stop()` records and *then* becomes a no-op, so recording the ceiling
+      // explicitly beside it put two samples in the series for one load, and
+      // every timed-out load counted twice in the percentiles. Elapsed time at
+      // the moment this timer fires is the ceiling, so stopping is all that
+      // was ever needed - and it still consumes the stop, which is what keeps
+      // the listener below from recording a third.
+      stop();
     }, ceilingMs);
     if (typeof timer.unref === 'function') timer.unref();
 
@@ -402,6 +407,11 @@ class TabManager {
     const [tab] = this.tabs.splice(index, 1);
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
+    // The governor's expiry clause only walks tabs that still exist, so a tab
+    // closed while it was being speculated on left `speculatingId` set for the
+    // rest of the session, and every later speculative restore was refused with
+    // nothing in the log to say why.
+    this.clearSpeculation(tab);
     // A picture of the page must not outlive the tab it was taken from.
     tab.discardThumbnail();
     tab.teardownView();

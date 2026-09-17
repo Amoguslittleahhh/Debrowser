@@ -61,7 +61,7 @@
  * does not model.
  */
 
-const { Tier, isStopped, MB } = require('../config');
+const { isStopped, MB } = require('../config');
 
 /**
  * Collection speed to assume before a tab has been observed collecting, in
