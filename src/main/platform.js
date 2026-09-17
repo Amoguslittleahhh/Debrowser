@@ -722,6 +722,24 @@ function chromiumSwitches(cfg) {
   //                           33.0MB for optimize-for-size alone), while also
   //                           shrinking image caches and disabling features the
   //                           user would notice. Same benefit, real cost.
+  //   --disk-cache-size, --media-cache-size
+  //                           the theory was that Chromium sizes these from the
+  //                           host's RAM and disk, so a machine with plenty of
+  //                           both pays for caches it never fills - and that
+  //                           bounding them would come off the fixed overhead,
+  //                           which is the largest line in the budget and the
+  //                           one that decides the tab count at which per-tab
+  //                           memory gets good. Measured at 8MB and 4MB against
+  //                           the defaults over the 14-tab suite: 243MB and
+  //                           243MB of browser+GPU+utility overhead, against
+  //                           242MB and 240MB unset. No win, and marginally the
+  //                           wrong way, which is noise. The caveat worth
+  //                           keeping: that workload fetches a handful of small
+  //                           pages from a local fixture server, so it says
+  //                           nothing about a browser that has been reading the
+  //                           web for an hour. Worth re-measuring against a
+  //                           long session before anyone concludes the idea is
+  //                           dead - but not worth shipping on a hunch.
   if (cfg.optimizeForSize) switches.push(['js-flags', '--optimize-for-size']);
 
   // --- Per-platform ------------------------------------------------------
