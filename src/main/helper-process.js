@@ -119,15 +119,22 @@ class HelperProcess {
       this.settle(HELPER_GONE);
     });
 
-    this.child.on('exit', () => {
+    // The exit code and signal are carried into the log and into the permanent
+    // reason. Without them a helper that dies on startup reports only "exited
+    // repeatedly", which says that it died and nothing about why - and the
+    // difference between a non-zero exit, a signal and a clean exit on EOF is
+    // most of the diagnosis.
+    this.child.on('exit', (code, signal) => {
+      const how = signal ? `signal ${signal}` : `code ${code}`;
       this.child = null;
       this.settle(HELPER_GONE);
       if (this.stopped) return;      // we asked it to go
       if (this.restarts++ === 0) {
-        this.log(`${this.name} helper exited; restarting once`);
+        this.log(`${this.name} helper exited (${how}); restarting once`);
         this.start();
       } else {
-        this.reason = 'helper exited repeatedly';
+        this.reason = `helper exited repeatedly (${how})`;
+        this.log(`${this.name} ${this.reason}`);
       }
     });
 

@@ -179,9 +179,22 @@ static int supported(void) {
 int main(void) {
   char line[256];
 
-  /* Line buffered both ways: the driver waits on a single line and must not sit
-     behind a block-sized buffer that never fills. */
-  setvbuf(stdout, NULL, _IOLBF, 0);
+  /*
+   * Unbuffered, not line-buffered.
+   *
+   * `setvbuf(stdout, NULL, _IOLBF, 0)` is the obvious thing to write and it is
+   * wrong on Windows in two separate ways. MSVC requires size between 2 and
+   * INT_MAX when the buffer is NULL, and an invalid parameter invokes the
+   * invalid-parameter handler, which in a release build terminates the process
+   * - so this helper started and died instantly, every time, and the driver
+   * reported only "helper exited repeatedly". And MSVC documents _IOLBF as
+   * behaving like full buffering on Win32 anyway, so surviving it would have
+   * left every reply sitting in a buffer that never fills.
+   *
+   * _IONBF ignores the size argument and is valid everywhere. For a protocol
+   * that writes one short line and waits, unbuffered is also what we want.
+   */
+  setvbuf(stdout, NULL, _IONBF, 0);
 
   while (fgets(line, sizeof(line), stdin) != NULL) {
     char *nl = strchr(line, '\n');
@@ -189,12 +202,13 @@ int main(void) {
 
     if (strcmp(line, "caps") == 0) {
       printf("caps %s %d\n", MECHANISM, supported());
+      fflush(stdout);
       continue;
     }
 
     if (strncmp(line, "measure ", 8) == 0) {
       unsigned long pid = strtoul(line + 8, NULL, 10);
-      if (pid == 0) { printf("err 0 22\n"); continue; }
+      if (pid == 0) { printf("err 0 22\n"); fflush(stdout); continue; }
 
       unsigned long long pss = 0, priv = 0;
       unsigned long err = 0;
@@ -203,12 +217,14 @@ int main(void) {
       } else {
         printf("ok %lu %llu %llu\n", pid, pss, priv);
       }
+      fflush(stdout);
       continue;
     }
 
     /* Unknown verbs are answered, never ignored: a driver waiting on a reply
        that never comes is a stall, and a stall here is a stalled governor tick. */
     printf("err 0 22\n");
+    fflush(stdout);
   }
   return 0;
 }
