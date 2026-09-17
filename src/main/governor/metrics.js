@@ -266,9 +266,23 @@ class Metrics {
       // the rest - and calling that 'probe' drops the "over-counts" warning from
       // a number that is still over-counting. One slow renderer would have been
       // enough. Mixtures read as the fallback they mostly are.
+      // Four states, because three of them are genuinely different and the
+      // difference matters to whoever reads the number:
+      //
+      //   pss    the kernel's own proportional figure (Linux)
+      //   probe  every process measured by the native helper
+      //   mixed  some measured, the rest still summed working set - so the
+      //          total still over-counts, and must still say so
+      //   rss    none measured; the old summed figure throughout
+      //
+      // An all-or-nothing rule was tried and is wrong: one process that exits
+      // between the sample and the probe, or that cannot be opened, pinned the
+      // label to 'rss' and hid the fact that the helper was working perfectly
+      // for everything else.
       accounting: accountingMode() === 'pss'
         ? 'pss'
-        : (this.byPid.size > 0 && this.probed.size >= this.byPid.size ? 'probe' : 'rss'),
+        : this.probed.size === 0 ? 'rss'
+        : this.probed.size >= this.byPid.size ? 'probe' : 'mixed',
       probeMechanism: this.probeMechanism || null,
       pageMerging: pageMergingStatus(),
       compression: compressionStatus(),

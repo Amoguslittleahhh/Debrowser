@@ -482,6 +482,10 @@ function measureProcess(pid, log) {
   return getMeasureHelper(log).measure(pid);
 }
 
+function probeBinaryPath() {
+  return PROBE_BINARY;
+}
+
 function measureCapability(log) {
   return getMeasureHelper(log).capability();
 }
@@ -749,7 +753,7 @@ function chromiumSwitches(cfg) {
 }
 
 module.exports = {
-  measureProcess, measureCapability, stopMeasureHelper,
+  measureProcess, measureCapability, stopMeasureHelper, probeBinaryPath,
   PLATFORM,
   isLinux,
   isMac,

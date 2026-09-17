@@ -59,6 +59,8 @@ function render(state) {
   // 'probe' is the native helper: a true proportional figure on Windows, and
   // the footprint macOS itself charges. Both are honest totals, so neither
   // carries the over-counting warning.
+  // 'mixed' is deliberately not counted as proportional: part of the total is
+  // still summed working set, so the over-count warning stays up.
   const proportional = state.accounting === 'pss' || state.accounting === 'probe';
   el.total.title = state.accounting === 'probe'
     ? (state.probeMechanism === 'proc_pid_rusage'

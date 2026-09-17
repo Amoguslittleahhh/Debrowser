@@ -758,6 +758,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
   // same suite - it asserts the native backend answered, which is the only
   // signal available that code compiled for a platform this was not written on
   // actually works.
+  // Probing is asynchronous and fire-and-forget by design - the sampler runs on
+  // the governor's tick and must not wait on a pipe - so the figures land one
+  // tick after the round that produced them. Wait for that rather than reading
+  // the instant after asking, which measures the scheduler and not the helper.
+  const probeReady = await waitFor(async () => {
+    governor.metrics.sample();
+    const cap = await platform.measureCapability(() => {});
+    return cap.available === true && governor.metrics.probed.size > 0;
+  }, { timeoutMs: 8000, pollMs: 400 });
+
   const probeCap = await platform.measureCapability(() => {});
   const probeSnap = governor.metrics.snapshot();
   if (process.platform === 'linux') {
@@ -765,9 +775,20 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, appMenuTemplate, op
       probeCap.available === false && probeSnap.accounting === 'pss',
       `${probeCap.reason} (accounting=${probeSnap.accounting})`);
   } else {
+    // Every failure mode names itself. The first run of this on a real Windows
+    // runner failed with "mechanism=null accounting=rss" and nothing else,
+    // which said the helper had not answered but not one word about why - so
+    // the reason, the binary it looked for and whether it exists are all
+    // printed, pass or fail.
+    const probePath = platform.probeBinaryPath();
     check('per-process memory is measured natively rather than summed',
-      probeCap.available === true && probeSnap.accounting === 'probe' && probeSnap.totalMB > 0,
-      `mechanism=${probeCap.mechanism} accounting=${probeSnap.accounting} total=${probeSnap.totalMB}MB`);
+      probeCap.available === true &&
+      (probeSnap.accounting === 'probe' || probeSnap.accounting === 'mixed') &&
+      probeSnap.totalMB > 0,
+      `mechanism=${probeCap.mechanism} accounting=${probeSnap.accounting} ` +
+      `probed=${governor.metrics.probed.size}/${governor.metrics.byPid.size} ` +
+      `ready=${probeReady} reason=${JSON.stringify(probeCap.reason)} ` +
+      `binary=${probePath} exists=${fs.existsSync(probePath)}`);
   }
 
   /* ---------------------------------------------------------------- */
