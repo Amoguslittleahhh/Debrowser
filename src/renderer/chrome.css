@@ -462,7 +462,11 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
   padding: 0 14px;
   border-radius: var(--radius-pill);
   background: var(--bg);
-  border: 1px solid transparent;
+  /* A real edge at rest, not a transparent placeholder held for the focus
+     state. The pill is `--bg` on a `--tint-2` toolbar, and those two are close
+     enough that an unbordered pill reads as a smudge rather than as a field -
+     which is what it looked like photographed. */
+  border: 1px solid var(--border);
   transition: background-color var(--fast) ease, border-color var(--fast) ease,
               box-shadow var(--fast) ease;
 }
@@ -693,7 +697,6 @@ body[data-layout="left"] .omnibox {
   flex: 1 0 100%;
   margin: 0;
   background: var(--bg-input);
-  border-color: var(--border);
 }
 body[data-layout="left"] .omnibox:hover {
   background: color-mix(in srgb, var(--accent) 6%, var(--bg-input));

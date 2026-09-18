@@ -215,15 +215,25 @@ function main() {
    * `before-input-event` is the only hook that sees a keystroke before the page
    * does. Only keys in the table are taken - everything else, including every
    * shortcut a web application defines for itself, is left alone.
+   *
+   * Every view that can hold focus needs this *except* the chrome, which has its
+   * own DOM handler over the same table: binding it there too would run each
+   * shortcut twice per keypress. That left the task manager and the sheets - the
+   * panel has no key handling of its own and the sheets handle only Escape - so
+   * with either of them focused no browser shortcut worked at all.
    */
-  const bindPageShortcuts = (tab) => {
-    if (!tab.isLive) return;
-    tab.wc.on('before-input-event', (event, input) => {
+  const bindShortcuts = (wc) => {
+    if (!wc || wc.isDestroyed()) return;
+    wc.on('before-input-event', (event, input) => {
       const command = pageShortcut(input);
       if (!command) return;
       event.preventDefault();
       runCommand(command, null);
     });
+  };
+
+  const bindPageShortcuts = (tab) => {
+    if (tab.isLive) bindShortcuts(tab.wc);
   };
 
   const onTabEvent = (tab, event, payload) => {
@@ -316,7 +326,13 @@ function main() {
       tabManager: tabs,
       prefs,
       log,
-      onCommand: (name) => { if (name === 'chrome-ready' || name === 'view-ready') publish(); }
+      onCommand: (name) => { if (name === 'chrome-ready' || name === 'view-ready') publish(); },
+      // The task manager and the panels are views, not tabs, so nothing was
+      // binding the browser's shortcuts to them - and with the task manager
+      // focused, Ctrl+T did nothing at all. They get the same table the tabs
+      // do. Not the chrome itself: that has its own handler in chrome.js, and
+      // binding both would open two tabs per keypress.
+      bindShortcuts
     });
 
     // `--no-governor` runs the browser with every tab left fully resident, as

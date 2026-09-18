@@ -151,7 +151,8 @@ class BrowserShell {
   /**
    * @param {object} deps - { tabManager, log, onCommand }
    */
-  constructor({ tabManager, prefs = null, updater = null, log = () => {}, onCommand = () => {} }) {
+  constructor({ tabManager, prefs = null, updater = null, log = () => {}, onCommand = () => {},
+                bindShortcuts = () => {} }) {
     this.tabs = tabManager;
     this.prefs = prefs;
     this.updater = updater;
@@ -161,6 +162,15 @@ class BrowserShell {
     this.downloads = null;
     this.log = log;
     this.onCommand = onCommand;
+    /**
+     * Give a view of ours the browser's keyboard shortcuts.
+     *
+     * The chrome has its own handler in its page; everything else here - the
+     * task manager, the menu, the downloads flyout, the update prompt - had
+     * none, and a view that holds focus and ignores Ctrl+T is a browser whose
+     * keyboard has stopped working as far as anyone can tell.
+     */
+    this.bindShortcuts = bindShortcuts;
 
     this.window = new BaseWindow({
       width: 1280,
@@ -501,6 +511,7 @@ class BrowserShell {
     }
 
     const wc = sheetView.webContents;
+    this.bindShortcuts(wc);
     wc.loadFile(path.join(RENDERER_DIR, file), {
       query: {
         x: String(Number.isFinite(x) ? Math.round(x) : 0),
@@ -760,6 +771,7 @@ class BrowserShell {
         }
       });
       this.window.contentView.addChildView(this.panelView);
+      this.bindShortcuts(this.panelView.webContents);
       this.panelView.webContents.loadFile(path.join(RENDERER_DIR, 'panel.html'));
     } else if (this.panelView) {
       // Destroy rather than hide. A task manager that costs a live renderer

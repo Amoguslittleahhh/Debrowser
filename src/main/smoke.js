@@ -18,6 +18,15 @@ const { applyPrefs } = require('./prefs');
 const platform = require('./platform');
 const fixtureServer = require('./fixture-server');
 const pages = require('./pages');
+
+/** The process a tab's page is in, asked of the renderer rather than the tab. */
+const safePidOf = (tab) => {
+  try {
+    return tab.isLive ? tab.wc.getOSProcessId() : 0;
+  } catch {
+    return 0;
+  }
+};
 const path = require('path');
 const { BROWSING_PARTITION } = require('./tabs/tab-manager');
 
@@ -793,6 +802,26 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     fresh.internal === false,
     `internal=${fresh.internal} url=${fresh.url.slice(0, 48)}`);
 
+  // And it still reports its own memory afterwards.
+  //
+  // `pid` was assigned in a `once('did-finish-load')`, so it held whichever
+  // process the tab was realised in - and with site isolation on, navigating to
+  // another site moves the page to a different renderer. Every tab that had
+  // been anywhere therefore attributed its memory to a process it no longer
+  // used and read 0 MB, including the one in front of the user. Only the
+  // browser's own pages looked right, because they never leave the process they
+  // started in. This tab has just done exactly that navigation.
+  {
+    const live = safePidOf(fresh);
+    const settled = await waitFor(() => {
+      governor.metrics.sample();
+      return fresh.rssMB > 0;
+    }, { timeoutMs: 10_000 });
+    check('a tab that has navigated still reports its own memory',
+      settled && live > 0 && fresh.pid === live,
+      `pid ${fresh.pid} (renderer says ${live}), ${fresh.rssMB}MB`);
+  }
+
   // Which is what decides whether the governor may touch it at all.
   check('a tab that navigated away is governed again',
     governor.clampToProtections(fresh, Tier.DISCARDED, { discardAllowed: true }) !== Tier.ACTIVE,
@@ -1216,6 +1245,39 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     shell.closeSheet();
     await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
+  }
+
+  // Which window can be typed at, and still answer a browser shortcut.
+  //
+  // Ctrl+T works while a page has focus because every tab's renderer is bound
+  // to the shortcut table. The browser's other views were not: the task manager
+  // has no key handling at all and the sheets handle only Escape, so with
+  // either of them focused - and the task manager is a window people leave open
+  // - no shortcut in the browser did anything. The chrome is deliberately left
+  // out: it runs the same table in the DOM, and a second binding would open two
+  // tabs per Ctrl+T.
+  {
+    const bound = (view) => Boolean(view) && !view.webContents.isDestroyed() &&
+      view.webContents.listenerCount('before-input-event') > 0;
+
+    shell.togglePanel(true);
+    const panelReady = await waitFor(() => Boolean(shell.panelView), { timeoutMs: 8000 });
+    const panelBound = panelReady && bound(shell.panelView);
+
+    shell.openSheet('menu', { x: 100, y: 84, right: 132 });
+    const sheetReady = await waitFor(
+      () => shell.sheetView && shell.sheetPage === 'menu', { timeoutMs: 8000 });
+    const sheetBound = sheetReady && bound(shell.sheetView);
+
+    const chromeDouble = bound(shell.chromeView);
+
+    check('the browser\'s own views answer its keyboard shortcuts',
+      panelBound && sheetBound && !chromeDouble,
+      `panel=${panelBound} sheet=${sheetBound} chrome bound twice=${chromeDouble}`);
+
+    shell.closeSheet();
+    await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
+    shell.togglePanel(false);
   }
 
   // The downloads page.

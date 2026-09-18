@@ -118,7 +118,6 @@ class Tab {
     this.wc = null;
     /** @type {CdpSession|null} */
     this.cdp = null;
-    this.pid = null;
 
     this.tier = Tier.DISCARDED; // becomes ACTIVE/WARM once realised
     this.visible = false;
@@ -195,6 +194,28 @@ class Tab {
 
   get isLive() {
     return Boolean(this.wc && !this.wc.isDestroyed());
+  }
+
+  /**
+   * The process this tab's page is in *right now*.
+   *
+   * Read live rather than cached, because a cached one goes stale in the most
+   * ordinary way there is: with site isolation on, navigating from one site to
+   * another moves the page into a different renderer. This used to be assigned
+   * in a `once('did-finish-load')`, so it held whichever process the tab was
+   * realised in - and every tab that had navigated anywhere attributed its
+   * memory to a process it no longer used.
+   *
+   * What that looked like: in a six-tab session, only the browser's own pages
+   * reported any memory at all, because they are the only tabs that never leave
+   * the process they started in. Every website read 0 MB, including the one in
+   * front of the user.
+   *
+   * `getOSProcessId()` is a plain accessor, so this is cheap enough for the
+   * governor to ask once per tab per tick.
+   */
+  get pid() {
+    return this.isLive ? safePid(this.wc) : null;
   }
 
   get isDiscarded() {
@@ -425,7 +446,6 @@ class Tab {
 
     wc.on('render-process-gone', (_e, details) => {
       this.log(`tab ${this.id} renderer gone: ${details.reason} exitCode=${details.exitCode}`);
-      this.pid = null;
       // An out-of-memory kill is not a crash the user should have to see: fall
       // back to the discard path, which restores cleanly on next activation.
       if (details.reason === 'oom' || details.reason === 'killed') {
@@ -439,7 +459,6 @@ class Tab {
     });
 
     wc.once('did-finish-load', () => {
-      this.pid = safePid(wc);
       this.applySuspendedPageState();
       this.emit('updated');
     });
@@ -543,7 +562,8 @@ class Tab {
     }
     this.view = null;
     this.wc = null;
-    this.pid = null;
+    // `pid` needs no clearing: it is read from the webContents, which has just
+    // gone, so it already answers null.
     this.rssMB = 0;
     this.cpu = 0;
     this.jsHeapMB = 0;
