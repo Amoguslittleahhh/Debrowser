@@ -106,13 +106,18 @@ function render(state) {
   }
 
   el.budget.textContent = `${state.budgetMB} MB`;
-  el.renderers.textContent = state.maxLiveTabs
-    ? `${state.liveTabs}/${state.maxLiveTabs}`
-    : String(state.liveTabs);
-  el.renderers.title = state.maxLiveTabs
-    ? `${state.liveTabs} tabs hold a renderer, out of a cap of ${state.maxLiveTabs}. ` +
-      `Beyond the cap the least-recently-used tab is discarded.`
-    : 'Live renderer cap is disabled.';
+  // The count, not a ration.
+  //
+  // This read "15/12" - which is true, and reads as a limit the browser is
+  // failing to keep. It is neither: tabs are never rationed, and the cap is an
+  // internal reclaim threshold, not a quota the user is spending. Showing it as
+  // a fraction invited exactly the wrong question, so the tile shows how many
+  // tabs currently hold a renderer and the tooltip explains what that means.
+  el.renderers.textContent = String(state.liveTabs);
+  el.renderers.title =
+    `${state.liveTabs} of ${state.tabs.length} open tabs hold a renderer. ` +
+    'The rest keep their place, their history and their scroll, and come back ' +
+    'when you return to them. Open as many as you like.';
 
   el.pressure.textContent = PRESSURE_TEXT[state.pressure] || state.pressure;
   el.pressure.dataset.pressure = state.pressure;
@@ -296,6 +301,11 @@ function updateRow(row, tab) {
 
   if (prev.favicon !== tab.favicon) {
     if (row.icon) { row.icon.remove(); row.icon = null; }
+    // The letter is a stand-in for a logo, not a tile to draw one on: favicons
+    // are transparent far more often than not, so the chip has to stop painting
+    // once the real icon is up. Reset first, in case the previous page had one
+    // and this one does not.
+    row.chip.classList.remove('has-icon');
     const src = iconSrc(tab.favicon);
     if (src) {
       const icon = document.createElement('img');
@@ -303,6 +313,7 @@ function updateRow(row, tab) {
       icon.alt = '';
       icon.decoding = 'async';
       icon.src = src;
+      icon.addEventListener('load', () => row.chip.classList.add('has-icon'));
       icon.addEventListener('error', () => icon.remove());
       row.chip.append(icon);
       row.icon = icon;

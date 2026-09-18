@@ -157,7 +157,7 @@
   text-transform: uppercase;
 }
 
-/* The logo covers the letter when it loads, and is removed if it does not -
+/* The logo replaces the letter when it loads, and is removed if it does not -
    so the row never shows a gap and never shows a broken image. */
 .site-icon {
   position: absolute;
@@ -166,13 +166,24 @@
   height: 100%;
   border-radius: inherit;
   object-fit: contain;
-  background: inherit;
 }
 
 body[data-theme="light"] .chip,
 body:not([data-theme="dark"]) .chip { color: hsl(var(--hue) 55% 32%); background: hsl(var(--hue) 70% 92%); }
 @media (prefers-color-scheme: dark) {
   body:not([data-theme="light"]) .chip { color: hsl(var(--hue) 70% 72%); background: hsl(var(--hue) 45% 22%); }
+}
+
+/*
+ * A chip holding a loaded logo stops painting: the tile and its letter are the
+ * fallback, and leaving them behind a transparent favicon - which is most of
+ * them - puts every logo in the list on a coloured square.
+ *
+ * `body` is in the selector only to out-specify the theme variants above.
+ */
+body .chip.has-icon {
+  background: none;
+  color: transparent;
 }
 
 .visit-text { flex: 1; min-width: 0; }

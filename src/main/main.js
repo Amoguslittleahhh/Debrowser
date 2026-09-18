@@ -818,6 +818,16 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       case 'clear-download':
         return { removed: Boolean(downloads && downloads.remove(String(payload?.id ?? ''))) };
 
+      // Settings' "Check now".
+      //
+      // A request rather than a command because the page needs the answer: the
+      // state broadcast will carry the eventual result, but the button has to
+      // change the moment it is pressed. Inert under a test or a benchmark,
+      // where no updater is constructed at all.
+      case 'check-for-updates':
+        return shell.updater ? shell.updater.checkNow()
+          : { available: false, reason: 'updates are off in this build' };
+
       case 'list-bookmarks':
         return { items: bookmarks.all() };
 

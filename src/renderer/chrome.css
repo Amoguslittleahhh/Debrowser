@@ -274,6 +274,15 @@ body:not([data-theme="dark"]) .tab-chip {
  * element, and the rotation is a transform, so it stays on the compositor and
  * never touches layout.
  */
+/*
+ * Once the site's own logo is on screen the chip stops painting entirely.
+ *
+ * It is a stand-in, not a backdrop. Most favicons are transparent, so leaving
+ * the tile behind one puts every logo in the browser on a coloured square with
+ * a letter showing through it.
+ */
+.tab-icon.has-icon .tab-chip { display: none; }
+
 .tab[data-loading="on"] .tab-chip,
 .tab[data-loading="on"] .tab-favicon { opacity: 0; }
 

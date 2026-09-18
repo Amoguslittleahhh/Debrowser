@@ -275,6 +275,24 @@ input[type="range"] {
 }
 
 /*
+ * The update line and its button share a baseline, and the button keeps its
+ * width while the line beside it changes length - a control that slides along
+ * the row as a percentage counts up is a control that is hard to press.
+ */
+.update-foot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+.update-foot .note { flex: 1; }
+.update-foot .ghost-btn { flex: none; align-self: center; }
+.update-foot .ghost-btn[disabled] { opacity: 0.5; }
+.update-foot .ghost-btn[disabled]:hover {
+  background: transparent;
+  border-color: var(--border);
+}
+
+/*
  * A slider's track is thin by design, and a thin track is a thin target. The
  * padding grows the element the pointer has to find without changing the line
  * it draws, so the control looks identical and is twice as easy to grab.

@@ -36,6 +36,7 @@ const { applyTier, refreshPriority } = require('./tiers');
 const { HeapLimiter } = require('./heap-limit');
 const { readProcessMemory } = require('../memory');
 const platform = require('../platform');
+const pages = require('../pages');
 
 /** Refresh per-tab heap/CPU every N ticks; each needs a CDP round trip. */
 const HEAP_SAMPLE_EVERY = 3;
@@ -598,15 +599,26 @@ class Governor {
       if (tierRank(tier) < tierRank(floor)) floor = tier;
     };
 
-    // The browser's own pages are not governed at all.
+    // Most of the browser's own pages are not governed at all.
     //
     // Not because they are precious - Settings is a cheap page - but because
     // every tier below ACTIVE is wrong for them. Freezing one stops the page
     // servicing the very controls the user is operating; discarding one throws
     // away a half-filled form and reloads it as though the browser had crashed.
-    // They are also a fixed, small number of tabs that the user opened to *do*
-    // something, so there is nothing to reclaim and no reason to look.
-    if (tab.internal) { cap(Tier.ACTIVE); return floor; }
+    //
+    // The clause used to end "and they are a fixed, small number of tabs the
+    // user opened to *do* something". That was wrong about the one internal
+    // page a user can have fifteen of. The new tab page is what every empty tab
+    // holds, it is opened by reflex rather than to do anything, and it has no
+    // state to lose - so the blanket protection pinned an unbounded number of
+    // blank pages at ACTIVE, put the live count permanently over its own cap,
+    // and gave the governor a pile of tabs it was forbidden to touch. Fifteen
+    // of them reading "Active - shares a process" is what that looks like.
+    //
+    // It is exempted by what it is rather than by being internal: a page with
+    // nothing to lose. Typing in its search box makes it dirty like any other
+    // page, and the rule below picks that up.
+    if (tab.internal && pages.pageName(tab.url) !== 'newtab') { cap(Tier.ACTIVE); return floor; }
 
     // Audio is the most noticeable thing a browser can take away.
     if (tab.audible) cap(Tier.WARM);

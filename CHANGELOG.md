@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Four fixes to things 1.3.0 shipped wrong, all of them visible on the first screen of the browser.
+
+- **Site logos no longer sit on a coloured tile.** The letter chip behind a favicon is a stand-in for a logo, and the code that drew it assumed the icon would cover it once it loaded. Almost no favicon is opaque and square — most are transparent PNG or SVG, and `object-fit: contain` letterboxes the rest — so every site logo in the browser was painted on a hue-coloured square with the site's initial showing through it. The chip now stops painting the moment a real icon loads, in the tab strip, the task manager and the history list. Guarded by a check against the live strip rather than a fixture, because the way this goes wrong is CSS specificity: the theme variants qualify the chip with `body[data-theme=…]`, so a rule that looks right in isolation quietly loses to them.
+- **The new tab page is governed like any other tab.** Debrowser's own pages were exempt from every tier below ACTIVE, on the reasoning that they are few and were opened to do something. That is true of Settings and History and false of the one internal page a user can have fifteen of. Fifteen blank tabs sat pinned at ACTIVE, the live-renderer count read 15 against a cap of 12, and the governor was forbidden to touch any of them. The new tab page is now exempt by what it is — a page with nothing to lose — rather than by being internal; typing in its search box makes it dirty like any other page and the existing rule protects it. Settings and History keep their exemption, and the suite now asserts both halves.
+- **The task manager shows how many tabs hold a renderer, not a ration.** It read `15/12`, which is accurate and reads as a quota the browser is failing to keep. Tabs are never rationed and the cap is an internal reclaim threshold, so the fraction invited exactly the wrong question.
+- **Settings no longer claims to be up to date before it has asked.** The first update check is deliberately a minute after launch, to keep a network request and a signature check off the busiest moment the browser has — and for that minute the page asserted a version comparison nobody had made. "Never checked" and "checked, nothing new" are now different states, and there is a **Check now** button for anyone who does not want to wait for the interval. Pressing it works with automatic updates switched off, which stops the browser checking on its own rather than making it refuse to answer; a check that finds something then says so instead of downloading it unasked.
+
 ## 1.3.0
 
 The browser's own interface, rebuilt. Nothing in the governor moved: every memory figure quoted for 1.2.0 still stands, and the suite that proves them has grown from 74 checks to 89.

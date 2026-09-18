@@ -459,19 +459,53 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') api.send('close-tab');
 });
 
+/**
+ * The line under the update switch, and the button beside it.
+ *
+ * `unchecked` is its own case rather than falling through to "Up to date."
+ * The first check is a minute after launch, so the old fallback spent that
+ * minute asserting a version comparison the browser had not made yet - and it
+ * would have gone on asserting it forever with automatic updates switched off.
+ */
 function renderUpdateState(u) {
   const el = document.getElementById('update-state');
+  const button = document.getElementById('check-updates');
   if (!el) return;
-  if (!u) { el.textContent = ''; return; }
-  if (!u.available) { el.textContent = `Updates are unavailable here: ${u.reason}.`; return; }
+
+  if (!u) {
+    el.textContent = '';
+    if (button) button.hidden = true;
+    return;
+  }
+
+  if (!u.available) {
+    el.textContent = `Updates are unavailable here: ${u.reason}.`;
+    if (button) button.hidden = true;
+    return;
+  }
+
   switch (u.state) {
     case 'checking':    el.textContent = 'Checking for a new version…'; break;
+    case 'available':   el.textContent =
+      `${u.version} is available. Turn on automatic updates to download it.`; break;
     case 'downloading': el.textContent = `Downloading ${u.version} — ${u.progress}%.`; break;
     case 'ready':       el.textContent = `${u.version} is downloaded and installs when you restart.`; break;
     case 'error':       el.textContent = `Last check failed: ${u.error}`; break;
-    default:            el.textContent = 'Up to date.';
+    case 'idle':        el.textContent = 'Up to date.'; break;
+    default:            el.textContent = 'Not checked yet.';
+  }
+
+  if (button) {
+    button.hidden = false;
+    // Nothing to ask while an answer is already on its way, or while an update
+    // is sitting downloaded waiting for a restart.
+    button.disabled = u.state === 'checking' || u.state === 'downloading' || u.state === 'ready';
   }
 }
+
+document.getElementById('check-updates')?.addEventListener('click', async () => {
+  renderUpdateState(await api.request('check-for-updates'));
+});
 
 /* ------------------------------------------------------------------ */
 /* Saved sign-ins and payment details                                  */

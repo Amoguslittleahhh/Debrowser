@@ -187,5 +187,16 @@ body:not([data-theme="dark"]) .row-chip {
   height: 100%;
   border-radius: inherit;
   object-fit: contain;
-  background: inherit;
+}
+
+/*
+ * The chip stops painting once the site's own logo is up.
+ *
+ * `body` is in the selector only to out-specify the theme variants above, which
+ * qualify `.row-chip` with `body[data-theme=…]` and would otherwise keep
+ * repainting the tile under every transparent favicon.
+ */
+body .row-chip.has-icon {
+  background: none;
+  color: transparent;
 }

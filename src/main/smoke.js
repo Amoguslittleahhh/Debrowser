@@ -17,6 +17,7 @@ const { Tier, tierRank, isStopped } = require('./config');
 const { applyPrefs } = require('./prefs');
 const platform = require('./platform');
 const fixtureServer = require('./fixture-server');
+const pages = require('./pages');
 
 /**
  * Fixtures are served on distinct sites (t1.test, t2.test, …) rather than as
@@ -603,6 +604,39 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     !oldest.isLive || newest.isLive,
     `oldest live=${oldest.isLive}, newest live=${newest.isLive}`);
 
+  // The new tab page counts, and can be reclaimed like anything else.
+  //
+  // It used to be exempt, along with Settings and History, on the reasoning that
+  // the browser's own pages are few and were opened to do something. That holds
+  // for the pages it was written about and not at all for this one: an empty tab
+  // holds it, people open them by reflex, and it has no state to lose. In a real
+  // session fifteen of them sat pinned at ACTIVE with the live count reading
+  // 15/12 - every one of them untouchable by the governor that was meant to be
+  // bounding them.
+  const blanks = [];
+  for (let i = 0; i < 6; i++) {
+    blanks.push(tabs.create({ url: pages.NEW_TAB_URL, activate: false, realise: true }));
+  }
+  const blanksCapped = await waitFor(
+    () => tabs.all().filter((t) => t.isLive).length <= governor.cfg.maxLiveTabs,
+    { timeoutMs: 20_000 });
+  const liveBlanks = blanks.filter((t) => t.isLive).length;
+  check('a burst of new tab pages is capped like any other tab',
+    blanksCapped && liveBlanks < blanks.length,
+    `${liveBlanks}/${blanks.length} blank tabs live, ` +
+    `${tabs.all().filter((t) => t.isLive).length} live overall (cap ${governor.cfg.maxLiveTabs})`);
+
+  // Settings is the page the old rule was actually written for, and it keeps
+  // its exemption: discarding one throws away whatever the user was part-way
+  // through setting.
+  check('Settings is still never discarded',
+    governor.clampToProtections(
+      { internal: true, url: pages.SETTINGS_URL }, Tier.DISCARDED,
+      { ignoreGrace: true }) === Tier.ACTIVE,
+    'settings floor is ACTIVE');
+
+  for (const blank of blanks) tabs.close(blank.id);
+
   // And a capped-out tab must still come back intact.
   const revived = await tabs.activate(oldest.id);
   const cameBack = await waitFor(() => revived.isLive && !revived.loading, { timeoutMs: 10_000 });
@@ -625,7 +659,6 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // the browser navigable - a second tab can still be activated and become
   // visible afterwards - and that the page is exempt from the governor, which
   // would otherwise be free to freeze or discard it mid-edit.
-  const pages = require('./pages');
   const settingsTab = tabs.create({ url: pages.SETTINGS_URL, activate: true, realise: true });
   await waitFor(() => settingsTab.isLive && !settingsTab.loading, { timeoutMs: 10_000 });
 
@@ -819,8 +852,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // The second half of this is the load-bearing part. Chromium reports an icon
   // address for *every* page - a page that declares nothing still arrives as
   // `<origin>/favicon.ico`, because that is the address it would try - and
-  // plenty of sites do not serve it. That is why the tab strip keeps the
-  // letter chip behind the image and puts it back when the image errors, and
+  // plenty of sites do not serve it. That is why the tab strip shows the
+  // letter chip until an image loads and puts it back when one errors, and
   // why the history store can derive an icon address instead of keeping one.
   // If this ever stopped being true, both of those would be built on nothing.
   {
@@ -843,6 +876,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       customIcon('https://a.test/page', 'https://a.test/logo.png') === 'https://a.test/logo.png' &&
       customIcon('https://a.test/page', 'https://a.test/favicon.ico') === null,
       'custom kept, default dropped');
+
+    // And the chip is a stand-in, not a backdrop.
+    //
+    // It used to stay painted underneath every icon that loaded, on the theory
+    // that the image covered it. Almost no favicon is opaque and square, so in
+    // practice every site logo in the browser sat on a coloured tile with the
+    // site's initial showing through it.
+    //
+    // Asserted against the live strip rather than a fixture because the way it
+    // goes wrong is CSS specificity: the theme variants qualify the chip with
+    // `body[data-theme=…]`, so a rule that looks right in isolation quietly
+    // loses to them and the tile keeps painting.
+    const chipStack = await shell.chromeView.webContents.executeJavaScript(`(() => {
+      const icon = document.querySelector('.tab .tab-icon');
+      if (!icon) return null;
+      const chip = icon.querySelector('.tab-chip');
+      const before = getComputedStyle(chip).display;
+      icon.classList.add('has-icon');
+      const after = getComputedStyle(chip).display;
+      icon.classList.remove('has-icon');
+      return { before, after };
+    })()`).catch(() => null);
+    check('a loaded favicon replaces the letter chip rather than sitting on it',
+      Boolean(chipStack) && chipStack.before !== 'none' && chipStack.after === 'none',
+      chipStack ? `chip display ${chipStack.before} -> ${chipStack.after}` : 'no tab in the strip');
 
     tabs.close(branded.id);
     tabs.close(bare.id);
@@ -1327,6 +1385,19 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   check('updates are inert outside a packaged build, and say why',
     updateCap.available === false && typeof updateCap.reason === 'string' && updateCap.reason.length > 0,
     updateCap.reason || 'no reason given');
+
+  // "Never asked" and "asked, nothing new" are different answers, and Settings
+  // renders the second as "Up to date." Reporting the second before the first
+  // check has run - which is a minute after launch - is the browser asserting a
+  // version comparison it has not made. Pressing the button before the updater
+  // could start must also be harmless rather than a throw across the IPC
+  // boundary, which is the state a test build is permanently in.
+  const unstarted = new Updater({ log: () => {} });
+  const atRest = unstarted.snapshot().state;
+  const pressed = unstarted.checkNow().state;
+  check('an unchecked updater does not claim to be up to date',
+    atRest === 'unchecked' && pressed === 'unchecked',
+    `at rest: ${atRest}, after "check now": ${pressed}`);
 
   const autoBudget = cfg.autoBudgetMB;
   prefs.set('memoryBudgetMB', 900);

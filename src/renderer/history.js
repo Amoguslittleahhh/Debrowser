@@ -118,6 +118,9 @@ function row(entry) {
     // burst of requests for a list the user has scrolled two screens of.
     icon.loading = 'lazy';
     icon.src = iconUrl;
+    // The letter underneath is a stand-in, not a backdrop: favicons are usually
+    // transparent, so the chip has to stop painting once the real one is up.
+    icon.addEventListener('load', () => chip.classList.add('has-icon'));
     icon.addEventListener('error', () => icon.remove());
     chip.append(icon);
   }

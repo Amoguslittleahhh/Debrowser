@@ -48,7 +48,20 @@ class Updater {
     this.window = window;
 
     this.timer = null;
-    this.state = 'idle';       // idle | checking | downloading | ready | error
+
+    /**
+     * unchecked | idle | checking | available | downloading | ready | error
+     *
+     * `unchecked` and `idle` are deliberately different states. Both mean "no
+     * update is in flight", but the first means we have never asked and the
+     * second means we asked and there was nothing - and the first minute of
+     * every launch is spent in `unchecked`, because the first check is delayed
+     * to keep a network request off the busiest moment the browser has.
+     *
+     * Collapsing them is what made Settings say "Up to date." before it had
+     * asked anything, which is the one thing a version indicator must not do.
+     */
+    this.state = 'unchecked';
     this.info = null;          // { version, releaseDate } once one is found
     this.error = null;
     this.progress = 0;
@@ -162,9 +175,21 @@ class Updater {
     const u = this.impl;
 
     u.on('update-available', (info) => {
-      this.state = 'downloading';
       this.info = { version: info.version, releaseDate: info.releaseDate };
       this.log('updates', `${info.version} is available`);
+
+      // Found one, but only download it if the user asked us to.
+      //
+      // Reachable with the preference off because "Check now" ignores it: being
+      // able to ask is not the same as agreeing to a hundred megabytes arriving
+      // unannounced, and someone who turned automatic updates off and then went
+      // looking wants the answer, not the download.
+      if (!this.enabled()) {
+        this.state = 'available';
+        return;
+      }
+
+      this.state = 'downloading';
       // Blockmap differential download happens inside this call: it fetches the
       // new blockmap, diffs it against the installed artifact, and requests only
       // the ranges that differ.
@@ -173,6 +198,8 @@ class Updater {
 
     u.on('update-not-available', () => {
       this.state = 'idle';
+      this.info = null;
+      this.error = null;
       this.log('updates', 'already up to date');
     });
 
@@ -199,12 +226,32 @@ class Updater {
     this.log('updates', `failed: ${this.error}`);
   }
 
-  check() {
-    if (!this.impl || !this.enabled()) return;
+  /**
+   * @param {boolean} manual - true when the user pressed the button, which is
+   *   the one case that ignores the preference. Turning automatic updates off
+   *   means the browser stops checking on its own, not that it refuses to
+   *   answer when asked.
+   */
+  check(manual = false) {
+    if (!this.impl) return;
+    if (!manual && !this.enabled()) return;
     // Nothing to do while one is already downloading or waiting to install.
     if (this.state === 'downloading' || this.state === 'ready') return;
     this.state = 'checking';
+    this.error = null;
     this.impl.checkForUpdates().catch((err) => this.fail(err));
+  }
+
+  /**
+   * "Check now", from Settings.
+   *
+   * Returns the state the button should draw immediately rather than leaving
+   * the page to wait for the next broadcast - a button that does nothing
+   * visible for half a second is a button people press twice.
+   */
+  checkNow() {
+    this.check(true);
+    return this.snapshot();
   }
 
   /**

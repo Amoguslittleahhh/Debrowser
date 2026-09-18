@@ -164,6 +164,14 @@ function createTabElement(id) {
   chip.className = 'tab-chip';
   chip.setAttribute('aria-hidden', 'true');
 
+  // One 15px box holding both, stacked rather than side by side: the letter is
+  // underneath until an icon replaces it, and the spinner replaces both while
+  // the page loads. Laying them out in a row instead would move the title every
+  // time an icon arrived.
+  const icon = document.createElement('span');
+  icon.className = 'tab-icon';
+  icon.append(chip, favicon);
+
   /*
    * An icon that does not load falls back to the letter, rather than to a
    * broken image.
@@ -177,8 +185,25 @@ function createTabElement(id) {
    */
   favicon.addEventListener('error', () => {
     favicon.hidden = true;
-    chip.hidden = false;
+    icon.classList.remove('has-icon');
   });
+
+  /*
+   * And the chip goes away when one *does* load.
+   *
+   * The two are stacked, and the original comment claimed the icon "covers" the
+   * letter underneath. It does not. Nearly every favicon is a transparent PNG
+   * or SVG, and `object-fit: contain` letterboxes the ones that are not square,
+   * so the hue-coloured square and its initial showed through and around every
+   * site logo in the browser - Gmail's M sitting on a green tile with a `g`
+   * behind it. The chip is a *fallback*, so it has to stop painting once it has
+   * been replaced.
+   *
+   * A class rather than `chip.hidden = true`: `.tab-chip` sets `display: grid`,
+   * and an author rule beats the UA's `[hidden] { display: none }` whatever its
+   * specificity, so the attribute would have looked right and done nothing.
+   */
+  favicon.addEventListener('load', () => icon.classList.add('has-icon'));
 
   const audio = document.createElement('span');
   audio.className = 'audio-dot';
@@ -192,14 +217,6 @@ function createTabElement(id) {
   close.className = 'tab-close';
   close.textContent = '×';
   close.setAttribute('aria-label', 'Close tab');
-
-  // One 15px box holding both, stacked rather than side by side: the letter is
-  // underneath, the icon covers it when it loads, and the spinner replaces both
-  // while the page does. Laying them out in a row instead would move the title
-  // every time an icon arrived.
-  const icon = document.createElement('span');
-  icon.className = 'tab-icon';
-  icon.append(chip, favicon);
 
   root.append(tier, icon, title, audio, close);
 
@@ -234,7 +251,7 @@ function createTabElement(id) {
     api.send('close-tab', { id });
   });
 
-  return { root, tier, favicon, chip, title, audio, close, state: {} };
+  return { root, tier, icon, favicon, chip, title, audio, close, state: {} };
 }
 
 /** Write only what changed - the cheapest update is the one we skip. */
@@ -250,18 +267,19 @@ function updateTabElement(node, tab) {
   if (prev.favicon !== tab.favicon) {
     // Through the browser's icon route, never at the site: see `iconSrc`.
     const src = iconSrc(tab.favicon);
+    // Back to the letter until this one decodes. Without the reset a tab that
+    // navigates from a site with an icon to one without keeps showing the old
+    // site's chip state, which is the previous page's identity on this page.
+    node.icon.classList.remove('has-icon');
     if (src) {
-      // Both shown until the image says otherwise: the chip is behind the icon,
-      // so a slow fetch shows the letter rather than a gap, and the icon covers
-      // it the moment it decodes. The error handler above puts the letter back
-      // if it never does.
+      // The letter shows during the fetch rather than a gap, and the `load`
+      // handler swaps it out; the `error` handler leaves it in place.
       node.favicon.src = src;
       node.favicon.hidden = false;
     } else {
       node.favicon.removeAttribute('src');
       node.favicon.hidden = true;
     }
-    node.chip.hidden = false;
     prev.favicon = tab.favicon;
   }
 
@@ -453,7 +471,7 @@ function renderMeter(state) {
   el.meterText.textContent = `${state.totalMB} MB`;
   el.meter.title =
     `${state.totalMB} MB of ${state.budgetMB} MB budget\n` +
-    `${state.liveTabs}${state.maxLiveTabs ? `/${state.maxLiveTabs}` : ''} tabs holding a renderer ` +
+    `${state.liveTabs} tabs holding a renderer ` +
     `(${state.rendererCount} process(es)), ${state.tabs.length} tab(s) open\n` +
     `Pressure: ${state.pressure} - click for the task manager`;
 }

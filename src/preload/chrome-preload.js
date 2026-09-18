@@ -54,6 +54,7 @@ const COMMANDS = new Set([
   'import-from-profile',
   'import-bookmark-file',
   'presence-capability',
+  'check-for-updates',
   'list-downloads',
   'cancel-download',
   'clear-download'
