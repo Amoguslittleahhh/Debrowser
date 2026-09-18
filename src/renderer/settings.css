@@ -2,11 +2,20 @@
 
 html, body { height: 100%; }
 
+/*
+ * The page is the base surface and the cards sit above it, not the other way
+ * round.
+ *
+ * It was inverted - a raised page with wells cut into it - which is a real
+ * style, but it puts the darkest thing on the screen around the text the user
+ * is reading and reads as a form on a lit table. Elevation going the usual way
+ * costs nothing and matches the task manager, which was already doing it.
+ */
 body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-raised);
+  background: var(--bg);
 }
 
 header {
@@ -14,11 +23,16 @@ header {
   align-items: center;
   justify-content: space-between;
   flex: none;
-  padding: 18px 28px;
+  padding: var(--s5) var(--s6);
   border-bottom: 1px solid var(--border);
 }
 
-h1 { margin: 0; font-size: 17px; font-weight: 600; }
+h1 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-title);
+}
 
 .close {
   display: grid;
@@ -41,49 +55,64 @@ main {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 28px 40px;
+  padding: var(--s2) var(--s6) var(--s7);
 }
 
 /* Centred rather than pinned to the left edge: the content has a fixed comfortable
    width, and against a full window that leaves an empty half if it does not move. */
 /* More air above a group than inside it, so the eye reads the page as a few
    groups rather than one long list of equally-spaced rows. */
-section { max-width: 620px; margin: 34px auto 0; }
-section:first-of-type { margin-top: 18px; }
+section { max-width: 620px; margin: var(--s7) auto 0; }
+section:first-of-type { margin-top: var(--s5); }
 
+/*
+ * Section labels, set as small caps rather than as small headings.
+ *
+ * At body size a section name competes with the settings under it; uppercase at
+ * a size below the body text reads as a label on a group instead - it is the
+ * furniture, not the content. The extra tracking is what keeps uppercase legible
+ * that small, and it is opened wider here than anywhere else in the browser.
+ */
 h2 {
-  margin: 0 0 12px 2px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
+  margin: 0 0 var(--s3) 2px;
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-label);
   text-transform: uppercase;
   color: var(--text-dim);
 }
 
 .rows {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 13px 16px;
-  background: var(--bg);
+  gap: var(--s5);
+  padding: var(--s3) var(--s4);
+  background: var(--bg-raised);
 }
-.row + .row { border-top: 1px solid var(--border); }
+/* The divider inside a card is lighter than the card's own edge. One weight for
+   both makes a group of settings read as a table of them. */
+.row + .row { border-top: 1px solid var(--border-soft); }
 
 .row-text { flex: 1; min-width: 0; }
 
-/* The label has to outrank the hint by more than colour. At the same size and
-   weight they read as one paragraph, and the eye has to parse the sentence to
-   find out what the setting is called. */
+/*
+ * The label outranks the hint by contrast and size, not by weight.
+ *
+ * It used to be `font-weight: 550`. In Calibri that is bold - the face has
+ * nothing between regular and bold - so every row in Settings would have had a
+ * bold first line, which is a page shouting its own furniture at you. Full-
+ * strength text over dimmed text at a smaller size separates them cleanly, and
+ * it is the same pairing the history rows and the task manager use.
+ */
 .row-label {
   display: block;
-  font-weight: 550;
-  letter-spacing: -0.003em;
+  color: var(--text);
   /* A row's label is also its control's target - clicking it toggles the
      checkbox - so it is grown to 26px tall and the space handed straight back,
      leaving the text exactly where it was and the hint's gap unchanged. */
@@ -97,9 +126,9 @@ h2 {
 .row-hint {
   display: block;
   max-width: 52ch;
-  margin-top: 3px;
-  font-size: 11.5px;
-  line-height: 1.5;
+  margin-top: 2px;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
   color: var(--text-dim);
 }
 
@@ -121,14 +150,14 @@ h2 {
 
 /* Beside the field, not under it. `.row-hint` is a block, which is right in the
    label column and wrong here. */
-.unit { font-size: 11.5px; color: var(--text-dim); }
+.unit { font-size: var(--fs-small); color: var(--text-dim); }
 
 select, input[type="text"], input[type="number"] {
-  height: 30px;
+  height: 32px;
   min-width: 150px;
-  padding: 0 9px;
+  padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--text);
   font: inherit;
@@ -158,13 +187,11 @@ select {
   background-position: right 9px center;
 }
 
+/* The ring itself is in theme.css, on `:focus-visible`, so every control in
+   every view gets it without being asked. This is the border that goes with
+   it - which also shows for a pointer click, where the ring deliberately does
+   not. */
 select:focus, input:focus { border-color: var(--accent); }
-
-/* Focus has to be visible without being a second border that shifts the layout,
-   so it is a ring outside the box rather than a thicker edge. */
-select:focus-visible, input:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
-}
 
 /* A real checkbox, accented and sized up - a hand-rolled toggle would mean
    reimplementing focus, keyboard activation and the accessibility tree. */
@@ -214,21 +241,21 @@ input[type="range"] {
 }
 
 .row { transition: background-color var(--fast) ease; }
-.row:hover { background: color-mix(in srgb, var(--text) 3%, var(--bg)); }
+.row:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg-raised)); }
 
 .ghost-btn {
-  height: 28px;
-  padding: 0 11px;
+  height: 30px;
+  padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-small);
   cursor: default;
   transition: background-color var(--fast) ease, border-color var(--fast) ease;
 }
-.ghost-btn:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.ghost-btn:hover { background: var(--wash-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .ghost-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
 
 /* A revealed secret is selectable - the point of showing one is usually to
@@ -241,9 +268,9 @@ input[type="range"] {
 
 .note {
   max-width: 620px;
-  margin: 10px 2px 0;
-  font-size: 11.5px;
-  line-height: 1.5;
+  margin: var(--s3) 2px 0;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
   color: var(--text-dim);
 }
 

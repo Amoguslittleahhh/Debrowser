@@ -43,7 +43,7 @@ const SECTIONS = {
     {
       key: 'theme',
       label: 'Theme',
-      hint: 'System follows whatever the machine is set to.',
+      hint: 'System follows the machine.',
       type: 'select',
       options: [
         { value: 'system', name: 'System' },
@@ -55,9 +55,7 @@ const SECTIONS = {
     {
       key: 'tabBarPosition',
       label: 'Tab bar position',
-      hint: 'Down the side, a tab keeps its title however many are open, because the ' +
-            'column divides height rather than a fixed width. It costs some width, ' +
-            'which is why across the top is the default.',
+      hint: 'Down the side, titles stay readable however many tabs are open.',
       type: 'select',
       options: [
         { value: 'top', name: 'Across the top' },
@@ -67,7 +65,7 @@ const SECTIONS = {
     {
       key: 'tabWidth',
       label: 'Tab width',
-      hint: 'Compact fits more tabs on the strip before they start shrinking.',
+      hint: 'Compact fits more tabs before they start shrinking.',
       type: 'select',
       options: [
         { value: 'roomy', name: 'Roomy' },
@@ -77,18 +75,13 @@ const SECTIONS = {
     {
       key: 'tabBarColor',
       label: 'Tab strip colour',
-      hint: 'Separate from the accent, because the strip is the largest painted area ' +
-            'in the window and the colour that works as a focus ring rarely works across it. ' +
-            'The second swatch follows the accent instead.',
+      hint: 'Separate from the accent. The second swatch follows it.',
       type: 'stripColor'
     },
     {
       key: 'windowOpacity',
       label: 'Tab bar translucency',
-      hint: 'The strip alone, never the page - fading a whole window fades the text on it. ' +
-            'Painted by the system compositor, which is already drawing this window, so it ' +
-            'costs essentially nothing. Turns on a window material to show through to, and ' +
-            'needs a desktop that composites.',
+      hint: 'The strip alone, never pages. Needs a window material behind it.',
       type: 'range',
       min: 0.6,
       max: 1,
@@ -98,8 +91,7 @@ const SECTIONS = {
     {
       key: 'backgroundMaterial',
       label: 'Window material',
-      hint: 'Windows 11 only. Lets the system paint its own blurred backdrop, which is ' +
-            'cheaper than doing it ourselves. Ignored elsewhere.',
+      hint: 'Windows 11 only. Ignored elsewhere.',
       type: 'select',
       options: [
         { value: 'none', name: 'None' },
@@ -111,8 +103,7 @@ const SECTIONS = {
     {
       key: 'reduceMotion',
       label: 'Reduce motion',
-      hint: 'Stops the small entrance and press animations. Your system setting is ' +
-            'always honoured regardless of this.',
+      hint: 'Your system setting is honoured either way.',
       type: 'checkbox'
     },
     {
@@ -124,7 +115,7 @@ const SECTIONS = {
     {
       key: 'showTierDots',
       label: 'Show resource dots on tabs',
-      hint: 'The coloured dot showing whether a tab is active, idle, frozen or discarded.',
+      hint: 'Whether a tab is active, idle, frozen or discarded.',
       type: 'checkbox'
     }
   ],
@@ -134,7 +125,7 @@ const SECTIONS = {
     {
       key: 'homepage',
       label: 'New tab page',
-      hint: 'Leave empty for the default.',
+      hint: 'Leave empty for the built-in page.',
       type: 'text',
       placeholder: 'https://'
     }
@@ -144,8 +135,7 @@ const SECTIONS = {
     {
       key: 'memoryBudgetMB',
       label: 'Memory budget',
-      hint: 'How much the browser may hold before it starts reclaiming. ' +
-            'Empty sizes it to this machine.',
+      hint: 'What the browser may hold before it reclaims. Empty sizes it to this machine.',
       type: 'number',
       placeholder: 'Automatic',
       min: 256,
@@ -155,8 +145,7 @@ const SECTIONS = {
     {
       key: 'maxLiveTabs',
       label: 'Tabs holding a renderer',
-      hint: 'Tabs past this limit stay open and keep their scroll and typed input, ' +
-            'but give their renderer back. 0 removes the limit. Empty sizes it to this machine.',
+      hint: 'Tabs past this stay open but give their renderer back. 0 removes the limit.',
       type: 'number',
       placeholder: 'Automatic',
       min: 0,
@@ -168,9 +157,7 @@ const SECTIONS = {
     {
       key: 'downloadConnections',
       label: 'Connections per download',
-      hint: 'Asks the server for several byte ranges at once instead of one stream. ' +
-            'Helps where a single connection is not the bottleneck, and does nothing ' +
-            'where it is. Servers that refuse ranges are downloaded whole. 1 turns it off.',
+      hint: 'Byte ranges fetched at once. Servers that refuse them are downloaded whole.',
       type: 'number',
       min: 1,
       max: 16
@@ -181,17 +168,13 @@ const SECTIONS = {
     {
       key: 'requirePresence',
       label: 'Ask for Windows Hello or Touch ID first',
-      hint: 'Before a saved password or card is shown or filled. The store is already ' +
-            'encrypted by the OS, so this is not about the file - it is about someone ' +
-            'sitting at an unlocked machine and pressing Show.',
+      hint: 'Before a saved password or card is shown or filled.',
       type: 'checkbox'
     },
     {
       key: 'fillPasswords',
       label: 'Fill saved passwords automatically',
-      hint: 'Only when exactly one saved sign-in matches the page\'s origin, and only ' +
-            'passwords. Payment details are never filled without a click, because a page ' +
-            'can hide a card field and a card number is not bound to any one site.',
+      hint: 'Passwords only, and only when one saved sign-in matches the site.',
       type: 'checkbox'
     }
   ],
@@ -200,17 +183,13 @@ const SECTIONS = {
     {
       key: 'showMemoryDetail',
       label: 'Explain the memory figures',
-      hint: 'Adds the notes about what the numbers mean and where they over-count to ' +
-            'the task manager. Off by default, because a live instrument reads better ' +
-            'without a wall of text beside it.',
+      hint: 'Adds notes to the task manager about what each number counts.',
       type: 'checkbox'
     },
     {
       key: 'hardwareAcceleration',
       label: 'Use hardware acceleration',
-      hint: 'Turn off if pages flicker, views come up blank, or the browser will not ' +
-            'start — that is almost always a GPU driver. Chromium decides this at ' +
-            'launch, so it takes effect when you restart.',
+      hint: 'Try this if pages flicker or the browser will not start. Needs a restart.',
       type: 'checkbox'
     }
   ],
@@ -219,9 +198,7 @@ const SECTIONS = {
     {
       key: 'autoUpdate',
       label: 'Install updates automatically',
-      hint: 'Downloads only the parts that changed rather than the whole browser. ' +
-            'Settings, open tabs and saved data are never touched by an update. ' +
-            'Off means the browser never checks.',
+      hint: 'Downloads only what changed. Your settings, tabs and data are untouched.',
       type: 'checkbox'
     }
   ]

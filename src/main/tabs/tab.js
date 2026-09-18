@@ -432,8 +432,13 @@ class Tab {
   :root { color-scheme: dark light; }
   body { margin: 0; display: grid; place-items: center; min-height: 100vh;
          background: #16181d; color: #e6e8ee;
-         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  @media (prefers-color-scheme: light) { body { background: #f2f3f6; color: #1a1d24; } }
+         /* The same stack theme.css defines, spelled out rather than linked:
+            this page is a data: URL with no origin and no stylesheet to load,
+            and an error page set in a different face from the browser around it
+            is the kind of seam that makes the error look like a crash. */
+         font: 14px/1.5 Aptos, Calibri, Carlito, "Segoe UI Variable Text",
+               "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+  @media (prefers-color-scheme: light) { body { background: #f4f5f8; color: #191c23; } }
   main { max-width: 27rem; padding: 1.5rem; text-align: center; }
   h1 { font-size: 1.1rem; margin: 0 0 .5rem; }
   p { margin: .35rem 0; color: #9aa1b1; }

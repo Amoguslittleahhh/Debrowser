@@ -29,33 +29,6 @@ body[data-translucent="on"] { background: transparent; }
 /* Tab strip                                                         */
 /* ---------------------------------------------------------------- */
 
-/*
- * One tint, derived from the accent, used everywhere a surface needs to be
- * something other than another grey.
- *
- * The chrome used to be four values of the same neutral - strip, toolbar, tab,
- * hover - and the result read as a wireframe of a browser rather than as one.
- * Mixing a few percent of the accent into each surface, and more of it into the
- * states that mean something (the active tab, a hover, focus), gives the chrome
- * a colour identity that follows whatever accent the user picked, without
- * adding a second thing to theme.
- *
- * `color-mix` resolves during style recalculation and paints as a flat colour,
- * so none of this costs a frame - which is the constraint everything in this
- * file is written to.
- *
- * On <body> rather than :root, for the reason written out in theme.css: these
- * are defined in terms of other custom properties, and the light palette is an
- * override on <body>. Declared on :root they would be mixed from the dark
- * palette and stay dark in the light theme.
- */
-body {
-  --tint-1: color-mix(in srgb, var(--accent) 6%, var(--strip));
-  --tint-2: color-mix(in srgb, var(--accent) 3%, var(--bg-input));
-  --wash: color-mix(in srgb, var(--accent) 13%, transparent);
-  --wash-soft: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
 .tabstrip {
   display: flex;
   align-items: flex-end;
@@ -185,19 +158,26 @@ body[data-platform="linux"] { --caption-right: 146px; }
 .tab:hover { background: var(--wash-soft); color: var(--text); }
 
 /*
- * The active tab, and the one place in the strip that is allowed to be loud.
+ * The active tab is the same colour as the toolbar, on purpose.
  *
- * Three things say "this one", where there used to be one: a surface lifted out
- * of the strip, a 2px bar in the accent along the edge the tab meets it on, and
- * a label at full contrast. The bar is what makes the strip readable at a
- * glance on a window of twenty tabs - a slightly different grey is not.
+ * That is the shape every browser draws and the reason the tab has rounded top
+ * corners and square bottom ones: the tab and the toolbar are one surface, and
+ * the strip is the background it sits in front of. With a different colour -
+ * and worse, with a gradient of its own - the tab reads as a button parked
+ * above a bar, and the seam between them is the giveaway.
+ *
+ * So the surface does the work, and a 2px bar in the accent along the top edge
+ * says which one it is at a glance across twenty tabs. Not bold: Calibri has no
+ * weight between regular and bold, so emphasis by weight here would be full
+ * bold on every active tab, and Chrome does not bold it either. Full-contrast
+ * text against dimmed text is the difference, which is what the eye reads
+ * first anyway.
  *
  * `::before` rather than a border, because a border changes the box and would
- * move the label by 2px when a tab becomes active.
+ * move the label by 2px whenever a tab became active.
  */
 .tab.active {
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--accent) 16%, var(--bg-input)), var(--bg-input));
+  background: var(--tint-2);
   color: var(--text);
   position: relative;
 }
@@ -205,15 +185,13 @@ body[data-platform="linux"] { --caption-right: 146px; }
 .tab.active::before {
   content: '';
   position: absolute;
-  left: 9px;
-  right: 9px;
+  left: 10px;
+  right: 10px;
   top: 0;
   height: 2px;
   border-radius: 0 0 2px 2px;
   background: var(--accent);
 }
-
-.tab.active .tab-title { font-weight: 550; }
 
 body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; }
 
@@ -251,8 +229,8 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   height: 15px;
   flex: none;
   border-radius: 4px;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 9.5px;
+  font-weight: var(--fw-bold);
   line-height: 1;
   text-transform: uppercase;
   color: hsl(var(--hue, 220) 70% 74%);
@@ -336,7 +314,7 @@ body:not([data-theme="dark"]) .tab-chip {
   /* The same tint as the strip, a shade further along, so the toolbar reads as
      the next band of one surface rather than as a different panel. */
   background: var(--tint-2);
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border));
+  border-bottom: 1px solid var(--border);
 }
 
 .nav { display: flex; gap: 0; }
@@ -402,10 +380,10 @@ body:not([data-theme="dark"]) .tab-chip {
   align-items: center;
   flex: 1;
   min-width: 0;
-  height: 32px;
-  margin: 0 4px;
+  height: 34px;
+  margin: 0 var(--s1);
   padding: 0 14px;
-  border-radius: 16px;
+  border-radius: var(--radius-pill);
   background: var(--bg);
   border: 1px solid transparent;
   transition: background-color var(--fast) ease, border-color var(--fast) ease,
@@ -423,8 +401,12 @@ body:not([data-theme="dark"]) .tab-chip {
   flex: none;
   margin-right: 6px;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
+
+/* The pill draws the focus ring for this field - see `.omnibox:focus-within` -
+   so the field must not draw a second one inside it. */
+#url:focus-visible { box-shadow: none; }
 
 #url {
   flex: 1;
@@ -453,7 +435,7 @@ body:not([data-theme="dark"]) .tab-chip {
   height: 30px;
   padding: 0 11px;
   border: none;
-  border-radius: 15px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-dim);
   font: inherit;
@@ -488,7 +470,7 @@ body[data-dots="off"] .tier { display: none; }
 .meter[data-pressure="high"]     .meter-fill { background: var(--warn); }
 .meter[data-pressure="critical"] .meter-fill { background: var(--crit); }
 
-.meter-text { font-size: 11px; }
+.meter-text { font-size: var(--fs-small); }
 
 /* ---------------------------------------------------------------- */
 /* Loading line                                                      */
@@ -593,15 +575,45 @@ body[data-layout="left"] .toolbar {
   padding-top: calc(env(titlebar-area-y, 0px) + 8px);
 }
 
+/* Last, and on a line of its own: `flex-basis: 100%` is what wraps it, and the
+   order puts it after every control above rather than between two of them. */
 body[data-layout="left"] .omnibox {
-  order: 3;
+  order: 5;
   flex: 1 0 100%;
   margin: 0;
 }
 
+/*
+ * Every control in this row needs an explicit order, including the ones whose
+ * order happens to match the markup.
+ *
+ * The star had none, so it fell to 0 and jumped ahead of the back button - the
+ * bookmark control was the first thing in the sidebar, before the navigation
+ * it belongs beside. An unset `order` is 0, which sorts *before* 1, and that is
+ * the trap: leaving a flex child out of the ordering does not leave it where it
+ * was, it moves it to the front.
+ */
 body[data-layout="left"] .nav { order: 1; }
-body[data-layout="left"] .meter { order: 2; margin-left: auto; }
-body[data-layout="left"] #menu { order: 2; }
+body[data-layout="left"] .star { order: 2; margin-left: auto; }
+body[data-layout="left"] #menu { order: 3; }
+
+/*
+ * The meter gets the column's full width here, rather than being squeezed onto
+ * the end of the button row and wrapping.
+ *
+ * A 240px column cannot hold four controls and a memory reading on one line, so
+ * something has to give; the meter is the one that gains from the space. Across
+ * the top it is a 46px sliver beside the address bar, and down the side it is a
+ * bar the width of the sidebar with the figure at the end of it - the same
+ * instrument, reading properly at the size it has been given.
+ */
+body[data-layout="left"] .meter {
+  order: 4;
+  flex: 1 0 100%;
+  justify-content: space-between;
+  padding: 0 6px;
+}
+body[data-layout="left"] .meter-bar { flex: 1; width: auto; }
 
 /* The strip becomes the column: tabs stacked, + beneath them, filler last so
    the empty space below is still draggable. */

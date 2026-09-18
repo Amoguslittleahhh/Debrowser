@@ -491,6 +491,7 @@ src/main/
   window.js     window layout: chrome, tab views, side panel
 src/preload/    activity probe (pages) and the chrome bridge
 src/renderer/   the browser UI, written from scratch
+  theme.css     the design system: type, colour, space, elevation, motion
 test/pages/     benchmark and test fixtures
 bench/          memory benchmark harness
 ```
@@ -525,6 +526,17 @@ tried, measured and removed — live on the `claude/research-build` branch.
   how many tabs hold a renderer, never how many can be open: past the cap the
   least-recently-used tab is discarded, and returning to it reloads the page
   behind a picture of how you left it. `--max-live-tabs=0` turns it off.
+- **The interface is set in Aptos, then Calibri, then whatever the system has.**
+  Neither can be bundled — both are Microsoft's and not redistributable — so the
+  stack degrades, and it names Carlito before the system default: Carlito is
+  metric-compatible with Calibri, is under the Open Font License, and on Linux is
+  one `apt install fonts-crosextra-carlito` away. With it the layout is identical
+  to the pixel; without it you get your own platform's UI face and nothing looks
+  broken. Two measured consequences are built into the rest of the styling:
+  Calibri's x-height is about 10% shorter than the faces desktop UI usually
+  assumes, so the base size is 14px rather than 13, and it ships exactly two
+  weights, so emphasis here is carried by colour and size rather than by a
+  semibold that does not exist.
 - **History is plain JSON in your profile directory, not a secret store.** It is
   the one record here that is deliberately readable: encrypting a list of the
   pages you visited would hide it from you and from nobody else, since anything

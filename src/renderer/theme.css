@@ -1,28 +1,178 @@
 /*
- * The palette, shared by every view the browser draws itself: the chrome, the
- * task manager and settings.
+ * The design system: type, colour, space, elevation and motion, in one file.
  *
- * It lives in one file because it was previously copied into each of them, and
- * a copied palette is one that drifts - the panel's light background was already
- * a different grey from the chrome's for no reason anyone chose. Each view links
- * this first and then its own layout rules.
+ * Every view the browser draws itself links this first and then its own layout
+ * rules. It lives in one file because it was previously copied into each of
+ * them, and a copied palette is one that drifts - the panel's light background
+ * was already a different grey from the chrome's for no reason anyone chose.
  *
  * Nothing here costs anything at runtime: custom properties are resolved during
  * style recalculation, and no rule below animates, filters or loads a resource.
+ *
+ * The one rule that governs all of it: the chrome is a live renderer for the
+ * whole life of the window, so it uses no web fonts, no images, and no effect
+ * that forces an offscreen layer.
  */
+
+/* ------------------------------------------------------------------ */
+/* Type                                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Aptos, then Calibri, then whatever the system has.
+ *
+ * Both are humanist sans faces with open apertures and rounded terminals, which
+ * is a different voice from the neutral grotesques desktop UI defaults to
+ * (Segoe UI, Roboto, Helvetica) - warmer, and easier on a long list of tab
+ * titles. Aptos is first because it is the newer of the two and ships with
+ * current Office and Windows; Calibri is the twenty-year incumbent and is on
+ * every Windows and every machine with Office installed.
+ *
+ * Neither can be bundled: both are Microsoft's and not redistributable. So the
+ * stack degrades, and names `Carlito` explicitly before the system default -
+ * Carlito is metric-compatible with Calibri, is under the Open Font License and
+ * is one `apt install fonts-crosextra-carlito` away on Linux. A machine with it
+ * gets the same layout to the pixel; a machine without it gets its own UI face
+ * and nothing looks broken.
+ *
+ * Two measured consequences, both of which the rest of this file is built
+ * around. Measured with canvas text metrics at 200px, not taken on trust:
+ *
+ *   x-height / em      Calibri 0.480   Segoe-class 0.50-0.53   DejaVu 0.550
+ *   advance, 54 chars  Calibri  303px  Arial-metric 333px      DejaVu 379px
+ *
+ * Calibri sets around 10% narrower and its x-height is roughly 10% shorter than
+ * the faces this UI was drawn for, so at an unchanged 13px it reads small and
+ * loose. The base size is 14px here for that reason: 14 x 0.48 = 6.7px of
+ * x-height, against 13 x 0.53 = 6.9px before. The same apparent size, in less
+ * horizontal space.
+ */
+:root {
+  --font-ui: Aptos, Calibri, Carlito, "Segoe UI Variable Text", "Segoe UI",
+             system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
+
+  /*
+   * Sizes, and there are deliberately only six.
+   *
+   * A scale with a step for every occasion is how an interface ends up with
+   * nine sizes doing the work of four. These are the ones the browser actually
+   * needs, named for their job rather than for their size, so a change is made
+   * once.
+   */
+  --fs-micro: 10.5px;   /* stat labels, the one-line footer */
+  --fs-small: 12px;     /* hints, shortcuts, secondary lines */
+  --fs-body: 14px;      /* everything the user reads */
+  --fs-lead: 16px;      /* a figure worth reading first */
+  --fs-title: 19px;     /* a page's own name */
+  --fs-hero: 34px;      /* the new tab wordmark, and nothing else */
+
+  /*
+   * Two weights, because Calibri has two.
+   *
+   * Measured: at 13px, `font-weight` 300, 400 and 500 all rasterise to exactly
+   * the same advance width in Calibri, and 600 and 700 to another - the face
+   * ships Regular and Bold and nothing between. So a stylesheet asking for 550
+   * or 600 to mean "slightly stronger" gets full bold, and a UI with bold in
+   * every third row reads as shouting.
+   *
+   * Emphasis is therefore carried by colour and size, and weight is spent only
+   * where something genuinely leads: a page title, a live figure, the tab in
+   * front of you.
+   */
+  --fw-regular: 400;
+  --fw-bold: 700;
+
+  --lh-tight: 1.25;     /* headings and single-line rows */
+  --lh-body: 1.45;      /* anything that can wrap */
+
+  /*
+   * Tracking. Calibri is loose by default at UI sizes, so headings are pulled
+   * in slightly and small caps labels are opened out - the opposite directions,
+   * for the same reason: each is set at a size the face was not optimised for.
+   */
+  --ls-title: -0.01em;
+  --ls-label: 0.06em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Colour                                                              */
+/* ------------------------------------------------------------------ */
 
 :root {
   --bg: #16181d;
   --bg-raised: #1e2128;
   --bg-input: #24272f;
   --border: #2c303a;
+  /* A second, quieter rule for dividers *inside* a surface. One border weight
+     for both the edge of a card and the lines between its rows makes a list
+     read as a table. */
+  --border-soft: #23262e;
   --text: #e6e8ee;
   --text-dim: #9aa1b1;
   --accent: #5b8cff;
   --ok: #49c17d;
   --warn: #e0a33e;
   --crit: #e2564a;
-  --radius: 7px;
+
+  --radius-sm: 6px;
+  --radius: 9px;
+  --radius-lg: 13px;
+  --radius-pill: 999px;
+
+  /*
+   * Space, on a 4px grid.
+   *
+   * Named by step rather than by use, because the same gap means different
+   * things in different views and naming it `--gap-row` in one of them is how
+   * a token ends up used for something it was not meant for.
+   */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 28px;
+  --s7: 40px;
+}
+
+/*
+ * Three ways to reach the light palette, and they are not redundant.
+ *
+ * `prefers-color-scheme` follows the OS, which is the default and what most
+ * people want. But a user who explicitly picks Light in Settings must get it on
+ * a machine set to dark, and vice versa - a media query alone cannot express
+ * that, so an explicit choice is stamped on <body> and wins over the OS.
+ */
+@media (prefers-color-scheme: light) {
+  body:not([data-theme="dark"]) {
+    --bg: #f4f5f8;
+    --bg-raised: #ffffff;
+    --bg-input: #ffffff;
+    --border: #dcdfe6;
+    --border-soft: #ebedf2;
+    --text: #191c23;
+    --text-dim: #5d6472;
+  }
+}
+
+body[data-theme="light"] {
+  --bg: #f4f5f8;
+  --bg-raised: #ffffff;
+  --bg-input: #ffffff;
+  --border: #dcdfe6;
+  --border-soft: #ebedf2;
+  --text: #191c23;
+  --text-dim: #5d6472;
+}
+
+body[data-theme="dark"] {
+  --bg: #16181d;
+  --bg-raised: #1e2128;
+  --bg-input: #24272f;
+  --border: #2c303a;
+  --border-soft: #23262e;
+  --text: #e6e8ee;
+  --text-dim: #9aa1b1;
 }
 
 /*
@@ -30,7 +180,7 @@
  * on :root, and this is not a detail.
  *
  * `var()` inside a custom property is substituted where the property is
- * *declared*, not where it is used. Both palette overrides below are on <body>,
+ * *declared*, not where it is used. Both palette overrides above are on <body>,
  * so a `--strip: var(--bg)` declared on :root computes against the root's
  * value - the dark one - and inherits that down even when the light palette is
  * in force. The tab strip was painted dark in the light theme for exactly that
@@ -40,11 +190,53 @@
  * An explicit strip colour set in Settings is written to `body.style` by
  * theme.js, which is an inline declaration and outranks this.
  */
-body { --strip: var(--bg); }
+body {
+  /* The tab strip's own colour, unless one has been chosen. */
+  --strip: var(--bg);
+
+  /*
+   * One tint, derived from the accent, for every surface and state that needs
+   * to be something other than another grey.
+   *
+   * The chrome used to be four values of the same neutral - strip, toolbar,
+   * tab, hover - and read as a wireframe of a browser rather than as one. A few
+   * percent of the accent in each surface, and more of it in the states that
+   * mean something, gives the whole UI a colour identity that follows whatever
+   * accent the user picked, with nothing new to theme.
+   *
+   * Kept at single digits on surfaces. The moment a background is obviously
+   * tinted it stops being a surface and starts being a decoration.
+   */
+  --tint-1: color-mix(in srgb, var(--accent) 6%, var(--strip));
+  --tint-2: color-mix(in srgb, var(--accent) 3%, var(--bg-input));
+  --wash: color-mix(in srgb, var(--accent) 13%, transparent);
+  --wash-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+
+  /*
+   * Focus, as one token used everywhere.
+   *
+   * A ring outside the box rather than a thicker border: a border that grows on
+   * focus moves everything beside it, and a control that shifts as you tab onto
+   * it is the clearest sign nobody tabbed onto it while building the thing.
+   */
+  --ring: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent);
+
+  /*
+   * Elevation, and there is exactly one shadow in this browser's own UI.
+   *
+   * It belongs to the menu, which floats over a page it has no other separation
+   * from, and it is affordable there because that view is created when the menu
+   * opens and destroyed when it closes. A shadow on the chrome would be a blur
+   * pass held for the life of the window.
+   */
+  --shadow-menu: 0 12px 36px -10px rgba(0, 0, 0, 0.5), 0 2px 8px -3px rgba(0, 0, 0, 0.35);
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion                                                              */
+/* ------------------------------------------------------------------ */
 
 /*
- * Motion, in one place.
- *
  * Every animation in this browser is a transform or an opacity change on a
  * small element, so it stays on the compositor and never causes layout - the
  * chrome is a live renderer for the whole life of the window, and an animation
@@ -69,42 +261,9 @@ body.calm *, body.calm *::before, body.calm *::after {
   transition-duration: 0.01ms !important;
 }
 
-/*
- * Three ways to reach the light palette, and they are not redundant.
- *
- * `prefers-color-scheme` follows the OS, which is the default and what most
- * people want. But a user who explicitly picks Light in Settings must get it on
- * a machine set to dark, and vice versa - a media query alone cannot express
- * that, so an explicit choice is stamped on <body> and wins over the OS.
- */
-@media (prefers-color-scheme: light) {
-  body:not([data-theme="dark"]) {
-    --bg: #f2f3f6;
-    --bg-raised: #ffffff;
-    --bg-input: #ffffff;
-    --border: #d8dbe2;
-    --text: #1a1d24;
-    --text-dim: #626a7a;
-  }
-}
-
-body[data-theme="light"] {
-  --bg: #f2f3f6;
-  --bg-raised: #ffffff;
-  --bg-input: #ffffff;
-  --border: #d8dbe2;
-  --text: #1a1d24;
-  --text-dim: #626a7a;
-}
-
-body[data-theme="dark"] {
-  --bg: #16181d;
-  --bg-raised: #1e2128;
-  --bg-input: #24272f;
-  --border: #2c303a;
-  --text: #e6e8ee;
-  --text-dim: #9aa1b1;
-}
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
 
 * { box-sizing: border-box; }
 
@@ -112,12 +271,31 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
   user-select: none;
   cursor: default;
   /* Text this small on a dark background gains more from lighter stems than it
      loses in weight. Only affects macOS, where the default is heavier. */
   -webkit-font-smoothing: antialiased;
+  /* Calibri and Aptos both carry proper kerning and standard ligatures; asking
+     for them costs nothing and is what the face was drawn expecting. */
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+}
+
+/*
+ * One focus treatment, for every focusable thing in the browser's own UI.
+ *
+ * Declared once here rather than per control, so a new button is correct before
+ * anyone remembers to style it - which is the only way a rule like this
+ * survives. `:focus-visible`, so a pointer click does not draw a ring the
+ * keyboard user is the only one who needs.
+ */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
 }
 
 /*
@@ -129,14 +307,50 @@ body {
  * barely moved. Tabular figures pin each digit to the same advance width, so a
  * changing number changes in place.
  *
+ * Calibri's figures are already fixed-width - measured: `111` and `000` set to
+ * the same width with and without the property - so this is a no-op there and
+ * does the work on whatever face a machine without Calibri falls back to.
  * Applied to the elements that hold live numbers rather than globally: tabular
- * figures are wider and slightly stiffer, which is right for data and wrong for
- * a sentence.
+ * figures are slightly stiffer, which is right for data and wrong for a
+ * sentence.
  */
 .meter-text,
 .stat-value,
 .row-mem,
-.stat {
+.stat,
+.time,
+.count,
+.zoom-value,
+.visits {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+}
+
+/*
+ * Scrollbars, because the default one is a stripe of the operating system
+ * running down the middle of an interface that is otherwise ours.
+ *
+ * The standard properties rather than `::-webkit-scrollbar`: they are two lines
+ * instead of six rules, they leave the scrollbar's behaviour to the platform,
+ * and Chromium has supported them for years. Overlay scrollbars stay overlay.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 22%, transparent) transparent;
+}
+
+/* Selection in the accent, at a strength that leaves the text readable rather
+   than reversed out. */
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--text);
+}
+
+/*
+ * A placeholder is a prompt, not content, and at full `--text-dim` it reads as
+ * a filled field from across the room.
+ */
+::placeholder {
+  color: color-mix(in srgb, var(--text-dim) 78%, transparent);
+  opacity: 1;                      /* Firefox-ism, harmless and explicit here */
 }

@@ -18,7 +18,7 @@
   height: 30px;
   padding: 0 11px;
   border: 1px solid var(--border);
-  border-radius: 15px;
+  border-radius: var(--radius-pill);
   background: var(--bg-input);
   color: var(--text);
   font: inherit;
@@ -26,7 +26,6 @@
   user-select: text;
 }
 #q:focus { border-color: var(--accent); }
-#q:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent); }
 
 .bar {
   display: flex;
@@ -66,11 +65,14 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 16px 2px 7px;
-  background: var(--bg-raised);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
+  padding: var(--s4) 2px 7px;
+  /* The page's own colour, not a raised one: this is a heading that happens to
+     be sticky, and it has to hide the rows passing under it without reading as
+     a band drawn across the list. */
+  background: var(--bg);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-label);
   text-transform: uppercase;
   color: var(--text-dim);
 }
@@ -88,13 +90,18 @@
   align-items: center;
   gap: 10px;
   padding: 2px 10px 2px 0;
-  border-radius: 9px;
+  border-radius: var(--radius);
   transition: background-color var(--fast) ease;
 }
 .visit:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+/* The row carries the focus mark, because the button inside it is the row's
+   whole width and an outer ring on a full-width child would be drawn half
+   under the row beside it. The button's own ring is suppressed for that
+   reason, not forgotten. */
 .visit:has(.open:focus-visible) {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 }
+.open:focus-visible { box-shadow: none; }
 
 .open {
   display: flex;
@@ -120,7 +127,7 @@
      out of alignment with the next. */
   width: 66px;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -139,9 +146,9 @@
   flex: none;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--fw-bold);
   color: hsl(var(--hue) 70% 72%);
   background: hsl(var(--hue) 45% 22%);
   text-transform: uppercase;
@@ -165,7 +172,7 @@ body:not([data-theme="dark"]) .chip { color: hsl(var(--hue) 55% 32%); background
 .visit-url {
   display: block;
   margin-top: 1px;
-  font-size: 11.5px;
+  font-size: var(--fs-small);
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -177,9 +184,9 @@ body:not([data-theme="dark"]) .chip { color: hsl(var(--hue) 55% 32%); background
 .visits {
   flex: none;
   padding: 1px 7px;
-  border-radius: 9px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--text) 8%, transparent);
-  font-size: 10.5px;
+  font-size: var(--fs-micro);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }

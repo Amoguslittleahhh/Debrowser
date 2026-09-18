@@ -16,9 +16,9 @@ main {
 
 #wordmark {
   margin: 0 0 22px;
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: var(--fs-hero);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-title);
   color: var(--text);
   /* One short fade on open. Cheap - opacity and transform stay on the
      compositor - and it runs once rather than looping, so an idle new tab
@@ -62,11 +62,11 @@ body.still #wordmark, body.still #search { animation: none; }
   height: 46px;
   padding: 0 18px;
   border: 1px solid var(--border);
-  border-radius: 23px;
+  border-radius: var(--radius-pill);
   background: var(--bg-input);
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-lead);
   outline: none;
   user-select: text;
   cursor: text;
@@ -79,8 +79,8 @@ body.still #wordmark, body.still #search { animation: none; }
 }
 
 .stat {
-  margin: 20px 0 0;
-  font-size: 11.5px;
+  margin: var(--s5) 0 0;
+  font-size: var(--fs-small);
   color: var(--text-dim);
   min-height: 1em;
 }

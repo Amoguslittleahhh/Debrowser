@@ -9,7 +9,12 @@ body {
   flex-direction: column;
   background: var(--bg);
   color: var(--text);
-  font: 12px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  /* Denser than the rest of the browser, and only here. The panel is an
+     instrument: twenty rows of live figures in a 360px column, read by
+     scanning rather than by reading. The family and everything else still come
+     from theme.css - this used to redeclare the whole `font` shorthand, which
+     quietly opted the panel out of the browser's typeface. */
+  font-size: var(--fs-small);
   border-left: 1px solid var(--border);
   user-select: none;
   cursor: default;
@@ -22,7 +27,7 @@ header {
   padding: 12px 14px 8px;
 }
 
-h1 { margin: 0; font-size: 13px; font-weight: 600; }
+h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: var(--ls-title); }
 
 .ghost {
   border: none;
@@ -50,11 +55,11 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
   padding: 8px 10px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius);
 }
 
-.stat-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.stat-value { font-size: var(--fs-lead); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+.stat-label { font-size: var(--fs-micro); color: var(--text-dim); text-transform: uppercase; letter-spacing: var(--ls-label); }
 
 .budget-row {
   display: flex;
@@ -81,7 +86,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
   background: var(--bg-raised);
   border: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
 .pressure[data-pressure="high"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
 .pressure[data-pressure="critical"] { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--border)); }
@@ -112,7 +117,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
 
 .row-main { min-width: 0; }
 .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-sub { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-sub { color: var(--text-dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .row-mem { font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .row-mem.boosted { color: var(--accent); }
@@ -124,7 +129,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
   border-radius: 5px;
   padding: 2px 7px;
   font: inherit;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   cursor: default;
   opacity: 0;
 }
@@ -136,5 +141,5 @@ footer {
   padding: 8px 14px 12px;
   border-top: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }

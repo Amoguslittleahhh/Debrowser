@@ -27,10 +27,10 @@ html, body {
 
 .sheet {
   position: fixed;
-  width: 268px;
+  width: 276px;
   padding: 6px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bg-raised);
   color: var(--text);
   /*
@@ -40,7 +40,7 @@ html, body {
    * destroyed when it closes - unlike the chrome, which is live for the whole
    * session and where a shadow would be permanent.
    */
-  box-shadow: 0 10px 34px -8px rgba(0, 0, 0, 0.55), 0 2px 8px -2px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-menu);
   animation: menu-in 130ms var(--ease);
   transform-origin: top right;
   outline: none;                 /* it holds focus so the keyboard reaches it */
@@ -63,7 +63,7 @@ body.calm .sheet { animation: none; }
   height: 34px;
   padding: 0 10px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -93,7 +93,7 @@ body.calm .sheet { animation: none; }
 /* The shortcut is a reminder, not a second label, so it recedes. */
 .accel {
   flex: none;
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -111,20 +111,26 @@ body.calm .sheet { animation: none; }
 }
 .item:hover:not(:disabled) svg, .item[aria-checked="true"] svg { color: var(--accent); }
 
-/* A checked item says so in its own colour rather than with a tick glyph that
-   would shift every label right by its width. */
+/*
+ * A checked item says so in its own colour rather than with a tick glyph that
+ * would shift every label right by its width - and not by going bold, because
+ * Calibri has nothing between regular and bold, so weight here would be a
+ * shout. See the note on weights in theme.css.
+ */
 .item[aria-checked="true"] { color: var(--text); }
-.item[aria-checked="true"] .item-label { font-weight: 550; }
 
+/* Inset from both ends rather than run edge to edge: a divider that stops
+   short groups the items on either side of it, where one that touches the
+   walls cuts the sheet into separate boxes. */
 .sep {
   height: 1px;
   margin: 5px 10px;
-  background: var(--border);
+  background: var(--border-soft);
 }
 
 .note {
   padding: 6px 10px 4px;
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--text-dim);
 }
 
@@ -152,9 +158,9 @@ body.calm .sheet { animation: none; }
 .zoom-label { flex: 1; color: var(--text); }
 
 .zoom-value {
-  min-width: 46px;
+  min-width: 48px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
@@ -166,11 +172,11 @@ body.calm .sheet { animation: none; }
   height: 26px;
   flex: none;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-lead);
   line-height: 1;
   cursor: default;
   transition: background-color var(--fast) ease, border-color var(--fast) ease;
@@ -193,7 +199,7 @@ body.calm .sheet { animation: none; }
   background: transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-small);
   cursor: default;
 }
 .zoom-reset:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
