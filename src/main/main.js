@@ -332,6 +332,8 @@ function main() {
     }
 
     bookmarks = new Bookmarks(log);
+    // So the state broadcast can carry the revision the bookmarks bar watches.
+    shell.bookmarks = bookmarks;
     // Read live rather than captured, so switching recording off in the history
     // page stops the very next navigation from being written down.
     //
@@ -393,7 +395,7 @@ function main() {
     }
 
     if (SMOKE_TEST) {
-      runSmokeTest({ tabs, governor, shell, prefs });
+      runSmokeTest({ tabs, governor, shell, prefs, bookmarks });
     } else if (argv.includes('--bench-test')) {
       const { runBench } = require('./bench');
       const tabCount = Number(argValue('tabs')) || 8;
@@ -615,6 +617,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
         if (governor && tab && !tab.visible) {
           governor.enforceManualDiscard(tab).catch((e) => log(`manual discard failed: ${e.message}`));
         }
+        break;
+      }
+
+      // Ctrl+Shift+B. Through the preference rather than a flag in the chrome,
+      // because showing the bar takes 34px from the page - the window has to
+      // lay out again, and the choice has to survive a restart.
+      case 'toggle-bookmarks-bar': {
+        prefs.set('showBookmarksBar', !shell.bookmarksBarVisible());
+        shell.layout();
         break;
       }
 
@@ -1247,9 +1258,9 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
 /* Smoke test - exercises the full lifecycle headlessly                */
 /* ------------------------------------------------------------------ */
 
-function runSmokeTest({ tabs, governor, shell, prefs }) {
+function runSmokeTest({ tabs, governor, shell, prefs, bookmarks }) {
   const { runSmoke } = require('./smoke');
-  runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage,
+  runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender) }).then((code) => {
     app.exit(code);
   }).catch((err) => {

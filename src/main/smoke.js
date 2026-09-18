@@ -68,7 +68,7 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
 }
 
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
-                          openInternalPage, senderPage }) {
+                          openInternalPage, senderPage, bookmarks }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -1254,6 +1254,45 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `second import added ${again.added}, list holds ${store.all().length}`);
 
     require('fs').rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // The bookmarks bar, which is two separate things that both have to be true.
+  //
+  // It was saving bookmarks with nowhere to show them: the star worked, the
+  // store worked, and the only way to see the list was Settings. A bar drawn
+  // inside the chrome is not enough on its own, because the chrome is a view
+  // clipped to the height the shell gives it - so the window has to hand it the
+  // extra 34px, and the page below has to give them up. Assert the arithmetic
+  // rather than the markup: a bar the window has not made room for is a bar
+  // with its bottom row cut off, and nothing in the renderer can tell.
+  {
+    prefs.set('showBookmarksBar', false);
+    shell.applyWindowPrefs();
+    const withoutBar = shell.contentBounds();
+
+    prefs.set('showBookmarksBar', true);
+    shell.applyWindowPrefs();
+    const withBar = shell.contentBounds();
+
+    const { BOOKMARKS_BAR_HEIGHT } = require('./window');
+    check('the bookmarks bar takes its room from the page, not from the chrome',
+      withBar.y - withoutBar.y === BOOKMARKS_BAR_HEIGHT &&
+      withoutBar.height - withBar.height === BOOKMARKS_BAR_HEIGHT,
+      `content starts at ${withoutBar.y} -> ${withBar.y}, ` +
+      `height ${withoutBar.height} -> ${withBar.height}`);
+
+    // And the list reaches the strip, keyed on a revision rather than pushed
+    // through the state broadcast on every tick.
+    const before = bookmarks.revision;
+    bookmarks.add({ url: 'https://bar.test/one', title: 'One' });
+    const published = shell.bookmarks === bookmarks && bookmarks.revision > before;
+    const drawn = published && await waitFor(async () =>
+      await shell.chromeView.webContents.executeJavaScript(
+        'document.querySelectorAll("#bookmarks .bookmark").length') > 0,
+    { timeoutMs: 8000 });
+    check('a saved bookmark appears in the bar',
+      drawn, `revision ${before} -> ${bookmarks.revision}`);
+    bookmarks.remove('https://bar.test/one');
   }
 
   // The presence check exists to stop someone at an unlocked machine pressing

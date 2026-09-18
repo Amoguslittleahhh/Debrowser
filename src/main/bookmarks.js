@@ -97,6 +97,19 @@ class Bookmarks {
     this.file = path.join(this.dir, FILE);
     /** @type {Array<{id:string, url:string, title:string, folder:string, addedAt:number}>} */
     this.items = [];
+
+    /**
+     * Bumped on every successful write.
+     *
+     * The bookmarks bar lives in the chrome, which learns about everything else
+     * from the state broadcast - and that broadcast reaches three views on every
+     * governor tick. Putting the list itself in it would send the user's whole
+     * bookmark collection twice a second on the chance the bar is showing, which
+     * is the thing this file's neighbours refuse to do with the credential list
+     * for the same reason. A number is enough: the bar re-asks only when it
+     * changes.
+     */
+    this.revision = 0;
     this.load();
   }
 
@@ -151,6 +164,7 @@ class Bookmarks {
       // bookmarks at all.
       fs.writeFileSync(tmp, body, { mode: 0o600 });
       fs.renameSync(tmp, this.file);
+      this.revision += 1;
       return true;
     } catch (err) {
       this.log(`bookmarks: could not save: ${err.message}`);

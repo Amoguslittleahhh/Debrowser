@@ -80,6 +80,17 @@
     <div class="progress" id="progress" aria-hidden="true"></div>
   </div>
 
+  <!--
+    Saved sites, under the toolbar.
+
+    A row of real buttons rather than links: this is the browser's own UI, and
+    navigating is a command sent to the browser process, not a document the
+    chrome is allowed to load. Empty until the first list arrives, and hidden
+    entirely when the strip runs down the side - there the chrome already owns a
+    full-height column and the bookmarks go in it.
+  -->
+  <nav class="bookmarks" id="bookmarks" aria-label="Bookmarks"></nav>
+
   <script src="theme.js"></script>
   <script src="chrome.js"></script>
 </body>

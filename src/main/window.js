@@ -20,6 +20,15 @@ const { BaseWindow, WebContentsView, ImageView, nativeImage, shell } = require('
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
 
+/**
+ * Height the bookmarks bar adds to the chrome when it is showing.
+ *
+ * The chrome is one web page, so the bar is drawn inside it - but the *window*
+ * has to know, because the content area starts below the chrome and the page
+ * would otherwise be painted over by it.
+ */
+const BOOKMARKS_BAR_HEIGHT = 34;
+
 /** Width of the chrome when it runs down the side instead of across the top. */
 const SIDEBAR_WIDTH = 240;
 
@@ -71,6 +80,8 @@ class BrowserShell {
     this.tabs = tabManager;
     this.prefs = prefs;
     this.updater = updater;
+    /** @type {import('./bookmarks').Bookmarks|null} */
+    this.bookmarks = null;
     this.log = log;
     this.onCommand = onCommand;
 
@@ -681,8 +692,13 @@ class BrowserShell {
     // so the whole layout is re-asserted. Only when it actually changed: this
     // runs on every preference write, and re-laying out on a colour change
     // would resize every live tab for nothing.
-    if (this.laidOutVertical !== this.vertical()) {
+    //
+    // The bookmarks bar is the same kind of change for the same reason: showing
+    // it takes 34px from every tab's rectangle, and hiding it gives them back.
+    if (this.laidOutVertical !== this.vertical() ||
+        this.laidOutBookmarksBar !== this.bookmarksBarVisible()) {
       this.laidOutVertical = this.vertical();
+      this.laidOutBookmarksBar = this.bookmarksBarVisible();
       this.layout();
     }
 
@@ -714,6 +730,23 @@ class BrowserShell {
    * The whole area below and beside the chrome, before the inspector takes its
    * share of it. What a tab would fill if nothing were docked.
    */
+  /**
+   * Is the bookmarks bar taking a strip of the window?
+   *
+   * Only in horizontal mode. With the strip down the side the chrome already
+   * owns a full-height column, so bookmarks go in it and cost the content area
+   * nothing - which is the whole reason a sidebar is worth having.
+   */
+  bookmarksBarVisible() {
+    if (this.vertical()) return false;
+    return this.prefs ? this.prefs.get('showBookmarksBar') !== false : true;
+  }
+
+  /** How much vertical room the chrome needs, bar included. */
+  chromeHeight() {
+    return CHROME_HEIGHT + (this.bookmarksBarVisible() ? BOOKMARKS_BAR_HEIGHT : 0);
+  }
+
   contentArea() {
     const { width, height } = this.window.getContentBounds();
     const panelWidth = this.panelOpen ? PANEL_WIDTH : 0;
@@ -729,9 +762,9 @@ class BrowserShell {
 
     return {
       x: 0,
-      y: CHROME_HEIGHT,
+      y: this.chromeHeight(),
       width: Math.max(0, width - panelWidth),
-      height: Math.max(0, height - CHROME_HEIGHT)
+      height: Math.max(0, height - this.chromeHeight())
     };
   }
 
@@ -784,7 +817,7 @@ class BrowserShell {
     // corner beside the window buttons rather than under them.
     this.chromeView.setBounds(this.vertical()
       ? { x: 0, y: 0, width: SIDEBAR_WIDTH, height }
-      : { x: 0, y: 0, width, height: CHROME_HEIGHT });
+      : { x: 0, y: 0, width, height: this.chromeHeight() });
 
     const bounds = this.contentBounds();
     for (const tab of this.tabs.all()) {
@@ -807,7 +840,7 @@ class BrowserShell {
     if (this.panelView) {
       // Sits beside the content, so it starts below whatever the content
       // starts below - the top band in sidebar mode, the chrome otherwise.
-      const top = this.vertical() ? SIDEBAR_TOP_BAND : CHROME_HEIGHT;
+      const top = this.vertical() ? SIDEBAR_TOP_BAND : this.chromeHeight();
       this.panelView.setBounds({
         x: width - PANEL_WIDTH,
         y: top,
@@ -848,6 +881,11 @@ class BrowserShell {
       ? { ...state, prefs: this.prefs.all(), searchEngines: this.prefs.engines() }
       : { ...state };
     if (this.updater) full.updates = this.updater.snapshot();
+    // A number, not the list. See Bookmarks#revision: the bar re-asks for the
+    // list only when this changes, rather than having it pushed into three
+    // views on every governor tick.
+    if (this.bookmarks) full.bookmarksRevision = this.bookmarks.revision;
+    full.bookmarksBar = this.bookmarksBarVisible();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
 
@@ -889,4 +927,4 @@ function send(view, channel, payload) {
   } catch { /* view torn down mid-publish */ }
 }
 
-module.exports = { BrowserShell, CHROME_HEIGHT, PANEL_WIDTH };
+module.exports = { BrowserShell, CHROME_HEIGHT, BOOKMARKS_BAR_HEIGHT, PANEL_WIDTH };

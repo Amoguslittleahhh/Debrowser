@@ -164,7 +164,13 @@ const SCHEMA = {
   // Where the inspector goes. `right` and `bottom` host it in a view of the
   // browser's own, beside or under the page; `window` hands it to Chromium to
   // put in a window of its own, which is what it used to do unconditionally.
-  devToolsDock: { def: 'right',  ok: (v) => ['right', 'bottom', 'window'].includes(v) }
+  devToolsDock: { def: 'right',  ok: (v) => ['right', 'bottom', 'window'].includes(v) },
+
+  /* --- Bookmarks --------------------------------------------------- */
+  // The strip of saved sites under the toolbar. On by default, because a
+  // bookmark you cannot see is a bookmark you will not use - and it costs the
+  // content area 34px only while it is showing.
+  showBookmarksBar: { def: true, ok: (v) => typeof v === 'boolean' }
 
   // Still nothing here for session restore or the resource profile: the first
   // is not built, and the second cannot take effect without a restart, since a

@@ -41,6 +41,7 @@ const el = {
   reloadIcon: document.getElementById('reload-icon'),
   progress: document.getElementById('progress'),
   star: document.getElementById('star'),
+  bookmarks: document.getElementById('bookmarks'),
   omnibox: document.getElementById('omnibox')
 };
 
@@ -86,6 +87,98 @@ function setStar(on) {
   starred = on;
   el.star.classList.toggle('on', Boolean(on));
   el.star.title = on ? 'Remove bookmark' : 'Bookmark this page (Ctrl+D)';
+}
+
+/* ------------------------------------------------------------------ */
+/* The bookmarks bar                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Redrawn when the browser says the list changed, and not otherwise.
+ *
+ * The state broadcast reaches this view on every governor tick, and it carries
+ * a revision number rather than the bookmarks themselves - so the list crosses
+ * the process boundary when the user adds or removes one, not twice a second
+ * for the life of the window.
+ */
+let bookmarksRevision = null;
+
+/** Titles are trimmed to a few words: a bar is a row of labels, not a list. */
+const BOOKMARK_LABEL_MAX = 22;
+
+async function refreshBookmarks(revision) {
+  if (revision === bookmarksRevision) return;
+  bookmarksRevision = revision;
+  const res = await api.request('list-bookmarks');
+  // Only if nothing has changed again while we were asking.
+  if (revision === bookmarksRevision) renderBookmarks((res && res.items) || []);
+}
+
+function renderBookmarks(items) {
+  const bar = document.createDocumentFragment();
+
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.className = 'bookmark';
+    button.type = 'button';
+    button.title = `${item.title || item.url}\n${item.url}`;
+
+    const chip = document.createElement('span');
+    chip.className = 'bookmark-chip';
+    chip.setAttribute('aria-hidden', 'true');
+    const host = siteOf(item.url);
+    chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+    chip.style.setProperty('--hue', String(siteHue(host)));
+
+    // The site's own logo over its letter, through the browser's icon route -
+    // never fetched by this page, which would send this session's cookies to
+    // every bookmarked site every time the window opened. See icons.js.
+    const src = iconSrc(item.icon || defaultIconFor(item.url));
+    if (src) {
+      const icon = document.createElement('img');
+      icon.className = 'bookmark-icon';
+      icon.alt = '';
+      icon.decoding = 'async';
+      icon.src = src;
+      icon.addEventListener('load', () => chip.classList.add('has-icon'));
+      icon.addEventListener('error', () => icon.remove());
+      chip.append(icon);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'bookmark-label';
+    const text = item.title || host;
+    label.textContent = text.length > BOOKMARK_LABEL_MAX
+      ? `${text.slice(0, BOOKMARK_LABEL_MAX - 1).trimEnd()}…`
+      : text;
+
+    button.append(chip, label);
+
+    // Same three gestures a bookmark has in any browser.
+    button.addEventListener('click', (event) => {
+      if (event.ctrlKey || event.metaKey) api.send('new-tab', { url: item.url });
+      else api.send('navigate', { url: item.url });
+    });
+    button.addEventListener('auxclick', (event) => {
+      if (event.button === 1) api.send('new-tab', { url: item.url });
+    });
+
+    bar.append(button);
+  }
+
+  el.bookmarks.replaceChildren(bar);
+  el.bookmarks.classList.toggle('empty', items.length === 0);
+}
+
+/** Where a site's icon is if it never said - the address Chromium would try. */
+function defaultIconFor(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.origin}/favicon.ico`;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -535,6 +628,12 @@ window.addEventListener('keydown', (event) => {
     case 'd': api.request('toggle-bookmark').then((res) => {
       if (res) setStar(Boolean(res.bookmarked));
     }); break;
+    // Ctrl+Shift+B shows and hides the bookmarks bar, as it does everywhere
+    // else. The browser owns the preference, so this asks rather than toggling
+    // a class here - the window has to give the page its 34px back too.
+    case 'b':
+      if (event.shiftKey) api.send('toggle-bookmarks-bar');
+      break;
     case ',': api.send('open-settings'); break;
     case 'h': api.send('open-history'); break;
     // Ctrl+Shift+I, the other half of F12. F12 itself needs no modifier and is
@@ -557,4 +656,10 @@ api.onState((state) => {
   renderTabs(state.tabs);
   renderToolbar(state);
   renderMeter(state);
+
+  // The bar is hidden rather than emptied when it is off or when the strip runs
+  // down the side: the window has already given its 34px back to the page, and
+  // a bar drawn into space nobody reserved would sit over the top of it.
+  document.body.classList.toggle('with-bookmarks', state.bookmarksBar !== false);
+  if (state.bookmarksBar !== false) refreshBookmarks(state.bookmarksRevision);
 });

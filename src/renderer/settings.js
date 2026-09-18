@@ -53,6 +53,12 @@ const SECTIONS = {
     },
     { key: 'accent', label: 'Accent colour', type: 'accent' },
     {
+      key: 'showBookmarksBar',
+      label: 'Show the bookmarks bar',
+      hint: 'A row of saved sites under the toolbar. Ctrl+Shift+B toggles it.',
+      type: 'checkbox'
+    },
+    {
       key: 'tabBarPosition',
       label: 'Tab bar position',
       hint: 'Down the side, titles stay readable however many tabs are open.',
