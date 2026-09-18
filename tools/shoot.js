@@ -17,8 +17,8 @@ const TABS = [
 ];
 
 const STATE = {
-  tabs: TABS, activeId: 1, totalMB: 409, budgetMB: 6144, rssTotalMB: 512,
-  privateTotalMB: 300, pressure: 'none', liveTabs: 4, maxLiveTabs: 12,
+  tabs: TABS, activeId: 1, totalMB: 1205, budgetMB: 6144, rssTotalMB: 512,
+  privateTotalMB: 300, pressure: 'none', liveTabs: 6, maxLiveTabs: 12,
   rendererCount: 3, bookmarksBar: true, bookmarksRevision: 1,
   downloads: { count: 3, active: 1, progress: 0.42 },
   sidebar: null,
@@ -63,6 +63,7 @@ const ANSWERS = {
 
 const SHOTS = [
   { name: 'chrome',   file: 'chrome.html',   w: 1280, h: 118 },
+  { name: 'sidebar',  file: 'chrome.html',   w: 240,  h: 820, side: true },
   { name: 'settings', file: 'settings.html', w: 1280, h: 860 },
   { name: 'history',  file: 'history.html',  w: 1280, h: 700 },
   { name: 'downloads', file: 'downloads.html', w: 1280, h: 700 },
@@ -81,6 +82,16 @@ process.on('uncaughtException', (e) => console.log('uncaught:', e && e.message))
 
 app.whenReady().then(async () => {
   for (const shot of WANTED) {
+    if (shot.side) {
+      STATE.prefs.tabBarPosition = 'left';
+      STATE.sidebar = { pinned: true, open: true };
+      STATE.bookmarksBar = false;
+    } else {
+      STATE.prefs.tabBarPosition = 'top';
+      STATE.sidebar = null;
+      STATE.bookmarksBar = true;
+    }
+
     const win = new BrowserWindow({
       // Doubled, because `force-device-scale-factor 2` makes the window's
       // dimensions *device* pixels: at 1280 the page would lay out in a 640px

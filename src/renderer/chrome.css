@@ -131,6 +131,7 @@ body[data-platform="linux"] { --caption-right: 146px; }
 .strip-filler { flex: 1 1 auto; min-width: 0; }
 
 .tab {
+  position: relative;          /* for the separator below */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -158,6 +159,30 @@ body[data-platform="linux"] { --caption-right: 146px; }
 .tab:hover { background: var(--wash-soft); color: var(--text); }
 
 /*
+ * A hairline between inactive tabs, which is what Chrome draws and what this
+ * strip was missing.
+ *
+ * Tabs are equal width, so a short title leaves empty space inside its own tab -
+ * and with no surface and no separator, five tabs read as five captions
+ * floating at intervals rather than as five tabs. The line is drawn on the
+ * *left* of a tab and suppressed next to the active one and on hover, because
+ * a separator beside a raised surface is a seam.
+ */
+.tab + .tab::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--border);
+}
+.tab:hover::after,
+.tab.active::after,
+.tab.active + .tab::after,
+.tab:hover + .tab::after { opacity: 0; }
+
+/*
  * The active tab is the same colour as the toolbar, on purpose.
  *
  * That is the shape every browser draws and the reason the tab has rounded top
@@ -179,7 +204,6 @@ body[data-platform="linux"] { --caption-right: 146px; }
 .tab.active {
   background: var(--tint-2);
   color: var(--text);
-  position: relative;
 }
 
 .tab.active::before {
@@ -524,10 +548,18 @@ body[data-dots="off"] .tier { display: none; }
   overflow: hidden;
 }
 
+/*
+ * The fill is full width and scaled down, not zero width and scaled up.
+ *
+ * It was `width: 0`, and the renderer animates this with `scaleX` - so the
+ * meter has never painted a single pixel of fill in any build. Zero times any
+ * factor is zero. What shipped was a grey pill beside a figure, which reads as
+ * a broken control rather than as a gauge at 6%.
+ */
 .meter-fill {
   display: block;
   height: 100%;
-  width: 0;
+  width: 100%;
   border-radius: 3px;
   background: var(--ok);
   /* Transform-only so the meter never causes layout on the governor tick. */
@@ -646,10 +678,25 @@ body[data-layout="left"] .toolbar {
 
 /* Last, and on a line of its own: `flex-basis: 100%` is what wraps it, and the
    order puts it after every control above rather than between two of them. */
+/*
+ * The address bar needs its own surface here, not a recess.
+ *
+ * `.omnibox` is `--bg` on a `--tint-2` toolbar: darker than what it sits on, so
+ * it reads as a well cut into the bar. In this layout the toolbar is
+ * transparent over the strip, which is *also* `--bg` - so the pill was exactly
+ * the colour of its own background and the most important control in the
+ * browser rendered as a line of text with a padlock beside it. Photographed,
+ * because it is invisible in the sense that there is nothing there to notice.
+ */
 body[data-layout="left"] .omnibox {
   order: 5;
   flex: 1 0 100%;
   margin: 0;
+  background: var(--bg-input);
+  border-color: var(--border);
+}
+body[data-layout="left"] .omnibox:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-input));
 }
 
 /*
@@ -841,13 +888,10 @@ body.calm .star.on svg { animation: none; }
 body.with-bookmarks .bookmarks { display: flex; }
 
 /* Nothing saved yet: the band stays, so the page below does not jump the first
-   time a bookmark is added. */
-.bookmarks.empty::before {
-  content: 'Bookmarks you save appear here.';
-  padding-left: 4px;
-  font-size: var(--fs-small);
-  color: var(--text-dim);
-}
+   time a bookmark is added - but it stays empty. It used to carry "Bookmarks
+   you save appear here", which is a sentence repeated under the toolbar of
+   every page you visit for as long as you have no bookmarks. Chrome leaves the
+   empty bar empty. */
 
 .bookmark {
   display: flex;

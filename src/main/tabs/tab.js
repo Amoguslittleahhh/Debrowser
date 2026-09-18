@@ -372,7 +372,15 @@ class Tab {
        * is what every browser does, and the reason the reset belongs on this
        * event and not the earlier one.
        */
-      this.title = url;
+      // The browser's own pages get their name rather than their address.
+      //
+      // Clearing to the raw URL is right for a website - it is what the strip
+      // shows until the page announces a title - but `debrowser://newtab/` is
+      // not a title anybody wants to read, and the new tab page's own <title>
+      // may never arrive before the user looks. The constructor already uses
+      // `titleFor` for exactly this; the reset had to as well, or navigating to
+      // the new tab page left its address in the strip and in the task manager.
+      this.title = pages.isInternal(url) ? pages.titleFor(url) : url;
       this.favicon = null;
       // `internal` follows the *current* URL, always.
       //
