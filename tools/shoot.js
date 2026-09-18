@@ -1,6 +1,19 @@
 // Photograph the browser's own pages, so they can be looked at rather than
 // imagined. Each page is loaded into a window the size the real view gets,
 // with a stub bridge supplying the state its scripts ask for.
+//
+// Two things this harness gets wrong, both found the hard way, both worth
+// knowing before believing a picture:
+//
+//  - Run one page per process. Every shot after the first comes back missed
+//    when they share one, which is why the caller loops over `--only=`.
+//  - A **text field whose value overflows it** photographs as a light tan
+//    block. The DOM is innocent - computed background is the right dark, the
+//    element at that point is the field, forcing a background changes nothing,
+//    and shortening the value makes it go away - so it is uninitialised memory
+//    in the field's own scrolling layer under software raster, and it differs
+//    between runs. It does not happen on a real machine with a GPU. The
+//    address bar in the 240px sidebar hits this every time.
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -70,7 +83,8 @@ const SHOTS = [
   { name: 'newtab',   file: 'newtab.html',   w: 1280, h: 700 },
   { name: 'panel',    file: 'panel.html',    w: 360,  h: 700 },
   { name: 'flyout',   file: 'flyout.html',   w: 700,  h: 520 },
-  { name: 'update',   file: 'update.html',   w: 900,  h: 560 }
+  { name: 'update',   file: 'update.html',   w: 900,  h: 560 },
+  { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 }
 ];
 
 
