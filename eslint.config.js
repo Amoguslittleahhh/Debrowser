@@ -53,6 +53,7 @@ module.exports = [
         TextDecoder: 'readonly',
         TextEncoder: 'readonly',
         AbortController: 'readonly',
+        AbortSignal: 'readonly',
         fetch: 'readonly',
         Response: 'readonly',
         Request: 'readonly'
@@ -101,6 +102,7 @@ module.exports = [
         // than a missing import.
         applyThemePrefs: 'readonly',
         siteHue: 'readonly',
+        iconSrc: 'readonly',
         URLSearchParams: 'readonly',
         // Preloads only.
         require: 'readonly',

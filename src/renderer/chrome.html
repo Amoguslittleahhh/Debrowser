@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https: http:;">
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: debrowser:;">
   <title>Debrowser</title>
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="chrome.css">
@@ -46,7 +46,7 @@
         should never look like it came from a chat message is the thing that
         says the connection is private.
       -->
-      <svg class="scheme" id="scheme" viewBox="0 0 16 16" aria-hidden="true" hidden>
+      <svg class="scheme" id="scheme" viewBox="0 0 16 16" aria-hidden="true">
         <path id="scheme-a"/><path id="scheme-b"/><path id="scheme-c"/>
       </svg>
       <input id="url" type="text" spellcheck="false" autocomplete="off"

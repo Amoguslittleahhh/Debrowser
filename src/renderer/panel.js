@@ -296,12 +296,13 @@ function updateRow(row, tab) {
 
   if (prev.favicon !== tab.favicon) {
     if (row.icon) { row.icon.remove(); row.icon = null; }
-    if (tab.favicon) {
+    const src = iconSrc(tab.favicon);
+    if (src) {
       const icon = document.createElement('img');
       icon.className = 'row-icon';
       icon.alt = '';
       icon.decoding = 'async';
-      icon.src = tab.favicon;
+      icon.src = src;
       icon.addEventListener('error', () => icon.remove());
       row.chip.append(icon);
       row.icon = icon;

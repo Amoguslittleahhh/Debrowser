@@ -42,6 +42,30 @@ function siteHue(text) {
   return Math.abs(hash) % 360;
 }
 
+/**
+ * Where a view should point an `<img>` to show a site's icon.
+ *
+ * Never at the site itself. An image in a page is fetched by that page, with
+ * its cookies - so a history list would announce to two hundred sites that the
+ * user is reading their history. `debrowser://icon` is fetched by the browser
+ * process instead, without cookies and only for addresses it already knows
+ * about; see icons.js.
+ *
+ * A `data:` icon is already the image and is passed through. Anything else -
+ * including the `file:` icons a local page might declare - returns null, and
+ * the caller shows the site's letter.
+ *
+ * @param {string} url - the icon's own address, as the browser reported it
+ * @returns {string|null}
+ */
+/* eslint-disable-next-line no-unused-vars -- read by chrome.js, panel.js, history.js */
+function iconSrc(url) {
+  if (typeof url !== 'string' || !url) return null;
+  if (url.startsWith('data:image/')) return url;
+  if (!/^https?:\/\//i.test(url)) return null;
+  return `debrowser://icon?url=${encodeURIComponent(url)}`;
+}
+
 /* eslint-disable-next-line no-unused-vars -- read by chrome.js, panel.js, settings.js */
 function applyThemePrefs(prefs) {
   if (!prefs) return;

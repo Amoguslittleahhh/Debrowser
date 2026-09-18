@@ -159,6 +159,18 @@ class Download {
       this.log('downloads', `${this.url}: ${err.message}`);
     } finally {
       await this.closeHandle();
+      // A failed download leaves no file behind either - the same rule as a
+      // cancelled one, and here it matters more.
+      //
+      // The file is sparse-allocated to its full length before the first byte
+      // arrives, so a download that dies part way through leaves something of
+      // exactly the right size with zeros in the gaps: an installer that looks
+      // complete in a file manager and is not. Cancelling already unlinked for
+      // this reason; failing did not, which is the path the user did not
+      // choose and is therefore less likely to be expecting.
+      if (this.state === 'failed' && this.file) {
+        await fs.promises.unlink(this.file).catch(() => { /* never written */ });
+      }
       this.report(true);
     }
   }

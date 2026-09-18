@@ -849,6 +849,32 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   }
 
   /* ---------------------------------------------------------------- */
+  // The icon route, and the reason it has an allowlist.
+  //
+  // Measured while building it: a *website* can reference `debrowser://`
+  // subresources - a plain http page embedding one reached the handler. So an
+  // unrestricted `?url=` would be a fetch proxy any site could aim anywhere,
+  // stripped of cookies but also of that page's own CSP and of mixed-content
+  // blocking. Only two things are fetchable: the well-known default path, and
+  // an address Chromium reported for a page that was actually loaded.
+  {
+    const icons = require('./icons');
+    const arbitrary = 'https://internal.test/secret.png';
+    const before = icons.allowed(arbitrary);
+    icons.remember(arbitrary);
+
+    check('the icon route refuses an address the browser was never told about',
+      before === false && icons.allowed('https://a.test/admin/keys.png') === false,
+      'unreported addresses refused');
+
+    check('it allows the default path, and an address a page reported',
+      icons.allowed('https://a.test/favicon.ico') && icons.allowed(arbitrary) &&
+      icons.allowed('file:///etc/passwd') === false &&
+      icons.allowed('https://a.test/favicon.ico?x=1') === false,
+      'default path and reported addresses only');
+  }
+
+  /* ---------------------------------------------------------------- */
   // History: what was visited, and what deliberately was not.
   //
   // The browser's own pages are excluded by the store's scheme list rather than
@@ -1269,6 +1295,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('one failing segment fails the download instead of crashing the browser',
       item3.state === 'failed' && typeof item3.error === 'string' && item3.handle === null,
       `state=${item3.state}, error=${item3.error || 'none'}, handle ${item3.handle === null ? 'closed' : 'STILL OPEN'}`);
+
+    // And it takes the part-written file with it. The file is allocated to its
+    // full length before the first byte arrives, so a failure that left it
+    // behind would leave something of exactly the right size with zeros in the
+    // gaps - an installer that looks complete in a file manager and is not.
+    const leftBehind = fs.existsSync(item3.file);
+    check('a failed download does not leave a full-size file behind',
+      !leftBehind, leftBehind ? `${item3.file} still there` : 'removed');
     flaky.close();
 
     // A weak ETag can never match a strong If-Range comparison, so sending one

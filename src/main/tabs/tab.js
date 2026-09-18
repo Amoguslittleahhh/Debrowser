@@ -342,6 +342,24 @@ class Tab {
 
     wc.on('did-navigate', (_e, url) => {
       this.url = url;
+      /*
+       * A new document does not inherit the last one's name or its icon.
+       *
+       * Both were left standing until the new page announced its own, which is
+       * some hundreds of milliseconds later at best - and the history entry is
+       * written *here*, from `visited`, so a row was recorded under the title
+       * of the page the user came from. The icon was worse: the store keeps an
+       * address only when it differs from the default, so the previous site's
+       * custom icon looked exactly like a custom icon for this one and was
+       * persisted as such.
+       *
+       * Cleared at commit rather than at `did-start-navigation`, so the strip
+       * keeps showing the old page while the new one is still loading - which
+       * is what every browser does, and the reason the reset belongs on this
+       * event and not the earlier one.
+       */
+      this.title = url;
+      this.favicon = null;
       // `internal` follows the *current* URL, always.
       //
       // Every tab now opens on debrowser://newtab, and typing in its search box

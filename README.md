@@ -538,16 +538,27 @@ tried, measured and removed — live on the `claude/research-build` branch.
   assumes, so the base size is 14px rather than 13, and it ships exactly two
   weights, so emphasis here is carried by colour and size rather than by a
   semibold that does not exist.
-- **Site icons are fetched from the site, never stored.** A tab, a history row
-  and a task-manager row all show the real favicon, with the site's initial on a
-  colour derived from its hostname underneath it — which is what you see while
-  the icon loads, and what stays for the many sites that serve none. Measured:
-  Chromium reports an icon address for *every* page, falling back to
-  `<origin>/favicon.ico` even when the page declares nothing, so an address is
-  always available and often 404s; the letter is the answer to that rather than
-  a broken image. History keeps an icon address only for sites whose icon is
-  somewhere other than the default, because the default one can be worked out
-  from the page's own address.
+- **Site icons are fetched by the browser, without cookies, and never stored.**
+  A tab, a history row and a task-manager row all show the real favicon, with
+  the site's initial on a colour derived from its hostname underneath it — what
+  you see while the icon loads, and what stays for the many sites that serve
+  none. Measured: Chromium reports an icon address for *every* page, falling
+  back to `<origin>/favicon.ico` even when the page declares nothing, so an
+  address is always available and often 404s; the letter is the answer to that
+  rather than a broken image.
+  The fetch does **not** happen in the page. An `<img>` pointed at a site is
+  loaded by the page showing it, with that session's cookies — so a history
+  list would send a cookie-bearing request to every site on screen, announcing
+  that you are reading your history. The views ask `debrowser://icon` instead
+  and the browser process fetches it with credentials omitted; the pages'
+  content policies allow no other image source, so that is enforced rather than
+  intended. Only two addresses are fetchable: the well-known `/favicon.ico`,
+  and one Chromium reported for a page actually loaded — because a *website*
+  can reference `debrowser://` subresources (measured), and without that
+  restriction the route would be a fetch proxy pointed wherever a page liked.
+  History keeps an icon address only for sites whose icon is somewhere other
+  than the default, because the default one can be worked out from the page's
+  own address.
 - **History is plain JSON in your profile directory, not a secret store.** It is
   the one record here that is deliberately readable: encrypting a list of the
   pages you visited would hide it from you and from nobody else, since anything

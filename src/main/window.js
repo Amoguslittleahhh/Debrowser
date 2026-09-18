@@ -347,16 +347,23 @@ class BrowserShell {
     // that stays up after the user has gone somewhere else is a menu they have
     // to dismiss twice. This is the backstop for the click-away the transparent
     // backdrop already handles; both funnel into `closeMenu`.
-    wc.on('blur', () => this.closeMenu());
+    wc.on('blur', () => this.closeMenu({ blurred: true }));
   }
 
-  /** Take the menu away. Idempotent - every dismissal path ends here. */
-  closeMenu() {
+  /**
+   * Take the menu away. Idempotent - every dismissal path ends here.
+   *
+   * @param {{blurred?: boolean}} [why] - `blurred` marks the one close that
+   *   arms the reopen guard: focus leaving the view because the user pressed
+   *   the three-dot button again. Every other dismissal - Escape, a menu item,
+   *   a click on the backdrop - must *not* arm it, or a menu closed with
+   *   Escape would make the button dead for the next quarter second.
+   */
+  closeMenu({ blurred = false } = {}) {
     if (!this.menuView) return;
     const view = this.menuView;
     this.menuView = null;
-    this.menuClosedAt = Date.now();
-    this.menuClosedAt = Date.now();
+    if (blurred) this.menuClosedAt = Date.now();
     try {
       this.window.contentView.removeChildView(view);
       view.webContents.close();

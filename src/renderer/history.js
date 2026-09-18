@@ -97,18 +97,25 @@ function row(entry) {
   // - which is exactly the address Chromium itself would have tried. Plenty of
   // sites do not answer it, and those fall back to the letter underneath rather
   // than to a broken image.
+  //
+  // The fetch itself goes through `debrowser://icon`, which is the browser
+  // process, without cookies. An <img> pointed at the site would be fetched by
+  // *this page* with this session's cookies - so opening a history list would
+  // tell two hundred sites that the user is reading their history.
   const chip = document.createElement('span');
   chip.className = 'chip';
   chip.setAttribute('aria-hidden', 'true');
   chip.style.setProperty('--hue', String(siteHue(host)));
   chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
 
-  const iconUrl = entry.icon || defaultIcon(entry.url);
+  const iconUrl = iconSrc(entry.icon || defaultIcon(entry.url));
   if (iconUrl) {
     const icon = document.createElement('img');
     icon.className = 'site-icon';
     icon.alt = '';
     icon.decoding = 'async';
+    // Only the rows on screen are fetched. Three hundred at once would be a
+    // burst of requests for a list the user has scrolled two screens of.
     icon.loading = 'lazy';
     icon.src = iconUrl;
     icon.addEventListener('error', () => icon.remove());

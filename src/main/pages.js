@@ -28,6 +28,7 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
 const { protocol, net, session } = require('electron');
+const icons = require('./icons');
 
 const SCHEME = 'debrowser';
 // The renderer directory itself, flat.
@@ -82,6 +83,12 @@ function serve(log = () => {}, partitions = []) {
   const registries = [protocol, ...partitions.map((p) => session.fromPartition(p).protocol)];
   const handler = async (request) => {
     const url = new URL(request.url);
+
+    // Site icons are served rather than read from disk: they come off the
+    // network, without cookies, and only for addresses this browser has been
+    // told about. See icons.js - including the measurement showing that a
+    // website can reach this handler, which is why there is an allowlist.
+    if (url.hostname === 'icon') return icons.serve(request, log);
     // The host names the page; the path names a file belonging to it, so
     // `debrowser://settings/settings.css` works without a second registration.
     // `hasOwn`, because a bare index reaches the prototype chain:

@@ -248,12 +248,14 @@ function updateTabElement(node, tab) {
   }
 
   if (prev.favicon !== tab.favicon) {
-    if (tab.favicon) {
+    // Through the browser's icon route, never at the site: see `iconSrc`.
+    const src = iconSrc(tab.favicon);
+    if (src) {
       // Both shown until the image says otherwise: the chip is behind the icon,
       // so a slow fetch shows the letter rather than a gap, and the icon covers
       // it the moment it decodes. The error handler above puts the letter back
       // if it never does.
-      node.favicon.src = tab.favicon;
+      node.favicon.src = src;
       node.favicon.hidden = false;
     } else {
       node.favicon.removeAttribute('src');
@@ -389,12 +391,37 @@ const SCHEME_GLYPHS = {
 /** What the indicator currently shows, so it is only rewritten on a change. */
 let schemeShows = null;
 
+/*
+ * Shown and hidden by `data-kind`, never by the `hidden` property.
+ *
+ * This is an <svg>, and `hidden` is defined on HTMLElement - SVGElement does
+ * not have it. Measured: `'hidden' in svg` is false, so `svg.hidden = false`
+ * silently defines an expando and never touches the attribute, and Chromium's
+ * UA `[hidden] { display: none }` rule does not apply to SVG either, so the
+ * attribute that *was* in the markup did nothing.
+ *
+ * Both halves of that cancelled out into a real fault: the indicator could be
+ * set but never cleared, so a padlock drawn on the last website stayed on
+ * screen when the user moved to `debrowser://settings` - an encrypted-
+ * connection claim on a page that has no connection at all. A security
+ * indicator that can lie in the reassuring direction is worse than none.
+ *
+ * So the paths are cleared as well as the element hidden. Either alone would
+ * do it; both, because this is the one element in the browser where being
+ * wrong is not a cosmetic bug.
+ */
 function setScheme(kind) {
   if (kind === schemeShows) return;
   schemeShows = kind;
-  el.scheme.hidden = !kind;
-  el.scheme.dataset.kind = kind || '';
-  if (!kind) return;
+
+  if (!kind) {
+    delete el.scheme.dataset.kind;
+    el.scheme.removeAttribute('aria-label');
+    for (const path of el.schemePaths) path.removeAttribute('d');
+    return;
+  }
+
+  el.scheme.dataset.kind = kind;
   SCHEME_GLYPHS[kind].forEach((d, i) => {
     if (d) el.schemePaths[i].setAttribute('d', d);
     else el.schemePaths[i].removeAttribute('d');

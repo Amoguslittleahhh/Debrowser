@@ -441,6 +441,10 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* No connection to describe - one of our own pages - means no indicator. See
+   setScheme in chrome.js for why this is an attribute rather than `hidden`. */
+.scheme:not([data-kind]) { display: none; }
+
 .scheme {
   flex: none;
   width: 14px;

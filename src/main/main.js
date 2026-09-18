@@ -22,6 +22,7 @@ const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { History } = require('./history');
+const icons = require('./icons');
 const presence = require('./presence');
 const { DownloadManager } = require('./downloads');
 const { Governor } = require('./governor');
@@ -246,6 +247,10 @@ function main() {
         break;
       case 'described':
         if (history && payload?.url) history.describe(payload.url, payload);
+        // Remembered so the icon route will fetch it. An address Chromium
+        // reported for a page the user loaded is the only kind that route will
+        // touch beyond the well-known default path.
+        if (payload?.favicon) icons.remember(payload.favicon);
         break;
       case 'closed':
         if (shell) shell.detachTab(tab);
@@ -335,6 +340,11 @@ function main() {
     // into the user's own history would be this browser filling their records
     // with its own test suite.
     history = new History(log, { enabled: () => !OFFLINE_MODE && prefs.get('saveHistory') });
+    // The stored icon addresses came from this same signal in earlier sessions,
+    // so they are exactly as trusted as the ones this session will report - and
+    // without seeding them, every row from before today would fall back to its
+    // letter until the site was visited again.
+    icons.rememberAll(history.all().map((entry) => entry.icon));
 
     runCommand = wireCommands({ tabs, shell, governor, prefs, publish, log });
 
@@ -779,7 +789,7 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       case 'list-history':
         return {
           items: history ? history.search(payload?.query, payload?.limit) : [],
-          total: history ? history.all().length : 0,
+          total: history ? history.count() : 0,
           recording: prefs.get('saveHistory')
         };
 

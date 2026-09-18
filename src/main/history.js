@@ -149,6 +149,7 @@ class History {
     if (!entry || typeof entry !== 'object') return null;
     const url = safeUrl(entry.url);
     if (!url) return null;
+    const icon = customIcon(url, entry.icon);
     return {
       id: typeof entry.id === 'string' && entry.id ? entry.id.slice(0, 64) : newId(),
       url,
@@ -156,10 +157,15 @@ class History {
       visitedAt: Number.isFinite(entry.visitedAt) ? entry.visitedAt : Date.now(),
       visits: Number.isFinite(entry.visits) && entry.visits > 0 ? Math.min(entry.visits, 1e6) : 1,
       // Present only for a site whose icon is somewhere other than the default
-      // address; see `describe`. `undefined` rather than null, so it does not
-      // appear in the file at all for the common case.
-      ...(customIcon(url, entry.icon) ? { icon: customIcon(url, entry.icon) } : {})
+      // address; see `describe`. Absent rather than null, so it does not appear
+      // in the file at all for the common case - which is most of them.
+      ...(icon ? { icon } : {})
     };
+  }
+
+  /** How many pages are stored. Not `all().length`, which copies the array. */
+  count() {
+    return this.items.length;
   }
 
   /**
