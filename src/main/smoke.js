@@ -1395,6 +1395,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
                      : typeof cap.reason === 'string' && cap.reason.length > 0),
       cap.available ? `${cap.mechanism}${cap.experimental ? ' (experimental)' : ''}` : cap.reason);
 
+    // On Windows, the probe must have *reached* Hello.
+    //
+    // "Not available" has two very different causes and Settings showed the
+    // wrong one on the first Windows machine this ever ran on: the probe used a
+    // type from an assembly Windows PowerShell does not load by default, so it
+    // could not ask the question at all - and a machine with Hello set up was
+    // told it did not have it. A negative answer from Hello is fine and is what
+    // a CI runner will give; not being able to ask is the bug.
+    //
+    // This is the one check in the suite that only means anything on the
+    // Windows runner, which is the only place this code can run.
+    if (process.platform === 'win32') {
+      const reason = String(cap.reason || '');
+      check('the Windows Hello probe gets an answer from Hello rather than failing to load',
+        cap.available || !/could not be queried|Unable to find type|could not be loaded/i.test(reason),
+        cap.available ? 'available' : `reason: ${reason}`);
+    }
+
     // On a machine with nothing to ask, verify must refuse rather than pass by
     // default. This is the assertion that would catch a refactor turning the
     // gate into a no-op everywhere it is not supported.

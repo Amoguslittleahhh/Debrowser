@@ -25,15 +25,22 @@
  * (`systemPreferences.promptTouchID`), so there is no native code and nothing
  * to guess at.
  *
- * Windows is implemented and **has never been executed**. Windows Hello lives
- * in WinRT's `UserConsentVerifier`, and the verification call needs a window
- * handle through a COM interop interface that has no PowerShell equivalent -
- * so it is reached by compiling a small C# shim with `Add-Type` at runtime,
- * the same way Microsoft's own samples do it. That was written on Linux, in a
- * container with no Windows, and CI cannot exercise it either: a Hello prompt
- * needs an interactive desktop session and hardware neither runner has. The
- * availability probe is checkable and is checked; the prompt itself is not.
- * It is marked experimental in the capability, which is what Settings shows.
+ * Windows is in two halves, and only one of them has ever run. Windows Hello
+ * lives in WinRT's `UserConsentVerifier`, and the verification call needs a
+ * window handle through a COM interop interface that has no PowerShell
+ * equivalent - so it is reached by compiling a small C# shim with `Add-Type` at
+ * runtime, the same way Microsoft's own samples do it. All of it was written on
+ * Linux, in a container with no Windows.
+ *
+ * The availability probe has now run on a real machine, and failed: it used a
+ * type from an assembly Windows PowerShell does not load by default, while the
+ * prompt half loaded it. So Hello reported itself unavailable on a machine that
+ * had it. Both halves share one prelude now, and both say which PowerShell they
+ * were talking to when they fail.
+ *
+ * The prompt itself is still unexecuted, and CI cannot help: a Hello prompt
+ * needs an interactive desktop session and hardware no runner has. It stays
+ * marked experimental in the capability, which is what Settings shows.
  *
  * Linux has no equivalent to report, and says so.
  */
@@ -50,6 +57,47 @@ const PROBE_TIMEOUT_MS = 8_000;
 let cachedCapability = null;
 
 /**
+ * Load the assembly that makes a WinRT async operation awaitable from .NET.
+ *
+ * `System.Runtime.WindowsRuntime` is where `AsTask()` and the
+ * `System.WindowsRuntimeSystemExtensions` class that carries it live. Windows
+ * PowerShell does not load it by default, and a type in an unloaded assembly is
+ * simply not there - which is what "Unable to find type
+ * [System.WindowsRuntimeSystemExtensions]" means, and what this probe reported
+ * on the first Windows machine it ever ran on. The prompt half loaded it and
+ * the probe half did not, so availability failed while the code it guards was
+ * fine.
+ *
+ * `LoadWithPartialName` first because it is the one that reliably resolves this
+ * assembly by simple name in Windows PowerShell; deprecated, and the documented
+ * alternative for exactly this case. `Load` is the fallback.
+ *
+ * The version is reported on failure because there is one way to be here that
+ * no amount of loading fixes: PowerShell 7 runs on .NET 5+, which dropped WinRT
+ * projection entirely, so the assembly does not exist for it to find. That
+ * should not happen - `powershell.exe` is always Windows PowerShell 5.1 - but
+ * "should not happen" is why the next person gets a version number instead of a
+ * mystery.
+ *
+ * @param {string} prefix - the label the caller's parser expects on the line
+ */
+function winrtPrelude(prefix) {
+  return `
+$ErrorActionPreference = 'Stop'
+$winrt = $null
+try { $winrt = [System.Reflection.Assembly]::LoadWithPartialName('System.Runtime.WindowsRuntime') } catch { }
+if (-not $winrt) {
+  try { $winrt = [System.Reflection.Assembly]::Load('System.Runtime.WindowsRuntime') } catch { }
+}
+if (-not $winrt) {
+  Write-Output ("${prefix}:Error:System.Runtime.WindowsRuntime could not be loaded (PowerShell " +
+    $PSVersionTable.PSVersion + " " + $PSVersionTable.PSEdition + ")")
+  exit
+}
+`;
+}
+
+/**
  * PowerShell that asks Windows whether Hello is usable *right now*.
  *
  * `CheckAvailabilityAsync` is a plain static and needs no window, which is why
@@ -60,7 +108,7 @@ let cachedCapability = null;
  * have completely different fixes.
  */
 const WINDOWS_PROBE = `
-$ErrorActionPreference = 'Stop'
+${winrtPrelude('AVAILABILITY')}
 try {
   [void][Windows.Security.Credentials.UI.UserConsentVerifier, Windows.Security.Credentials.UI, ContentType=WindowsRuntime]
   $task = [Windows.Security.Credentials.UI.UserConsentVerifier]::CheckAvailabilityAsync()
@@ -161,7 +209,7 @@ function windowsPromptScript(hwnd, message) {
   // string is always ours" is the assumption that stops being true later.
   const safeMessage = String(message).replace(/["\\]/g, '').slice(0, 200);
   return `
-$ErrorActionPreference = 'Stop'
+${winrtPrelude('VERIFY')}
 try {
   Add-Type -TypeDefinition @"
 using System;
@@ -188,7 +236,7 @@ public static class DebrowserHello {
     return (int)task.Result;
   }
 }
-"@ -ReferencedAssemblies ([System.Reflection.Assembly]::Load("System.Runtime.WindowsRuntime").Location)
+"@ -ReferencedAssemblies $winrt.Location
 
   $code = [DebrowserHello]::Verify([IntPtr]${hwnd}, "${safeMessage}")
   Write-Output ("VERIFY:" + $code)
