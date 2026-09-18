@@ -60,7 +60,7 @@ Debrowser.exe --smoke-test              # Windows
 /opt/Debrowser/debrowser --smoke-test   # Linux
 ```
 
-113 checks on real pages. Worth doing here rather than taking it on trust: this
+114 checks on real pages. Worth doing here rather than taking it on trust: this
 project is tested on Linux and only *expected* to work on Windows and macOS.
 
 ---

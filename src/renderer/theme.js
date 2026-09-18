@@ -157,3 +157,34 @@ function anchorSheet(sheet, anchor, edge = 8) {
   sheet.style.left = `${Math.round(left)}px`;
   sheet.style.top = `${Math.round(top)}px`;
 }
+
+/**
+ * Report typed-but-unsent text to the browser.
+ *
+ * The browser's own pages are governed like any other tab now, which means one
+ * of them can be discarded while you are not looking at it. What that must
+ * never lose is something you typed and have not used yet - a half-written
+ * search, a query on the new tab page.
+ *
+ * Every other page in the browser is watched by `probe-preload.js`, which is
+ * what sets a tab's `hasDirtyInput`. These pages do not get that preload - they
+ * get the command bridge instead - so nothing was watching them at all, and the
+ * governor had no way to know they were holding anything.
+ *
+ * Only fields marked `data-transient` count. A settings control is not
+ * transient: it saves the moment it changes, so there is nothing to protect and
+ * marking it would pin Settings open forever the first time you set a homepage.
+ */
+/* eslint-disable-next-line no-unused-vars -- read by newtab.js, history.js, downloads.js */
+function watchTransientInput(api) {
+  let reported = false;
+  const report = () => {
+    const dirty = [...document.querySelectorAll('[data-transient]')]
+      .some((el) => String(el.value || '').trim().length > 0);
+    if (dirty === reported) return;
+    reported = dirty;
+    api.send('page-dirty', { dirty });
+  };
+  document.addEventListener('input', report);
+  document.addEventListener('change', report);
+}

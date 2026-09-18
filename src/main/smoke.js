@@ -649,14 +649,39 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `empty: ${empty}, with text: ${typed}`);
   }
 
-  // Settings is the page the old rule was actually written for, and it keeps
-  // its exemption: discarding one throws away whatever the user was part-way
-  // through setting.
-  check('Settings is still never discarded',
-    governor.clampToProtections(
-      { internal: true, url: pages.SETTINGS_URL }, Tier.DISCARDED,
-      { ignoreGrace: true }) === Tier.ACTIVE,
-    'settings floor is ACTIVE');
+  // And so is every other page the browser serves itself.
+  //
+  // They were pinned at ACTIVE. In a real session that made three of six live
+  // renderers Settings, the downloads page and a new tab page - about 95MB held
+  // permanently - while the actual websites beside them sat discarded at zero.
+  // What the exemption was protecting is unsubmitted text, which is
+  // `hasDirtyInput`'s job; Settings has nothing to lose, because every control
+  // on it saves the moment it changes.
+  {
+    const settings = { internal: true, url: pages.SETTINGS_URL, hasDirtyInput: false };
+    const searching = { internal: true, url: pages.HISTORY_URL, hasDirtyInput: true };
+    const floor = (tab) =>
+      governor.clampToProtections(tab, Tier.DISCARDED, { ignoreGrace: true });
+    check('the browser\'s own pages are reclaimable like any other tab',
+      floor(settings) === Tier.DISCARDED &&
+      tierRank(floor(searching)) < tierRank(Tier.DISCARDED),
+      `settings: ${floor(settings)}, a page with a half-written search: ${floor(searching)}`);
+  }
+
+  // The pages that *can* lose something have to be able to say so, and they do
+  // not carry the preload that normally reports it. Asserted as the wiring it
+  // is: the field is marked, and the page watches marked fields.
+  {
+    const fs2 = require('fs');
+    const marked = ['history.html', 'downloads.html', 'newtab.html'].every((page) =>
+      /id="q"[^>]*data-transient/.test(
+        fs2.readFileSync(path.join(__dirname, '..', 'renderer', page), 'utf8')));
+    const watched = ['history.js', 'downloads.js', 'newtab.js'].every((page) =>
+      fs2.readFileSync(path.join(__dirname, '..', 'renderer', page), 'utf8')
+        .includes('watchTransientInput(api)'));
+    check('a page that can hold typed text marks it and watches for it',
+      marked && watched, `marked=${marked}, watched=${watched}`);
+  }
 
   for (const blank of blanks) tabs.close(blank.id);
 
@@ -702,10 +727,19 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     other.visible && !settingsTab.visible,
     `settings visible=${settingsTab.visible}, other tab visible=${other.visible}`);
 
-  // Ask for the deepest demotion there is and confirm the protections refuse it.
-  const floor = governor.clampToProtections(settingsTab, Tier.DISCARDED, { discardAllowed: true });
-  check('the browser\'s own pages are never demoted by the governor',
-    settingsTab.internal && floor === Tier.ACTIVE,
+  // Ask for the deepest demotion there is, on a *live* Settings tab, and
+  // confirm nothing refuses it any more.
+  //
+  // This asserted the opposite until the pages were let onto the ladder. It is
+  // kept, inverted, rather than deleted: the exemption is the thing that came
+  // back as three permanently-resident renderers, and the check that used to
+  // enforce it is the right place to say so. `ignoreGrace`, because this tab
+  // was visible a moment ago and the grace period - not the exemption - would
+  // otherwise be what answered.
+  const floor = governor.clampToProtections(settingsTab, Tier.DISCARDED,
+    { discardAllowed: true, ignoreGrace: true });
+  check('a live Settings tab is reclaimable like any other',
+    settingsTab.internal && floor === Tier.DISCARDED,
     `internal=${settingsTab.internal}, asked for discarded, allowed ${floor}`);
 
   // Opening it twice focuses the one that is open rather than making a second,

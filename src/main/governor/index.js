@@ -36,7 +36,6 @@ const { applyTier, refreshPriority } = require('./tiers');
 const { HeapLimiter } = require('./heap-limit');
 const { readProcessMemory } = require('../memory');
 const platform = require('../platform');
-const pages = require('../pages');
 
 /** Refresh per-tab heap/CPU every N ticks; each needs a CDP round trip. */
 const HEAP_SAMPLE_EVERY = 3;
@@ -599,31 +598,28 @@ class Governor {
       if (tierRank(tier) < tierRank(floor)) floor = tier;
     };
 
-    // Most of the browser's own pages are not governed at all.
+    // The browser's own pages are governed like any other tab.
     //
-    // Not because they are precious - Settings is a cheap page - but because
-    // every tier below ACTIVE is wrong for them. Freezing one stops the page
-    // servicing the very controls the user is operating; discarding one throws
-    // away a half-filled form and reloads it as though the browser had crashed.
+    // They used to be pinned at ACTIVE, on the reasoning that every tier below
+    // it is wrong for them: freezing one stops the page servicing the controls
+    // the user is operating, and discarding one throws away a half-filled form.
     //
-    // The clause used to end "and they are a fixed, small number of tabs the
-    // user opened to *do* something". That was wrong about the one internal
-    // page a user can have fifteen of. The new tab page is what every empty tab
-    // holds, it is opened by reflex rather than to do anything, and it has no
-    // state to lose - so the blanket protection pinned an unbounded number of
-    // blank pages at ACTIVE, put the live count permanently over its own cap,
-    // and gave the governor a pile of tabs it was forbidden to touch. Fifteen
-    // of them reading "Active - shares a process" is what that looks like.
+    // In a real session that made three of the six live renderers Settings, the
+    // downloads page and a new tab page - about 95MB held permanently - while
+    // the actual websites beside them sat discarded at zero. A browser whose
+    // own pages are the expensive ones has the rule backwards.
     //
-    // It is exempted by what it is rather than by being internal: a page with
-    // nothing to lose. Typing in its search box is the one thing it can hold,
-    // and the `hasDirtyInput` rule below covers that - but only because the
-    // page reports it directly (see newtab.js). It does not come from
-    // `probe-preload.js` the way it does for a website: the browser's own pages
-    // carry the command bridge instead of the probe, so that flag was always
-    // false here and a typed query could have been discarded.
-    if (tab.internal && pages.pageName(tab.url) !== 'newtab') { cap(Tier.ACTIVE); return floor; }
-
+    // What the exemption was really protecting is unsubmitted text, and that is
+    // `hasDirtyInput`'s job. These pages carry the command bridge rather than
+    // `probe-preload.js`, so nothing was watching them - so they report it
+    // themselves now, from the one kind of field that can lose anything: a
+    // search box, or the new tab page's query. Settings needs no such rule
+    // because every control on it saves the moment it changes; there is nothing
+    // there to lose.
+    //
+    // They are cheap to bring back, which is the other half of why this is
+    // safe: a local page, and one that lands in a renderer the prewarmer keeps
+    // warm - 46ms measured against 79ms cold.
     // Audio is the most noticeable thing a browser can take away.
     if (tab.audible) cap(Tier.WARM);
 

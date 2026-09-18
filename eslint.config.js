@@ -104,6 +104,7 @@ module.exports = [
         siteHue: 'readonly',
         iconSrc: 'readonly',
         anchorSheet: 'readonly',
+        watchTransientInput: 'readonly',
         URLSearchParams: 'readonly',
         IntersectionObserver: 'readonly',
         // Preloads only.

@@ -260,4 +260,7 @@ window.addEventListener('keydown', (event) => {
 
 api.onState((state) => applyThemePrefs(state.prefs));
 
+// A half-written search keeps this page off the reclaim ladder; see theme.js.
+watchTransientInput(api);
+
 load();
