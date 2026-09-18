@@ -49,6 +49,8 @@ const COMMANDS = new Set([
   'reveal-credential',
   'save-payment',
   'fill-payment',
+  'sidebar-hover',
+  'toggle-sidebar-pin',
   'toggle-bookmarks-bar',
   'list-bookmarks',
   'toggle-bookmark',

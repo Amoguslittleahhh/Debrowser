@@ -33,6 +33,48 @@ const BOOKMARKS_BAR_HEIGHT = 34;
 const SIDEBAR_WIDTH = 240;
 
 /**
+ * How wide the sidebar's view stays while it is hidden.
+ *
+ * Zen's sidebar is out of the way until the pointer reaches the left edge, and
+ * this is that edge. It has to be a real strip rather than nothing, because a
+ * view is what receives the pointer: there is no way to be told the pointer
+ * approached a view that is not there. Wide enough to hit without aiming,
+ * narrow enough that the page effectively starts at the window edge.
+ *
+ * It also bounds the cost of the whole idea. A view swallows every click inside
+ * its bounds, so a full-width transparent sidebar waiting to be hovered would
+ * make the leftmost 240px of every page unclickable.
+ */
+const SIDEBAR_EDGE = 10;
+
+/**
+ * The gap around the page, and the radius of its corners.
+ *
+ * The other half of what was asked for: with the strip down the side the
+ * content used to meet the sidebar edge to edge, so the two read as one surface
+ * and the browser's own pages - which have their own dark background - looked
+ * fused to it. Inset by a few pixels over the window's own colour, the page
+ * reads as a card the sidebar sits beside.
+ *
+ * `setBorderRadius` was measured before this was built on: with a red window
+ * behind a white view, the pixel three in from the corner reads red and the
+ * centre reads white, so the corner really is clipped rather than the call
+ * merely being accepted.
+ */
+const CONTENT_GAP = 8;
+const CONTENT_RADIUS = 10;
+
+/**
+ * How long the sidebar waits before sliding away.
+ *
+ * The pointer crossing the sidebar on its way somewhere else should not close
+ * it mid-movement, and a menu or a dropdown opened from it takes the pointer
+ * out of the view for a moment. Short enough to feel like it is following the
+ * pointer rather than lagging behind it.
+ */
+const SIDEBAR_CLOSE_MS = 220;
+
+/**
  * How much of the content area a docked inspector takes, and the least it may
  * have. Chromium's own default split is close to this; the minimum exists so
  * that docking into a narrow window leaves the inspector usable rather than a
@@ -88,6 +130,22 @@ const SHEET_PAGES = {
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
 const CHROME_PRELOAD = path.join(__dirname, '..', 'preload', 'chrome-preload.js');
+
+/**
+ * Round a view's corners, where the running Electron can.
+ *
+ * Measured working under Electron 44 before anything was built on it - with a
+ * red window behind a white view, the pixel three in from the corner reads red
+ * while the centre reads white, so the corner really is clipped. Guarded
+ * anyway: a browser that will not start because a cosmetic API moved would be a
+ * poor trade, and square corners are a miss rather than a fault.
+ */
+function setRadius(view, radius) {
+  if (!view || typeof view.setBorderRadius !== 'function') return;
+  try {
+    view.setBorderRadius(radius);
+  } catch { /* not supported here; square corners */ }
+}
 
 class BrowserShell {
   /**
@@ -179,6 +237,18 @@ class BrowserShell {
     this.devToolsMode = null;
     this.devToolsRedock = null;
 
+    /**
+     * Whether the auto-hiding sidebar is currently slid out.
+     *
+     * Only meaningful with the strip down the side and unpinned; pinned, it is
+     * simply always out. Held here rather than in the chrome because the
+     * *window* is what changes - the view's own width is what slides.
+     */
+    this.sidebarOpen = false;
+    this.sidebarCloseTimer = null;
+    /** The card treatment currently applied to tab views, so it is set on change. */
+    this.laidOutCard = null;
+
     this.createChrome();
     this.applyWindowPrefs();
 
@@ -251,6 +321,9 @@ class BrowserShell {
     // inspector painted over tab B, with B sized as though it had the window.
     if (this.devToolsView) this.layout();
     else tab.setBounds(this.contentBounds());
+    // A tab realised after the layout ran has never been shaped, so the change
+    // guard in `layout` would skip it. Cheap, and once per attach.
+    setRadius(tab.view, this.vertical() ? CONTENT_RADIUS : 0);
     tab.setVisible(tab.visible);
   }
 
@@ -784,9 +857,15 @@ class BrowserShell {
     // The bookmarks bar is the same kind of change for the same reason: showing
     // it takes 34px from every tab's rectangle, and hiding it gives them back.
     if (this.laidOutVertical !== this.vertical() ||
-        this.laidOutBookmarksBar !== this.bookmarksBarVisible()) {
+        this.laidOutBookmarksBar !== this.bookmarksBarVisible() ||
+        this.laidOutPinned !== this.sidebarPinned()) {
       this.laidOutVertical = this.vertical();
       this.laidOutBookmarksBar = this.bookmarksBarVisible();
+      this.laidOutPinned = this.sidebarPinned();
+      // Unpinning leaves the sidebar out until the pointer goes elsewhere,
+      // which is what it would do if the pointer were over it - and it is,
+      // since the button that unpinned it is in it.
+      if (this.laidOutPinned) this.sidebarOpen = false;
       this.layout();
     }
 
@@ -835,16 +914,69 @@ class BrowserShell {
     return CHROME_HEIGHT + (this.bookmarksBarVisible() ? BOOKMARKS_BAR_HEIGHT : 0);
   }
 
+  /** Is the sidebar held open, rather than sliding away when the pointer goes? */
+  sidebarPinned() {
+    return this.prefs ? this.prefs.get('sidebarPinned') === true : false;
+  }
+
+  /** How much width the chrome occupies in sidebar mode, right now. */
+  sidebarWidth() {
+    if (!this.vertical()) return 0;
+    return this.sidebarPinned() || this.sidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_EDGE;
+  }
+
+  /**
+   * The pointer arrived at the edge, or left the sidebar.
+   *
+   * Opening is immediate and closing waits, which is not symmetry for its own
+   * sake: arriving is a decision and leaving is usually just the pointer
+   * passing through on its way to the page.
+   */
+  setSidebarOpen(open) {
+    if (!this.vertical() || this.sidebarPinned()) return;
+    clearTimeout(this.sidebarCloseTimer);
+    if (open) {
+      if (this.sidebarOpen) return;
+      this.sidebarOpen = true;
+      this.layout();
+      return;
+    }
+    this.sidebarCloseTimer = setTimeout(() => {
+      if (!this.sidebarOpen || this.sidebarPinned()) return;
+      this.sidebarOpen = false;
+      this.layout();
+    }, SIDEBAR_CLOSE_MS);
+  }
+
+  /**
+   * The page sits in a card rather than filling the window, in sidebar mode.
+   *
+   * Only there: across the top the toolbar is a band the page hangs directly
+   * below, which is what every browser draws and what the eye expects. Down the
+   * side there is nothing separating the two, and edge to edge they read as one
+   * surface - most obviously on the browser's own pages, which carry the same
+   * dark background as the strip.
+   */
+  cardInset() {
+    return this.vertical() ? CONTENT_GAP : 0;
+  }
+
   contentArea() {
     const { width, height } = this.window.getContentBounds();
     const panelWidth = this.panelOpen ? PANEL_WIDTH : 0;
 
     if (this.vertical()) {
+      // Measured from the *pinned* width, not the current one. An unpinned
+      // sidebar slides out over the page rather than pushing it: a page that
+      // reflowed every time the pointer touched the window edge would be the
+      // most distracting thing in the browser.
+      const gap = this.cardInset();
+      const left = (this.sidebarPinned() ? SIDEBAR_WIDTH : SIDEBAR_EDGE) + gap;
       return {
-        x: SIDEBAR_WIDTH,
-        y: SIDEBAR_TOP_BAND,
-        width: Math.max(0, width - SIDEBAR_WIDTH - panelWidth),
-        height: Math.max(0, height - SIDEBAR_TOP_BAND)
+        x: left,
+        y: SIDEBAR_TOP_BAND + gap,
+        width: Math.max(0, width - left - gap - panelWidth),
+        height: Math.max(0, height - SIDEBAR_TOP_BAND - gap * 2)
       };
     }
 
@@ -904,15 +1036,25 @@ class BrowserShell {
     // extra renderer. Full height on the left, which puts the chrome's own top
     // corner beside the window buttons rather than under them.
     this.chromeView.setBounds(this.vertical()
-      ? { x: 0, y: 0, width: SIDEBAR_WIDTH, height }
+      ? { x: 0, y: 0, width: this.sidebarWidth(), height }
       : { x: 0, y: 0, width, height: this.chromeHeight() });
 
     const bounds = this.contentBounds();
+    const radius = this.vertical() ? CONTENT_RADIUS : 0;
+    // Applied on a change rather than every layout, which runs on every resize
+    // and every tab switch.
+    const reshape = this.laidOutCard !== radius;
+    this.laidOutCard = radius;
     for (const tab of this.tabs.all()) {
-      if (tab.view) tab.setBounds(bounds);
+      if (!tab.view) continue;
+      tab.setBounds(bounds);
+      if (reshape) setRadius(tab.view, radius);
     }
 
-    if (this.placeholderView) this.placeholderView.setBounds(bounds);
+    if (this.placeholderView) {
+      this.placeholderView.setBounds(bounds);
+      setRadius(this.placeholderView, radius);
+    }
 
     if (this.devToolsView) {
       const dock = this.dockBounds(this.contentArea());
@@ -976,6 +1118,9 @@ class BrowserShell {
     // A count and a fraction, not the list. See DownloadManager#summary.
     if (this.downloads) full.downloads = this.downloads.summary();
     full.bookmarksBar = this.bookmarksBarVisible();
+    full.sidebar = this.vertical()
+      ? { pinned: this.sidebarPinned(), open: this.sidebarPinned() || this.sidebarOpen }
+      : null;
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
     // And the sheet, while one is up. The menu takes its preferences off the
@@ -1021,4 +1166,7 @@ function send(view, channel, payload) {
   } catch { /* view torn down mid-publish */ }
 }
 
-module.exports = { BrowserShell, CHROME_HEIGHT, BOOKMARKS_BAR_HEIGHT, PANEL_WIDTH };
+module.exports = {
+  BrowserShell, CHROME_HEIGHT, BOOKMARKS_BAR_HEIGHT, PANEL_WIDTH,
+  SIDEBAR_WIDTH, SIDEBAR_EDGE, CONTENT_GAP
+};

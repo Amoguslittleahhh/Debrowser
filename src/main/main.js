@@ -681,6 +681,18 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (prewarm) prewarm.warm();
         break;
 
+      // The pointer reached the window's left edge, or left the strip. Only
+      // the chrome can tell us: it is the view the pointer enters and leaves.
+      case 'sidebar-hover':
+        shell.setSidebarOpen(Boolean(payload?.over));
+        break;
+
+      // The pin at the bottom of the strip.
+      case 'toggle-sidebar-pin':
+        prefs.set('sidebarPinned', !shell.sidebarPinned());
+        shell.applyWindowPrefs();
+        break;
+
       case 'toggle-bookmarks-bar': {
         // The preference, not `bookmarksBarVisible()` - that is hard-false
         // with the strip down the side, so inverting it there could only ever

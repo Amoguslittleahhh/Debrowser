@@ -44,6 +44,7 @@ const el = {
   bookmarks: document.getElementById('bookmarks'),
   downloads: document.getElementById('downloads'),
   downloadsRing: document.getElementById('downloads-ring'),
+  pin: document.getElementById('pin'),
   omnibox: document.getElementById('omnibox')
 };
 
@@ -89,6 +90,69 @@ function setStar(on) {
   starred = on;
   el.star.classList.toggle('on', Boolean(on));
   el.star.title = on ? 'Remove bookmark' : 'Bookmark this page (Ctrl+D)';
+}
+
+/* ------------------------------------------------------------------ */
+/* The sliding side strip                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Tell the browser when the pointer is over the strip.
+ *
+ * Unpinned, the strip's *view* is ten pixels wide until the pointer reaches it,
+ * and the whole width once it has - so this is what drives the slide. It has to
+ * come from here because the view is what the pointer enters and leaves, and a
+ * view is the only thing that can be told either.
+ *
+ * Sent on change only. `mouseenter` fires once per entry and `mouseleave` once
+ * per exit, but a page that reloads its own layout can produce a burst of them,
+ * and this is a message to another process.
+ */
+let pointerOver = null;
+
+function reportHover(over) {
+  if (over === pointerOver) return;
+  pointerOver = over;
+  api.send('sidebar-hover', { over });
+}
+
+document.addEventListener('mouseenter', () => reportHover(true));
+document.addEventListener('mouseleave', () => reportHover(false));
+// `mousemove` as well, because entering a view the pointer is *already* inside
+// - which is what happens when the strip slides out from under it - does not
+// fire `mouseenter`.
+document.addEventListener('mousemove', () => reportHover(true));
+
+el.pin.addEventListener('click', () => api.send('toggle-sidebar-pin'));
+
+/**
+ * Whether the strip is pinned, and whether it is currently out.
+ *
+ * Both come from the browser: the first is a preference it owns, and the second
+ * is a property of the *window*, since what slides is the view's width. The
+ * strip only draws itself to match.
+ */
+function renderSidebar(sidebar) {
+  const side = Boolean(sidebar);
+  if (document.body.dataset.sidebar !== String(side)) {
+    document.body.dataset.sidebar = String(side);
+  }
+  if (!side) return;
+
+  const pinned = sidebar.pinned === true;
+  if (el.pin.getAttribute('aria-pressed') !== String(pinned)) {
+    el.pin.setAttribute('aria-pressed', String(pinned));
+    el.pin.title = pinned ? 'Let the tab strip slide away' : 'Keep the tab strip open';
+    el.pin.setAttribute('aria-label', el.pin.title);
+  }
+  // The contents are faded out rather than removed while the strip is a
+  // ten-pixel edge: at that width they would be a column of clipped glyphs,
+  // and rebuilding them on every slide would be work for something the pointer
+  // opens and closes by accident all day.
+  const open = sidebar.open === true;
+  if (document.body.dataset.sidebarOpen !== String(open)) {
+    document.body.dataset.sidebarOpen = String(open);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -736,6 +800,7 @@ api.onState((state) => {
   // down the side: the window has already given its 34px back to the page, and
   // a bar drawn into space nobody reserved would sit over the top of it.
   renderDownloadsButton(state.downloads);
+  renderSidebar(state.sidebar);
   document.body.classList.toggle('with-bookmarks', state.bookmarksBar !== false);
   if (state.bookmarksBar !== false) refreshBookmarks(state.bookmarksRevision);
 });

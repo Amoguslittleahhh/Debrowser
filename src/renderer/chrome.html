@@ -21,6 +21,19 @@
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
     </button>
     <div class="strip-filler"></div>
+
+    <!--
+      The pin, at the foot of the strip. Only drawn with the strip down the
+      side, where there is a foot to put it at and something for it to do:
+      across the top nothing slides, so nothing needs holding open.
+    -->
+    <button class="pin" id="pin" type="button" aria-pressed="false"
+            title="Keep the tab strip open" aria-label="Keep the tab strip open">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M6.5 2.5h3l-.4 4 2.4 2v1H4.5v-1l2.4-2z"/>
+        <path d="M8 9.5V13"/>
+      </svg>
+    </button>
   </div>
 
   <div class="toolbar">

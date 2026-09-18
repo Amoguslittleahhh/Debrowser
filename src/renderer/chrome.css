@@ -958,3 +958,95 @@ body .bookmark-chip.has-icon {
 /* A finished download leaves the button in place - you may still want the
    panel - but nothing about it should keep asking for attention. */
 .icon-btn.downloads[data-active="false"] .downloads-ring { opacity: 0; }
+
+/* ------------------------------------------------------------------ */
+/* The sliding side strip                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Zen's shape: the strip is out of the way until the pointer reaches the
+ * window's left edge, and the page keeps the whole window either way.
+ *
+ * The slide itself is the *view's* width, changed by the browser process - a
+ * view cannot be animated from inside its own page, and it is the view that has
+ * to narrow or the page underneath stays covered. What this file does is make
+ * the collapsed state look like an edge rather than a clipped sidebar, and
+ * bring the contents back without a flash of half-drawn layout.
+ */
+
+/* Everything except the pin fades while the strip is an edge. Hidden rather
+   than removed: rebuilding a tab list on every accidental brush of the window
+   edge would be work for nothing, and the elements are 10px wide by then. */
+body[data-sidebar="true"][data-sidebar-open="false"] .tabs,
+body[data-sidebar="true"][data-sidebar-open="false"] .new-tab,
+body[data-sidebar="true"][data-sidebar-open="false"] .toolbar,
+body[data-sidebar="true"][data-sidebar-open="false"] .bookmarks,
+body[data-sidebar="true"][data-sidebar-open="false"] .pin {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 90ms ease;
+}
+
+/* A hairline of the strip's own colour, so the edge reads as something to
+   reach for rather than as a rendering artefact. */
+body[data-sidebar="true"][data-sidebar-open="false"] .tabstrip {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 30%, var(--strip)),
+    var(--strip));
+}
+
+body[data-sidebar="true"][data-sidebar-open="true"] .tabs,
+body[data-sidebar="true"][data-sidebar-open="true"] .new-tab,
+body[data-sidebar="true"][data-sidebar-open="true"] .toolbar,
+body[data-sidebar="true"][data-sidebar-open="true"] .bookmarks,
+body[data-sidebar="true"][data-sidebar-open="true"] .pin {
+  opacity: 1;
+  transition: opacity 140ms ease 40ms;
+}
+
+/*
+ * The pin, at the foot of the strip.
+ *
+ * Bottom left, where it was asked for, and drawn only in sidebar mode - across
+ * the top nothing slides, so there is nothing to hold open. `margin-top: auto`
+ * is what puts it at the foot: the strip is a column, and this is the last
+ * thing in it.
+ */
+.pin {
+  display: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 0 10px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: default;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--fast) ease, color var(--fast) ease,
+              opacity 140ms ease;
+}
+
+body[data-layout="left"] .pin { display: grid; }
+
+.pin:hover { background: var(--wash-soft); color: var(--text); }
+
+/* Pinned reads as pressed: the accent, and the pin upright rather than tilted.
+   A toggle that looks identical in both states is a toggle nobody trusts. */
+.pin[aria-pressed="true"] {
+  background: var(--wash);
+  color: var(--accent);
+}
+.pin[aria-pressed="false"] svg { transform: rotate(-35deg); }
+
+.pin svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--fast) var(--ease);
+}

@@ -72,6 +72,20 @@ const SCHEMA = {
   tabBarPosition: { def: 'top', ok: (v) => v === 'top' || v === 'left' },
 
   /**
+   * Whether the side strip stays out, or slides away when the pointer leaves.
+   *
+   * Off by default, which is the Zen behaviour and the point of putting the
+   * strip down the side at all: the page gets the whole window, and the tabs
+   * are a pointer-flick away rather than a permanent 240px tax. Pinning is
+   * there for anyone who would rather see them all the time, and the button
+   * that does it sits at the bottom of the strip.
+   *
+   * Only meaningful with `tabBarPosition: 'left'`. Across the top there is
+   * nothing to slide.
+   */
+  sidebarPinned: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
    * Windows 11 only: let the OS paint its own blurred material behind the
    * window. Cheaper than doing it ourselves, because the compositor is already
    * blurring what is behind every other window on the system.

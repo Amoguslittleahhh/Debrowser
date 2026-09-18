@@ -1221,6 +1221,66 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `automatic: ${first}, a second automatic: ${throttled}, after the button: ${manual}`);
   }
 
+  // The side strip: out of the way until the pointer asks for it.
+  //
+  // Zen's shape, and the two halves that make it work. The strip's *view* is a
+  // ten-pixel edge until the pointer reaches it, because a view is the only
+  // thing that can be told the pointer arrived - there is no hovering something
+  // that is not there. And sliding it out must not move the page: a page that
+  // reflowed every time the pointer brushed the window edge would be the most
+  // distracting thing in the browser.
+  {
+    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, CONTENT_GAP } = require('./window');
+    const chromeWidth = () => shell.chromeView.getBounds().width;
+
+    prefs.set('tabBarPosition', 'left');
+    prefs.set('sidebarPinned', false);
+    shell.applyWindowPrefs();
+    shell.layout();
+
+    const edgeWide = chromeWidth();
+    const shut = shell.contentBounds();
+
+    shell.setSidebarOpen(true);
+    const openWide = chromeWidth();
+    const whileOpen = shell.contentBounds();
+
+    check('the side strip is an edge until the pointer reaches it',
+      edgeWide === SIDEBAR_EDGE && openWide === SIDEBAR_WIDTH,
+      `${edgeWide}px at rest, ${openWide}px open`);
+    check('sliding it out does not move the page',
+      whileOpen.x === shut.x && whileOpen.width === shut.width,
+      `page at ${shut.x}px wide ${shut.width} -> ${whileOpen.x}px wide ${whileOpen.width}`);
+
+    // Pinned, it takes its column back and the page gives up the width.
+    prefs.set('sidebarPinned', true);
+    shell.applyWindowPrefs();
+    const pinned = shell.contentBounds();
+    check('pinning it gives the strip its column and the page the rest',
+      chromeWidth() === SIDEBAR_WIDTH && pinned.x === SIDEBAR_WIDTH + CONTENT_GAP &&
+      pinned.width < shut.width,
+      `page starts at ${pinned.x}px, ${shut.width} -> ${pinned.width} wide`);
+
+    // And the page is a card rather than something fused to the strip, which
+    // is the other half of what was asked for: edge to edge, the browser's own
+    // pages carry the same dark background as the strip and read as one
+    // surface with it.
+    const { width: winW, height: winH } = shell.window.getContentBounds();
+    check('the page is inset as a card in sidebar mode',
+      pinned.y > 0 && pinned.x + pinned.width === winW - CONTENT_GAP &&
+      pinned.y + pinned.height === winH - CONTENT_GAP,
+      `${pinned.x},${pinned.y} ${pinned.width}x${pinned.height} in ${winW}x${winH}`);
+
+    prefs.set('sidebarPinned', false);
+    prefs.set('tabBarPosition', 'top');
+    shell.applyWindowPrefs();
+    shell.layout();
+    const back = shell.contentBounds();
+    check('across the top the page fills the window again',
+      back.x === 0 && back.width === winW,
+      `${back.x},${back.y} ${back.width}x${back.height}`);
+  }
+
   // The renderer warmed on a dwell over the + button.
   //
   // Exercised directly, because it is switched off under a test - a spare
