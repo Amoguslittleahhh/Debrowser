@@ -408,7 +408,10 @@ function main() {
         // effect at the next check instead of at the next launch.
         enabled: () => prefs.get('autoUpdate'),
         log,
-        window: () => (shell && !shell.window.isDestroyed() ? shell.window : null)
+        // The browser draws its own prompt rather than asking the system for
+        // one: a Win32 message box in the middle of a window that draws
+        // everything else itself is the thing this browser keeps replacing.
+        onReady: () => { if (shell) shell.openSheet('update'); }
       });
       updater.start();
       shell.updater = updater;
@@ -597,6 +600,14 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'close-menu':
         shell.closeSheet();
+        break;
+
+      // From the browser's own update prompt. Restarting into the installer is
+      // the updater's to do - this only carries the answer.
+      case 'update-restart':
+        shell.closeSheet();
+        if (prewarm) prewarm.drop();
+        if (shell.updater) shell.updater.install();
         break;
 
       case 'open-settings':

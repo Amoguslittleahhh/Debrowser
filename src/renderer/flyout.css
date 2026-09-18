@@ -39,7 +39,6 @@
   cursor: default;
 }
 .flyout-all:hover { background: var(--wash-soft); }
-.flyout-all:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 
 .flyout-list {
   max-height: 380px;
@@ -107,7 +106,6 @@
   cursor: default;
 }
 .dl-link:hover { text-decoration: underline; }
-.dl-link:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 
 /*
  * The progress bar: a transform on one element, so a download updating four
@@ -147,7 +145,6 @@
   cursor: default;
 }
 .dl-action:hover { background: var(--wash); color: var(--text); }
-.dl-action:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 
 /* The site's mark, exactly as the history list and the downloads page draw it. */
 .dl-chip {

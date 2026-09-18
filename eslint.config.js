@@ -105,6 +105,7 @@ module.exports = [
         iconSrc: 'readonly',
         anchorSheet: 'readonly',
         URLSearchParams: 'readonly',
+        IntersectionObserver: 'readonly',
         // Preloads only.
         require: 'readonly',
         module: 'writable',

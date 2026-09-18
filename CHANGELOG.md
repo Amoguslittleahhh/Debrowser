@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The update prompt is the browser's own.** It was `dialog.showMessageBox` — a Win32 message box in the middle of a window that draws everything else itself: light-themed over a dark browser, in the system's typeface, with the system's buttons. It is a panel now, in the same sheet the app menu and the downloads flyout use, centred rather than anchored and dimming what is behind it. The one thing a platform dialog was buying here was modality, and a view over the whole window with a backdrop that catches the click was already that.
+- **The browser no longer checks for updates on a schedule.** It used to re-check every six hours for the life of a window, which is it reaching out to GitHub on a schedule nobody asked for. It checks when it starts, when you open the Updates section in Settings — scrolling to a section headed "Updates" to read whether you have one is the same request as pressing the button — and when you press **Check now**. The first two share a ten-minute floor so scrolling past twice is one request; the button is never subject to it.
+- **An update installs without putting the wizard in front of you again.** You have already been asked, in the browser's own prompt, and pressed Restart now; showing the full NSIS wizard after that is asking the same question twice. It also skips the part that looks broken — pressing Finish leaves that wizard titled "Not Responding" for a few seconds while NSIS deletes the couple of hundred megabytes it extracted to a temp directory. That is the installer's own cleanup on its own UI thread, and nothing here can hurry it; an update that never shows the wizard never reaches it. A first install from a downloaded `.exe` is unchanged, because there the wizard is the point.
+
 ## 1.4.0
 
 Downloads and developer tools stop being somewhere else. Both were arrangements that read as a second application bolted to the browser — downloads were a section of Settings, the inspector was a window of its own — and both are now part of it. Along the way, five things 1.3.0 shipped wrong on its first screen, and five more found by a review pass over all of this.

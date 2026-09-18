@@ -215,7 +215,7 @@ const SECTIONS = {
     {
       key: 'autoUpdate',
       label: 'Install updates automatically',
-      hint: 'Downloads only what changed. Your settings, tabs and data are untouched.',
+      hint: 'Checks on launch and when you open this section. Downloads only what changed.',
       type: 'checkbox'
     }
   ]
@@ -523,6 +523,31 @@ function renderUpdateState(u) {
 document.getElementById('check-updates')?.addEventListener('click', async () => {
   renderUpdateState(await api.request('check-for-updates'));
 });
+
+/*
+ * Looking at the Updates section is asking the question.
+ *
+ * The browser used to check every six hours for the life of a window, which is
+ * it reaching out to GitHub on a schedule nobody asked for. It checks on launch,
+ * when you press the button, and here - because scrolling to a section headed
+ * "Updates" to read whether you have one is the same request as pressing it.
+ *
+ * The browser rate-limits this, so scrolling past twice is one check; see
+ * MIN_AUTO_INTERVAL_MS in updater.js. The observer is disconnected after the
+ * first sighting anyway, since a section that has been seen once has been asked
+ * about once.
+ */
+{
+  const section = document.querySelector('section[data-section="updates"]');
+  if (section && typeof IntersectionObserver === 'function') {
+    const seen = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      seen.disconnect();
+      api.request('check-for-updates').then(renderUpdateState);
+    }, { threshold: 0.4 });
+    seen.observe(section);
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Saved sign-ins and payment details                                  */

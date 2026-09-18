@@ -78,7 +78,12 @@ const PLACEHOLDER_MAX_MS = 1500;
  */
 const SHEET_PAGES = {
   menu: 'menu.html',
-  downloads: 'flyout.html'
+  downloads: 'flyout.html',
+  // Not anchored to anything - it centres itself. It is in the sheet because
+  // everything the sheet gives it is what a prompt needs: a view over the whole
+  // window, a backdrop that catches a click, the keyboard, and nothing held
+  // while it is closed.
+  update: 'update.html'
 };
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
@@ -495,6 +500,11 @@ class BrowserShell {
       this.sheetClosedPage = page;
       this.sheetClosedAt = Date.now();
     }
+    // Dismissing the update prompt is "Later", and the updater has to know it
+    // is no longer on screen or it would refuse to offer again for the life of
+    // the session. Nothing is cancelled: the downloaded update is still there
+    // and the prompt comes back on the next launch.
+    if (page === 'update' && this.updater) this.updater.dismissPrompt();
     try {
       this.window.contentView.removeChildView(view);
       view.webContents.close();

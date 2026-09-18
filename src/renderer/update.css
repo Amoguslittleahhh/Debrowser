@@ -1,0 +1,96 @@
+/*
+ * The update prompt.
+ *
+ * Sits on menu.css, which supplies the sheet and its shadow. What differs is
+ * that this one is a prompt rather than a panel: it is centred instead of
+ * anchored, it dims what is behind it, and it is wide enough for a sentence.
+ */
+
+/* A prompt is the browser asking something, so the rest of the window should
+   read as waiting. The menu's backdrop is deliberately invisible; this one is
+   not - but it is a wash rather than a blackout, because the page behind it is
+   still the thing the user was doing. */
+.update-body .backdrop {
+  background: color-mix(in srgb, #000 42%, transparent);
+  animation: update-dim 160ms var(--ease);
+}
+
+@keyframes update-dim {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/*
+ * Centred, which is the one thing that makes this different from the panels:
+ * `anchorSheet` is never called on it, so `left`/`top` are never written and
+ * the transform does the work. `position: fixed` comes from `.sheet`.
+ */
+.card {
+  left: 50%;
+  top: 50%;
+  width: 400px;
+  padding: 22px 24px 18px;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  animation: update-in 160ms var(--ease);
+}
+
+@keyframes update-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(0.98); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* The OS dialog put a blue information icon beside the message. Nothing is
+   being warned about, so the heading carries it instead. */
+.card h2 {
+  margin: 0 0 8px;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-bold);
+}
+
+.card .lead {
+  margin: 0 0 6px;
+  line-height: var(--lh-body);
+}
+
+.card .detail {
+  margin: 0 0 20px;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+  color: var(--text-dim);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.btn {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font: inherit;
+  cursor: default;
+  transition: background-color var(--fast) ease, border-color var(--fast) ease;
+}
+/* No focus rule here: theme.css declares one `:focus-visible` treatment for
+   every focusable thing in the browser's own UI, so a new button is correct
+   before anyone remembers to style it. Measured - a plain button and these draw
+   the identical ring. */
+
+/* Restart is the default and reads as it: filled, and what Enter does. Later is
+   the quiet one, because choosing it costs nothing and undoes nothing. */
+.btn.primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn.primary:hover { background: color-mix(in srgb, #fff 12%, var(--accent)); }
+
+.btn.ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn.ghost:hover { background: var(--wash-soft); }

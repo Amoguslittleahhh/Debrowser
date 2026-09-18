@@ -63,7 +63,8 @@ const COMMANDS = new Set([
   'clear-download',
   'reveal-download',
   'open-download',
-  'open-downloads-page'
+  'open-downloads-page',
+  'update-restart'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {

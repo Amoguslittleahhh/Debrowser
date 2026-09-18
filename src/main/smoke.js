@@ -1131,6 +1131,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       'window.debrowser.request("list-credentials").then((r) => r === null)')
       .catch(() => false);
 
+    // And the update prompt is the third tenant, drawn by the browser rather
+    // than asked of the system. `dialog.showMessageBox` put a Win32 box in the
+    // middle of a window that draws everything else itself.
+    shell.openSheet('update');
+    const promptUp = await waitFor(
+      () => shell.sheetView && shell.sheetPage === 'update' &&
+        shell.sheetView.webContents.getURL().includes('update.html'),
+      { timeoutMs: 8000 });
+    check('the update prompt is one of the browser\'s own views',
+      promptUp, `sheet is ${shell.sheetPage}`);
+    shell.closeSheet();
+    await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
+
+    shell.openSheet('menu', { x: 100, y: 84, right: 132 });
+    await waitFor(() => shell.sheetView && shell.sheetPage === 'menu', { timeoutMs: 8000 });
+    shell.openSheet('downloads', { x: 900, y: 84, right: 932 });
+    await waitFor(() => shell.sheetView && shell.sheetPage === 'downloads', { timeoutMs: 8000 });
+
     check('the downloads flyout takes over the sheet from the menu',
       menuUp && swapped, `menu up=${menuUp}, swapped to ${shell.sheetPage}`);
     check('the flyout reads the download list and not the credential store',
@@ -1172,6 +1190,35 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `list-downloads answered=${answers}, list-credentials refused=${refused}`);
 
     tabs.close(page.id);
+  }
+
+  // When the browser checks for updates, and when it does not.
+  //
+  // It used to re-check every six hours for the life of a window - a browser
+  // reaching out to GitHub on a schedule nobody asked for. Now it checks on
+  // launch, when the Updates section comes into view, and when the button is
+  // pressed. The first two need a floor or scrolling past twice is two
+  // requests; the button must not be subject to it, because pressing Check now
+  // means check now. Both halves are here because they are one decision.
+  {
+    const { Updater } = require('./updater');
+    let calls = 0;
+    const sched = new Updater({ log: () => {}, enabled: () => true });
+    // Stubbed rather than packaged: `capability()` is false from source, so the
+    // real implementation is never loaded and `check` would be inert.
+    sched.impl = { checkForUpdates: () => { calls += 1; return Promise.resolve(null); } };
+
+    sched.check();
+    const first = calls;
+    sched.state = 'unchecked';
+    sched.check();
+    const throttled = calls;
+    sched.check(true);
+    const manual = calls;
+
+    check('the browser checks for updates on request, not on a timer',
+      first === 1 && throttled === 1 && manual === 2,
+      `automatic: ${first}, a second automatic: ${throttled}, after the button: ${manual}`);
   }
 
   // The renderer warmed on a dwell over the + button.

@@ -869,7 +869,6 @@ body.with-bookmarks .bookmarks { display: flex; }
 
 .bookmark:hover { background: var(--wash-soft); }
 .bookmark:active { background: var(--wash); }
-.bookmark:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 
 .bookmark-label {
   overflow: hidden;

@@ -20,7 +20,7 @@
  * browser that lost your tabs.
  */
 
-const { app, dialog } = require('electron');
+const { app } = require('electron');
 
 /**
  * How long after launch the first check happens.
@@ -32,20 +32,38 @@ const { app, dialog } = require('electron');
  */
 const FIRST_CHECK_MS = 60_000;
 
-/** And every few hours after that, for a browser left open for days. */
-const RECHECK_MS = 6 * 60 * 60 * 1000;
+/**
+ * The least time between two checks the browser makes on its own.
+ *
+ * There is no interval any more. It used to re-check every six hours, which is
+ * a browser reaching out to GitHub on its own schedule for the life of a window
+ * left open for days - and nobody asked it to. It checks when the browser
+ * starts, when you look at the Updates section in Settings, and when you press
+ * the button. This floor is what keeps the second of those from being a request
+ * per scroll.
+ *
+ * The button is not subject to it: pressing Check now means check now.
+ */
+const MIN_AUTO_INTERVAL_MS = 10 * 60 * 1000;
 
 class Updater {
   /**
    * @param {object} deps
    * @param {() => boolean} deps.enabled - reads the user's preference, live
    * @param {(...args: any[]) => void} deps.log
-   * @param {() => Electron.BaseWindow|null} deps.window - for the restart prompt
+   * @param {(version: string) => void} deps.onReady - called once an update is
+   *   downloaded and waiting. The browser draws its own prompt for this; see
+   *   `update.html`. It used to be `dialog.showMessageBox`, which is a Win32
+   *   dialog in the middle of a browser that draws everything else itself -
+   *   light-themed on a dark window, in a different typeface, with the system's
+   *   own buttons.
    */
-  constructor({ enabled = () => true, log = () => {}, window = () => null }) {
+  constructor({ enabled = () => true, log = () => {}, onReady = () => {} }) {
     this.enabled = enabled;
     this.log = log;
-    this.window = window;
+    this.onReady = onReady;
+    /** When the last check actually started, for MIN_AUTO_INTERVAL_MS. */
+    this.lastCheckAt = 0;
 
     this.timer = null;
 
@@ -165,10 +183,9 @@ class Updater {
 
     this.wire();
 
-    this.timer = setInterval(() => this.check(), RECHECK_MS);
+    // Once, shortly after launch. Nothing periodic: see MIN_AUTO_INTERVAL_MS.
+    this.timer = setTimeout(() => this.check(), FIRST_CHECK_MS);
     if (typeof this.timer.unref === 'function') this.timer.unref();
-    const first = setTimeout(() => this.check(), FIRST_CHECK_MS);
-    if (typeof first.unref === 'function') first.unref();
   }
 
   wire() {
@@ -237,6 +254,10 @@ class Updater {
     if (!manual && !this.enabled()) return;
     // Nothing to do while one is already downloading or waiting to install.
     if (this.state === 'downloading' || this.state === 'ready') return;
+    // Looking at the Updates section asks for a check, and looking at it twice
+    // in a minute is still one question.
+    if (!manual && Date.now() - this.lastCheckAt < MIN_AUTO_INTERVAL_MS) return;
+    this.lastCheckAt = Date.now();
     this.state = 'checking';
     this.error = null;
     this.impl.checkForUpdates().catch((err) => this.fail(err));
@@ -262,34 +283,52 @@ class Updater {
    * reading would be indefensible, and doing it silently at quit would lose the
    * session to a restart they did not choose.
    */
-  async offerRestart(version) {
+  offerRestart(version) {
     if (this.promptOpen) return;
     this.promptOpen = true;
-
-    const win = this.window();
-    const opts = {
-      type: 'info',
-      buttons: ['Restart now', 'Later'],
-      defaultId: 0,
-      cancelId: 1,
-      title: 'Update ready',
-      message: `Debrowser ${version} is ready to install.`,
-      detail: 'Your settings, open tabs and saved data are kept. The browser will close while it installs.'
-    };
-
     try {
-      const { response } = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
-      if (response === 0) {
-        // `isSilent: false` because this installer shows its own UI anyway;
-        // pretending otherwise produces a window the user did not expect with
-        // no explanation of what it is.
-        this.impl.quitAndInstall(false, true);
-      }
+      this.onReady(version);
     } catch (err) {
       this.log('updates', `could not prompt: ${err.message}`);
-    } finally {
       this.promptOpen = false;
     }
+  }
+
+  /**
+   * Restart into the new version, from the browser's own prompt.
+   *
+   * Silently, which reverses an earlier call. The reasoning then was that the
+   * installer shows its own UI anyway, so pretending otherwise would produce a
+   * window the user did not expect - and that was right while the prompt came
+   * from the system and could be mistaken for something else. It is not right
+   * now: the user has been asked, in the browser's own prompt, and pressed
+   * Restart now. Putting the full NSIS wizard in front of someone who already
+   * answered that question is asking it twice.
+   *
+   * It also skips the part that looks broken. Pressing Finish on that wizard
+   * leaves it titled "Not Responding" for a few seconds while NSIS deletes the
+   * couple of hundred megabytes it extracted to a temp directory - that is the
+   * installer's own cleanup, on its own UI thread, and nothing in this browser
+   * can hurry it. An update that never shows the wizard never reaches it.
+   *
+   * The second argument keeps "run after installing", so Restart now still
+   * means restart rather than quit. A first install from a downloaded .exe is
+   * unaffected: that one is the wizard, and it is meant to be.
+   */
+  install() {
+    if (!this.impl || this.state !== 'ready') return false;
+    try {
+      this.impl.quitAndInstall(true, true);
+      return true;
+    } catch (err) {
+      this.log('updates', `could not install: ${err.message}`);
+      return false;
+    }
+  }
+
+  /** The prompt was dismissed. It comes back on the next launch. */
+  dismissPrompt() {
+    this.promptOpen = false;
   }
 
   /**
@@ -316,7 +355,7 @@ class Updater {
   }
 
   stop() {
-    clearInterval(this.timer);
+    clearTimeout(this.timer);
     this.timer = null;
   }
 }
