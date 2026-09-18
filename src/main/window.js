@@ -24,6 +24,25 @@ const PANEL_WIDTH = 360;
 const SIDEBAR_WIDTH = 240;
 
 /**
+ * How much of the content area a docked inspector takes, and the least it may
+ * have. Chromium's own default split is close to this; the minimum exists so
+ * that docking into a narrow window leaves the inspector usable rather than a
+ * sliver, and `dockBounds` gives up on the dock entirely rather than squeeze
+ * the page out of existence.
+ */
+const DEVTOOLS_SHARE = 0.42;
+const DEVTOOLS_MIN = 320;
+
+/**
+ * How long to wait before reopening the inspector somewhere else.
+ *
+ * Closing one is asynchronous, and an open that races the teardown does
+ * nothing at all - measured, not guessed. This is comfortably longer than the
+ * teardown took and short enough to read as immediate.
+ */
+const DEVTOOLS_REDOCK_MS = 250;
+
+/**
  * Height of the band left clear above the content in sidebar mode.
  *
  * The system draws minimise/maximise/close at the *window's* top right, and in
@@ -99,6 +118,25 @@ class BrowserShell {
     this.placeholderView = null;
     this.placeholderTimer = null;
 
+    /**
+     * The inspector, when it is docked inside this window.
+     *
+     * Electron's own docking (`openDevTools({ mode: 'right' })`) is implemented
+     * by the owning BrowserWindow, and this browser does not have one - it is a
+     * BaseWindow holding sibling views. So the inspector is hosted the other way
+     * round: `setDevToolsWebContents` points it at a view we create, and we lay
+     * that view out ourselves like any other. Measured working under Electron 44
+     * before this was built on.
+     *
+     * @type {Electron.WebContentsView|null}
+     */
+    this.devToolsView = null;
+    /** @type {import('./tabs/tab').Tab|null} the tab being inspected */
+    this.devToolsTab = null;
+    /** The dock mode in force when it was opened, so a change can re-dock it. */
+    this.devToolsMode = null;
+    this.devToolsRedock = null;
+
     this.createChrome();
     this.applyWindowPrefs();
 
@@ -167,6 +205,10 @@ class BrowserShell {
   }
 
   detachTab(tab) {
+    // An inspector outlives nothing. Closing the tab it was opened on leaves a
+    // view inspecting a renderer that is being torn down, holding a share of
+    // the window for a page that is no longer there.
+    if (this.devToolsTab === tab) this.closeDevTools();
     if (!tab.view) return;
     try {
       this.window.contentView.removeChildView(tab.view);
@@ -378,6 +420,158 @@ class BrowserShell {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Developer tools                                                   */
+  /* ---------------------------------------------------------------- */
+
+  /** Where the user wants the inspector. */
+  dockMode() {
+    const mode = this.prefs ? this.prefs.get('devToolsDock') : 'right';
+    return mode === 'bottom' || mode === 'window' ? mode : 'right';
+  }
+
+  /**
+   * Open the inspector on a tab, or close it if it is already on that one.
+   *
+   * One inspector at a time. Chromium allows one per tab and this could too,
+   * but every open inspector is a live renderer of its own - considerably
+   * heavier than the page it is inspecting - and a browser arguing that tabs
+   * should be cheap has no business quietly holding six of them.
+   */
+  toggleDevTools(tab) {
+    if (!tab || !tab.isLive) return false;
+
+    if (this.devToolsTab === tab) {
+      this.closeDevTools();
+      return false;
+    }
+
+    // Whatever was open belonged to another tab, or to another dock mode.
+    this.closeDevTools();
+
+    const mode = this.dockMode();
+    if (mode === 'window') {
+      try {
+        tab.wc.openDevTools({ mode: 'detach', activate: true });
+      } catch (err) {
+        this.log(`devtools failed for tab ${tab.id}: ${err.message}`);
+        return false;
+      }
+      // Tracked even with no view of ours, so there is one place that knows
+      // which tab is being inspected however it is being shown.
+      this.devToolsTab = tab;
+      this.devToolsMode = mode;
+      tab.wc.once('devtools-closed', () => this.closeDevTools());
+      return true;
+    }
+
+    let view;
+    try {
+      view = new WebContentsView();
+      this.window.contentView.addChildView(view);
+      tab.wc.setDevToolsWebContents(view.webContents);
+      // Still 'detach', even though nothing detaches: it is what tells Chromium
+      // not to manage the placement itself, which is the whole point here.
+      tab.wc.openDevTools({ mode: 'detach' });
+    } catch (err) {
+      this.log(`devtools failed for tab ${tab.id}: ${err.message}`);
+      if (view) {
+        try { this.window.contentView.removeChildView(view); view.webContents.close(); } catch { /* gone */ }
+      }
+      return false;
+    }
+
+    this.devToolsView = view;
+    this.devToolsTab = tab;
+    this.devToolsMode = mode;
+
+    // The inspector has its own close button, and nothing else would tell us it
+    // had been used. Tracking open-ness as a flag on the tab would go stale in
+    // the direction that matters - a tab held out of the reclaim ladder forever
+    // by tools that are no longer there - so the event is what clears it.
+    tab.devToolsHost = view.webContents;
+    tab.wc.once('devtools-closed', () => this.closeDevTools());
+
+    this.layout();
+    return true;
+  }
+
+  /** Tear down whichever inspector is open, docked or windowed. */
+  closeDevTools() {
+    const tab = this.devToolsTab;
+    const view = this.devToolsView;
+    // Cleared first: `closeDevTools` on the page fires `devtools-closed`, whose
+    // handler calls straight back into here.
+    this.devToolsTab = null;
+    this.devToolsView = null;
+    this.devToolsMode = null;
+
+    if (tab) {
+      tab.devToolsHost = null;
+      if (tab.isLive) {
+        try { tab.wc.closeDevTools(); } catch { /* gone */ }
+      }
+    }
+
+    if (view) {
+      try {
+        this.window.contentView.removeChildView(view);
+        view.webContents.close();
+      } catch { /* already gone */ }
+      // Only a docked inspector was taking room, so only that needs a relayout.
+      this.layout();
+    }
+  }
+
+  /**
+   * Re-dock after the preference changed.
+   *
+   * Closing and reopening rather than moving the view: the mode decides whether
+   * the inspector lives in a view of ours or in a window of Chromium's, and
+   * those are not the same object to reposition.
+   */
+  redockDevTools() {
+    if (!this.devToolsMode || this.devToolsMode === this.dockMode()) return;
+    const tab = this.devToolsTab;
+    this.closeDevTools();
+    if (!tab || !tab.isLive) return;
+
+    // Reopened on a timer rather than in this turn.
+    //
+    // Closing an inspector is asynchronous, and an open that races the teardown
+    // is swallowed - measured: reopening immediately left no inspector at all,
+    // while the same sequence with a gap worked. The delay is invisible against
+    // a setting the user just changed, and the guard means a second change, or
+    // a tab closing in the meantime, wins over this one.
+    clearTimeout(this.devToolsRedock);
+    this.devToolsRedock = setTimeout(() => {
+      if (this.window.isDestroyed() || this.devToolsTab || !tab.isLive) return;
+      this.toggleDevTools(tab);
+    }, DEVTOOLS_REDOCK_MS);
+  }
+
+  /**
+   * The rectangle the inspector occupies, or null when it is not taking space.
+   *
+   * It takes space only while the tab it belongs to is the one on screen -
+   * the inspector for a background tab is neither useful nor visible, and
+   * reserving room for it would shrink whatever page the user is actually
+   * looking at.
+   */
+  dockBounds(content) {
+    if (!this.devToolsView || !this.devToolsTab || !this.devToolsTab.visible) return null;
+
+    if (this.dockMode() === 'bottom') {
+      const height = Math.max(DEVTOOLS_MIN, Math.round(content.height * DEVTOOLS_SHARE));
+      if (height >= content.height) return null;  // no room worth splitting
+      return { x: content.x, y: content.y + content.height - height, width: content.width, height };
+    }
+
+    const width = Math.max(DEVTOOLS_MIN, Math.round(content.width * DEVTOOLS_SHARE));
+    if (width >= content.width) return null;
+    return { x: content.x + content.width - width, y: content.y, width, height: content.height };
+  }
+
+  /* ---------------------------------------------------------------- */
 
   togglePanel(open = !this.panelOpen) {
     if (open === this.panelOpen) return this.panelOpen;
@@ -422,6 +616,11 @@ class BrowserShell {
    */
   applyWindowPrefs() {
     if (!this.prefs || this.window.isDestroyed()) return;
+
+    // Where the inspector goes is a window preference like any other, and it is
+    // the one the user is most likely to change while looking at the thing it
+    // moves. `redockDevTools` is a no-op unless the mode actually changed.
+    this.redockDevTools();
 
     // Pinned at 1, and set rather than skipped.
     //
@@ -511,7 +710,11 @@ class BrowserShell {
     return this.prefs ? this.prefs.get('tabBarPosition') === 'left' : false;
   }
 
-  contentBounds() {
+  /**
+   * The whole area below and beside the chrome, before the inspector takes its
+   * share of it. What a tab would fill if nothing were docked.
+   */
+  contentArea() {
     const { width, height } = this.window.getContentBounds();
     const panelWidth = this.panelOpen ? PANEL_WIDTH : 0;
 
@@ -530,6 +733,16 @@ class BrowserShell {
       width: Math.max(0, width - panelWidth),
       height: Math.max(0, height - CHROME_HEIGHT)
     };
+  }
+
+  /** What a tab actually gets: the content area less any docked inspector. */
+  contentBounds() {
+    const area = this.contentArea();
+    const dock = this.dockBounds(area);
+    if (!dock) return area;
+    return this.dockMode() === 'bottom'
+      ? { ...area, height: Math.max(0, dock.y - area.y) }
+      : { ...area, width: Math.max(0, dock.x - area.x) };
   }
 
   /**
@@ -559,6 +772,13 @@ class BrowserShell {
     // transient state to sit out.
     if (width <= 0 || height <= 0) return;
 
+    // An inspector whose page has gone - crashed, or discarded out from under
+    // it - is a dead view holding a share of the window. Dropped here rather
+    // than hooked to every path that could end a renderer, because this runs on
+    // every resize and tab change anyway. `closeDevTools` calls back into
+    // `layout`, but only once: the second pass finds nothing to clean up.
+    if (this.devToolsTab && !this.devToolsTab.isLive) this.closeDevTools();
+
     // One rectangle either way, so sidebar mode costs no extra view and no
     // extra renderer. Full height on the left, which puts the chrome's own top
     // corner beside the window buttons rather than under them.
@@ -572,6 +792,17 @@ class BrowserShell {
     }
 
     if (this.placeholderView) this.placeholderView.setBounds(bounds);
+
+    if (this.devToolsView) {
+      const dock = this.dockBounds(this.contentArea());
+      // Hidden rather than destroyed while its tab is in the background: the
+      // inspector holds the state the user has built up in it - breakpoints, a
+      // console history, a filtered network log - and throwing that away on a
+      // tab switch would make it useless for the thing people actually do with
+      // it, which is switch to another tab and come back.
+      this.devToolsView.setVisible(Boolean(dock));
+      if (dock) this.devToolsView.setBounds(dock);
+    }
 
     if (this.panelView) {
       // Sits beside the content, so it starts below whatever the content

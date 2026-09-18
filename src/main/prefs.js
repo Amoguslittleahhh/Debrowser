@@ -158,7 +158,13 @@ const SCHEMA = {
   /* --- Updates ---------------------------------------------------- */
   // Off means the browser never reaches the network to look for a version,
   // which is a privacy choice as much as a bandwidth one.
-  autoUpdate:   { def: true,     ok: (v) => typeof v === 'boolean' }
+  autoUpdate:   { def: true,     ok: (v) => typeof v === 'boolean' },
+
+  /* --- Developer tools -------------------------------------------- */
+  // Where the inspector goes. `right` and `bottom` host it in a view of the
+  // browser's own, beside or under the page; `window` hands it to Chromium to
+  // put in a window of its own, which is what it used to do unconditionally.
+  devToolsDock: { def: 'right',  ok: (v) => ['right', 'bottom', 'window'].includes(v) }
 
   // Still nothing here for session restore or the resource profile: the first
   // is not built, and the second cannot take effect without a restart, since a

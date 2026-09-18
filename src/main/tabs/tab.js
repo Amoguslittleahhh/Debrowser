@@ -100,6 +100,14 @@ class Tab {
      * tell what a renderer is carrying.
      */
     this.realisedInternal = this.internal;
+
+    /**
+     * The webContents hosting this tab's inspector, when the browser is showing
+     * it in a view of its own rather than letting Chromium put it in a window.
+     * Set and cleared by BrowserShell; see `devToolsOpen` below.
+     * @type {Electron.WebContents|null}
+     */
+    this.devToolsHost = null;
     this.title = this.internal ? pages.titleFor(url) : url;
     this.favicon = null;
     this.pinned = false;
@@ -204,6 +212,12 @@ class Tab {
    */
   get devToolsOpen() {
     if (!this.isLive) return false;
+    // An inspector hosted in one of the browser's own views does not count as
+    // opened by this measure - `isDevToolsOpened()` returns false for exactly
+    // that arrangement, measured - so the host is the only signal there is.
+    // It is still not a flag anyone sets by hand: the shell clears it from
+    // `devtools-closed`, which is what the inspector's own close button fires.
+    if (this.devToolsHost && !this.devToolsHost.isDestroyed()) return true;
     try {
       return this.wc.isDevToolsOpened();
     } catch {

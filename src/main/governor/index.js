@@ -748,7 +748,7 @@ class Governor {
     if (tab.loading) return true;                       // never interrupt a load
     if (tab.crashed) return true;
     if (tab.boosted) return true;
-    if (tab.wc.isDevToolsOpened?.()) return true;       // the user is inspecting it
+    if (tab.devToolsOpen) return true;                  // the user is inspecting it
     return false;
   }
 

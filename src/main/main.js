@@ -595,7 +595,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
         break;
 
       case 'toggle-devtools':
-        toggleDevTools(active, log);
+        toggleDevTools(active, shell, log);
         break;
 
       case 'set-pref': {
@@ -1185,7 +1185,7 @@ function menuModel({ tabs, shell }) {
       accel: 'F12',
       icon: 'code',
       kind: 'checkbox',
-      checked: Boolean(live && active.wc.isDevToolsOpened()),
+      checked: Boolean(live && active.devToolsOpen),
       enabled: live
     },
     { id: 'open-settings', label: 'Settings', accel: `${MOD}+,`, icon: 'gear' },
@@ -1201,25 +1201,21 @@ function menuModel({ tabs, shell }) {
  * it is already in the engine this browser is built on. Shipping a hand-made
  * inspector beside it would be strictly worse at every one of those jobs.
  *
- * Detached rather than docked, deliberately. A docked panel would be a fourth
- * kind of view sharing the content rectangle, and `setDevToolsWebContents`
- * binds it to one renderer - so every tab switch, and every discard, would have
- * to tear it down and build it again. A separate window is also the one the
- * user can drag to another monitor, and it costs nothing while it is closed.
+ * Where it goes is the user's choice, and the work of putting it there belongs
+ * to the shell, which is the only thing that knows how this window is laid out.
+ * This used to open detached always, on the reasoning that a docked panel would
+ * be a fourth kind of view sharing the content rectangle and would have to be
+ * rebuilt on every tab switch. The first half was true and is simply the price;
+ * the second was wrong - a hidden view keeps the inspector's state, so coming
+ * back to the tab finds the breakpoints and console history still there.
  */
-function toggleDevTools(tab, log = () => {}) {
+function toggleDevTools(tab, shell, log = () => {}) {
   if (!tab?.isLive) return false;
-  try {
-    if (tab.wc.isDevToolsOpened()) {
-      tab.wc.closeDevTools();
-      return false;
-    }
-    tab.wc.openDevTools({ mode: 'detach', activate: true });
-    return true;
-  } catch (err) {
-    log(`devtools failed for tab ${tab.id}: ${err.message}`);
+  if (!shell) {
+    log('devtools: no window to open them in');
     return false;
   }
+  return shell.toggleDevTools(tab);
 }
 
 /**

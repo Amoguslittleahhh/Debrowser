@@ -992,15 +992,54 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // floor is asserted directly rather than by waiting out the idle ladder,
   // which would add ten seconds to the suite to observe the same rule.
   {
-    const target = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true });
+    const target = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
     await waitFor(() => target.isLive && !target.loading, { timeoutMs: 10_000 });
 
-    const opened = toggleDevTools(target);
+    prefs.set('devToolsDock', 'right');
+    shell.applyWindowPrefs();
+    const fullWidth = shell.contentBounds().width;
+
+    const opened = toggleDevTools(target, shell);
     const seen = await waitFor(() => target.devToolsOpen, { timeoutMs: 5000 });
-    const floor = governor.clampToProtections(target, Tier.DISCARDED);
-    toggleDevTools(target);
+    // `ignoreGrace`, because the tab is the one on screen: without it the
+    // grace period that protects a just-left tab would be what the second
+    // assertion measured, rather than the inspector.
+    const floor = governor.clampToProtections(target, Tier.DISCARDED, { ignoreGrace: true });
+
+    // Docked means two things, and both are worth asserting: the inspector is
+    // really in a view of ours, and the page beside it actually gave up the
+    // room. Either alone can pass while the user sees a window or an inspector
+    // drawn over the page.
+    const hosted = await waitFor(
+      () => shell.devToolsView &&
+        shell.devToolsView.webContents.getURL().startsWith('devtools://'),
+      { timeoutMs: 8000 });
+    const dockedWidth = shell.contentBounds().width;
+    check('developer tools dock inside the browser window',
+      hosted && dockedWidth > 0 && dockedWidth < fullWidth,
+      `page ${fullWidth}px -> ${dockedWidth}px beside the inspector`);
+
+    // `isDevToolsOpened()` reports false for an inspector hosted this way -
+    // measured - so everything that asks whether a tab is being inspected has
+    // to go through the tab, not through Chromium. The governor is the one that
+    // matters: it is what would otherwise discard the page mid-session.
+    check('a docked inspector still counts as open',
+      seen === true && target.devToolsOpen === true &&
+      governor.shouldSkip(target) === true,
+      `devToolsOpen=${target.devToolsOpen}, chromium says ${target.wc.isDevToolsOpened()}`);
+
+    // Changing where they go moves them, rather than needing them reopened.
+    prefs.set('devToolsDock', 'window');
+    shell.applyWindowPrefs();
+    const windowed = await waitFor(
+      () => !shell.devToolsView && target.wc.isDevToolsOpened(), { timeoutMs: 8000 });
+    check('the dock preference moves an open inspector',
+      windowed && shell.contentBounds().width === fullWidth,
+      `windowed=${windowed}, page back to ${shell.contentBounds().width}px`);
+
+    toggleDevTools(target, shell);
     const closed = await waitFor(() => !target.devToolsOpen, { timeoutMs: 5000 });
-    const floorAfter = governor.clampToProtections(target, Tier.DISCARDED);
+    const floorAfter = governor.clampToProtections(target, Tier.DISCARDED, { ignoreGrace: true });
 
     check('developer tools open on the page, and close again',
       opened === true && seen && closed, `opened=${seen} closed=${closed}`);
@@ -1008,6 +1047,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       floor === Tier.WARM && floorAfter === Tier.DISCARDED,
       `with tools: ${floor}, without: ${floorAfter}`);
 
+    prefs.set('devToolsDock', 'right');
     tabs.close(target.id);
   }
 

@@ -191,6 +191,17 @@ const SECTIONS = {
       label: 'Use hardware acceleration',
       hint: 'Try this if pages flicker or the browser will not start. Needs a restart.',
       type: 'checkbox'
+    },
+    {
+      key: 'devToolsDock',
+      label: 'Developer tools open',
+      hint: 'Beside the page, under it, or in a window of their own.',
+      type: 'select',
+      options: [
+        { value: 'right', name: 'Beside the page' },
+        { value: 'bottom', name: 'Under the page' },
+        { value: 'window', name: 'In their own window' }
+      ]
     }
   ],
 
