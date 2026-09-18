@@ -14,6 +14,24 @@ const api = window.debrowser;
 const q = document.getElementById('q');
 const stat = document.getElementById('stat');
 
+/*
+ * Tell the browser when there is something in the box worth keeping.
+ *
+ * Every other page is watched by `probe-preload.js`, which is what sets a tab's
+ * `hasDirtyInput` and stops the governor discarding a half-filled form. The
+ * browser's own pages do not get that preload - they get the command bridge
+ * instead - so nothing was watching this box at all, and a query typed here
+ * and left could be thrown away by the live-tab cap. Since this page is the one
+ * that knows, this page is what says so.
+ */
+let reportedDirty = false;
+q.addEventListener('input', () => {
+  const dirty = q.value.trim().length > 0;
+  if (dirty === reportedDirty) return;
+  reportedDirty = dirty;
+  api.send('page-dirty', { dirty });
+});
+
 document.getElementById('search').addEventListener('submit', (event) => {
   event.preventDefault();
   const text = q.value.trim();

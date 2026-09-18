@@ -616,8 +616,12 @@ class Governor {
     // of them reading "Active - shares a process" is what that looks like.
     //
     // It is exempted by what it is rather than by being internal: a page with
-    // nothing to lose. Typing in its search box makes it dirty like any other
-    // page, and the rule below picks that up.
+    // nothing to lose. Typing in its search box is the one thing it can hold,
+    // and the `hasDirtyInput` rule below covers that - but only because the
+    // page reports it directly (see newtab.js). It does not come from
+    // `probe-preload.js` the way it does for a website: the browser's own pages
+    // carry the command bridge instead of the probe, so that flag was always
+    // false here and a typed query could have been discarded.
     if (tab.internal && pages.pageName(tab.url) !== 'newtab') { cap(Tier.ACTIVE); return floor; }
 
     // Audio is the most noticeable thing a browser can take away.

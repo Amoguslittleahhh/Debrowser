@@ -628,6 +628,27 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     `${liveBlanks}/${blanks.length} blank tabs live, ` +
     `${tabs.all().filter((t) => t.isLive).length} live overall (cap ${governor.cfg.maxLiveTabs})`);
 
+  // Typed text on the new tab page survives the cap.
+  //
+  // Taking the blanket exemption off that page rested on `hasDirtyInput`
+  // catching a half-typed query - and that flag is set by `probe-preload.js`,
+  // which the browser's own pages do not carry, so it was always false here.
+  // The reasoning was sound and the mechanism was absent. The page reports it
+  // over the command bridge now, and this is what says so.
+  {
+    const blank = blanks.find((t) => t.isLive) || blanks[0];
+    const empty = governor.clampToProtections(blank, Tier.DISCARDED, { ignoreGrace: true });
+    blank.hasDirtyInput = true;
+    const typed = governor.clampToProtections(blank, Tier.DISCARDED, { ignoreGrace: true });
+    blank.hasDirtyInput = false;
+    // A smaller rank is a stronger protection - TIER_ORDER runs ACTIVE down to
+    // DISCARDED - so "not discarded" is `<`, which is the direction
+    // `clampToProtections` itself compares in.
+    check('a new tab page holding typed text is not discarded',
+      empty === Tier.DISCARDED && tierRank(typed) < tierRank(Tier.DISCARDED),
+      `empty: ${empty}, with text: ${typed}`);
+  }
+
   // Settings is the page the old rule was actually written for, and it keeps
   // its exemption: discarding one throws away whatever the user was part-way
   // through setting.
@@ -1039,6 +1060,26 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       seen === true && target.devToolsOpen === true &&
       governor.shouldSkip(target) === true,
       `devToolsOpen=${target.devToolsOpen}, chromium says ${target.wc.isDevToolsOpened()}`);
+
+    // The dock belongs to one tab and goes away when you leave it.
+    //
+    // `attachTab` used to return early for a view that was already a child,
+    // which is true of every tab switch - so nothing re-laid-out on one, and
+    // tab A's inspector stayed painted over tab B while B was sized as though
+    // it had the whole window. Asserted as the two halves the user sees: the
+    // dock is off screen, and the page beside it gets its width back.
+    const other = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => other.isLive && !other.loading, { timeoutMs: 10_000 });
+    const awayVisible = shell.devToolsView.getVisible?.() !== false &&
+      shell.dockBounds(shell.contentArea()) !== null;
+    const awayWidth = shell.contentBounds().width;
+
+    await tabs.activate(target.id);
+    const backWidth = shell.contentBounds().width;
+    check('a docked inspector follows its own tab and nothing else',
+      !awayVisible && awayWidth === fullWidth && backWidth === dockedWidth,
+      `away: ${awayWidth}px and dock ${awayVisible ? 'still up' : 'hidden'}, back: ${backWidth}px`);
+    tabs.close(other.id);
 
     // Changing where they go moves them, rather than needing them reopened.
     prefs.set('devToolsDock', 'window');

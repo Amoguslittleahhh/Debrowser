@@ -39,6 +39,7 @@ const COMMANDS = new Set([
   'zoom',
   'print',
   'toggle-devtools',
+  'page-dirty',
   'set-pref',
   'list-history',
   'delete-history',

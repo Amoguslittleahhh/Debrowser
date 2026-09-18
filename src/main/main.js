@@ -482,7 +482,7 @@ function main() {
  * one switch and two ways in rather than a second copy for shortcuts.
  */
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null }) {
-  const runCommand = (command, payload) => {
+  const runCommand = (command, payload, sender = null) => {
     const active = tabs.activeTab();
 
     switch (command) {
@@ -671,8 +671,21 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'toggle-bookmarks-bar': {
-        prefs.set('showBookmarksBar', !shell.bookmarksBarVisible());
+        // The preference, not `bookmarksBarVisible()` - that is hard-false
+        // with the strip down the side, so inverting it there could only ever
+        // write `true` and the shortcut stopped toggling.
+        prefs.set('showBookmarksBar', prefs.get('showBookmarksBar') === false);
         shell.layout();
+        break;
+      }
+
+      // One of our own pages reporting that it is holding something. See
+      // newtab.js: the browser's pages carry the command bridge rather than the
+      // probe preload, so the governor has no other way to learn this.
+      case 'page-dirty': {
+        if (!sender) break;
+        const tab = tabs.all().find((t) => t.isLive && t.wc.id === sender.id);
+        if (tab && tab.internal) tab.hasDirtyInput = Boolean(payload?.dirty);
         break;
       }
 
@@ -700,7 +713,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
     if (!senderMayCommand(tabs, shell, event.sender)) return;
-    runCommand(command, payload ?? null);
+    runCommand(command, payload ?? null, event.sender);
   });
 
   return runCommand;

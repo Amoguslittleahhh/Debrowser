@@ -92,7 +92,12 @@ class Prewarm {
           backgroundThrottling: true
         }
       });
-      this.view.webContents.loadURL(pages.NEW_TAB_URL);
+      // Caught, because `drop()` closes this mid-load on purpose - on the TTL,
+      // at quit, and in the smoke test - and an aborted load rejects. Nothing
+      // in this project installs an `unhandledRejection` handler, so the one
+      // uncaught promise in the main process would be a crash.
+      this.view.webContents.loadURL(pages.NEW_TAB_URL)
+        .catch((err) => this.log(`prewarm load ended: ${err.message}`));
     } catch (err) {
       this.log(`prewarm failed: ${err.message}`);
       this.view = null;

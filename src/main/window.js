@@ -233,11 +233,19 @@ class BrowserShell {
   attachTab(tab) {
     if (!tab.view) return;
     const children = this.window.contentView.children;
-    if (children.includes(tab.view)) return;
-
     // Insert below the chrome so the chrome always wins the z-order.
-    this.window.contentView.addChildView(tab.view, 0);
-    tab.setBounds(this.contentBounds());
+    if (!children.includes(tab.view)) this.window.contentView.addChildView(tab.view, 0);
+
+    // Bounds are re-asserted on every present, not only on the first.
+    //
+    // This used to return early for a view that was already attached, which was
+    // true of every tab switch - and became wrong the moment a docked inspector
+    // existed. The dock belongs to one tab and is drawn above all of them, so
+    // switching tabs changes both who gets the content rectangle and whether
+    // the dock should be on screen at all. Returning early left tab A's
+    // inspector painted over tab B, with B sized as though it had the window.
+    if (this.devToolsView) this.layout();
+    else tab.setBounds(this.contentBounds());
     tab.setVisible(tab.visible);
   }
 
@@ -960,6 +968,10 @@ class BrowserShell {
     full.bookmarksBar = this.bookmarksBarVisible();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
+    // And the sheet, while one is up. The menu takes its preferences off the
+    // `menu-model` reply and would not need this; the downloads flyout has no
+    // equivalent reply, so without it the panel ignored the chosen theme.
+    send(this.sheetView, 'debrowser:state', full);
 
     // And the browser's own pages, which are tabs now rather than views. Both
     // build their UI from this message, so without it Settings renders as a
