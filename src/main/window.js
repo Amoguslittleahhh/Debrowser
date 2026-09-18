@@ -352,7 +352,7 @@ class BrowserShell {
     const y = Number(anchor?.y);
     const right = Number(anchor?.right);
 
-    this.menuView = new WebContentsView({
+    const menuView = new WebContentsView({
       webPreferences: {
         preload: CHROME_PRELOAD,
         contextIsolation: true,
@@ -364,17 +364,16 @@ class BrowserShell {
         transparent: true
       }
     });
+    this.menuView = menuView;
+
     // The view is window-sized; only the menu itself is painted. Anything the
     // page leaves untouched has to show what is behind it, or this covers the
     // browser with a grey sheet.
     try {
-      this.menuView.setBackgroundColor('#00000000');
+      menuView.setBackgroundColor('#00000000');
     } catch (err) {
       this.log(`transparent menu unavailable: ${err.message}`);
     }
-
-    this.window.contentView.addChildView(this.menuView);   // topmost, over the chrome
-    this.layoutMenu();
 
     const wc = this.menuView.webContents;
     wc.loadFile(path.join(RENDERER_DIR, 'menu.html'), {
@@ -390,17 +389,38 @@ class BrowserShell {
       // is an ordinary thing for a menu and not worth a line in the log.
     }).catch((err) => { if (this.menuView) this.log(`menu failed to load: ${err.message}`); });
 
-    // Focused so it can take the keyboard, which is how the arrow keys and
-    // Escape reach it at all.
+    // Put on screen only once it has something to show.
+    //
+    // The view used to be added to the window before the load was even started,
+    // and a window-sized view with nothing painted in it is a window-sized
+    // white rectangle - which is what pressing the three dots flashed. The
+    // transparency above is real and was not enough: it governs what the view
+    // composites where the *page* is transparent, and until the page exists
+    // there is nothing to be transparent.
+    //
+    // Attaching the dismissal handlers here too, rather than at creation. A
+    // blur that arrives while the menu is still loading is focus settling, not
+    // the user clicking away, and treating it as a dismissal closed the menu
+    // in the same breath as opening it.
     wc.once('did-finish-load', () => {
-      if (this.menuView && !wc.isDestroyed()) wc.focus();
-    });
+      // Dismissed before it finished loading - Escape, or a second press. The
+      // view is already being torn down; putting it on screen now would show a
+      // menu the user has closed.
+      if (this.menuView !== menuView || wc.isDestroyed()) return;
 
-    // Clicking a page or the tab strip moves focus out of this view, and a menu
-    // that stays up after the user has gone somewhere else is a menu they have
-    // to dismiss twice. This is the backstop for the click-away the transparent
-    // backdrop already handles; both funnel into `closeMenu`.
-    wc.on('blur', () => this.closeMenu({ blurred: true }));
+      this.window.contentView.addChildView(menuView);   // topmost, over the chrome
+      this.layoutMenu();
+
+      // Focused so it can take the keyboard, which is how the arrow keys and
+      // Escape reach it at all.
+      wc.focus();
+
+      // Clicking a page or the tab strip moves focus out of this view, and a
+      // menu that stays up after the user has gone somewhere else is a menu
+      // they have to dismiss twice. This is the backstop for the click-away the
+      // transparent backdrop already handles; both funnel into `closeMenu`.
+      wc.on('blur', () => this.closeMenu({ blurred: true }));
+    });
   }
 
   /**

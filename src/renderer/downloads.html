@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: debrowser:;">
+  <title>Downloads</title>
+  <!--
+    Settings' stylesheet, then this page's own - the same arrangement the
+    history page uses, and for the same reason: the header, the rows and the
+    notes are one set of components, so a change to the row treatment lands on
+    all three pages rather than on whichever was edited last.
+  -->
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="downloads.css">
+</head>
+<body>
+  <header>
+    <h1>Downloads</h1>
+    <div class="head-tools">
+      <input id="q" type="search" spellcheck="false" autocomplete="off"
+             placeholder="Search downloads" aria-label="Search downloads">
+      <button class="ghost-btn" id="clear">Clear finished</button>
+    </div>
+    <button class="close" id="close" title="Close downloads (Esc)" aria-label="Close downloads">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <div class="bar">
+      <span class="count" id="count"></span>
+    </div>
+
+    <div id="list" class="list"></div>
+    <p class="note" id="empty" hidden></p>
+  </main>
+
+  <script src="theme.js"></script>
+  <script src="downloads.js"></script>
+</body>
+</html>

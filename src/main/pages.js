@@ -45,13 +45,15 @@ const PAGES_DIR = path.join(__dirname, '..', 'renderer');
 const PAGES = {
   newtab: 'newtab.html',
   settings: 'settings.html',
-  history: 'history.html'
+  history: 'history.html',
+  downloads: 'downloads.html'
 };
 
 /** Where a new tab goes when the user has not chosen a homepage. */
 const NEW_TAB_URL = `${SCHEME}://newtab`;
 const SETTINGS_URL = `${SCHEME}://settings`;
 const HISTORY_URL = `${SCHEME}://history`;
+const DOWNLOADS_URL = `${SCHEME}://downloads`;
 
 /**
  * Must run before `app.whenReady()`.
@@ -147,11 +149,12 @@ function titleFor(url) {
     case 'settings': return 'Settings';
     case 'newtab': return 'New tab';
     case 'history': return 'History';
+    case 'downloads': return 'Downloads';
     default: return 'Debrowser';
   }
 }
 
 module.exports = {
-  SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL,
+  SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL,
   registerScheme, serve, isInternal, pageName, titleFor
 };

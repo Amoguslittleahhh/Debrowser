@@ -591,7 +591,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'open-downloads':
-        openInternalPage(tabs, `${pages.SETTINGS_URL}#downloads`);
+        openInternalPage(tabs, pages.DOWNLOADS_URL);
         publish();
         break;
 
@@ -800,6 +800,15 @@ const CHROME_REQUESTS = new Set([
  */
 const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-history', 'set-pref']);
 
+/**
+ * What the downloads page may ask for - its own list, and nothing else.
+ *
+ * Same reasoning as the history gate above: it is one of the browser's own
+ * pages, so without this it would inherit Settings' surface, credentials
+ * included. A page that lists files has no business reading a password store.
+ */
+const DOWNLOAD_REQUESTS = new Set(['list-downloads', 'cancel-download', 'clear-download']);
+
 function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
@@ -807,7 +816,8 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
     const allowed =
       sender === 'settings' ||
       (sender === 'chrome' && CHROME_REQUESTS.has(command)) ||
-      (sender === 'history' && HISTORY_REQUESTS.has(command));
+      (sender === 'history' && HISTORY_REQUESTS.has(command)) ||
+      (sender === 'downloads' && DOWNLOAD_REQUESTS.has(command));
     if (!allowed) return null;
 
     switch (command) {
@@ -1194,7 +1204,6 @@ function menuModel({ tabs, shell }) {
     { kind: 'separator' },
     { id: 'open-history', label: 'History', accel: `${MOD}+H`, icon: 'clock' },
     { id: 'open-downloads', label: 'Downloads', accel: `${MOD}+J`, icon: 'download' },
-    { id: 'open-bookmarks', label: 'Bookmarks', accel: `${MOD}+Shift+O`, icon: 'star' },
     { kind: 'separator' },
     { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live },
     {

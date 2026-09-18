@@ -831,9 +831,19 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   {
     shell.openMenu({ x: 100, y: 84, right: 132 });
     const view = shell.menuView;
+
+    // Waited for, because the view is put on screen only once its page has
+    // loaded. It used to be added before the load was even started, and a
+    // window-sized view with nothing painted in it is a window-sized white
+    // rectangle - which is what pressing the three dots flashed. So "is it on
+    // top and window-sized" is now a question with a moment's delay in front of
+    // it, and asking it immediately is asking before the answer exists.
+    const shown = await waitFor(
+      () => shell.window.contentView.children.includes(view), { timeoutMs: 8000 });
+
     const children = shell.window.contentView.children;
-    const onTop = Boolean(view) && children[children.length - 1] === view;
-    const covers = Boolean(view) &&
+    const onTop = shown && children[children.length - 1] === view;
+    const covers = shown &&
       view.getBounds().width === shell.window.getContentBounds().width;
     const wc = view && view.webContents;
 
@@ -1051,6 +1061,39 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     prefs.set('devToolsDock', 'right');
     tabs.close(target.id);
+  }
+
+  // The downloads page.
+  //
+  // Downloads used to be a handful of rows inside Settings, which is the wrong
+  // place for a list that changes while you are looking at it. Now it is a page
+  // with an address like any other - and that is exactly why the request gate
+  // matters: one of the browser's own pages inherits Settings' surface unless
+  // something says otherwise, and Settings is where the credential store is
+  // reachable from. A page that lists files must not be able to read passwords.
+  {
+    const page = tabs.create({ url: pages.DOWNLOADS_URL, activate: true, realise: true });
+    const ready = await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    const title = await page.wc.executeJavaScript('document.title').catch(() => null);
+    const listed = await page.wc.executeJavaScript(
+      'Boolean(document.getElementById("list"))').catch(() => false);
+
+    check('the downloads page loads at its own address',
+      ready && senderPage(tabs, page.wc) === 'downloads' && title === 'Downloads' && listed,
+      `sender=${JSON.stringify(senderPage(tabs, page.wc))} title=${JSON.stringify(title)}`);
+
+    // Asked of the page itself, through the same bridge it really uses.
+    const answers = await page.wc.executeJavaScript(
+      'window.debrowser.request("list-downloads").then((r) => r && Array.isArray(r.items))')
+      .catch(() => false);
+    const refused = await page.wc.executeJavaScript(
+      'window.debrowser.request("list-credentials").then((r) => r === null)')
+      .catch(() => false);
+    check('the downloads page may read its own list and nothing else',
+      answers === true && refused === true,
+      `list-downloads answered=${answers}, list-credentials refused=${refused}`);
+
+    tabs.close(page.id);
   }
 
   // The renderer warmed on a dwell over the + button.
