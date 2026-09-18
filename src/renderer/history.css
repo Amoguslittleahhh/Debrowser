@@ -133,14 +133,17 @@
 }
 
 /*
- * The site's letter, on the site's colour.
+ * The site's logo, with its letter underneath.
  *
- * No favicon is stored - keeping one per entry would mean thousands of images
- * on disk for a list nobody looks at most days - so the colour is computed from
- * the hostname instead, by the same function the tab strip uses. It costs one
- * hash and no bytes, and it is what makes a long list scannable.
+ * No image is ever stored - keeping a favicon per entry would mean thousands of
+ * files on disk for a list nobody looks at most days - so the icon is fetched
+ * from the site's own address when the row is drawn, and the letter shows
+ * through until it arrives, or for good if it never does. The letter's colour
+ * comes from the hostname by the same function the tab strip uses, so a site
+ * looks the same in both.
  */
 .chip {
+  position: relative;
   display: grid;
   place-items: center;
   flex: none;
@@ -152,6 +155,18 @@
   color: hsl(var(--hue) 70% 72%);
   background: hsl(var(--hue) 45% 22%);
   text-transform: uppercase;
+}
+
+/* The logo covers the letter when it loads, and is removed if it does not -
+   so the row never shows a gap and never shows a broken image. */
+.site-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+  background: inherit;
 }
 
 body[data-theme="light"] .chip,

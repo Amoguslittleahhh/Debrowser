@@ -283,3 +283,16 @@ input[type="range"] {
   padding: 8px 0;
   box-sizing: content-box;
 }
+
+/*
+ * The section a deep link asked for.
+ *
+ * Two seconds of a tinted rule down the leading edge, then gone. The scroll
+ * alone is ambiguous - a page that opens part-way down looks like a page that
+ * lost its top - and this says "here is the thing you asked for" without
+ * leaving a permanent mark on a section that is not otherwise special.
+ */
+section.landed .rows {
+  box-shadow: -3px 0 0 var(--accent);
+  transition: box-shadow var(--slow) ease;
+}

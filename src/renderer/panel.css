@@ -101,7 +101,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 
 .row {
   display: grid;
-  grid-template-columns: 8px 1fr auto auto;
+  grid-template-columns: 8px 18px 1fr auto auto;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
@@ -142,4 +142,50 @@ footer {
   border-top: 1px solid var(--border);
   color: var(--text-dim);
   font-size: var(--fs-micro);
+}
+
+/*
+ * The site chip: its initial on a colour from its hostname, with the real
+ * favicon over the top once it loads.
+ *
+ * The same two elements the tab strip uses, at the same sizes, from the same
+ * `siteHue` - so a site is one colour everywhere in the browser rather than a
+ * different one in each view that draws it.
+ */
+.row-chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  text-transform: uppercase;
+  color: hsl(var(--hue, 220) 70% 74%);
+  background: hsl(var(--hue, 220) 42% 26%);
+}
+
+body[data-theme="light"] .row-chip,
+body:not([data-theme="dark"]) .row-chip {
+  color: hsl(var(--hue, 220) 55% 34%);
+  background: hsl(var(--hue, 220) 70% 90%);
+}
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .row-chip {
+    color: hsl(var(--hue, 220) 70% 74%);
+    background: hsl(var(--hue, 220) 42% 26%);
+  }
+}
+
+.row-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+  background: inherit;
 }

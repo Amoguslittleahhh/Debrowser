@@ -47,6 +47,9 @@ const ICONS = {
   clock: ['M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z', 'M8 5v3.2l2.2 1.3'],
   gauge: ['M2.5 11.5a5.5 5.5 0 1 1 11 0', 'M8 11.5L10.6 7'],
   code:  ['M6 5.5L3 8l3 2.5', 'M10 5.5L13 8l-3 2.5'],
+  download: ['M8 2.5v7', 'M5 7l3 3 3-3', 'M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5'],
+  star:  ['M8 2.6l1.7 3.45 3.8.55-2.75 2.68.65 3.79L8 11.28l-3.4 1.79.65-3.79L2.5 6.6l3.8-.55z'],
+  expand: ['M6 2.5H2.5V6', 'M10 2.5h3.5V6', 'M6 13.5H2.5V10', 'M10 13.5h3.5V10'],
   gear:  ['M8 5.8a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z',
           'M12.6 9.6l1.2.7-1.3 2.2-1.3-.5a4.9 4.9 0 0 1-1.2.7L9.7 14h-2.6L6.9 12.7a4.9 4.9 0 0 1-1.2-.7l-1.3.5L3.1 10.3l1.2-.7a4.9 4.9 0 0 1 0-1.4l-1.2-.7 1.3-2.2 1.3.5a4.9 4.9 0 0 1 1.2-.7L7.1 3h2.6l.3 1.3c.43.17.83.4 1.2.7l1.3-.5 1.3 2.2-1.2.7a4.9 4.9 0 0 1 0 1.4z']
 };
@@ -190,7 +193,13 @@ function zoomRow(item) {
   into.disabled = item.enabled === false;
   into.addEventListener('click', () => step('in'));
 
-  row.append(label, reset, out, value, into);
+  // Reset last, after the stepper it resets.
+  //
+  // It sat between the label and the minus, which put a word in the middle of
+  // a control: the eye reads "Zoom … Reset … − 110% +" and has to work out
+  // which of the three things the Reset belongs to. At the end it reads as what
+  // it is - the way back from wherever the stepper has got to.
+  row.append(label, out, value, into, reset);
   return row;
 }
 

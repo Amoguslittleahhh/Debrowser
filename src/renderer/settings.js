@@ -221,6 +221,27 @@ function buildAll() {
   built = true;
 }
 
+/**
+ * Scroll to the section the address asked for, and say which one it was.
+ *
+ * `debrowser://settings#downloads` from the menu lands here. Done once, after
+ * the page is built - the controls are generated, so before that there is
+ * nothing to scroll to - and the brief highlight matters as much as the scroll:
+ * a page that jumps to the middle of itself with no explanation reads as a page
+ * that failed to load its top half.
+ */
+function revealSection() {
+  const wanted = decodeURIComponent(location.hash.slice(1));
+  if (!wanted) return;
+  const section = document.querySelector(`section[data-section="${CSS.escape(wanted)}"]`);
+  if (!section) return;
+  section.scrollIntoView({ block: 'start', behavior: 'auto' });
+  section.classList.add('landed');
+  // Removed rather than left on the element: it is an arrival, not a state, and
+  // a highlight that never goes away is just a differently coloured section.
+  setTimeout(() => section.classList.remove('landed'), 1400);
+}
+
 function buildRow(spec) {
   const row = document.createElement('div');
   row.className = 'row';
@@ -608,7 +629,10 @@ api.onState((state) => {
   renderUpdateState(state.updates);
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
-  if (!built) { buildAll(); renderCredentials(); renderBookmarks(); renderPresence(); }
+  if (!built) {
+    buildAll(); renderCredentials(); renderBookmarks(); renderPresence();
+    revealSection();
+  }
   renderDownloads();
   for (const [key, control] of controls) control.write(state.prefs[key]);
 });

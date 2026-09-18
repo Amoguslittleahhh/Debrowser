@@ -203,10 +203,27 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
   white-space: nowrap;
 }
 
-.tab-favicon {
+/*
+ * The icon holder: one 15px box with the letter, the favicon and the loading
+ * spinner stacked in it.
+ *
+ * Stacked rather than laid out in a row, so the title never moves. A site's
+ * icon arrives some hundreds of milliseconds after its page, and a strip whose
+ * labels all shuffle right when the icons land is a strip that looks broken
+ * while it is merely loading.
+ */
+.tab-icon {
+  position: relative;
   width: 15px;
   height: 15px;
   flex: none;
+}
+
+.tab-favicon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border-radius: 3px;
   object-fit: contain;
 }
@@ -223,11 +240,10 @@ body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; 
  * same colour in both.
  */
 .tab-chip {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  width: 15px;
-  height: 15px;
-  flex: none;
   border-radius: 4px;
   font-size: 9.5px;
   font-weight: var(--fw-bold);
@@ -248,6 +264,34 @@ body:not([data-theme="dark"]) .tab-chip {
     background: hsl(var(--hue, 220) 42% 26%);
   }
 }
+
+/*
+ * The loading spinner, in the tab, where Chrome puts it.
+ *
+ * One element, one rotation, and it exists only while a tab is actually
+ * loading - `data-loading` is written by the renderer on a change, not on every
+ * state broadcast. A `border-top-color` ring costs no image and no second
+ * element, and the rotation is a transform, so it stays on the compositor and
+ * never touches layout.
+ */
+.tab[data-loading="on"] .tab-chip,
+.tab[data-loading="on"] .tab-favicon { opacity: 0; }
+
+.tab[data-loading="on"] .tab-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  animation: tab-spin 700ms linear infinite;
+}
+
+@keyframes tab-spin { to { transform: rotate(360deg); } }
+
+/* Stillness means stillness: the ring stays, and stops. It still reads as "this
+   tab is busy" because it is a ring where an icon usually is. */
+body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
 
 /*
  * Tier badge. The whole point of this browser is that it is constantly moving
@@ -399,10 +443,22 @@ body:not([data-theme="dark"]) .tab-chip {
 
 .scheme {
   flex: none;
-  margin-right: 6px;
+  width: 14px;
+  height: 14px;
+  margin-right: 7px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   color: var(--text-dim);
-  font-size: var(--fs-small);
 }
+
+/* An unencrypted connection is worth a colour, and the warning colour is the
+   one the meter already uses for "you should look at this". It is not red:
+   plain http is a caution, not a failure, and spending the critical colour on
+   it would leave nothing louder for something that actually is. */
+.scheme[data-kind="insecure"] { color: var(--warn); }
 
 /* The pill draws the focus ring for this field - see `.omnibox:focus-within` -
    so the field must not draw a second one inside it. */

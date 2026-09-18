@@ -33,6 +33,7 @@ const el = {
   reload: document.getElementById('reload'),
   url: document.getElementById('url'),
   scheme: document.getElementById('scheme'),
+  schemePaths: ['scheme-a', 'scheme-b', 'scheme-c'].map((id) => document.getElementById(id)),
   meter: document.getElementById('meter'),
   meterFill: document.getElementById('meter-fill'),
   meterText: document.getElementById('meter-text'),
@@ -150,6 +151,10 @@ function createTabElement(id) {
   favicon.className = 'tab-favicon';
   favicon.alt = '';
   favicon.hidden = true;
+  // Decoded off the main thread. The strip is the one renderer that must stay
+  // responsive while a page is busy, and a synchronous decode of a 128px PNG in
+  // the middle of a tab switch is exactly the kind of hitch that shows.
+  favicon.decoding = 'async';
 
   // Shown until a favicon arrives, and for good on the many sites that never
   // send one. Both elements exist for the life of the tab and one of them is
@@ -158,6 +163,22 @@ function createTabElement(id) {
   const chip = document.createElement('span');
   chip.className = 'tab-chip';
   chip.setAttribute('aria-hidden', 'true');
+
+  /*
+   * An icon that does not load falls back to the letter, rather than to a
+   * broken image.
+   *
+   * This is not an edge case. Chromium reports a favicon URL for *every* page:
+   * measured, a page that declares no icon at all still arrives here as
+   * `<origin>/favicon.ico`, because that is the address Chromium would try.
+   * Plenty of sites do not serve it. Without this the strip showed a broken
+   * image where the site's logo should be - worse than the letter it replaced,
+   * and the reason tabs looked wrong.
+   */
+  favicon.addEventListener('error', () => {
+    favicon.hidden = true;
+    chip.hidden = false;
+  });
 
   const audio = document.createElement('span');
   audio.className = 'audio-dot';
@@ -172,7 +193,15 @@ function createTabElement(id) {
   close.textContent = '×';
   close.setAttribute('aria-label', 'Close tab');
 
-  root.append(tier, favicon, chip, title, audio, close);
+  // One 15px box holding both, stacked rather than side by side: the letter is
+  // underneath, the icon covers it when it loads, and the spinner replaces both
+  // while the page does. Laying them out in a row instead would move the title
+  // every time an icon arrived.
+  const icon = document.createElement('span');
+  icon.className = 'tab-icon';
+  icon.append(chip, favicon);
+
+  root.append(tier, icon, title, audio, close);
 
   root.addEventListener('mousedown', (event) => {
     if (event.button === 1) { api.send('close-tab', { id }); return; }
@@ -219,9 +248,18 @@ function updateTabElement(node, tab) {
   }
 
   if (prev.favicon !== tab.favicon) {
-    if (tab.favicon) { node.favicon.src = tab.favicon; node.favicon.hidden = false; }
-    else node.favicon.hidden = true;
-    node.chip.hidden = Boolean(tab.favicon);
+    if (tab.favicon) {
+      // Both shown until the image says otherwise: the chip is behind the icon,
+      // so a slow fetch shows the letter rather than a gap, and the icon covers
+      // it the moment it decodes. The error handler above puts the letter back
+      // if it never does.
+      node.favicon.src = tab.favicon;
+      node.favicon.hidden = false;
+    } else {
+      node.favicon.removeAttribute('src');
+      node.favicon.hidden = true;
+    }
+    node.chip.hidden = false;
     prev.favicon = tab.favicon;
   }
 
@@ -254,6 +292,14 @@ function updateTabElement(node, tab) {
   if (prev.audible !== tab.audible) {
     node.audio.hidden = !tab.audible;
     prev.audible = tab.audible;
+  }
+
+  // The spinner is Chrome's, and it belongs in the tab rather than only in the
+  // line under the toolbar: with twenty tabs open and three of them loading, a
+  // single bar at the top says that *something* is loading and not which.
+  if (prev.loading !== tab.loading) {
+    node.root.dataset.loading = tab.loading ? 'on' : 'off';
+    prev.loading = tab.loading;
   }
 }
 
@@ -329,13 +375,46 @@ function renderToolbar(state) {
 }
 
 
+/**
+ * What the padlock says, as path data.
+ *
+ * Three slots because the widest glyph needs three; a shorter one leaves the
+ * rest empty rather than adding and removing elements on every navigation.
+ */
+const SCHEME_GLYPHS = {
+  secure: ['M4.6 7.4h6.8v5.1H4.6z', 'M6.2 7.4V5.9a1.8 1.8 0 0 1 3.6 0v1.5', ''],
+  insecure: ['M8 2.9a5.1 5.1 0 1 0 0 10.2 5.1 5.1 0 0 0 0-10.2z', 'M8 5.3v3.5', 'M8 10.7h.01']
+};
+
+/** What the indicator currently shows, so it is only rewritten on a change. */
+let schemeShows = null;
+
+function setScheme(kind) {
+  if (kind === schemeShows) return;
+  schemeShows = kind;
+  el.scheme.hidden = !kind;
+  el.scheme.dataset.kind = kind || '';
+  if (!kind) return;
+  SCHEME_GLYPHS[kind].forEach((d, i) => {
+    if (d) el.schemePaths[i].setAttribute('d', d);
+    else el.schemePaths[i].removeAttribute('d');
+  });
+  el.scheme.setAttribute('aria-label',
+    kind === 'secure' ? 'Connection is encrypted' : 'Connection is not encrypted');
+}
+
 function setAddress(url) {
   try {
     const parsed = new URL(url);
-    el.scheme.textContent = parsed.protocol === 'https:' ? '\u{1F512}' : '';
+    // Nothing at all for the browser's own pages: they are not a connection,
+    // and a padlock on Settings would be claiming something that has no
+    // meaning there.
+    if (parsed.protocol === 'https:') setScheme('secure');
+    else if (parsed.protocol === 'http:') setScheme('insecure');
+    else setScheme(null);
     el.url.value = url;
   } catch {
-    el.scheme.textContent = '';
+    setScheme(null);
     el.url.value = url || '';
   }
 }

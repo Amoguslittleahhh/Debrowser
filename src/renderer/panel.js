@@ -234,6 +234,13 @@ function createRow(id) {
   const dot = document.createElement('span');
   dot.className = 'dot';
 
+  // The site's own icon, so a list of twenty rows can be read by looking rather
+  // than by reading. Same treatment as the tab strip: the letter underneath,
+  // the logo over it, and the logo removed if it never loads.
+  const chip = document.createElement('span');
+  chip.className = 'row-chip';
+  chip.setAttribute('aria-hidden', 'true');
+
   const main = document.createElement('div');
   main.className = 'row-main';
   const title = document.createElement('div');
@@ -254,8 +261,8 @@ function createRow(id) {
     if (event.target !== action) api.send('activate-tab', { id });
   });
 
-  root.append(dot, main, mem, action);
-  return { root, dot, title, sub, mem, action, state: {} };
+  root.append(dot, chip, main, mem, action);
+  return { root, dot, chip, title, sub, mem, action, state: {} };
 }
 
 function updateRow(row, tab) {
@@ -277,6 +284,31 @@ function updateRow(row, tab) {
     prev.tier = tab.tier;
   }
 
+  // Keyed on the site rather than the URL: a tab moving between pages on one
+  // host keeps its letter and its colour, and rewriting them on every
+  // navigation would be work for no visible change.
+  const host = siteOf(tab.url);
+  if (prev.host !== host) {
+    row.chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+    row.chip.style.setProperty('--hue', String(siteHue(host)));
+    prev.host = host;
+  }
+
+  if (prev.favicon !== tab.favicon) {
+    if (row.icon) { row.icon.remove(); row.icon = null; }
+    if (tab.favicon) {
+      const icon = document.createElement('img');
+      icon.className = 'row-icon';
+      icon.alt = '';
+      icon.decoding = 'async';
+      icon.src = tab.favicon;
+      icon.addEventListener('error', () => icon.remove());
+      row.chip.append(icon);
+      row.icon = icon;
+    }
+    prev.favicon = tab.favicon;
+  }
+
   const mem = tab.tier === 'discarded' ? '—' : `${tab.rssMB} MB`;
   if (prev.mem !== mem) {
     row.mem.textContent = mem;
@@ -293,6 +325,17 @@ function updateRow(row, tab) {
   if (prev.disabled !== disabled) {
     row.action.disabled = disabled;
     prev.disabled = disabled;
+  }
+}
+
+/** The site a tab is on, for the chip's letter and colour. */
+function siteOf(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'debrowser:') return 'debrowser';
+    return parsed.hostname.replace(/^www\./, '') || parsed.protocol;
+  } catch {
+    return '';
   }
 }
 

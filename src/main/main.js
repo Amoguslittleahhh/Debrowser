@@ -244,8 +244,8 @@ function main() {
       case 'visited':
         if (history && payload?.url) history.record({ url: payload.url, title: tab.title });
         break;
-      case 'titled':
-        if (history && payload?.url) history.retitle(payload.url, payload.title);
+      case 'described':
+        if (history && payload?.url) history.describe(payload.url, payload);
         break;
       case 'closed':
         if (shell) shell.detachTab(tab);
@@ -551,6 +551,24 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
         publish();
         break;
 
+      // Bookmarks and downloads are sections of Settings rather than pages of
+      // their own. Deep-linked rather than merely opened: landing at the top of
+      // a settings page having asked for downloads is the kind of near-miss
+      // that makes a menu item feel broken.
+      case 'open-bookmarks':
+        openInternalPage(tabs, `${pages.SETTINGS_URL}#bookmarks`);
+        publish();
+        break;
+
+      case 'open-downloads':
+        openInternalPage(tabs, `${pages.SETTINGS_URL}#downloads`);
+        publish();
+        break;
+
+      case 'toggle-fullscreen':
+        if (!shell.window.isDestroyed()) shell.window.setFullScreen(!shell.window.isFullScreen());
+        break;
+
       case 'zoom':
         if (payload?.direction === 'reset') {
           if (active?.isLive) active.wc.setZoomFactor(1);
@@ -641,7 +659,9 @@ function pageShortcut(input) {
   const key = String(input.key || '').toLowerCase();
 
   if (key === 'f12') return 'toggle-devtools';
+  if (key === 'f11') return 'toggle-fullscreen';
   if (mod && input.shift && key === 'i') return 'toggle-devtools';
+  if (mod && input.shift && key === 'o') return 'open-bookmarks';
   if (!mod || input.shift || input.alt) return null;
 
   switch (key) {
@@ -650,6 +670,7 @@ function pageShortcut(input) {
     case 'r': return 'reload';
     case 'm': return 'toggle-panel';
     case 'h': return 'open-history';
+    case 'j': return 'open-downloads';
     case 'p': return 'print';
     case ',': return 'open-settings';
     default: return null;
@@ -1029,10 +1050,29 @@ function openInternalPage(tabs, url) {
   const wanted = pages.pageName(url);
   const existing = tabs.all().find((t) => t.internal && pages.pageName(t.url) === wanted);
   if (existing) {
+    // Already open, and asked for a particular section of it: reload at that
+    // address. A page reached by focusing the tab it is already in would
+    // otherwise ignore the fragment and leave the user at the top, which is
+    // indistinguishable from the menu item doing nothing. Settings and history
+    // are both cheap to rebuild and hold no unsaved state, which is what makes
+    // this affordable.
+    const section = hashOf(url);
+    if (section && existing.isLive && hashOf(existing.url) !== section) {
+      existing.wc.loadURL(url).catch(() => {});
+    }
     tabs.activate(existing.id).catch(() => {});
     return existing;
   }
   return tabs.create({ url });
+}
+
+/** The `#section` of one of our own URLs, or '' - never throws on a bad one. */
+function hashOf(url) {
+  try {
+    return new URL(url).hash;
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -1087,14 +1127,30 @@ function menuModel({ tabs, shell }) {
   const active = tabs.activeTab();
   const zoom = active?.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100;
   const live = Boolean(active?.isLive);
+  const full = !shell.window.isDestroyed() && shell.window.isFullScreen();
 
+  // Grouped the way Chrome groups it - what you opened, where you have been,
+  // what this page can do, what the browser can do - because that ordering is
+  // twenty years of muscle memory and there is nothing to gain by being
+  // different. What is in each group is ours.
   return [
     { id: 'new-tab', label: 'New tab', accel: `${MOD}+T`, icon: 'plus' },
     { kind: 'separator' },
+    { id: 'open-history', label: 'History', accel: `${MOD}+H`, icon: 'clock' },
+    { id: 'open-downloads', label: 'Downloads', accel: `${MOD}+J`, icon: 'download' },
+    { id: 'open-bookmarks', label: 'Bookmarks', accel: `${MOD}+Shift+O`, icon: 'star' },
+    { kind: 'separator' },
     { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live },
+    {
+      id: 'toggle-fullscreen',
+      label: 'Full screen',
+      accel: 'F11',
+      icon: 'expand',
+      kind: 'checkbox',
+      checked: full
+    },
     { id: 'print', label: 'Print\u2026', accel: `${MOD}+P`, icon: 'print', enabled: live },
     { kind: 'separator' },
-    { id: 'open-history', label: 'History', accel: `${MOD}+H`, icon: 'clock' },
     {
       id: 'toggle-panel',
       label: 'Task manager',

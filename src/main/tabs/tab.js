@@ -301,18 +301,25 @@ class Tab {
   wireEvents() {
     const wc = this.wc;
 
+    // What the page says about itself, as one event.
+    //
+    // Separate from 'updated', which also fires for loading and audio changes.
+    // The history store answers this one by searching its list for the URL, and
+    // doing that on every state change would be a scan of ten thousand entries
+    // several times per page load.
+    const described = () => this.emit('described', {
+      url: this.url, title: this.title, favicon: this.favicon
+    });
+
     wc.on('page-title-updated', (_e, title) => {
       this.title = title;
-      // Separate from 'updated', which fires for loading, audio and favicon
-      // changes too. The history store answers this one by searching its list
-      // for the URL, and doing that on every state change would be a scan of
-      // ten thousand entries several times per page load.
-      this.emit('titled', { url: this.url, title });
+      described();
       this.emit('updated');
     });
 
     wc.on('page-favicon-updated', (_e, icons) => {
       this.favicon = icons?.[0] || null;
+      described();
       this.emit('updated');
     });
 

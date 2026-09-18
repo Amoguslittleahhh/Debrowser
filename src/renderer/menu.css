@@ -121,11 +121,15 @@ body.calm .sheet { animation: none; }
 
 /* Inset from both ends rather than run edge to edge: a divider that stops
    short groups the items on either side of it, where one that touches the
-   walls cuts the sheet into separate boxes. */
+   walls cuts the sheet into separate boxes.
+
+   `--border`, not the softer one used inside a settings card: this sheet is
+   already the raised surface, and against it the soft rule is darker than the
+   background rather than lighter - a divider nobody can see. */
 .sep {
   height: 1px;
   margin: 5px 10px;
-  background: var(--border-soft);
+  background: var(--border);
 }
 
 .note {
@@ -152,7 +156,11 @@ body.calm .sheet { animation: none; }
   align-items: center;
   gap: 8px;
   height: 34px;
-  padding: 0 10px;
+  /* Indented to the icon column, so "Zoom" starts where every other label in
+     the menu starts. It is the one row with no glyph, and left at the sheet's
+     own padding it sat a glyph's width to the left of the list it is part
+     of - the sort of half-alignment that reads as carelessness. */
+  padding: 0 10px 0 36px;
 }
 
 .zoom-label { flex: 1; color: var(--text); }

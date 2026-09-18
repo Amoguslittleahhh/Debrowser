@@ -38,6 +38,17 @@ const PAGE = 300;
 const SEARCH_DEBOUNCE_MS = 130;
 let searchTimer = null;
 
+/** Where a site's icon is if it never said: the address Chromium would try. */
+function defaultIcon(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.origin}/favicon.ico`;
+  } catch {
+    return null;
+  }
+}
+
 function hostOf(url) {
   try {
     const parsed = new URL(url);
@@ -79,11 +90,30 @@ function row(entry) {
   time.className = 'time';
   time.textContent = timeLabel(entry.visitedAt);
 
+  // The site's own logo, on top of its letter.
+  //
+  // The store keeps an icon address only for sites that put theirs somewhere
+  // other than the default, so most rows derive it here from the page's origin
+  // - which is exactly the address Chromium itself would have tried. Plenty of
+  // sites do not answer it, and those fall back to the letter underneath rather
+  // than to a broken image.
   const chip = document.createElement('span');
   chip.className = 'chip';
   chip.setAttribute('aria-hidden', 'true');
   chip.style.setProperty('--hue', String(siteHue(host)));
   chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+
+  const iconUrl = entry.icon || defaultIcon(entry.url);
+  if (iconUrl) {
+    const icon = document.createElement('img');
+    icon.className = 'site-icon';
+    icon.alt = '';
+    icon.decoding = 'async';
+    icon.loading = 'lazy';
+    icon.src = iconUrl;
+    icon.addEventListener('error', () => icon.remove());
+    chip.append(icon);
+  }
 
   const text = document.createElement('span');
   text.className = 'visit-text';

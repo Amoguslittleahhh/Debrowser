@@ -73,6 +73,28 @@ function safeUrl(raw) {
   return parsed.href;
 }
 
+/**
+ * The icon address worth storing for a page, or null when it can be derived.
+ *
+ * `null` for anything that is the default `<origin>/favicon.ico`, for a
+ * non-http(s) icon, or for anything unparseable - the history page falls back
+ * to the derived address and then to the site's initial, so the cost of
+ * returning null here is never a broken row.
+ */
+function customIcon(pageUrl, iconUrl) {
+  if (typeof iconUrl !== 'string' || !iconUrl) return null;
+  let icon, page;
+  try {
+    icon = new URL(iconUrl);
+    page = new URL(pageUrl);
+  } catch {
+    return null;
+  }
+  if (icon.protocol !== 'http:' && icon.protocol !== 'https:') return null;
+  if (icon.href === `${page.origin}/favicon.ico`) return null;
+  return icon.href.slice(0, 2048);
+}
+
 function cleanTitle(raw, fallback) {
   if (typeof raw !== 'string') return fallback;
   const text = raw.replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE);
@@ -132,7 +154,11 @@ class History {
       url,
       title: cleanTitle(entry.title, url),
       visitedAt: Number.isFinite(entry.visitedAt) ? entry.visitedAt : Date.now(),
-      visits: Number.isFinite(entry.visits) && entry.visits > 0 ? Math.min(entry.visits, 1e6) : 1
+      visits: Number.isFinite(entry.visits) && entry.visits > 0 ? Math.min(entry.visits, 1e6) : 1,
+      // Present only for a site whose icon is somewhere other than the default
+      // address; see `describe`. `undefined` rather than null, so it does not
+      // appear in the file at all for the common case.
+      ...(customIcon(url, entry.icon) ? { icon: customIcon(url, entry.icon) } : {})
     };
   }
 
@@ -167,21 +193,42 @@ class History {
   }
 
   /**
-   * Give the most recent entry for a URL its real title.
+   * Record what the page has since said about itself: its title, and where its
+   * icon is.
    *
-   * A document's title arrives after the navigation that created the entry, so
-   * without this every row would read as its own address.
+   * Both arrive after the navigation that created the entry - a document
+   * announces its name and its icon once it has parsed - so without this every
+   * row would read as its own address with no logo.
+   *
+   * The icon is stored only when it is *not* the one that could be worked out
+   * from the address. Measured: Chromium reports `<origin>/favicon.ico` for
+   * every page that declares nothing, which is the large majority, and storing
+   * a string the history page can derive for itself would be tens of kilobytes
+   * of duplicated address across a full store. A custom path is kept, because
+   * that one cannot be guessed.
    */
-  retitle(url, title) {
+  describe(url, { title, favicon } = {}) {
     const clean = safeUrl(url);
-    if (!clean || typeof title !== 'string' || !title.trim()) return false;
+    if (!clean) return false;
     const entry = this.items.find((e) => e.url === clean);
     if (!entry) return false;
-    const next = cleanTitle(title, entry.title);
-    if (next === entry.title) return false;
-    entry.title = next;
-    this.queueSave();
-    return true;
+
+    let changed = false;
+
+    if (typeof title === 'string' && title.trim()) {
+      const next = cleanTitle(title, entry.title);
+      if (next !== entry.title) { entry.title = next; changed = true; }
+    }
+
+    const icon = customIcon(clean, favicon);
+    if (icon !== (entry.icon || null)) {
+      if (icon) entry.icon = icon;
+      else delete entry.icon;
+      changed = true;
+    }
+
+    if (changed) this.queueSave();
+    return changed;
   }
 
   /** Newest first, optionally filtered. `query` matches title or URL. */
@@ -263,4 +310,4 @@ function newId() {
   return `h-${Date.now().toString(36)}-${idCounter.toString(36)}`;
 }
 
-module.exports = { History, MAX_ENTRIES, safeUrl };
+module.exports = { History, MAX_ENTRIES, safeUrl, customIcon };

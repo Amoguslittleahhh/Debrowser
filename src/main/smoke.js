@@ -814,6 +814,41 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   }
 
   /* ---------------------------------------------------------------- */
+  // Favicons: the site's own logo, and what happens when there is not one.
+  //
+  // The second half of this is the load-bearing part. Chromium reports an icon
+  // address for *every* page - a page that declares nothing still arrives as
+  // `<origin>/favicon.ico`, because that is the address it would try - and
+  // plenty of sites do not serve it. That is why the tab strip keeps the
+  // letter chip behind the image and puts it back when the image errors, and
+  // why the history store can derive an icon address instead of keeping one.
+  // If this ever stopped being true, both of those would be built on nothing.
+  {
+    const branded = tabs.create({ url: pageUrl('branded.html'), activate: false, realise: true });
+    const bare = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true });
+    const gotIcons = await waitFor(() => branded.favicon && bare.favicon, { timeoutMs: 10_000 });
+
+    const declared = String(branded.favicon || '');
+    const derived = String(bare.favicon || '');
+    check('a page that declares an icon is reported with that icon',
+      gotIcons && declared.endsWith('/icon.svg'), declared || 'nothing reported');
+    check('a page that declares none is still reported, as the default address',
+      gotIcons && derived.endsWith('/favicon.ico'), derived || 'nothing reported');
+
+    // The store keeps an address only when it could not be worked out, which is
+    // what keeps a ten-thousand-entry history from carrying ten thousand copies
+    // of a string the page can derive.
+    const { customIcon } = require('./history');
+    check('history stores a custom icon address and derives the default one',
+      customIcon('https://a.test/page', 'https://a.test/logo.png') === 'https://a.test/logo.png' &&
+      customIcon('https://a.test/page', 'https://a.test/favicon.ico') === null,
+      'custom kept, default dropped');
+
+    tabs.close(branded.id);
+    tabs.close(bare.id);
+  }
+
+  /* ---------------------------------------------------------------- */
   // History: what was visited, and what deliberately was not.
   //
   // The browser's own pages are excluded by the store's scheme list rather than

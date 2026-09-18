@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:;">
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https: http:;">
   <title>Debrowser</title>
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="chrome.css">
@@ -39,7 +39,16 @@
     </div>
 
     <div class="omnibox" id="omnibox">
-      <span class="scheme" id="scheme" aria-hidden="true"></span>
+      <!--
+        The security indicator. A drawn glyph, not the 🔒 emoji it replaced:
+        an emoji is rendered by whichever colour font the machine has, at
+        whatever size that font decides, and the one part of a browser that
+        should never look like it came from a chat message is the thing that
+        says the connection is private.
+      -->
+      <svg class="scheme" id="scheme" viewBox="0 0 16 16" aria-hidden="true" hidden>
+        <path id="scheme-a"/><path id="scheme-b"/><path id="scheme-c"/>
+      </svg>
       <input id="url" type="text" spellcheck="false" autocomplete="off"
              placeholder="Search or type a URL" aria-label="Address and search bar">
     </div>

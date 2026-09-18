@@ -143,7 +143,8 @@ above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 ### Keyboard
 
 `Ctrl/Cmd+T` new tab · `+W` close · `+R` reload · `+L` address bar ·
-`+D` bookmark · `+H` history · `+M` task manager · `+,` settings ·
+`+D` bookmark · `+H` history · `+J` downloads · `+Shift+O` bookmarks ·
+`+M` task manager · `+,` settings · `+P` print · `F11` full screen ·
 `F12` or `Ctrl+Shift+I` developer tools
 
 All of these work while a page has the keyboard, not only while the chrome
@@ -537,6 +538,16 @@ tried, measured and removed — live on the `claude/research-build` branch.
   assumes, so the base size is 14px rather than 13, and it ships exactly two
   weights, so emphasis here is carried by colour and size rather than by a
   semibold that does not exist.
+- **Site icons are fetched from the site, never stored.** A tab, a history row
+  and a task-manager row all show the real favicon, with the site's initial on a
+  colour derived from its hostname underneath it — which is what you see while
+  the icon loads, and what stays for the many sites that serve none. Measured:
+  Chromium reports an icon address for *every* page, falling back to
+  `<origin>/favicon.ico` even when the page declares nothing, so an address is
+  always available and often 404s; the letter is the answer to that rather than
+  a broken image. History keeps an icon address only for sites whose icon is
+  somewhere other than the default, because the default one can be worked out
+  from the page's own address.
 - **History is plain JSON in your profile directory, not a secret store.** It is
   the one record here that is deliberately readable: encrypting a list of the
   pages you visited would hide it from you and from nobody else, since anything

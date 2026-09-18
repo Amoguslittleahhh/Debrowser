@@ -26,6 +26,23 @@ const PAGES = path.join(__dirname, '..', '..', 'test', 'pages');
 /** The Chromium switch that makes `*.test` hostnames resolve locally. */
 const HOST_RESOLVER_RULES = 'MAP *.test 127.0.0.1';
 
+/**
+ * What to serve a fixture as.
+ *
+ * Everything here used to go out as HTML, which was fine while every fixture
+ * was a page. A favicon served as text/html is not an image, and the tab strip
+ * would have shown nothing - so the one check that the icon path works would
+ * have failed for a reason that has nothing to do with the browser.
+ */
+const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon'
+};
+
+const contentType = (name) => TYPES[path.extname(name).toLowerCase()] || 'text/plain; charset=utf-8';
+
 function start() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
@@ -38,7 +55,7 @@ function start() {
         res.end('not found');
         return;
       }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { 'Content-Type': contentType(name) });
       fs.createReadStream(file).pipe(res);
     });
 
