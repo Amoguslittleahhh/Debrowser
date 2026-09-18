@@ -27,6 +27,7 @@ const COMMANDS = new Set([
   'discard-tab',
   'pin-tab',
   'prefetch-tab',
+  'prefetch-new-tab',
   'open-menu',
   'close-menu',
   'menu-model',

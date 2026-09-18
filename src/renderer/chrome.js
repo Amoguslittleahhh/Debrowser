@@ -574,6 +574,28 @@ function renderMeter(state) {
 /* ------------------------------------------------------------------ */
 
 el.newTab.addEventListener('click', () => api.send('new-tab'));
+
+/*
+ * Start the renderer while the pointer is still on its way.
+ *
+ * Measured: a new tab page costs 79ms when no page of the browser's own is
+ * live, and 46ms when the renderer is already up - and every page the browser
+ * serves itself shares one, so warming it on the way to the + also covers
+ * Settings and History from the menu. The same dwell as the tab strip's
+ * speculation, and for the same reason: sweeping the pointer across the
+ * toolbar must not start a renderer.
+ */
+for (const button of [el.newTab, el.menu]) {
+  let dwell = null;
+  const cancel = () => { clearTimeout(dwell); dwell = null; };
+  button.addEventListener('pointerenter', () => {
+    cancel();
+    dwell = setTimeout(() => api.send('prefetch-new-tab'), HOVER_DWELL_MS);
+  });
+  button.addEventListener('pointerleave', cancel);
+  // The click has asked for the real thing; the guess is redundant now.
+  button.addEventListener('mousedown', cancel);
+}
 el.back.addEventListener('click', () => api.send('back'));
 el.forward.addEventListener('click', () => api.send('forward'));
 el.reload.addEventListener('click', () => api.send(reloadShows === 'stop' ? 'stop' : 'reload'));

@@ -26,6 +26,7 @@ const icons = require('./icons');
 const presence = require('./presence');
 const { DownloadManager } = require('./downloads');
 const { Governor } = require('./governor');
+const { Prewarm } = require('./prewarm');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
 const pages = require('./pages');
@@ -187,6 +188,8 @@ function main() {
   /** @type {Credentials|null} */
   let credentials = null;
   let bookmarks = null;
+  /** @type {Prewarm|null} */
+  let prewarm = null;
   let downloads = null;
   /** @type {History|null} */
   let history = null;
@@ -331,6 +334,20 @@ function main() {
       governor.start();
     }
 
+    // Started while the pointer is still on its way to the + or the menu, so
+    // the first new tab page of a session does not pay to start a renderer
+    // after the click. Off under a test or a benchmark: both assert on measured
+    // memory, and a spare renderer appearing on a timer would make the numbers
+    // depend on where a pointer had been.
+    prewarm = new Prewarm({
+      partition: BROWSING_PARTITION,
+      preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
+      hasLiveInternal: () => tabs.all().some((t) => t.internal && t.isLive),
+      busy: () => Boolean(governor && governor.boost.quiesceRequested),
+      enabled: !OFFLINE_MODE,
+      log
+    });
+
     bookmarks = new Bookmarks(log);
     // So the state broadcast can carry the revision the bookmarks bar watches.
     shell.bookmarks = bookmarks;
@@ -348,7 +365,7 @@ function main() {
     // letter until the site was visited again.
     icons.rememberAll(history.all().map((entry) => entry.icon));
 
-    runCommand = wireCommands({ tabs, shell, governor, prefs, publish, log });
+    runCommand = wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm });
 
     // Downloads are taken over from Chromium rather than added beside it.
     //
@@ -428,6 +445,7 @@ function main() {
 
   app.on('before-quit', () => {
     if (updater) updater.stop();
+    if (prewarm) prewarm.drop();
     if (governor) governor.stop();
     // Writes are debounced by a few seconds, and quit does not wait for a
     // timer, so the last few pages visited would be lost on every close.
@@ -460,7 +478,7 @@ function main() {
  * while it has focus. Both must mean the same thing by 'new-tab', so there is
  * one switch and two ways in rather than a second copy for shortcuts.
  */
-function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
+function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null }) {
   const runCommand = (command, payload) => {
     const active = tabs.activeTab();
 
@@ -623,6 +641,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log }) {
       // Ctrl+Shift+B. Through the preference rather than a flag in the chrome,
       // because showing the bar takes 34px from the page - the window has to
       // lay out again, and the choice has to survive a restart.
+      // A dwell on the + or the menu. Both open one of the browser's own pages,
+      // and all of them share a renderer - so one warm process serves the new
+      // tab page, Settings and History alike.
+      case 'prefetch-new-tab':
+        if (prewarm) prewarm.warm();
+        break;
+
       case 'toggle-bookmarks-bar': {
         prefs.set('showBookmarksBar', !shell.bookmarksBarVisible());
         shell.layout();

@@ -18,6 +18,8 @@ const { applyPrefs } = require('./prefs');
 const platform = require('./platform');
 const fixtureServer = require('./fixture-server');
 const pages = require('./pages');
+const path = require('path');
+const { BROWSING_PARTITION } = require('./tabs/tab-manager');
 
 /**
  * Fixtures are served on distinct sites (t1.test, t2.test, …) rather than as
@@ -815,7 +817,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // allowlist cannot live in a module both sides share - and a second copy of
   // it here to compare against would be the drift this check is looking for.
   const preloadSource = fs.readFileSync(
-    require('path').join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
+    path.join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
   const unknown = ids.filter((id) => !preloadSource.includes(`'${id}'`));
   check('every item in the menu names a command the bridge allows',
     unknown.length === 0,
@@ -941,7 +943,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // until someone opened the page.
   {
     const { History } = require('./history');
-    const dir = fs.mkdtempSync(require('path').join(require('os').tmpdir(), 'debrowser-hist-'));
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-hist-'));
     let recording = true;
     const hist = new History(() => {}, { dir, enabled: () => recording });
 
@@ -1049,6 +1051,46 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     prefs.set('devToolsDock', 'right');
     tabs.close(target.id);
+  }
+
+  // The renderer warmed on a dwell over the + button.
+  //
+  // Exercised directly, because it is switched off under a test - a spare
+  // renderer appearing on a timer would move the memory figures every other
+  // check in this suite asserts on. The two properties worth holding are that
+  // it actually starts a process, since a prefetch that quietly does nothing
+  // would look exactly like one that works, and that it declines whenever
+  // spending 13MB on a guess is the wrong trade.
+  {
+    const { Prewarm } = require('./prewarm');
+    let liveInternal = false;
+    let busy = false;
+    const warmer = new Prewarm({
+      partition: BROWSING_PARTITION,
+      preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
+      hasLiveInternal: () => liveInternal,
+      busy: () => busy,
+      log: () => {}
+    });
+
+    warmer.warm();
+    const spawned = await waitFor(
+      () => Boolean(warmer.view) && warmer.view.webContents.getOSProcessId() > 0,
+      { timeoutMs: 10_000 });
+    warmer.drop();
+
+    liveInternal = true;
+    const skipsWhenLive = warmer.warm() === false;
+    liveInternal = false;
+    busy = true;
+    const skipsWhenBusy = warmer.warm() === false;
+    busy = false;
+    warmer.drop();
+
+    check('a hover warms a real renderer, and only when it would pay',
+      spawned && warmer.view === null && skipsWhenLive && skipsWhenBusy,
+      `spawned=${spawned}, released=${warmer.view === null}, ` +
+      `declined with a page already live=${skipsWhenLive}, mid-animation=${skipsWhenBusy}`);
   }
 
   // Updates must never run under a test: a background download competing with
