@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
-Four things: the menu is ours now, there is a history page, developer tools are a keystroke away, and both tab bars have a colour.
+The browser's own interface, rebuilt. Nothing in the governor moved: every memory figure quoted for 1.2.0 still stands, and the suite that proves them has grown from 74 checks to 89.
+
+What is new: a history page, Chromium's developer tools, an app menu Debrowser draws for itself instead of asking the operating system for one, real site logos wherever a page is listed, and the whole interface set in Aptos and Calibri on a design system that finally lives in one file. Six defects found by a review pass over all of it are fixed here too, two of them worse than they were reported.
 
 - **The three-dot menu is drawn by Debrowser instead of by the operating system.** It used to be `Menu.popup()`, for a reason that was true — the chrome is a view clipped to its 84px strip, so a dropdown drawn there stops at the toolbar's bottom edge, and a menu that cannot overflow its own window is not a menu. The way out is a second view, window-sized and transparent, created when the menu opens and destroyed when it closes: the menu can be drawn anywhere in the window, and the empty part of the view catches the click that dismisses it, which is the job a system popup does with a pointer grab we cannot take. Verified rather than assumed — a transparent `WebContentsView` really does composite over the views beneath it, measured by reading the X framebuffer with the menu open.
 - **What that buys:** the menu matches the browser rather than matching Win32, it themes and animates with everything else, and it can hold a control a platform menu item cannot. Zoom is now a stepper showing the current percentage, where it was three items behind a chevron — 100% to 125% and back used to be four interactions.

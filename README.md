@@ -60,7 +60,7 @@ Debrowser.exe --smoke-test              # Windows
 /opt/Debrowser/debrowser --smoke-test   # Linux
 ```
 
-43 checks on real pages. Worth doing here rather than taking it on trust: this
+89 checks on real pages. Worth doing here rather than taking it on trust: this
 project is tested on Linux and only *expected* to work on Windows and macOS.
 
 ---
@@ -75,7 +75,7 @@ npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
 npm run start:merged       # + page merging (KSM) - side-channel risk, read below
 npm run start:performance  # most headroom
 
-npm run smoke              # 41-check end-to-end test against real renderers
+npm run smoke              # 89-check end-to-end test against real renderers
 npm run bench              # memory benchmark
 ```
 

@@ -297,7 +297,7 @@ password page being screenshotted) and was not.
 
 ## The macOS smoke gate is advisory
 
-`release.yml` runs the 41-check suite on each platform before packaging it. On
+`release.yml` runs the 89-check suite on each platform before packaging it. On
 Linux and Windows a failure blocks the build. On macOS it is reported and does
 not.
 
