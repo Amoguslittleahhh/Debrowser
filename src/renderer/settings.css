@@ -62,7 +62,16 @@ main {
    width, and against a full window that leaves an empty half if it does not move. */
 /* More air above a group than inside it, so the eye reads the page as a few
    groups rather than one long list of equally-spaced rows. */
-section { max-width: 620px; margin: var(--s7) auto 0; }
+/*
+ * Wider than it was, which was 620px.
+ *
+ * Photographed at 1280px, the page was a narrow ribbon down the middle with
+ * more empty window either side of it than the settings themselves occupied -
+ * the layout of a phone page opened on a desktop. Chrome and Firefox both give
+ * their settings roughly this. The hint text keeps its own 52ch measure, so
+ * widening the card does not turn the explanations into long lines.
+ */
+section { max-width: 840px; margin: var(--s7) auto 0; }
 section:first-of-type { margin-top: var(--s5); }
 
 /*
@@ -267,7 +276,7 @@ input[type="range"] {
 }
 
 .note {
-  max-width: 620px;
+  max-width: 840px;
   margin: var(--s3) 2px 0;
   font-size: var(--fs-small);
   line-height: var(--lh-body);

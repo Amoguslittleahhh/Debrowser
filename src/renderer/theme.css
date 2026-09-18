@@ -98,7 +98,23 @@
 /* Colour                                                              */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Tell the engine which way round this UI is.
+ *
+ * Without it every control the *engine* draws - a checkbox, a scrollbar, a
+ * select's dropdown, the text caret, an autofill highlight - is rendered with
+ * light styling, because `color-scheme` defaults to `normal` and nothing in a
+ * stylesheet changes that. Our own CSS cannot reach them: a checkbox with
+ * `appearance: auto` is painted by Chromium, not by us.
+ *
+ * Photographed, which is how it was found: the unchecked box on Settings' own
+ * "Reduce motion" row was a stark white square on a dark page, beside checked
+ * boxes that looked fine, and the scrollbar beside it was a light track. One
+ * declaration fixes every one of them at once.
+ */
 :root {
+  color-scheme: dark;
+
   --bg: #16181d;
   --bg-raised: #1e2128;
   --bg-input: #24272f;
@@ -145,6 +161,7 @@
  */
 @media (prefers-color-scheme: light) {
   body:not([data-theme="dark"]) {
+    color-scheme: light;
     --bg: #f4f5f8;
     --bg-raised: #ffffff;
     --bg-input: #ffffff;
@@ -156,6 +173,7 @@
 }
 
 body[data-theme="light"] {
+  color-scheme: light;
   --bg: #f4f5f8;
   --bg-raised: #ffffff;
   --bg-input: #ffffff;
@@ -166,6 +184,7 @@ body[data-theme="light"] {
 }
 
 body[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #16181d;
   --bg-raised: #1e2128;
   --bg-input: #24272f;
@@ -297,6 +316,23 @@ body {
   outline: none;
   box-shadow: var(--ring);
 }
+
+/*
+ * `hidden` means hidden, whatever the element's own rule says.
+ *
+ * The UA's `[hidden] { display: none }` is a *user-agent* rule, so any author
+ * declaration beats it however weak - and the browser's own UI sets `display`
+ * on nearly everything it lays out. So `el.hidden = true` silently did nothing
+ * in three places at once: the downloads button in the toolbar (`display: grid`
+ * from `.icon-btn`) stayed visible with no downloads, and in the downloads
+ * flyout (`display: block`) every finished row kept a full progress bar and
+ * every row offered "Open file", including one that had failed.
+ *
+ * Found by photographing the panels rather than by reading them. Fixed here
+ * rather than per element, because the next person to write `hidden = true`
+ * should not have to know this.
+ */
+[hidden] { display: none !important; }
 
 /*
  * Figures that change keep their width.

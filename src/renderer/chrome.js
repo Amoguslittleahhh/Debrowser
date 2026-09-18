@@ -408,9 +408,10 @@ function createTabElement(id) {
    * behind it. The chip is a *fallback*, so it has to stop painting once it has
    * been replaced.
    *
-   * A class rather than `chip.hidden = true`: `.tab-chip` sets `display: grid`,
-   * and an author rule beats the UA's `[hidden] { display: none }` whatever its
-   * specificity, so the attribute would have looked right and done nothing.
+   * A class rather than `chip.hidden = true`. Both work now - theme.css carries
+   * an author-level `[hidden]` rule, added after that collision turned up in
+   * three more places - but this is a state with a transition on it, and a
+   * class is what a state should be.
    */
   favicon.addEventListener('load', () => icon.classList.add('has-icon'));
 

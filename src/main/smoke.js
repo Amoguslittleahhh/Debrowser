@@ -931,6 +931,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       icon.classList.remove('has-icon');
       return { before, after };
     })()`).catch(() => null);
+    // `hidden` has to mean hidden, on an element with a `display` of its own.
+    //
+    // The UA's `[hidden] { display: none }` is a user-agent rule, so any author
+    // declaration beats it however weak - and this UI sets `display` on nearly
+    // everything. So `el.hidden = true` silently did nothing in three places at
+    // once: the toolbar's downloads button stayed visible with no downloads,
+    // and in the downloads flyout every finished row kept a full progress bar
+    // and offered "Open file", including one that had failed. Found by
+    // photographing the panels; fixed once, in theme.css.
+    const hiddenWorks = await shell.chromeView.webContents.executeJavaScript(`(() => {
+      // The menu button, because it is always visible - the downloads button
+      // next to it is legitimately hidden when nothing has been downloaded,
+      // which is every run of this suite.
+      const el = document.getElementById('menu');
+      if (!el) return null;
+      const before = getComputedStyle(el).display;
+      el.hidden = true;
+      const after = getComputedStyle(el).display;
+      el.hidden = false;
+      return { before, after };
+    })()`).catch(() => null);
+    check('an element with its own display still obeys `hidden`',
+      Boolean(hiddenWorks) && hiddenWorks.before !== 'none' && hiddenWorks.after === 'none',
+      hiddenWorks ? `display ${hiddenWorks.before} -> ${hiddenWorks.after}` : 'no button in the toolbar');
+
     check('a loaded favicon replaces the letter chip rather than sitting on it',
       Boolean(chipStack) && chipStack.before !== 'none' && chipStack.after === 'none',
       chipStack ? `chip display ${chipStack.before} -> ${chipStack.after}` : 'no tab in the strip');

@@ -52,6 +52,11 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* `min-width: 0` so a long label can be clipped rather than forcing its
+     track wider. The tiles are already equal thirds - `.summary` is a grid -
+     and what made the first one look wrong was its label wrapping to two lines
+     and standing the tile taller than the two beside it. */
+  min-width: 0;
   padding: 8px 10px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
@@ -59,7 +64,15 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 }
 
 .stat-value { font-size: var(--fs-lead); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
-.stat-label { font-size: var(--fs-micro); color: var(--text-dim); text-transform: uppercase; letter-spacing: var(--ls-label); }
+.stat-label {
+  font-size: var(--fs-micro);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .budget-row {
   display: flex;
