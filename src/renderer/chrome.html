@@ -59,6 +59,21 @@
       </svg>
     </button>
 
+    <!--
+      Downloads. Hidden until there is something to show, the way Chrome and
+      Edge both do it: a button that is dead for the first hour of every session
+      is a button in the way. The ring around it fills while something is
+      arriving, so the toolbar answers "is it done yet" without being opened.
+    -->
+    <button class="icon-btn downloads" id="downloads" hidden
+            title="Downloads (Ctrl+J)" aria-label="Downloads">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/>
+        <path d="M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5"/>
+      </svg>
+      <span class="downloads-ring" id="downloads-ring" aria-hidden="true"></span>
+    </button>
+
     <button class="meter" id="meter" title="Resource governor — click for the task manager">
       <span class="meter-bar"><span class="meter-fill" id="meter-fill"></span></span>
       <span class="meter-text" id="meter-text">—</span>

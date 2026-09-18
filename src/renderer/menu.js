@@ -233,25 +233,7 @@ async function step(direction) {
  * carries its own coordinates rather than being inferred here.
  */
 function place() {
-  const sheet = el.sheet;
-  const width = sheet.offsetWidth;
-  const height = sheet.offsetHeight;
-  const right = anchor.right || anchor.x;
-
-  let left = right - width;
-  left = Math.min(Math.max(EDGE, left), Math.max(EDGE, window.innerWidth - width - EDGE));
-
-  let top = anchor.y + 6;
-  if (top + height > window.innerHeight - EDGE) {
-    // Above the button if it fits there, otherwise pinned to the bottom edge -
-    // a menu hanging off the screen is worse than one that is not where it was
-    // asked to be.
-    const above = anchor.y - height - 40;
-    top = above > EDGE ? above : Math.max(EDGE, window.innerHeight - height - EDGE);
-  }
-
-  sheet.style.left = `${Math.round(left)}px`;
-  sheet.style.top = `${Math.round(top)}px`;
+  anchorSheet(el.sheet, anchor, EDGE);
 }
 
 /* ------------------------------------------------------------------ */

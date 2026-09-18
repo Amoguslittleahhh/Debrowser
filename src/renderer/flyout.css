@@ -1,0 +1,196 @@
+/*
+ * The downloads flyout.
+ *
+ * Sits on menu.css, which supplies the sheet, the backdrop, the shadow and the
+ * way it arrives - the two panels in this toolbar are one treatment, and the
+ * only thing that should differ is what is inside them. Everything here is
+ * about a list of files, which a menu of commands has no use for.
+ */
+
+.flyout {
+  /* Wider than the menu: a filename needs the room, and truncating one to a
+     command's width defeats the point of showing it. */
+  width: 340px;
+  padding: 0;
+}
+
+.flyout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px 8px 14px;
+}
+
+.flyout-head h2 {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+}
+
+.flyout-all {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: default;
+}
+.flyout-all:hover { background: var(--wash-soft); }
+.flyout-all:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+
+.flyout-list {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 0 6px 8px;
+}
+
+.flyout-empty {
+  margin: 0;
+  padding: 6px 14px 20px;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+
+/* ---------------------------------------------------------------- */
+
+.dl {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius);
+  transition: background-color var(--fast) ease;
+}
+.dl:hover { background: var(--wash-soft); }
+
+.dl-text { flex: 1; min-width: 0; }
+
+.dl-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A file that is gone reads as gone, the way Edge strikes it through - a row
+   that looks identical to a live one but does nothing when pressed is worse
+   than one that says so. */
+.dl[data-state="cancelled"] .dl-name,
+.dl[data-state="failed"] .dl-name {
+  text-decoration: line-through;
+  color: var(--text-dim);
+}
+
+.dl-status {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.dl[data-state="failed"] .dl-status { color: var(--crit); }
+
+/* "Open file", styled as the link it behaves like. */
+.dl-link {
+  display: block;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-small);
+  text-align: left;
+  cursor: default;
+}
+.dl-link:hover { text-decoration: underline; }
+.dl-link:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+
+/*
+ * The progress bar: a transform on one element, so a download updating four
+ * times a second never causes layout. The same rule the toolbar's memory meter
+ * follows, and worth following here because this panel redraws while you watch.
+ */
+.dl-meter {
+  display: block;
+  height: 3px;
+  margin: 6px 0 3px;
+  border-radius: 2px;
+  background: var(--wash);
+  overflow: hidden;
+}
+
+.dl-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 200ms linear;
+}
+
+.dl-action {
+  flex: none;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: default;
+}
+.dl-action:hover { background: var(--wash); color: var(--text); }
+.dl-action:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+
+/* The site's mark, exactly as the history list and the downloads page draw it. */
+.dl-chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  text-transform: uppercase;
+  color: hsl(var(--hue, 220) 70% 72%);
+  background: hsl(var(--hue, 220) 45% 22%);
+}
+
+body[data-theme="light"] .dl-chip,
+body:not([data-theme="dark"]) .dl-chip {
+  color: hsl(var(--hue, 220) 55% 32%);
+  background: hsl(var(--hue, 220) 70% 92%);
+}
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .dl-chip {
+    color: hsl(var(--hue, 220) 70% 72%);
+    background: hsl(var(--hue, 220) 45% 22%);
+  }
+}
+
+/* Stops painting once the site's own logo is up rather than showing through it.
+   `body` is in the selector only to out-specify the variants above. */
+body .dl-chip.has-icon {
+  background: none;
+  color: transparent;
+}
+
+.dl-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+}

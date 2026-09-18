@@ -121,3 +121,39 @@ function applyThemePrefs(prefs) {
   // user instead of before them.
   body.classList.toggle('calm', prefs.reduceMotion === true);
 }
+
+/**
+ * Put a sheet under the button that opened it.
+ *
+ * Shared by the app menu and the downloads flyout, which are the same shape:
+ * a panel in a window-sized transparent view, right-aligned to a toolbar
+ * button, kept inside the window when it will not fit where it was asked to
+ * go. Two copies of this arithmetic drifting apart is how one panel ends up
+ * hanging off the bottom of the screen while the other does not.
+ *
+ * @param {HTMLElement} sheet
+ * @param {{x:number, y:number, right:number}} anchor - window coordinates of
+ *   the button; `right` is its right edge, which is the one a panel aligns to.
+ * @param {number} edge - how close to the window's sides it may come
+ */
+/* eslint-disable-next-line no-unused-vars -- read by menu.js and flyout.js */
+function anchorSheet(sheet, anchor, edge = 8) {
+  const width = sheet.offsetWidth;
+  const height = sheet.offsetHeight;
+  const right = anchor.right || anchor.x;
+
+  let left = right - width;
+  left = Math.min(Math.max(edge, left), Math.max(edge, window.innerWidth - width - edge));
+
+  let top = anchor.y + 6;
+  if (top + height > window.innerHeight - edge) {
+    // Above the button if it fits there, otherwise pinned to the bottom edge -
+    // a panel hanging off the screen is worse than one that is not quite where
+    // it was asked to be.
+    const above = anchor.y - height - 40;
+    top = above > edge ? above : Math.max(edge, window.innerHeight - height - edge);
+  }
+
+  sheet.style.left = `${Math.round(left)}px`;
+  sheet.style.top = `${Math.round(top)}px`;
+}

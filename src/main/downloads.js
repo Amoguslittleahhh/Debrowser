@@ -472,6 +472,50 @@ class DownloadManager {
     return true;
   }
 
+  /**
+   * Where a finished download landed, by id.
+   *
+   * Separate from `snapshot()`, which is what crosses into a renderer: a
+   * filesystem path is not something the chrome needs in order to draw a row,
+   * and the one place it is needed - revealing or opening the file - is
+   * resolved here from an id the renderer sends. So a compromised chrome can
+   * ask to open *a download*, never an arbitrary path.
+   *
+   * Only a completed download has a file worth opening; a running one is a
+   * partial, and a failed one was unlinked.
+   */
+  pathOf(id) {
+    const item = this.items.get(id);
+    return item && item.state === 'done' && item.file ? item.file : null;
+  }
+
+  /**
+   * Just enough for the toolbar button, on the state broadcast.
+   *
+   * The whole list would be the wrong thing to push into three views twice a
+   * second for a button that shows a count and a ring - the same reasoning that
+   * keeps bookmarks and credentials off that message. The flyout asks for the
+   * list when it opens, which is the only time anyone can read it.
+   */
+  summary() {
+    let active = 0;
+    let received = 0;
+    let total = 0;
+    for (const item of this.items.values()) {
+      if (item.state !== 'running' && item.state !== 'starting') continue;
+      active += 1;
+      received += item.received || 0;
+      total += item.total || 0;
+    }
+    return {
+      count: this.items.size,
+      active,
+      // Null rather than zero where no running download has declared a size:
+      // an empty ring and a ring at 0% mean different things.
+      progress: total > 0 ? Math.max(0, Math.min(1, received / total)) : null
+    };
+  }
+
   list() {
     return [...this.items.values()]
       .sort((a, b) => b.startedAt - a.startedAt)

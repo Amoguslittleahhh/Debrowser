@@ -103,6 +103,7 @@ module.exports = [
         applyThemePrefs: 'readonly',
         siteHue: 'readonly',
         iconSrc: 'readonly',
+        anchorSheet: 'readonly',
         URLSearchParams: 'readonly',
         // Preloads only.
         require: 'readonly',

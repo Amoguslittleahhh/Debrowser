@@ -11,7 +11,7 @@
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session, Menu, dialog } = require('electron');
+const { app, ipcMain, session, Menu, dialog, shell: electronShell } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
@@ -382,6 +382,9 @@ function main() {
       log,
       onChange: () => publish()
     });
+    // So the state broadcast can carry the count and progress the toolbar
+    // button draws, without carrying the list itself.
+    shell.downloads = downloads;
     session.fromPartition(BROWSING_PARTITION).on('will-download', (event, item) => {
       const url = item.getURL();
       // Only what a download can mean. A blob: or data: URL has no server to
@@ -560,15 +563,40 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         publish();
         break;
 
-      // The menu is ours, drawn in a view of our own. See BrowserShell#openMenu
-      // for why it is a separate view rather than part of the chrome, and why
-      // it is no longer the system's popup.
+      // The menu and the downloads flyout are ours, drawn in a view of our
+      // own. See BrowserShell#openSheet for why a panel is a separate view
+      // rather than part of the chrome, and why neither is a system popup.
       case 'open-menu':
-        shell.openMenu(payload);
+        shell.openSheet('menu', payload);
+        break;
+
+      // Edge's shape, and the one asked for: the button in the toolbar opens a
+      // panel of recent files with live progress, and the full page is a click
+      // away inside it. `Ctrl+J` and the menu item come here too, so there is
+      // one downloads gesture rather than two that disagree.
+      case 'open-downloads': {
+        // The menu item and a page-level Ctrl+J arrive with no anchor, because
+        // only the chrome knows where its button ended up after the toolbar
+        // laid out. Falling back to the top right, under the toolbar, puts the
+        // panel where that button is rather than in the corner of the window.
+        const right = Number(payload?.right);
+        const anchored = Number.isFinite(right) && right > 0
+          ? payload
+          : { x: 0, y: shell.chromeHeight() - 8,
+              right: shell.window.getContentBounds().width - 12 };
+        shell.openSheet('downloads', anchored);
+        break;
+      }
+
+      // The page behind the flyout, for searching a long history of them.
+      case 'open-downloads-page':
+        shell.closeSheet();
+        openInternalPage(tabs, pages.DOWNLOADS_URL);
+        publish();
         break;
 
       case 'close-menu':
-        shell.closeMenu();
+        shell.closeSheet();
         break;
 
       case 'open-settings':
@@ -581,17 +609,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         publish();
         break;
 
-      // Bookmarks and downloads are sections of Settings rather than pages of
-      // their own. Deep-linked rather than merely opened: landing at the top of
-      // a settings page having asked for downloads is the kind of near-miss
-      // that makes a menu item feel broken.
+      // Bookmarks are still a section of Settings. Deep-linked rather than
+      // merely opened: landing at the top of a settings page having asked for
+      // bookmarks is the kind of near-miss that makes a menu item feel broken.
       case 'open-bookmarks':
         openInternalPage(tabs, `${pages.SETTINGS_URL}#bookmarks`);
-        publish();
-        break;
-
-      case 'open-downloads':
-        openInternalPage(tabs, pages.DOWNLOADS_URL);
         publish();
         break;
 
@@ -783,6 +805,13 @@ function senderMayCommand(tabs, shell, sender) {
  */
 const CHROME_REQUESTS = new Set([
   'list-bookmarks', 'toggle-bookmark', 'remove-bookmark',
+  // The downloads flyout is drawn in the sheet, which is one of the chrome's
+  // own views. Downloads are not secrets - they are files the user asked for,
+  // sitting in their own downloads directory - so this is a list the chrome may
+  // read, unlike the credential store next door. No path crosses the boundary:
+  // `reveal-download` and `open-download` take an id and resolve it here.
+  'list-downloads', 'cancel-download', 'clear-download',
+  'reveal-download', 'open-download',
   // The menu draws itself from this. It is a request rather than part of the
   // state broadcast because the menu is open for a second or two and the
   // broadcast reaches three views twice a second - sending a menu's worth of
@@ -807,7 +836,8 @@ const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-histo
  * pages, so without this it would inherit Settings' surface, credentials
  * included. A page that lists files has no business reading a password store.
  */
-const DOWNLOAD_REQUESTS = new Set(['list-downloads', 'cancel-download', 'clear-download']);
+const DOWNLOAD_REQUESTS = new Set([
+  'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download']);
 
 function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
@@ -863,6 +893,31 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
 
       case 'clear-download':
         return { removed: Boolean(downloads && downloads.remove(String(payload?.id ?? ''))) };
+
+      // Show the file where it landed. The renderer sends an id and never sees
+      // a path, so the worst a compromised chrome can do here is reveal a file
+      // the user downloaded themselves.
+      case 'reveal-download': {
+        const file = downloads && downloads.pathOf(String(payload?.id ?? ''));
+        if (!file) return { ok: false };
+        electronShell.showItemInFolder(file);
+        return { ok: true };
+      }
+
+      // And open it with whatever the system uses for that type.
+      //
+      // The same gesture every browser offers on a finished download, and the
+      // same risk: the file is whatever the user chose to fetch, and opening it
+      // is their decision exactly as it would be from their file manager. What
+      // this must not become is a way to open an *arbitrary* path, which is why
+      // the id is resolved against the download store and why `pathOf` answers
+      // only for a download that actually completed.
+      case 'open-download': {
+        const file = downloads && downloads.pathOf(String(payload?.id ?? ''));
+        if (!file) return { ok: false };
+        const problem = await electronShell.openPath(file);
+        return { ok: problem === '', reason: problem || null };
+      }
 
       // Settings' "Check now".
       //

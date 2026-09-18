@@ -42,6 +42,8 @@ const el = {
   progress: document.getElementById('progress'),
   star: document.getElementById('star'),
   bookmarks: document.getElementById('bookmarks'),
+  downloads: document.getElementById('downloads'),
+  downloadsRing: document.getElementById('downloads-ring'),
   omnibox: document.getElementById('omnibox')
 };
 
@@ -88,6 +90,56 @@ function setStar(on) {
   el.star.classList.toggle('on', Boolean(on));
   el.star.title = on ? 'Remove bookmark' : 'Bookmark this page (Ctrl+D)';
 }
+
+/* ------------------------------------------------------------------ */
+/* The downloads button                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A count and a fraction, from the state broadcast.
+ *
+ * The list itself never comes through here - the flyout asks for it when it
+ * opens, which is the only moment anyone can read it. See
+ * `DownloadManager#summary`.
+ */
+function renderDownloadsButton(summary) {
+  const count = summary ? summary.count : 0;
+  // Hidden until there is something to show, as Chrome and Edge both do it. A
+  // button that does nothing for the first hour of a session is a button in
+  // the way of the ones that do.
+  const hide = count === 0;
+  if (el.downloads.hidden !== hide) el.downloads.hidden = hide;
+  if (hide) return;
+
+  const active = summary.active > 0;
+  if (el.downloads.dataset.active !== String(active)) {
+    el.downloads.dataset.active = String(active);
+  }
+
+  // A transform, so a download updating twice a second never lays out the
+  // toolbar. An indeterminate one - no server-declared size - leaves the ring
+  // empty rather than sitting at zero, which would read as stalled.
+  const part = active && typeof summary.progress === 'number' ? summary.progress : 0;
+  el.downloadsRing.style.transform = `scaleX(${part})`;
+}
+
+/** The flyout anchors to this button, so the chrome is what measures it. */
+function openDownloads() {
+  if (el.downloads.hidden) {
+    // Nothing to fly out over. The page is still the right answer for someone
+    // who pressed Ctrl+J on purpose.
+    api.send('open-downloads-page');
+    return;
+  }
+  const rect = el.downloads.getBoundingClientRect();
+  api.send('open-downloads', {
+    x: Math.round(rect.left),
+    y: Math.round(rect.bottom),
+    right: Math.round(rect.right)
+  });
+}
+
+el.downloads.addEventListener('click', openDownloads);
 
 /* ------------------------------------------------------------------ */
 /* The bookmarks bar                                                   */
@@ -658,6 +710,7 @@ window.addEventListener('keydown', (event) => {
       break;
     case ',': api.send('open-settings'); break;
     case 'h': api.send('open-history'); break;
+    case 'j': openDownloads(); break;
     // Ctrl+Shift+I, the other half of F12. F12 itself needs no modifier and is
     // handled below.
     case 'i': if (event.shiftKey) api.send('toggle-devtools'); else return; break;
@@ -682,6 +735,7 @@ api.onState((state) => {
   // The bar is hidden rather than emptied when it is off or when the strip runs
   // down the side: the window has already given its 34px back to the page, and
   // a bar drawn into space nobody reserved would sit over the top of it.
+  renderDownloadsButton(state.downloads);
   document.body.classList.toggle('with-bookmarks', state.bookmarksBar !== false);
   if (state.bookmarksBar !== false) refreshBookmarks(state.bookmarksRevision);
 });

@@ -69,6 +69,18 @@ const SIDEBAR_TOP_BAND = 40;
  */
 const PLACEHOLDER_MAX_MS = 1500;
 
+/**
+ * The panels that can occupy the sheet, and the page each one is.
+ *
+ * Named here rather than passed in: the sheet loads a file from disk into a
+ * view with the chrome's preload, so what may go in it is a fixed list in the
+ * browser process, not something a caller chooses.
+ */
+const SHEET_PAGES = {
+  menu: 'menu.html',
+  downloads: 'flyout.html'
+};
+
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
 const CHROME_PRELOAD = path.join(__dirname, '..', 'preload', 'chrome-preload.js');
 
@@ -82,6 +94,8 @@ class BrowserShell {
     this.updater = updater;
     /** @type {import('./bookmarks').Bookmarks|null} */
     this.bookmarks = null;
+    /** @type {import('./downloads').DownloadManager|null} */
+    this.downloads = null;
     this.log = log;
     this.onCommand = onCommand;
 
@@ -116,10 +130,22 @@ class BrowserShell {
     this.panelOpen = false;
 
     /**
-     * The app menu, while it is open. See openMenu.
+     * The sheet, while one is open: the app menu or the downloads flyout.
+     *
+     * One mechanism rather than two. Both are a panel anchored to a toolbar
+     * button that has to be able to overflow the chrome's 84px strip, both are
+     * dismissed by clicking away, and both should cost nothing while closed -
+     * so they are the same window-sized transparent view loading a different
+     * page, not two copies of that idea drifting apart. See openSheet.
+     *
      * @type {Electron.WebContentsView|null}
      */
-    this.menuView = null;
+    this.sheetView = null;
+    /** Which page the open sheet is showing, or null. */
+    this.sheetPage = null;
+    /** The sheet whose close armed the reopen guard, and when. */
+    this.sheetClosedPage = null;
+    this.sheetClosedAt = 0;
 
     /**
      * One reused ImageView showing the outgoing tab's thumbnail while a
@@ -164,7 +190,7 @@ class BrowserShell {
     // A resize with the menu open would leave it anchored to a button that has
     // moved. Closed rather than re-anchored: the user is dragging a window
     // edge, not reading a menu.
-    this.window.on('resize', () => { this.closeMenu(); this.layout(); });
+    this.window.on('resize', () => { this.closeSheet(); this.layout(); });
     this.window.on('restore', () => this.revive());
     this.window.on('show', () => this.revive());
     this.window.on('maximize', () => this.layout());
@@ -333,26 +359,38 @@ class BrowserShell {
    *   in window coordinates. The renderer sends it because only it knows where
    *   the button ended up after the strip laid out.
    */
-  openMenu(anchor = {}) {
+  openSheet(page, anchor = {}) {
     if (this.window.isDestroyed()) return;
-    // Toggle: clicking the button with the menu open closes it, as it would
-    // with a system menu, where the click lands on the dismissing grab.
-    if (this.menuView) { this.closeMenu(); return; }
+    const file = SHEET_PAGES[page];
+    if (!file) return;
+
+    // Toggle: pressing the same button again closes it, as a system menu does
+    // when the click lands on its dismissing grab. Pressing the *other* one
+    // swaps, which is what a toolbar full of panels should do.
+    if (this.sheetView) {
+      const same = this.sheetPage === page;
+      this.closeSheet();
+      if (same) return;
+    }
 
     // The same toggle, for the ordering that actually happens.
     //
-    // Pressing the button moves focus to the chrome, which blurs the menu view
-    // and closes the menu - *before* the click that follows arrives here. So by
-    // the time the command lands there is no menu to toggle, and the second
+    // Pressing the button moves focus to the chrome, which blurs the sheet's
+    // view and closes it - *before* the click that follows arrives here. So by
+    // the time the command lands there is nothing to toggle, and the second
     // press would reopen it: the button would look like it did nothing. A press
     // this soon after a close is the closing half of a toggle, not a new open.
-    if (Date.now() - this.menuClosedAt < 250) return;
+    //
+    // Keyed to the page, because the guard is about one button being pressed
+    // twice. Closing the menu by reaching for the downloads button must not
+    // make the downloads button dead for a quarter second.
+    if (this.sheetClosedPage === page && Date.now() - this.sheetClosedAt < 250) return;
 
     const x = Number(anchor?.x);
     const y = Number(anchor?.y);
     const right = Number(anchor?.right);
 
-    const menuView = new WebContentsView({
+    const sheetView = new WebContentsView({
       webPreferences: {
         preload: CHROME_PRELOAD,
         contextIsolation: true,
@@ -364,19 +402,20 @@ class BrowserShell {
         transparent: true
       }
     });
-    this.menuView = menuView;
+    this.sheetView = sheetView;
+    this.sheetPage = page;
 
     // The view is window-sized; only the menu itself is painted. Anything the
     // page leaves untouched has to show what is behind it, or this covers the
     // browser with a grey sheet.
     try {
-      menuView.setBackgroundColor('#00000000');
+      sheetView.setBackgroundColor('#00000000');
     } catch (err) {
       this.log(`transparent menu unavailable: ${err.message}`);
     }
 
-    const wc = this.menuView.webContents;
-    wc.loadFile(path.join(RENDERER_DIR, 'menu.html'), {
+    const wc = sheetView.webContents;
+    wc.loadFile(path.join(RENDERER_DIR, file), {
       query: {
         x: String(Number.isFinite(x) ? Math.round(x) : 0),
         y: String(Number.isFinite(y) ? Math.round(y) : 0),
@@ -387,7 +426,13 @@ class BrowserShell {
       }
       // A menu dismissed before it finished loading cancels its own load. That
       // is an ordinary thing for a menu and not worth a line in the log.
-    }).catch((err) => { if (this.menuView) this.log(`menu failed to load: ${err.message}`); });
+      // A sheet dismissed - or replaced by the other one - before it finished
+      // loading cancels its own load. That is an ordinary thing for a panel and
+      // not worth a line in the log, so this reports only a load that failed
+      // while its sheet was still the one on screen.
+    }).catch((err) => {
+      if (this.sheetView === sheetView) this.log(`${page} sheet failed to load: ${err.message}`);
+    });
 
     // Put on screen only once it has something to show.
     //
@@ -406,10 +451,10 @@ class BrowserShell {
       // Dismissed before it finished loading - Escape, or a second press. The
       // view is already being torn down; putting it on screen now would show a
       // menu the user has closed.
-      if (this.menuView !== menuView || wc.isDestroyed()) return;
+      if (this.sheetView !== sheetView || wc.isDestroyed()) return;
 
-      this.window.contentView.addChildView(menuView);   // topmost, over the chrome
-      this.layoutMenu();
+      this.window.contentView.addChildView(sheetView);   // topmost, over the chrome
+      this.layoutSheet();
 
       // Focused so it can take the keyboard, which is how the arrow keys and
       // Escape reach it at all.
@@ -418,8 +463,8 @@ class BrowserShell {
       // Clicking a page or the tab strip moves focus out of this view, and a
       // menu that stays up after the user has gone somewhere else is a menu
       // they have to dismiss twice. This is the backstop for the click-away the
-      // transparent backdrop already handles; both funnel into `closeMenu`.
-      wc.on('blur', () => this.closeMenu({ blurred: true }));
+      // transparent backdrop already handles; both funnel into `closeSheet`.
+      wc.on('blur', () => this.closeSheet({ blurred: true }));
     });
   }
 
@@ -432,22 +477,27 @@ class BrowserShell {
    *   a click on the backdrop - must *not* arm it, or a menu closed with
    *   Escape would make the button dead for the next quarter second.
    */
-  closeMenu({ blurred = false } = {}) {
-    if (!this.menuView) return;
-    const view = this.menuView;
-    this.menuView = null;
-    if (blurred) this.menuClosedAt = Date.now();
+  closeSheet({ blurred = false } = {}) {
+    if (!this.sheetView) return;
+    const view = this.sheetView;
+    const page = this.sheetPage;
+    this.sheetView = null;
+    this.sheetPage = null;
+    if (blurred) {
+      this.sheetClosedPage = page;
+      this.sheetClosedAt = Date.now();
+    }
     try {
       this.window.contentView.removeChildView(view);
       view.webContents.close();
     } catch { /* already gone */ }
   }
 
-  layoutMenu() {
-    if (!this.menuView || this.window.isDestroyed()) return;
+  layoutSheet() {
+    if (!this.sheetView || this.window.isDestroyed()) return;
     const { width, height } = this.window.getContentBounds();
     if (width <= 0 || height <= 0) return;
-    this.menuView.setBounds({ x: 0, y: 0, width, height });
+    this.sheetView.setBounds({ x: 0, y: 0, width, height });
   }
 
   /* ---------------------------------------------------------------- */
@@ -881,7 +931,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.panelView, this.menuView]) {
+    for (const view of [this.chromeView, this.panelView, this.sheetView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }
@@ -905,6 +955,8 @@ class BrowserShell {
     // list only when this changes, rather than having it pushed into three
     // views on every governor tick.
     if (this.bookmarks) full.bookmarksRevision = this.bookmarks.revision;
+    // A count and a fraction, not the list. See DownloadManager#summary.
+    if (this.downloads) full.downloads = this.downloads.summary();
     full.bookmarksBar = this.bookmarksBarVisible();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
@@ -932,7 +984,7 @@ class BrowserShell {
   }
 
   destroy() {
-    this.closeMenu();
+    this.closeSheet();
     this.togglePanel(false);
     if (!this.window.isDestroyed()) this.window.destroy();
   }

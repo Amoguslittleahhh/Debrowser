@@ -59,7 +59,10 @@ const COMMANDS = new Set([
   'check-for-updates',
   'list-downloads',
   'cancel-download',
-  'clear-download'
+  'clear-download',
+  'reveal-download',
+  'open-download',
+  'open-downloads-page'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {

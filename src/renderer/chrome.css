@@ -922,3 +922,40 @@ body .bookmark-chip.has-icon {
   border-radius: inherit;
   object-fit: contain;
 }
+
+/* ------------------------------------------------------------------ */
+/* The downloads button                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Appears when there is something to show and not before - see
+ * `renderDownloadsButton`. The ring underneath fills while a file is arriving,
+ * so the toolbar answers "is it done yet" without the panel being opened.
+ *
+ * `position: relative` so the ring has something to sit in; `overflow: hidden`
+ * so it is clipped to the button's rounded corners rather than drawing a bar
+ * across the toolbar.
+ */
+.icon-btn.downloads {
+  position: relative;
+  overflow: hidden;
+}
+
+.downloads-ring {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  /* A transform, so a download updating twice a second stays on the compositor
+     and never lays out the toolbar. */
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 200ms linear;
+}
+
+/* A finished download leaves the button in place - you may still want the
+   panel - but nothing about it should keep asking for attention. */
+.icon-btn.downloads[data-active="false"] .downloads-ring { opacity: 0; }

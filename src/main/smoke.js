@@ -829,8 +829,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // would be spending a process on nothing, which is the thing this project
   // exists to avoid.
   {
-    shell.openMenu({ x: 100, y: 84, right: 132 });
-    const view = shell.menuView;
+    shell.openSheet('menu', { x: 100, y: 84, right: 132 });
+    const view = shell.sheetView;
 
     // Waited for, because the view is put on screen only once its page has
     // loaded. It used to be added before the load was even started, and a
@@ -847,12 +847,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       view.getBounds().width === shell.window.getContentBounds().width;
     const wc = view && view.webContents;
 
-    shell.closeMenu();
+    shell.closeSheet();
     // `webContents.close()` is a graceful close, so the renderer is still there
     // for a moment afterwards. Waited for rather than read straight back: the
     // question is whether it goes away, not whether it goes away synchronously.
     const released = await waitFor(() => !wc || wc.isDestroyed(), { timeoutMs: 5000 });
-    const gone = shell.menuView === null && released;
+    const gone = shell.sheetView === null && released;
     check('the menu is drawn over the whole window and its renderer is destroyed on close',
       onTop && covers && gone,
       `on top: ${onTop}, window-sized: ${covers}, renderer released: ${gone}`);
@@ -1061,6 +1061,43 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     prefs.set('devToolsDock', 'right');
     tabs.close(target.id);
+  }
+
+  // The downloads flyout, which is the default way downloads are reached.
+  //
+  // It shares the sheet with the app menu rather than having a mechanism of its
+  // own, so the two properties worth asserting are that the sheet actually
+  // swaps between them - a toolbar where opening one panel leaves the other up
+  // is worse than one with a single panel - and that the flyout, which is one
+  // of the chrome's own views, can read the download list without inheriting
+  // the credential surface next door.
+  {
+    shell.openSheet('menu', { x: 100, y: 84, right: 132 });
+    const menuUp = await waitFor(
+      () => shell.sheetView && shell.sheetPage === 'menu', { timeoutMs: 8000 });
+
+    shell.openSheet('downloads', { x: 900, y: 84, right: 932 });
+    const swapped = await waitFor(
+      () => shell.sheetView && shell.sheetPage === 'downloads' &&
+        shell.sheetView.webContents.getURL().includes('flyout.html'),
+      { timeoutMs: 8000 });
+
+    const wc = shell.sheetView && shell.sheetView.webContents;
+    const reads = wc && await wc.executeJavaScript(
+      'window.debrowser.request("list-downloads").then((r) => r && Array.isArray(r.items))')
+      .catch(() => false);
+    const refused = wc && await wc.executeJavaScript(
+      'window.debrowser.request("list-credentials").then((r) => r === null)')
+      .catch(() => false);
+
+    check('the downloads flyout takes over the sheet from the menu',
+      menuUp && swapped, `menu up=${menuUp}, swapped to ${shell.sheetPage}`);
+    check('the flyout reads the download list and not the credential store',
+      reads === true && refused === true,
+      `list-downloads answered=${reads}, list-credentials refused=${refused}`);
+
+    shell.closeSheet();
+    await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
   }
 
   // The downloads page.
