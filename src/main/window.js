@@ -1045,7 +1045,11 @@ class BrowserShell {
    */
   bookmarksBarVisible() {
     if (this.vertical()) return false;
-    return this.prefs ? this.prefs.get('showBookmarksBar') !== false : true;
+    if (this.prefs && this.prefs.get('showBookmarksBar') === false) return false;
+    // An empty bar is 34px of nothing taken from the page. The preference says
+    // whether the bar is wanted; this says whether there is anything to put in
+    // it, and until the first bookmark is saved the answer is no.
+    return Boolean(this.bookmarks && this.bookmarks.all().length > 0);
   }
 
   /** How much vertical room the chrome needs, bars included. */
@@ -1433,6 +1437,14 @@ class BrowserShell {
     // A count and a fraction, not the list. See DownloadManager#summary.
     if (this.downloads) full.downloads = this.downloads.summary();
     full.bookmarksBar = this.bookmarksBarVisible();
+    // Saving the first bookmark, or removing the last, changes how much room
+    // the page gets - and neither goes through `applyWindowPrefs`. Checked here
+    // because this runs on every state change and on the governor's tick, so
+    // the bar appears with the bookmark rather than at the next resize.
+    if (this.laidOutBookmarksBar !== full.bookmarksBar) {
+      this.laidOutBookmarksBar = full.bookmarksBar;
+      this.layout();
+    }
     full.sidebar = this.sidebarState();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);

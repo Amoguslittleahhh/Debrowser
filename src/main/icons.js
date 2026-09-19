@@ -104,13 +104,26 @@ function rememberAll(list) {
 }
 
 /**
- * May this address be fetched? The default path is always allowed; anything
+ * The paths a site's icon is at when the page never said.
+ *
+ * Both are fixed paths on the page's own origin, which is what keeps them
+ * inside what this route will fetch without having been told: a page cannot
+ * name them, it can only be on the origin they belong to. `apple-touch-icon` is
+ * here because a real number of sites ship one and no favicon.ico, and the
+ * alternative for those is the letter chip - which is what apple.com showed
+ * until the renderer started trying more than one address. See `showIcon` in
+ * theme.js, which decides the order.
+ */
+const DEFAULT_PATHS = new Set(['/favicon.ico', '/apple-touch-icon.png']);
+
+/**
+ * May this address be fetched? A default path is always allowed; anything
  * else has to have been reported for a page that was actually loaded.
  */
 function allowed(raw) {
   const url = parse(raw);
   if (!url) return false;
-  if (url.pathname === '/favicon.ico' && !url.search) return true;
+  if (DEFAULT_PATHS.has(url.pathname) && !url.search) return true;
   return seen.has(url.href);
 }
 

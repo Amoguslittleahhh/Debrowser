@@ -51,6 +51,7 @@ const COMMANDS = new Set([
   'fill-payment',
   'sidebar-hover',
   'chrome-size',
+  'bookmarks-overflow',
   'toggle-sidebar-pin',
   'toggle-bookmarks-bar',
   'list-bookmarks',

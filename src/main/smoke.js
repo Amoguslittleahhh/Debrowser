@@ -2124,6 +2124,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // rather than the markup: a bar the window has not made room for is a bar
   // with its bottom row cut off, and nothing in the renderer can tell.
   {
+    // Something saved, because an empty bar is hidden whatever the preference
+    // says - which is the check below this one.
+    bookmarks.add({ url: 'https://bar.test/room', title: 'Room' });
+
     prefs.set('showBookmarksBar', false);
     shell.applyWindowPrefs();
     const withoutBar = shell.contentBounds();
@@ -2150,6 +2154,51 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     { timeoutMs: 8000 });
     check('a saved bookmark appears in the bar',
       drawn, `revision ${before} -> ${bookmarks.revision}`);
+
+    // More bookmarks than the bar can hold go behind a chevron, not off the
+    // edge of the window.
+    //
+    // Reported as bookmarks running past the right-hand side and simply
+    // vanishing - the bar is one row, it does not wrap and it does not scroll,
+    // so everything past the edge was gone with nothing to say it existed.
+    {
+      const many = [];
+      for (let i = 0; i < 24; i++) {
+        many.push(`https://overflow.test/a-bookmark-with-a-long-name-${i}`);
+        bookmarks.add({ url: many[i], title: `A bookmark with a long name ${i}` });
+      }
+      shell.publish(governor.snapshot());
+
+      // `waitFor` answers whether the predicate came true, not with what it
+      // saw, so the reading is kept here and the wait only says when to stop.
+      let fit = null;
+      await waitFor(async () => {
+        fit = await shell.chromeView.webContents.executeJavaScript(`(() => {
+          const bar = document.getElementById('bookmarks');
+          const all = [...bar.querySelectorAll('.bookmark[data-id]')];
+          const more = bar.querySelector('.bookmark-more');
+          const shown = all.filter((b) => !b.hidden);
+          const widest = shown.reduce((m, b) => Math.max(m, b.getBoundingClientRect().right), 0);
+          return {
+            total: all.length, shown: shown.length,
+            chevron: Boolean(more) && more.hidden === false,
+            overflows: widest > bar.clientWidth + 1
+          };
+        })()`).catch(() => null);
+        return Boolean(fit) && fit.total >= 24;
+      }, { timeoutMs: 8000 });
+
+      check('bookmarks past the end of the bar go behind a chevron rather than off the edge',
+        Boolean(fit) && fit.shown < fit.total && fit.chevron === true &&
+        fit.overflows === false,
+        fit
+          ? `${fit.shown} of ${fit.total} shown, chevron ${fit.chevron ? 'up' : 'missing'}, ` +
+            `last visible edge ${fit.overflows ? 'past' : 'inside'} the bar`
+          : 'the bar did not answer');
+
+      for (const url of many) bookmarks.remove(url);
+      shell.publish(governor.snapshot());
+    }
 
     // Clicking one opens a tab rather than replacing the page in front of you,
     // and the preference is what decides that - both halves asserted by
@@ -2187,6 +2236,43 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       for (const tab of tabs.all().filter((t) => String(t.url).includes('bar.test'))) {
         tabs.close(tab.id);
       }
+    }
+
+    // An empty bar takes no room, and the first bookmark brings it back.
+    //
+    // It used to stay as a 34px band of nothing under the toolbar of every page
+    // for as long as you had no bookmarks saved. The preference says whether
+    // the bar is wanted; having something to put in it is a separate question,
+    // and until the first save the answer is no.
+    {
+      // Put back afterwards: the checks below this one are about bookmarks that
+      // exist, and emptying the store under them is how this first ran - two
+      // failures and a crash, none of them about the bar.
+      const saved = bookmarks.all();
+      for (const b of saved) bookmarks.remove(b.id);
+      shell.publish(governor.snapshot());
+      const empty = shell.contentBounds();
+      const emptyVisible = shell.bookmarksBarVisible();
+
+      bookmarks.add({ url: 'https://bar.test/first', title: 'First' });
+      shell.publish(governor.snapshot());
+      const filled = shell.contentBounds();
+
+      const { BOOKMARKS_BAR_HEIGHT } = require('./window');
+      check('an empty bookmarks bar takes no room, and the first bookmark brings it back',
+        emptyVisible === false && shell.bookmarksBarVisible() === true &&
+        empty.height - filled.height === BOOKMARKS_BAR_HEIGHT,
+        `empty: bar ${emptyVisible ? 'shown' : 'hidden'}, page ${empty.height}px; ` +
+        `with one: page ${filled.height}px`);
+
+      bookmarks.remove('https://bar.test/first');
+      for (const b of saved.slice().reverse()) {
+        bookmarks.add({ url: b.url, title: b.title, folder: b.folder });
+      }
+      shell.publish(governor.snapshot());
+      await waitFor(async () => await shell.chromeView.webContents.executeJavaScript(
+        'document.querySelectorAll("#bookmarks .bookmark[data-id]").length') >= saved.length,
+      { timeoutMs: 8000 });
     }
 
     // Editing one by hand, which is the manager's whole job. Three properties,

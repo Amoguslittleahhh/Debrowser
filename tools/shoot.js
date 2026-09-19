@@ -54,7 +54,15 @@ const ANSWERS = {
     { id: 'a', url: 'https://github.com', title: 'GitHub', folder: '' },
     { id: 'b', url: 'https://news.ycombinator.com', title: 'Hacker News', folder: '' },
     { id: 'c', url: 'https://developer.mozilla.org', title: 'MDN Web Docs', folder: '' },
-    { id: 'd', url: 'https://youtube.com', title: 'YouTube', folder: '' }
+    { id: 'd', url: 'https://youtube.com', title: 'YouTube', folder: '' },
+    // Enough to overflow a 1280px bar, because the chevron and what it hides
+    // are the part of this bar that cannot be checked any other way.
+    { id: 'e', url: 'https://en.wikipedia.org', title: 'Wikipedia, the free encyclopedia', folder: '' },
+    { id: 'f', url: 'https://stackoverflow.com', title: 'Stack Overflow - Where Developers Learn', folder: '' },
+    { id: 'g', url: 'https://www.apple.com/sg/', title: 'Apple (Singapore)', folder: '' },
+    { id: 'h', url: 'https://mail.google.com', title: 'Inbox - Gmail', folder: '' },
+    { id: 'i', url: 'https://nature.com', title: 'Nature - International journal of science', folder: '' },
+    { id: 'j', url: 'https://claude.ai', title: 'Claude', folder: '' }
   ] },
   'list-downloads': { items: [
     { id: 'd1', url: 'https://github.com/rel/Debrowser-1.4.0-win-x64.exe', filename: 'Debrowser-1.4.0-win-x64.exe', state: 'running', total: 111810824, received: 47000000, segments: 4, error: null, bytesPerSecond: 5400000 },
@@ -115,6 +123,9 @@ const ANSWERS = {
 
 const SHOTS = [
   { name: 'chrome',   file: 'chrome.html',   w: 1280, h: 118 },
+  // The same chrome in a window too narrow for its bookmarks, which is the only
+  // way to see the overflow chevron and what the bar does with what is left.
+  { name: 'chrome-narrow', file: 'chrome.html', w: 620, h: 118 },
   { name: 'sidebar',  file: 'chrome.html',   w: 240,  h: 820, side: true },
   // The collapsed strip, at the width the browser actually gives it. Ten
   // pixels is a degenerate picture and that is the point: everything in the

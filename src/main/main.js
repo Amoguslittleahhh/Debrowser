@@ -990,6 +990,39 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         shell.setChromeHeight(payload?.height);
         break;
 
+      // The bookmarks that did not fit on the bar, as a menu.
+      //
+      // The chrome names them by id and nothing else: it holds no addresses,
+      // and a bar that could ask for a menu of arbitrary URLs would be a page
+      // deciding what the browser offers to open. The ids are looked up here,
+      // in the store, and anything that no longer exists is simply absent.
+      //
+      // Drawn in the context sheet because it is the same thing - a list of
+      // labelled commands anchored to a point - and a second sheet for it would
+      // be a second set of keyboard handling and a second stylesheet to keep in
+      // step with this one.
+      case 'bookmarks-overflow': {
+        if (!bookmarks) break;
+        const wanted = Array.isArray(payload?.ids) ? payload.ids.slice(0, 200) : [];
+        const byId = new Map(bookmarks.all().map((b) => [b.id, b]));
+        const items = wanted
+          .map((id) => byId.get(String(id)))
+          .filter(Boolean)
+          .map((b) => ({
+            id: 'new-tab',
+            label: b.title || b.url,
+            payload: { url: b.url },
+            icon: 'star'
+          }));
+        if (!items.length) break;
+
+        context.model = { items, params: {} };
+        const x = Math.round(Number(payload?.x) || 0);
+        const y = Math.round(Number(payload?.y) || 0);
+        shell.openSheet('context', { x, y, right: Math.round(Number(payload?.right) || x) });
+        break;
+      }
+
       // The pointer reached the window's left edge, or left the strip. Only
       // the chrome can tell us: it is the view the pointer enters and leaves.
       case 'sidebar-hover':

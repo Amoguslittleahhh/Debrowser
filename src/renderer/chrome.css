@@ -910,11 +910,12 @@ body.calm .star.on svg { animation: none; }
 
 body.with-bookmarks .bookmarks { display: flex; }
 
-/* Nothing saved yet: the band stays, so the page below does not jump the first
-   time a bookmark is added - but it stays empty. It used to carry "Bookmarks
-   you save appear here", which is a sentence repeated under the toolbar of
-   every page you visit for as long as you have no bookmarks. Chrome leaves the
-   empty bar empty. */
+/* Nothing saved yet: no band at all. It used to stay, empty, so the page below
+   would not jump the first time a bookmark was added - which meant 34px of
+   nothing under the toolbar of every page for as long as you had no bookmarks.
+   The jump happens once, when you save your first; the empty band was there
+   every day until then. The window is what actually reserves the room, so the
+   decision is `bookmarksBarVisible()` in window.js and this class follows it. */
 
 .bookmark {
   display: flex;
@@ -1280,3 +1281,22 @@ body[data-floating="true"] .tabstrip {
 body[data-floating="true"] .toolbar {
   padding-top: 8px;
 }
+
+/*
+ * The overflow chevron, at the end of the bookmarks bar.
+ *
+ * A bar that does not wrap and does not scroll has to say when it is holding
+ * more than it shows; without this the last bookmark was cut in half by the
+ * window edge and the rest were simply gone. Styled as a bookmark rather than
+ * as an icon button so it sits on the same baseline as the row it ends.
+ */
+.bookmark-more {
+  flex: none;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 6px;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+}
+.bookmark-more:hover { color: var(--text); }

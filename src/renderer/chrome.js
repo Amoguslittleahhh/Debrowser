@@ -307,6 +307,7 @@ function renderBookmarks(items) {
     const button = document.createElement('button');
     button.className = 'bookmark';
     button.type = 'button';
+    button.dataset.id = item.id;
     button.title = `${item.title || item.url}\n${item.url}`;
 
     // The site's own logo over its letter, through the browser's icon route -
@@ -345,9 +346,98 @@ function renderBookmarks(items) {
     bar.append(button);
   }
 
+  // The chevron lives at the end and only appears when something did not fit.
+  // Built here rather than in the markup so the bar is one list either way.
+  const more = document.createElement('button');
+  more.className = 'bookmark bookmark-more';
+  more.type = 'button';
+  more.hidden = true;
+  more.title = 'More bookmarks';
+  more.setAttribute('aria-label', more.title);
+  more.textContent = '\u00bb';
+  more.addEventListener('click', () => {
+    const box = more.getBoundingClientRect();
+    api.send('bookmarks-overflow', {
+      ids: hiddenBookmarkIds(),
+      x: Math.round(box.left),
+      y: Math.round(box.bottom),
+      right: Math.round(box.right)
+    });
+  });
+  bar.append(more);
+
   el.bookmarks.replaceChildren(bar);
   el.bookmarks.classList.toggle('empty', items.length === 0);
+  fitBookmarks();
 }
+
+/**
+ * The bookmarks that did not fit, by id.
+ *
+ * Read back off the buttons rather than kept in a second list beside them: the
+ * id is on the element that was hidden, so the two cannot disagree about which
+ * ones those were. The browser turns the ids back into a menu - the bar holds
+ * no addresses of its own.
+ */
+function hiddenBookmarkIds() {
+  return [...el.bookmarks.querySelectorAll('.bookmark[data-id][hidden]')]
+    .map((b) => b.dataset.id);
+}
+
+/**
+ * Show what fits, and hand the rest to the chevron.
+ *
+ * The bar is one row and it does not wrap, so without this the last bookmark
+ * was cut in half by the window edge and everything past it was simply gone -
+ * no scroll, no menu, no sign that it existed. Chrome puts the remainder behind
+ * a chevron and so does this.
+ *
+ * Measured against the bar's own width rather than the window's: in the side
+ * layout the bar is inside a 240px column, and the window is not the thing
+ * doing the clipping.
+ */
+function fitBookmarks() {
+  // The bar itself, not a wrapper inside it: `replaceChildren` is given a
+  // fragment, so the buttons end up as children of `#bookmarks` directly. The
+  // first version of this read `firstElementChild` and searched inside it,
+  // which is the first *bookmark*, found nothing, and silently did nothing.
+  const bar = el.bookmarks;
+  const more = bar.querySelector('.bookmark-more');
+  const buttons = [...bar.querySelectorAll('.bookmark[data-id]')];
+  if (!more || !buttons.length) return;
+
+  // Everything visible first, so the measurement is of the real widths rather
+  // than of whatever the last pass left hidden.
+  for (const button of buttons) button.hidden = false;
+  more.hidden = true;
+
+  const room = bar.clientWidth - BOOKMARK_BAR_PADDING;
+  let used = 0;
+  let cut = -1;
+  for (let i = 0; i < buttons.length; i++) {
+    used += buttons[i].offsetWidth + BOOKMARK_GAP;
+    if (used > room) { cut = i; break; }
+  }
+  if (cut === -1) return;              // everything fits; no chevron
+
+  // The chevron needs room too, so one more may have to go to make space for
+  // the thing that says the rest are there.
+  more.hidden = false;
+  const chevron = more.offsetWidth + BOOKMARK_GAP;
+  while (cut > 0 && used + chevron > room) {
+    cut -= 1;
+    used -= buttons[cut].offsetWidth + BOOKMARK_GAP;
+  }
+  for (let i = cut; i < buttons.length; i++) buttons[i].hidden = true;
+}
+
+/** The bar's own padding and the gap between buttons, from chrome.css. */
+const BOOKMARK_BAR_PADDING = 12;
+const BOOKMARK_GAP = 2;
+
+// The window changes width far more often than the bookmarks change, and a
+// resize is the other way the bar overflows.
+window.addEventListener('resize', fitBookmarks);
 
 /**
  * The reload button's two glyphs, as path data.
@@ -444,10 +534,9 @@ function createTabElement(id) {
    * image where the site's logo should be - worse than the letter it replaced,
    * and the reason tabs looked wrong.
    */
-  favicon.addEventListener('error', () => {
-    favicon.hidden = true;
-    icon.classList.remove('has-icon');
-  });
+  // The fallbacks and the order they are tried in live in `showIcon`, which the
+  // bookmarks bar, history and the new tab page all share - see theme.js. What
+  // is left here is only what this view does when the chain runs out.
 
   /*
    * And the chip goes away when one *does* load.
@@ -465,7 +554,7 @@ function createTabElement(id) {
    * three more places - but this is a state with a transition on it, and a
    * class is what a state should be.
    */
-  favicon.addEventListener('load', () => icon.classList.add('has-icon'));
+
 
   const audio = document.createElement('span');
   audio.className = 'audio-dot';
@@ -526,29 +615,31 @@ function updateTabElement(node, tab) {
     prev.title = tab.title;
   }
 
-  if (prev.favicon !== tab.favicon) {
-    // Through the browser's icon route, never at the site: see `iconSrc`.
-    const src = iconSrc(tab.favicon);
-    // Back to the letter until this one decodes. Without the reset a tab that
+  // The icon is re-armed when the reported address changes *or* when the site
+  // does, because the fallbacks are derived from the page's own origin: a tab
+  // moving from a site with no icon to another with none would otherwise keep
+  // trying the first site's addresses.
+  const site = siteOf(tab.url);
+  if (prev.favicon !== tab.favicon || prev.iconSite !== site) {
+    // Back to the letter until one decodes. Without the reset a tab that
     // navigates from a site with an icon to one without keeps showing the old
     // site's chip state, which is the previous page's identity on this page.
     node.icon.classList.remove('has-icon');
-    if (src) {
-      // The letter shows during the fetch rather than a gap, and the `load`
-      // handler swaps it out; the `error` handler leaves it in place.
-      node.favicon.src = src;
-      node.favicon.hidden = false;
-    } else {
-      node.favicon.removeAttribute('src');
-      node.favicon.hidden = true;
-    }
+    // Through the browser's icon route, never at the site: see `iconSrc`. Every
+    // address the icon might be at is tried before the letter wins - the
+    // reported one, then the two default paths. See `showIcon`.
+    showIcon(node.favicon, tab.url, tab.favicon, {
+      onLoad: () => node.icon.classList.add('has-icon'),
+      onFail: () => node.icon.classList.remove('has-icon')
+    });
     prev.favicon = tab.favicon;
+    prev.iconSite = site;
   }
 
   // The chip only changes when the site does, which is far less often than the
   // URL: a page moving between paths on one host keeps its letter and colour,
   // and rewriting them on every navigation would be work for no visible change.
-  const host = siteOf(tab.url);
+  const host = site;
   if (prev.host !== host) {
     node.chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
     node.chip.style.setProperty('--hue', String(siteHue(host)));

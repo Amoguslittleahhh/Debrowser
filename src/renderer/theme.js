@@ -65,22 +65,72 @@ function iconSrc(url) {
 }
 
 /**
- * Where a site's icon is if the page never said: the address Chromium itself
+ * Where a site's icon is if the page never said: the addresses Chromium itself
  * would have tried.
  *
- * Five views had a byte-identical copy of this, which is five places to change
- * the day the rule is not `origin + /favicon.ico` any more - and it lives here
- * beside `iconSrc` because the two are one decision: where an icon is, and how
- * this browser is allowed to fetch it.
+ * Five views had a byte-identical copy of the first of these, which is five
+ * places to change the day the rule is not `origin + /favicon.ico` any more -
+ * and it lives here beside `iconSrc` because the two are one decision: where an
+ * icon is, and how this browser is allowed to fetch it.
+ *
+ * `/apple-touch-icon.png` is the second guess because a real number of sites
+ * ship one and nothing else. Both are fixed paths on the page's own origin,
+ * which is what keeps them inside what the icon route will fetch - see
+ * `allowed()` in icons.js.
  */
-function defaultIcon(url) {
+function defaultIcons(url) {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return `${parsed.origin}/favicon.ico`;
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return [];
+    return [`${parsed.origin}/favicon.ico`, `${parsed.origin}/apple-touch-icon.png`];
   } catch {
-    return null;
+    return [];
   }
+}
+
+/**
+ * Show a site's real logo, trying every address it might be at.
+ *
+ * The tab strip used to set `img.src = iconSrc(tab.favicon)` and stop there: one
+ * address, and the site's letter forever if it did not load. apple.com is the
+ * case that showed it up - the page declares no icon link at all, and a single
+ * failed guess left a browser showing "A" on a site with one of the most
+ * recognisable logos there is.
+ *
+ * So the candidates are tried in order and the letter is only what is left when
+ * every one of them has failed. `onerror` and `onload` as properties rather
+ * than listeners, because this is re-armed every time a tab navigates and
+ * `addEventListener` would stack a new handler on each one.
+ *
+ * @param {HTMLImageElement} img
+ * @param {string} url - the page the icon belongs to
+ * @param {string|null} reported - an icon address the browser reported
+ * @param {{onLoad?:Function, onFail?:Function}} [hooks]
+ * @returns {boolean} whether anything at all will be tried
+ */
+function showIcon(img, url, reported, { onLoad, onFail } = {}) {
+  const sources = [];
+  for (const candidate of [reported, ...defaultIcons(url)]) {
+    const src = iconSrc(candidate);
+    if (src && !sources.includes(src)) sources.push(src);
+  }
+
+  let next = 0;
+  const advance = () => {
+    if (next >= sources.length) {
+      img.removeAttribute('src');
+      img.hidden = true;
+      if (onFail) onFail();
+      return;
+    }
+    img.hidden = false;
+    img.src = sources[next++];
+  };
+
+  img.onerror = advance;
+  img.onload = () => { if (onLoad) onLoad(); };
+  advance();
+  return sources.length > 0;
 }
 
 /**
@@ -139,21 +189,21 @@ function siteChip(url, { icon = null, chipClass = 'chip', iconClass = 'site-icon
   chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
   chip.style.setProperty('--hue', String(siteHue(host)));
 
-  const src = iconSrc(icon || defaultIcon(url));
-  if (src) {
-    const img = document.createElement('img');
-    img.className = iconClass;
-    img.alt = '';
-    // Decoded off the main thread, and only for the rows on screen: three
-    // hundred history rows at once would be a burst of requests for a list the
-    // user has scrolled two screens of.
-    img.decoding = 'async';
-    img.loading = 'lazy';
-    img.src = src;
-    img.addEventListener('load', () => chip.classList.add('has-icon'));
-    img.addEventListener('error', () => img.remove());
-    chip.append(img);
-  }
+  const img = document.createElement('img');
+  img.className = iconClass;
+  img.alt = '';
+  // Decoded off the main thread, and only for the rows on screen: three
+  // hundred history rows at once would be a burst of requests for a list the
+  // user has scrolled two screens of.
+  img.decoding = 'async';
+  img.loading = 'lazy';
+  chip.append(img);
+  // Every address the icon might be at, in order, and the letter underneath
+  // until one of them loads. See `showIcon`.
+  showIcon(img, url, icon, {
+    onLoad: () => chip.classList.add('has-icon'),
+    onFail: () => img.remove()
+  });
 
   return chip;
 }

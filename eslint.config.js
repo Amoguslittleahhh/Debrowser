@@ -104,6 +104,7 @@ module.exports = [
         applyThemePrefs: 'readonly',
         siteHue: 'readonly',
         iconSrc: 'readonly',
+        showIcon: 'readonly',
         anchorSheet: 'readonly',
         watchTransientInput: 'readonly',
         defaultIcon: 'readonly',
