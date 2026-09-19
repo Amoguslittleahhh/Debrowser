@@ -1030,34 +1030,58 @@ body .bookmark-chip.has-icon {
  * bring the contents back without a flash of half-drawn layout.
  */
 
-/* Everything except the pin fades while the strip is an edge. Hidden rather
-   than removed: rebuilding a tab list on every accidental brush of the window
-   edge would be work for nothing, and the elements are 10px wide by then. */
+/*
+ * The collapsed edge is painted by the *body*, not by the tab strip.
+ *
+ * It was the strip, and that is the bug: the strip is one child of a column
+ * that also holds the toolbar, so the edge was a vertical slice through the
+ * chrome's own layout - the toolbar's share at the top showing plain body
+ * colour, the strip's share below showing the accent hairline, and a hard seam
+ * where they met about a third of the way down. Photographed off the
+ * recording: `#161614` above the seam, `#2a4030` below it, at the same x.
+ *
+ * Painting the body means the whole ten pixels are one gradient whatever the
+ * column happens to contain, so there is nothing to line up and nothing to
+ * come apart.
+ */
+body[data-sidebar="true"][data-sidebar-open="false"] {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 30%, var(--strip)),
+    var(--strip));
+}
+
+body[data-sidebar="true"][data-sidebar-open="false"] .tabstrip { background: none; }
+
+/*
+ * And everything inside stops painting, rather than only fading.
+ *
+ * `opacity: 0` leaves an element composited, so a fade interrupted by the
+ * view's own resize can leave a tab row half-painted in the slit - a stray
+ * lighter block a third of the way down the edge, which is the other artefact
+ * in that recording. `visibility` is delayed by the length of the fade so the
+ * fade still runs, and then the elements are genuinely not drawn.
+ */
 body[data-sidebar="true"][data-sidebar-open="false"] .tabs,
 body[data-sidebar="true"][data-sidebar-open="false"] .new-tab,
 body[data-sidebar="true"][data-sidebar-open="false"] .toolbar,
 body[data-sidebar="true"][data-sidebar-open="false"] .bookmarks,
+body[data-sidebar="true"][data-sidebar-open="false"] .findbar,
 body[data-sidebar="true"][data-sidebar-open="false"] .pin {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: opacity 90ms ease;
-}
-
-/* A hairline of the strip's own colour, so the edge reads as something to
-   reach for rather than as a rendering artefact. */
-body[data-sidebar="true"][data-sidebar-open="false"] .tabstrip {
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--accent) 30%, var(--strip)),
-    var(--strip));
+  transition: opacity 90ms ease, visibility 0s linear 90ms;
 }
 
 body[data-sidebar="true"][data-sidebar-open="true"] .tabs,
 body[data-sidebar="true"][data-sidebar-open="true"] .new-tab,
 body[data-sidebar="true"][data-sidebar-open="true"] .toolbar,
 body[data-sidebar="true"][data-sidebar-open="true"] .bookmarks,
+body[data-sidebar="true"][data-sidebar-open="true"] .findbar,
 body[data-sidebar="true"][data-sidebar-open="true"] .pin {
   opacity: 1;
-  transition: opacity 140ms ease 40ms;
+  visibility: visible;
+  transition: opacity 140ms ease 40ms, visibility 0s;
 }
 
 /*

@@ -125,8 +125,18 @@ const BASE = {
   /**
    * Idle ladder: how long a tab must be hidden before each demotion. A tab
    * becomes WARM the moment it is hidden, so that step needs no threshold.
+   *
+   * COLD comes five seconds after you look away, which is soon, and is soon on
+   * purpose: reaching it costs the renderer nothing at all - no freeze, no CDP
+   * round trip, nothing sent to the page - it only means "this one may be
+   * reclaimed if something needs the memory". Forty-five seconds of pretending
+   * a tab is still warm bought nothing and made the task manager report a tab
+   * as busy for most of a minute after it was abandoned.
+   *
+   * What stops that becoming a reload is `minLifetimeMs` below, not this: a tab
+   * may be marked reclaimable long before it may actually be reclaimed.
    */
-  coldAfterMs: 45_000,
+  coldAfterMs: 5_000,
   freezeAfterMs: 5 * 60_000,
 
   /**
@@ -402,7 +412,7 @@ const PROFILES = {
     memoryBudgetMB: 700,
     tabFloorMB: 35,
     maxLiveTabs: 4,
-    coldAfterMs: 20_000,
+    coldAfterMs: 5_000,
     freezeAfterMs: 90_000,
     discardAfterMs: 3 * 60_000,
     minLifetimeMs: 45_000,
@@ -426,7 +436,7 @@ const PROFILES = {
     memoryBudgetMB: 600,
     tabFloorMB: 30,
     maxLiveTabs: 0,
-    coldAfterMs: 20_000,
+    coldAfterMs: 5_000,
     freezeAfterMs: 90_000,
     discardAfterMs: 5 * 60_000,
     minLifetimeMs: 45_000,

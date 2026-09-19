@@ -1108,6 +1108,41 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   }
 
   /* ---------------------------------------------------------------- */
+  // Leaving a tab marks it idle quickly, and coming back does not reload it.
+  //
+  // Those are two halves of one request and they pull in opposite directions,
+  // which is why both are asserted together: the mark has to arrive within a
+  // few seconds of looking away, and the page behind it has to survive the
+  // trip back with the same renderer and the same document. The shipped
+  // threshold is read from the profile rather than from `cfg`, which this
+  // suite compresses.
+  {
+    const shipped = require('./config').loadConfig('balanced').coldAfterMs;
+
+    const keep = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => keep.isLive && !keep.loading, { timeoutMs: 10_000 });
+    // Something the page itself remembers. A reload loses it; a restore from
+    // the tier ladder must not, because nothing below FROZEN touches the page.
+    await keep.wc.executeJavaScript('window.__kept = Date.now()').catch(() => {});
+    const pidBefore = keep.pid;
+
+    // Away, and back once it has actually gone idle.
+    const other = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => other.isLive, { timeoutMs: 10_000 });
+    const wentIdle = await waitFor(
+      () => tierRank(keep.tier) >= tierRank(Tier.COLD), { timeoutMs: 8000 });
+    await tabs.activate(keep.id);
+
+    const kept = await keep.wc.executeJavaScript('window.__kept || 0').catch(() => 0);
+    check('a tab you come back to is the one you left, not a reload of it',
+      shipped <= 5000 && wentIdle && kept > 0 && keep.pid === pidBefore,
+      `idle after ${shipped}ms shipped; came back to pid ${keep.pid} (was ${pidBefore}), ` +
+      `page state ${kept ? 'kept' : 'lost'}`);
+
+    tabs.close(other.id);
+    tabs.close(keep.id);
+  }
+
   // Developer tools, and the one thing they must do to the governor.
   //
   // A tab being inspected has to stay live: freezing it stops the task queues
@@ -1150,6 +1185,56 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       seen === true && target.devToolsOpen === true &&
       governor.shouldSkip(target) === true,
       `devToolsOpen=${target.devToolsOpen}, chromium says ${target.wc.isDevToolsOpened()}`);
+
+    // The same thing, in the layout and on the page it was reported against.
+    //
+    // The check above exercises a website across the top; the report was an
+    // internal page with the strip down the side, and both of those are
+    // separate code paths - `contentArea` has a whole branch for the vertical
+    // layout, and the browser's own pages are realised differently from a site.
+    {
+      const wasSide = prefs.get('tabBarPosition');
+      prefs.set('tabBarPosition', 'left');
+      shell.applyWindowPrefs();
+
+      const own = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
+      await waitFor(() => own.isLive && !own.loading, { timeoutMs: 10_000 });
+
+      const before = shell.contentBounds().width;
+      toggleDevTools(own, shell);
+      await waitFor(() => shell.devToolsView, { timeoutMs: 8000 });
+      const after = shell.contentBounds().width;
+      // What the view was actually given, not what the geometry says it should
+      // be: the report is that the page did not move, and only the view's own
+      // bounds can answer that.
+      const given = own.view ? own.view.getBounds().width : -1;
+
+      // And the page itself has to agree. A view can be resized while the
+      // document inside it keeps its old layout viewport, which is exactly what
+      // "the page did not make space" looks like: the content stays the width
+      // it was and the inspector is drawn over the end of it.
+      const settled = await waitFor(async () => {
+        const seen = await own.wc.executeJavaScript('window.innerWidth').catch(() => 0);
+        return seen > 0 && Math.abs(seen - after) <= 2;
+      }, { timeoutMs: 4000 });
+      const inner = await own.wc.executeJavaScript('window.innerWidth').catch(() => -1);
+
+      check('one of our own pages gives up room for the inspector, down the side too',
+        after > 0 && after < before && given === after && settled,
+        `page ${before}px -> ${after}px, view says ${given}px, document says ${inner}px`);
+
+      toggleDevTools(own, shell);
+      tabs.close(own.id);
+      prefs.set('tabBarPosition', wasSide);
+      shell.applyWindowPrefs();
+
+      // Put the section back the way it found it. There is one inspector at a
+      // time, so opening this one closed the one on `target` - and everything
+      // below is written against a `target` that still has its dock.
+      await tabs.activate(target.id);
+      toggleDevTools(target, shell);
+      await waitFor(() => shell.devToolsView && target.devToolsOpen, { timeoutMs: 8000 });
+    }
 
     // The dock belongs to one tab and goes away when you leave it.
     //

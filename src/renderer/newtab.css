@@ -8,8 +8,16 @@ body {
   overflow: hidden;
 }
 
+/*
+ * One measure for the whole page.
+ *
+ * The field was 560px and the tiles 760, so nothing on the page shared an edge
+ * with anything else and the tiles read as misaligned - which is exactly what
+ * they are. The tiles need the width (four hostnames do not fit in 560), so the
+ * field takes the same width rather than the grid taking a narrower one.
+ */
 main {
-  width: min(560px, calc(100vw - 48px));
+  width: min(760px, calc(100vw - 48px));
   margin-top: -8vh;          /* optically centred rather than measured-centred */
   text-align: center;
 }
@@ -106,16 +114,7 @@ body.still #wordmark, body.still #search { animation: none; }
      supposed to line up with. */
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--s2);
-  /*
-   * Wider than the field above it, and centred on the same axis.
-   *
-   * Four tiles inside a 560px measure leaves 128px each, which truncates every
-   * hostname longer than "github.com" - and a tile whose label reads
-   * "news.ycombin…" is a tile you have to hover to identify. The field keeps
-   * its reading width; the tiles get the room they need.
-   */
-  width: min(760px, calc(100vw - 48px));
-  margin: var(--s6) auto 0;
+  margin: var(--s6) 0 0;
   text-align: left;
 }
 
