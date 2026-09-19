@@ -98,7 +98,7 @@ const SECTIONS = {
       label: 'Tab bar translucency',
       hint: 'The strip alone, never pages. Needs a window material behind it.',
       type: 'range',
-      min: 0.6,
+      min: 0.4,
       max: 1,
       step: 0.02,
       format: (v) => `${Math.round(v * 100)}%`
@@ -239,6 +239,14 @@ const SECTIONS = {
     }
   ]
 };
+
+/**
+ * How often a slider being dragged may write its value through.
+ *
+ * Fast enough that the browser appears to follow the thumb, slow enough that a
+ * drag across the range is a handful of writes rather than one per pixel.
+ */
+const LIVE_SET_MS = 120;
 
 /** Built controls, keyed by preference, so state only ever writes values. */
 const controls = new Map();
@@ -401,10 +409,39 @@ function buildControl(spec) {
       out.className = 'unit';
 
       const show = (v) => { out.textContent = spec.format ? spec.format(v) : String(v); };
-      // `input` for the live preview as it is dragged, `change` to save - so a
-      // drag across the range is one write to disk rather than forty.
-      input.addEventListener('input', () => show(Number(input.value)));
-      input.addEventListener('change', () => save(spec.key, Number(input.value)));
+
+      /*
+       * The thing being set changes as the slider moves, not when it is let go.
+       *
+       * Translucency is the reason this matters: it is a setting you judge by
+       * looking at it, and a slider that shows a number while the browser stays
+       * as it was until you release is one you have to guess with. So the value
+       * is sent while dragging.
+       *
+       * Rate-limited rather than sent per event, because every send is a write
+       * to disk and a relayout: a drag across the range fires forty of them, and
+       * forty atomic file writes for one decision is exactly the kind of waste
+       * this browser is about. The trailing `change` is what stores the value
+       * the user actually stopped on, whichever side of the window it lands.
+       */
+      let sentAt = 0;
+      let pending = null;
+      const push = () => {
+        pending = null;
+        sentAt = Date.now();
+        save(spec.key, Number(input.value));
+      };
+
+      input.addEventListener('input', () => {
+        show(Number(input.value));
+        if (pending) return;
+        const wait = Math.max(0, LIVE_SET_MS - (Date.now() - sentAt));
+        pending = setTimeout(push, wait);
+      });
+      input.addEventListener('change', () => {
+        if (pending) { clearTimeout(pending); pending = null; }
+        push();
+      });
 
       const wrap = document.createDocumentFragment();
       wrap.append(input, out);
@@ -806,13 +843,63 @@ function markRail(name) {
 function watchSections() {
   if (typeof IntersectionObserver !== 'function') return;
 
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) entry.target.dataset.onScreen = String(entry.isIntersecting);
-    const first = sections.find((section) => section.dataset.onScreen === 'true');
-    if (first) markRail(first.dataset.section);
-  }, { root: document.querySelector('main'), rootMargin: '0px 0px -55% 0px' });
+  const main = document.querySelector('main');
+  if (!main) return;
 
-  for (const section of sections) observer.observe(section);
+  /**
+   * The end of the page, watched as a thing in its own right.
+   *
+   * Without it the mark stopped moving two sections early, and the reason is
+   * the band below: the last sections are shorter than the scroller, so once
+   * the page has scrolled as far as it goes they never reach the top 45% and
+   * the topmost-intersecting rule keeps naming whichever section does. Reported
+   * as the rail sticking on "Passwords and payment" while Advanced and Updates
+   * were both on screen.
+   *
+   * A sentinel rather than a scroll handler, so the whole thing stays in one
+   * mechanism: when the last pixel of the page is in view, the reader is in the
+   * last section, whichever section that happens to be after a filter.
+   */
+  const end = document.createElement('div');
+  end.className = 'rail-end';
+  end.setAttribute('aria-hidden', 'true');
+  main.append(end);
+
+  let atEnd = false;
+
+  const mark = () => {
+    // Two different questions, and the second one is why this went wrong the
+    // first time. "Which section is the reader in" is answered against the top
+    // band; "which section is last on screen" has to be answered against the
+    // whole scroller, because a section sitting below the band is exactly the
+    // case at the end of the page - and asking the band about it returned the
+    // section above, which is how the mark stopped one short of the last.
+    const key = atEnd ? 'inView' : 'onScreen';
+    const visible = sections.filter((s) => !s.hidden && s.dataset[key] === 'true');
+    if (!visible.length) return;
+    markRail((atEnd ? visible[visible.length - 1] : visible[0]).dataset.section);
+  };
+
+  // The reading position: the topmost section still in the top 45%.
+  const reading = new IntersectionObserver((entries) => {
+    for (const entry of entries) entry.target.dataset.onScreen = String(entry.isIntersecting);
+    mark();
+  }, { root: main, rootMargin: '0px 0px -55% 0px' });
+
+  // What is actually on screen, and whether the end of the page is.
+  const onScreen = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.target === end) atEnd = entry.isIntersecting;
+      else entry.target.dataset.inView = String(entry.isIntersecting);
+    }
+    mark();
+  }, { root: main });
+
+  for (const section of sections) {
+    reading.observe(section);
+    onScreen.observe(section);
+  }
+  onScreen.observe(end);
 }
 
 /**
@@ -863,11 +950,6 @@ function filterSettings(query) {
  * else in it touches a row.
  */
 function reapplyFilter() {
-  const search = document.getElementById('q');
-  if (search && search.value.trim()) filterSettings(search.value);
-}
-
-{
   const search = document.getElementById('q');
   if (search && search.value.trim()) filterSettings(search.value);
 }

@@ -438,6 +438,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   const asWindow = (over) => ({
     isDestroyed: () => false,
     isMinimized: () => false,
+    // `layout` asks this to decide whether the chrome is a band, a panel or
+    // nothing at all; a stand-in window has to answer everything the real one
+    // is asked, not only the two calls this check is about.
+    isFullScreen: () => false,
     getContentBounds: () => healthy,
     contentView: realWindow.contentView,
     ...over
@@ -778,6 +782,39 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     'document.querySelectorAll("#appearance .row").length').catch(() => 0);
   check('the browser\'s own pages are sent browser state',
     sawState > 0, `${sawState} setting rows built from a published snapshot`);
+
+  // The rail keeps up with the scroll, all the way to the end.
+  //
+  // It did not: the mark is the topmost section intersecting the top 45% of the
+  // scroller, and the last sections are shorter than that band - so once the
+  // page had scrolled as far as it goes, nothing new ever entered the band and
+  // the rail sat on "Passwords and payment" with Advanced and Updates both on
+  // screen. Asserted at the bottom of the scroll, which is the only place the
+  // defect exists.
+  {
+    const railAtEnd = await settingsTab.wc.executeJavaScript(`(async () => {
+      const main = document.querySelector('main');
+      main.scrollTop = main.scrollHeight;
+      await new Promise((r) => setTimeout(r, 400));
+      const marked = document.querySelector('.rail-item.current');
+      const last = [...document.querySelectorAll('section[data-section]')]
+        .filter((s) => !s.hidden).pop();
+      return {
+        marked: marked ? marked.textContent : null,
+        section: last ? last.dataset.section : null,
+        atBottom: Math.abs(main.scrollTop + main.clientHeight - main.scrollHeight) < 2
+      };
+    })()`).catch((err) => ({ error: err.message }));
+
+    check('the settings rail follows the scroll to the last section',
+      Boolean(railAtEnd) && railAtEnd.atBottom === true &&
+      railAtEnd.marked && railAtEnd.section &&
+      railAtEnd.marked.toLowerCase().includes(railAtEnd.section.slice(0, 6)),
+      railAtEnd && railAtEnd.error
+        ? railAtEnd.error
+        : `scrolled to the end, rail says ${JSON.stringify(railAtEnd.marked)}, ` +
+          `last section is ${railAtEnd.section}`);
+  }
 
   tabs.close(settingsTab.id);
 
@@ -2413,6 +2450,87 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   console.log(`  reclaimed so far: ~${Math.round(governor.stats.reclaimedMB)}MB ` +
               `across ${governor.stats.freezes} freezes and ` +
               `${governor.stats.discards} discards`);
+
+  // Full screen, in both layouts.
+  //
+  // Two different answers to the same ask - the page should have the screen.
+  // Across the top the chrome is a band and can simply go. Down the side it is
+  // the only way to see a tab, so it becomes a panel over the page instead:
+  // inset from the corner, and as tall as its own rows rather than the window.
+  //
+  // Asserted on the rectangles the views are actually given, because that is
+  // the thing that was wrong before any of this existed - the chrome kept its
+  // band and the page kept its offset, full screen or not.
+  {
+    const wasSide = prefs.get('tabBarPosition');
+    const wasPinned = prefs.get('sidebarPinned');
+    // Pinned, because an unpinned strip is a ten-pixel edge until the pointer
+    // arrives - true full screen or not - and the panel is what is being
+    // checked here, not the slide.
+    prefs.set('sidebarPinned', true);
+
+    prefs.set('tabBarPosition', 'top');
+    shell.applyWindowPrefs();
+    shell.window.setFullScreen(true);
+    const entered = await waitFor(() => shell.fullScreen(), { timeoutMs: 6000 });
+    // Read *after* entering: full screen is a different window size, and the
+    // first version of this check compared the new layout against the old
+    // window and failed on arithmetic that was right.
+    const full = shell.window.getContentBounds();
+    // The event is what drives the relayout; ask for one anyway so a platform
+    // that never fires it fails on the geometry rather than on a missing event.
+    shell.layout();
+
+    const topPage = shell.contentBounds();
+    check('full screen across the top takes the chrome away and gives the page the window',
+      entered && shell.chromeHidden() === true &&
+      topPage.y === 0 && topPage.height === full.height && topPage.width === full.width,
+      `entered=${entered} chrome hidden=${shell.chromeHidden()} ` +
+      `page ${topPage.width}x${topPage.height} at y=${topPage.y}, window ${full.height} tall`);
+
+    // Except while the find bar is up, which is in the chrome: a search box the
+    // user cannot see is worse than a band they did not ask for.
+    shell.setFindOpen(true);
+    shell.layout();
+    const withFind = shell.contentBounds();
+    check('a search brings the chrome back rather than typing into a bar nobody can see',
+      shell.chromeHidden() === false && withFind.y > 0 && withFind.height < full.height,
+      `chrome hidden=${shell.chromeHidden()}, page starts at y=${withFind.y}`);
+    shell.setFindOpen(false);
+    shell.layout();
+
+    prefs.set('tabBarPosition', 'left');
+    shell.applyWindowPrefs();
+    shell.layout();
+
+    const sidePage = shell.contentBounds();
+    const panel = shell.chromeView.getBounds();
+    check('full screen down the side floats the strip over a full-screen page',
+      shell.chromeFloats() === true &&
+      sidePage.x === 0 && sidePage.y === 0 &&
+      sidePage.width === full.width && sidePage.height === full.height &&
+      panel.x > 0 && panel.y > 0 && panel.height < full.height,
+      `page ${sidePage.width}x${sidePage.height} at ${sidePage.x},${sidePage.y}; ` +
+      `panel ${panel.width}x${panel.height} at ${panel.x},${panel.y}`);
+
+    shell.window.setFullScreen(false);
+    await waitFor(() => !shell.fullScreen(), { timeoutMs: 6000 });
+    shell.layout();
+
+    // And back: a browser that leaves full screen holding a floating panel over
+    // a page with no room made for it is worse than one that never floated.
+    const backPage = shell.contentBounds();
+    const backPanel = shell.chromeView.getBounds();
+    check('leaving full screen puts the column and the page back',
+      shell.chromeFloats() === false && backPanel.x === 0 && backPanel.y === 0 &&
+      backPage.x > 0,
+      `panel at ${backPanel.x},${backPanel.y} ${backPanel.width}x${backPanel.height}; ` +
+      `page starts at x=${backPage.x}`);
+
+    prefs.set('tabBarPosition', wasSide);
+    prefs.set('sidebarPinned', wasPinned);
+    shell.applyWindowPrefs();
+  }
 
   /* ---------------------------------------------------------------- */
   if (fixtures) await fixtures.close();

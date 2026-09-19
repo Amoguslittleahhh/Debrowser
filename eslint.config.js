@@ -89,6 +89,7 @@ module.exports = [
         Image: 'readonly',
         MutationObserver: 'readonly',
         IntersectionObserver: 'readonly',
+        ResizeObserver: 'readonly',
         performance: 'readonly',
         location: 'readonly',
         history: 'readonly',
@@ -112,6 +113,7 @@ module.exports = [
         wireMenuKeyboard: 'readonly',
         URLSearchParams: 'readonly',
         IntersectionObserver: 'readonly',
+        ResizeObserver: 'readonly',
         // Preloads only.
         require: 'readonly',
         module: 'writable',

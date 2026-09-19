@@ -121,6 +121,11 @@ const SHOTS = [
   // strip has to have stopped painting by then, or its fragments show as the
   // flicker that was reported.
   { name: 'strip',    file: 'chrome.html',   w: 10,   h: 820, side: true, collapsed: true },
+  // Full screen, down the side: the strip is a panel over the page, and the
+  // window sizes the view to what the chrome measures itself at. Photographed
+  // at a plausible answer for eight tabs, which is the only way to see whether
+  // a panel that stops partway down actually looks like one.
+  { name: 'sidebar-float', file: 'chrome.html', w: 240, h: 480, side: true, floating: true },
   { name: 'settings', file: 'settings.html', w: 1280, h: 860 },
   // The same page, scrolled to a section that would otherwise be eight screens
   // down. Worth its own shot because the rows there are built by hand rather
@@ -147,7 +152,9 @@ app.whenReady().then(async () => {
   for (const shot of WANTED) {
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';
-      STATE.sidebar = shot.collapsed ? { pinned: false, open: false } : { pinned: true, open: true };
+      STATE.sidebar = shot.collapsed
+        ? { pinned: false, open: false }
+        : { pinned: true, open: true, floating: shot.floating === true };
       STATE.bookmarksBar = false;
     } else {
       STATE.prefs.tabBarPosition = 'top';

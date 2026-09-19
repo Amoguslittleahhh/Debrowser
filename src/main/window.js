@@ -116,6 +116,25 @@ const DEVTOOLS_REDOCK_MS = 250;
  */
 const SIDEBAR_TOP_BAND = 40;
 
+/*
+ * Full screen, where the chrome gets out of the way.
+ *
+ * Across the top the strip simply goes: the point of full screen is the page,
+ * and a browser that keeps a toolbar across it is one that did not do what was
+ * asked. Down the side it cannot go - the strip is the only way to see a tab in
+ * that layout - so it becomes a panel floating over the page instead: the page
+ * takes the whole screen, and the strip sits on top of it, inset from the
+ * corner and only as tall as its own contents need.
+ *
+ * That height is the one number this side cannot work out for itself. What a
+ * column of tabs comes to depends on how many there are, on the bookmarks bar,
+ * on the find bar - so the chrome measures itself and says, and this clamps the
+ * answer. See `setChromeHeight`.
+ */
+const FLOAT_GAP = 10;
+const FLOAT_RADIUS = 14;
+const FLOAT_MIN_HEIGHT = 120;
+
 /**
  * Hard ceiling on how long a restore placeholder may stay up. Generous enough
  * to cover a slow page, short enough that a page which never paints does not
@@ -279,6 +298,17 @@ class BrowserShell {
     this.devToolsRedock = null;
 
     /**
+     * Full screen, across the top: does the chrome have focus right now?
+     *
+     * Tracked rather than asked, because the answer decides whether the chrome
+     * is on screen at all - and a view that has been hidden cannot report
+     * anything about itself.
+     */
+    this.chromeFocused = false;
+    /** The floating panel's height, as the chrome last measured itself. */
+    this.chromeWantsHeight = 0;
+
+    /**
      * Whether the auto-hiding sidebar is currently slid out.
      *
      * Only meaningful with the strip down the side and unpinned; pinned, it is
@@ -309,6 +339,11 @@ class BrowserShell {
     this.window.on('resize', () => { this.closeSheet(); this.layout(); });
     this.window.on('restore', () => this.revive());
     this.window.on('show', () => this.revive());
+    // Full screen changes which rectangle everything gets, in both layouts, so
+    // it is a relayout like a resize - and a publish, because the chrome draws
+    // itself differently as a floating panel and only the window knows.
+    this.window.on('enter-full-screen', () => { this.layout(); this.publishSidebar(); });
+    this.window.on('leave-full-screen', () => { this.layout(); this.publishSidebar(); });
     this.window.on('maximize', () => this.layout());
     this.window.on('unmaximize', () => this.layout());
     this.window.once('ready-to-show', () => this.window.show());
@@ -333,6 +368,13 @@ class BrowserShell {
     // to run a second one in its own DOM, which is how the browser ended up
     // with shortcuts that existed only while the toolbar had focus.
     this.bindShortcuts(this.chromeView.webContents);
+
+    // The address bar is in here, and in full screen across the top the chrome
+    // is not on screen until something reaches for it. Focus is that signal:
+    // Ctrl+L brings the bar back, and leaving it lets the page have the room
+    // again. Harmless in every other layout, where nothing reads the flag.
+    this.chromeView.webContents.on('focus', () => this.setChromeFocused(true));
+    this.chromeView.webContents.on('blur', () => this.setChromeFocused(false));
     this.chromeView.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'));
 
     // Links in our own UI (there should be none) open externally rather than
@@ -369,7 +411,7 @@ class BrowserShell {
     else tab.setBounds(this.contentBounds());
     // A tab realised after the layout ran has never been shaped, so the change
     // guard in `layout` would skip it. Cheap, and once per attach.
-    setRadius(tab.view, this.vertical() ? CONTENT_RADIUS : 0);
+    setRadius(tab.view, this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0);
     tab.setVisible(tab.visible);
   }
 
@@ -1072,6 +1114,78 @@ class BrowserShell {
     if (wc && !wc.isDestroyed()) wc.focus();
   }
 
+  /** Focus came to or left the chrome; only full screen across the top cares. */
+  setChromeFocused(focused) {
+    if (this.chromeFocused === focused) return;
+    this.chromeFocused = focused;
+    if (this.fullScreen() && !this.vertical()) this.layout();
+  }
+
+  /** Is the window full screen? False once it is destroyed, rather than a throw. */
+  fullScreen() {
+    return !this.window.isDestroyed() && this.window.isFullScreen();
+  }
+
+  /**
+   * Full screen, down the side: the strip becomes a panel over the page.
+   *
+   * Not across the top, where full screen hides the chrome outright - there the
+   * page can simply have the room. See `chromeHidden`.
+   */
+  chromeFloats() {
+    return this.vertical() && this.fullScreen();
+  }
+
+  /**
+   * Full screen, across the top: no chrome at all.
+   *
+   * Except while something in it is being used. The find bar lives in the
+   * chrome, so hiding the chrome while a search is open would be a search box
+   * the user cannot see typing into a page they cannot leave; the same goes for
+   * the address bar, which is why the chrome's own focus is part of this. Both
+   * bring the bar back for as long as they hold it, and full screen takes it
+   * away again the moment they let go.
+   */
+  chromeHidden() {
+    return this.fullScreen() && !this.vertical() && !this.findOpen && !this.chromeFocused;
+  }
+
+  /** What the chrome needs to know about its own shape. */
+  sidebarState() {
+    if (!this.vertical()) return null;
+    return {
+      pinned: this.sidebarPinned(),
+      open: this.sidebarPinned() || this.sidebarOpen,
+      floating: this.chromeFloats()
+    };
+  }
+
+  /**
+   * Tell the chrome its shape changed, without waiting for the governor.
+   *
+   * The state broadcast carries this too, but it arrives on the governor's own
+   * tick - up to half a second after the window entered full screen, which is
+   * half a second of a full-height strip drawn over a full-screen page.
+   */
+  publishSidebar() {
+    this.toChrome('sidebar', { sidebar: this.sidebarState() });
+  }
+
+  /**
+   * How tall the floating panel wants to be, as the chrome measures itself.
+   *
+   * The chrome is the only thing that can answer: the height is its tab rows,
+   * its toolbar, whichever bars are up and how many tabs there are. Clamped
+   * here rather than there, because the window is the only thing that knows how
+   * much room there is to give.
+   */
+  setChromeHeight(height) {
+    const want = Math.round(Number(height) || 0);
+    if (!Number.isFinite(want) || want <= 0 || want === this.chromeWantsHeight) return;
+    this.chromeWantsHeight = want;
+    if (this.chromeFloats()) this.layout();
+  }
+
   /** Is the sidebar held open, rather than sliding away when the pointer goes? */
   sidebarPinned() {
     return this.prefs ? this.prefs.get('sidebarPinned') === true : false;
@@ -1119,12 +1233,23 @@ class BrowserShell {
    * dark background as the strip.
    */
   cardInset() {
-    return this.vertical() ? CONTENT_GAP : 0;
+    return this.vertical() && !this.fullScreen() ? CONTENT_GAP : 0;
   }
 
   contentArea() {
     const { width, height } = this.window.getContentBounds();
     const panelWidth = this.panelOpen ? PANEL_WIDTH : 0;
+
+    // Full screen gives the page the window, in both layouts. Across the top
+    // there is no chrome to make room for; down the side the strip is a panel
+    // drawn over the page rather than a column beside it, which is the whole
+    // point of that shape - the page is the thing you went full screen for.
+    //
+    // Except while the chrome is back for the find or address bar, where it is
+    // a band again and the page moves down for it exactly as it always does.
+    if (this.fullScreen() && (this.vertical() || this.chromeHidden())) {
+      return { x: 0, y: 0, width: Math.max(0, width - panelWidth), height };
+    }
 
     if (this.vertical()) {
       // Measured from the *pinned* width, not the current one. An unpinned
@@ -1196,12 +1321,41 @@ class BrowserShell {
     // One rectangle either way, so sidebar mode costs no extra view and no
     // extra renderer. Full height on the left, which puts the chrome's own top
     // corner beside the window buttons rather than under them.
-    this.chromeView.setBounds(this.vertical()
-      ? { x: 0, y: 0, width: this.sidebarWidth(), height }
-      : { x: 0, y: 0, width, height: this.chromeHeight() });
+    // Three shapes, and full screen is what chooses between the last two.
+    //
+    //   hidden    across the top, full screen: the page has the whole window
+    //   floating  down the side, full screen: a panel over the page, inset from
+    //             the corner and as tall as the chrome says it needs
+    //   docked    everything else: a full-height column, or a band on top
+    const hidden = this.chromeHidden();
+    this.chromeView.setVisible(!hidden);
+    if (!hidden) {
+      if (this.chromeFloats()) {
+        const room = Math.max(FLOAT_MIN_HEIGHT, height - FLOAT_GAP * 2);
+        this.chromeView.setBounds({
+          x: FLOAT_GAP,
+          y: FLOAT_GAP,
+          width: this.sidebarWidth(),
+          height: Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
+        });
+      } else {
+        this.chromeView.setBounds(this.vertical()
+          ? { x: 0, y: 0, width: this.sidebarWidth(), height }
+          : { x: 0, y: 0, width, height: this.chromeHeight() });
+      }
+    }
+    // Rounded only while it floats. A panel over a page needs corners; a column
+    // against the window's own edge does not, and rounding one would leave four
+    // notches of window background at the screen's corners.
+    const chromeRadius = this.chromeFloats() ? FLOAT_RADIUS : 0;
+    if (this.laidOutChromeRadius !== chromeRadius) {
+      this.laidOutChromeRadius = chromeRadius;
+      setRadius(this.chromeView, chromeRadius);
+    }
 
     const bounds = this.contentBounds();
-    const radius = this.vertical() ? CONTENT_RADIUS : 0;
+    // No card, and no corners, while full screen: the page is the window.
+    const radius = this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0;
     // Applied on a change rather than every layout, which runs on every resize
     // and every tab switch.
     const reshape = this.laidOutCard !== radius;
@@ -1279,9 +1433,7 @@ class BrowserShell {
     // A count and a fraction, not the list. See DownloadManager#summary.
     if (this.downloads) full.downloads = this.downloads.summary();
     full.bookmarksBar = this.bookmarksBarVisible();
-    full.sidebar = this.vertical()
-      ? { pinned: this.sidebarPinned(), open: this.sidebarPinned() || this.sidebarOpen }
-      : null;
+    full.sidebar = this.sidebarState();
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
     // And the sheet, while one is up. The menu takes its preferences off the

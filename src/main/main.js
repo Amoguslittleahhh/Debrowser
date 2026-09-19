@@ -983,6 +983,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (prewarm) prewarm.warm();
         break;
 
+      // How tall the chrome's own contents come to. Only it can measure that,
+      // and full screen down the side is where the answer matters: the strip is
+      // a floating panel there, and a panel is as tall as what is in it.
+      case 'chrome-size':
+        shell.setChromeHeight(payload?.height);
+        break;
+
       // The pointer reached the window's left edge, or left the strip. Only
       // the chrome can tell us: it is the view the pointer enters and leaves.
       case 'sidebar-hover':

@@ -437,3 +437,8 @@ section.landed .rows {
 /* A form is one row taller than the rows around it; the buttons stay with the
    fields rather than drifting to the middle of that extra height. */
 .bookmark-form .row-control { align-self: center; }
+
+/* The end-of-page sentinel the rail watches. Zero height, no room taken: it
+   exists so "the bottom is in view" is an observation like any other rather
+   than a scroll handler. */
+.rail-end { height: 0; }

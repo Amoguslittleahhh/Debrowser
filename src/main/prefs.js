@@ -58,15 +58,18 @@ const SCHEMA = {
   tabBarColor:  { def: 'default', ok: (v) => v === 'default' || v === 'mirror' || /^#[0-9a-f]{6}$/i.test(v) },
 
   /**
-   * Window translucency, as plain opacity.
+   * How opaque the tab strip is. The strip, and nothing else.
    *
-   * Deliberately the cheap mechanism. Real per-element transparency needs a
-   * transparent window, which forces the whole surface through the compositor
-   * with an alpha channel and costs GPU memory on every frame. `setOpacity` is
-   * a property of the window the OS compositor already draws, so it is close to
-   * free - which is what was asked for.
+   * It was `setOpacity` on the window once, and that comment outlived the
+   * mechanism by several versions: fading the window fades the page text with
+   * it, so a translucent browser was an unreadable one. The alpha is applied to
+   * the one surface the user asked to see through - see `--strip-alpha` in
+   * chrome.css - and pages stay fully opaque.
+   *
+   * Down to 40%, which is as far as the strip can go before the tab titles
+   * stop being legible against a bright window behind them.
    */
-  windowOpacity: { def: 1, ok: (v) => Number.isFinite(v) && v >= 0.6 && v <= 1 },
+  windowOpacity: { def: 1, ok: (v) => Number.isFinite(v) && v >= 0.4 && v <= 1 },
 
   /**
    * Ask for a fingerprint, face or PIN before a saved secret is shown or filled.

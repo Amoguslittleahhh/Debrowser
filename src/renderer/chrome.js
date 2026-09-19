@@ -159,6 +159,57 @@ function renderSidebar(sidebar) {
   if (document.body.dataset.sidebarOpen !== String(open)) {
     document.body.dataset.sidebarOpen = String(open);
   }
+
+  // Full screen: the strip is a panel drawn over the page rather than a column
+  // beside it, so it stops filling its view and reports what it comes to
+  // instead. See `reportChromeHeight`.
+  const floating = sidebar.floating === true;
+  if (document.body.dataset.floating !== String(floating)) {
+    document.body.dataset.floating = String(floating);
+    reportChromeHeight();
+  }
+}
+
+/**
+ * Say how tall the chrome's contents are, for the window to size the panel.
+ *
+ * Only while floating, and only on a change. Every other shape is a rectangle
+ * the window decides on its own, and a message per animation frame to say a
+ * number that has not moved is exactly the kind of idle cost this browser is
+ * supposed to be about.
+ *
+ * The measurement is of what is in the chrome, not of the chrome: the body is
+ * the view, and the view is the thing being sized - asking it would be asking
+ * the answer to the question. So the panel's height is the bottom of its last
+ * visible child, plus whatever padding sits under it.
+ */
+let reportedHeight = 0;
+
+function reportChromeHeight() {
+  if (document.body.dataset.floating !== 'true') return;
+
+  let bottom = 0;
+  for (const child of document.body.children) {
+    if (child.hidden) continue;
+    const box = child.getBoundingClientRect();
+    if (box.height === 0) continue;
+    bottom = Math.max(bottom, box.bottom);
+  }
+  if (!bottom) return;
+
+  const pad = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+  const height = Math.ceil(bottom + pad);
+  // A pixel of hysteresis. The window rounds, the panel is re-measured after it
+  // is resized, and without this the two could trade a pixel back and forth for
+  // as long as the browser is full screen.
+  if (Math.abs(height - reportedHeight) < 2) return;
+  reportedHeight = height;
+  api.send('chrome-size', { height });
+}
+
+if (typeof ResizeObserver === 'function') {
+  const watch = new ResizeObserver(() => reportChromeHeight());
+  for (const child of document.body.children) watch.observe(child);
 }
 
 /* ------------------------------------------------------------------ */
@@ -817,6 +868,13 @@ api.onMessage((message) => {
     // Ctrl+D and the context menu both bookmark through the command channel,
     // which returns nothing - so the browser says what it decided, and the star
     // follows that rather than guessing.
+    // Full screen changed the strip's shape. Sent directly rather than waited
+    // for on the governor's next tick, which is up to half a second of a
+    // full-height strip drawn over a full-screen page.
+    case 'sidebar':
+      renderSidebar(message.sidebar);
+      break;
+
     case 'bookmarked':
       if (message.url === starUrl) setStar(Boolean(message.bookmarked));
       break;

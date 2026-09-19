@@ -1238,3 +1238,45 @@ body[data-layout="left"] #find-input { order: 1; flex: 1 1 60%; height: 22px; }
 body[data-layout="left"] .find-count { order: 2; flex: 1 1 auto; }
 body[data-layout="left"] .find-step,
 body[data-layout="left"] #find-close { order: 3; }
+
+/* ------------------------------------------------------------------ */
+/* Full screen, down the side: the strip as a floating panel           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The page has the whole screen and the strip sits on top of it.
+ *
+ * That is the shape of the layout in full screen, and it is what makes the
+ * strip *shorter* rather than narrower: it stops filling a full-height column
+ * and becomes a panel as tall as its own rows. The window sizes the view to the
+ * height this measures itself at - see `reportChromeHeight` in chrome.js - so
+ * everything here has to size to its content rather than to the view.
+ */
+body[data-floating="true"] {
+  justify-content: flex-start;
+  padding-bottom: 8px;
+  border-radius: 14px;
+  /* An edge, because the panel is now over a page rather than against the
+     window's own border, and without one a dark strip on a dark site has no
+     boundary at all. */
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  overflow: hidden;
+}
+
+/*
+ * The tab list stops stretching.
+ *
+ * `flex: 1 1 auto` is what makes the column fill the window in the docked
+ * shape, and it is exactly wrong here: a panel that is as tall as its contents
+ * cannot have a child claiming whatever height is left. It still scrolls, so
+ * forty tabs are a scrolling panel rather than a panel taller than the screen -
+ * the window clamps the height it was told to the room there is.
+ */
+body[data-floating="true"] .tabstrip {
+  flex: 0 1 auto;
+}
+
+/* Nothing is reserved for the window buttons: full screen has none. */
+body[data-floating="true"] .toolbar {
+  padding-top: 8px;
+}
