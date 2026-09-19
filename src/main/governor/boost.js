@@ -198,12 +198,18 @@ class BoostController {
    * always undone in `unyieldOthers`.
    */
   yieldOthers(boostedTab, allTabs) {
+    // Read once per tab. `Tab#pid` is a live getter now - it asks the renderer
+    // rather than returning a field, because a cached one goes stale the moment
+    // a tab navigates across sites - so four reads in this loop were four
+    // native calls per tab per boost.
+    const boostedPid = boostedTab.pid;
     for (const tab of allTabs) {
-      if (tab.id === boostedTab.id || !tab.pid) continue;
-      if (tab.pid === boostedTab.pid) continue; // same process; cannot differentiate
-      if (this.yieldedPids.has(tab.pid)) continue;
-      if (platform.setProcessPriority(tab.pid, this.cfg.boost.niceBackground)) {
-        this.yieldedPids.add(tab.pid);
+      const pid = tab.pid;
+      if (tab.id === boostedTab.id || !pid) continue;
+      if (pid === boostedPid) continue;          // same process; cannot differentiate
+      if (this.yieldedPids.has(pid)) continue;
+      if (platform.setProcessPriority(pid, this.cfg.boost.niceBackground)) {
+        this.yieldedPids.add(pid);
       }
     }
   }
@@ -211,7 +217,10 @@ class BoostController {
   unyieldOthers(allTabs) {
     if (!this.yieldedPids.size) return;
     const byPid = new Map();
-    for (const tab of allTabs) if (tab.pid) byPid.set(tab.pid, tab);
+    for (const tab of allTabs) {
+      const pid = tab.pid;
+      if (pid) byPid.set(pid, tab);
+    }
 
     for (const pid of this.yieldedPids) {
       const tab = byPid.get(pid);
@@ -224,8 +233,9 @@ class BoostController {
   }
 
   setPriority(tab, priority) {
-    if (!tab.pid) return false;
-    const ok = platform.setProcessPriority(tab.pid, priority);
+    const pid = tab.pid;
+    if (!pid) return false;
+    const ok = platform.setProcessPriority(pid, priority);
     if (ok) tab.priority = priority;
     return ok;
   }

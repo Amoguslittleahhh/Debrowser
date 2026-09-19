@@ -245,27 +245,12 @@ function renderBookmarks(items) {
     button.type = 'button';
     button.title = `${item.title || item.url}\n${item.url}`;
 
-    const chip = document.createElement('span');
-    chip.className = 'bookmark-chip';
-    chip.setAttribute('aria-hidden', 'true');
-    const host = siteOf(item.url);
-    chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
-    chip.style.setProperty('--hue', String(siteHue(host)));
-
     // The site's own logo over its letter, through the browser's icon route -
     // never fetched by this page, which would send this session's cookies to
-    // every bookmarked site every time the window opened. See icons.js.
-    const src = iconSrc(item.icon || defaultIconFor(item.url));
-    if (src) {
-      const icon = document.createElement('img');
-      icon.className = 'bookmark-icon';
-      icon.alt = '';
-      icon.decoding = 'async';
-      icon.src = src;
-      icon.addEventListener('load', () => chip.classList.add('has-icon'));
-      icon.addEventListener('error', () => icon.remove());
-      chip.append(icon);
-    }
+    // every bookmarked site every time the window opened. See `siteChip`.
+    const host = siteOf(item.url);
+    const chip = siteChip(item.url,
+      { icon: item.icon, chipClass: 'bookmark-chip', iconClass: 'bookmark-icon' });
 
     const label = document.createElement('span');
     label.className = 'bookmark-label';
@@ -290,17 +275,6 @@ function renderBookmarks(items) {
 
   el.bookmarks.replaceChildren(bar);
   el.bookmarks.classList.toggle('empty', items.length === 0);
-}
-
-/** Where a site's icon is if it never said - the address Chromium would try. */
-function defaultIconFor(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return `${parsed.origin}/favicon.ico`;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -539,19 +513,6 @@ function updateTabElement(node, tab) {
   }
 }
 
-/** The site a tab is on, for the fallback chip's letter and colour. */
-function siteOf(url) {
-  try {
-    const parsed = new URL(url);
-    // The browser's own pages are one "site" as far as this is concerned, so
-    // Settings and the new tab page do not each get a colour of their own.
-    if (parsed.protocol === 'debrowser:') return 'debrowser';
-    return parsed.hostname.replace(/^www\./, '') || parsed.protocol;
-  } catch {
-    return '';
-  }
-}
-
 function tierLabel(tab) {
   switch (tab.tier) {
     case 'active': return tab.boosted ? 'Active - boosted for animation' : 'Active';
@@ -770,7 +731,6 @@ el.url.addEventListener('keydown', (event) => {
  */
 function showFind(open) {
   el.findbar.hidden = !open;
-  document.body.classList.toggle('with-find', open);
   if (!open) {
     el.findInput.value = '';
     el.findCount.textContent = '';

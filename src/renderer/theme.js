@@ -34,7 +34,6 @@
  * @param {string} text - a hostname, or anything stable about the site
  * @returns {number} a hue, 0-359
  */
-/* eslint-disable-next-line no-unused-vars -- read by chrome.js and history.js */
 function siteHue(text) {
   let hash = 5381;
   const source = String(text || '');
@@ -58,7 +57,6 @@ function siteHue(text) {
  * @param {string} url - the icon's own address, as the browser reported it
  * @returns {string|null}
  */
-/* eslint-disable-next-line no-unused-vars -- read by chrome.js, panel.js, history.js */
 function iconSrc(url) {
   if (typeof url !== 'string' || !url) return null;
   if (url.startsWith('data:image/')) return url;
@@ -66,7 +64,100 @@ function iconSrc(url) {
   return `debrowser://icon?url=${encodeURIComponent(url)}`;
 }
 
-/* eslint-disable-next-line no-unused-vars -- read by chrome.js, panel.js, settings.js */
+/**
+ * Where a site's icon is if the page never said: the address Chromium itself
+ * would have tried.
+ *
+ * Five views had a byte-identical copy of this, which is five places to change
+ * the day the rule is not `origin + /favicon.ico` any more - and it lives here
+ * beside `iconSrc` because the two are one decision: where an icon is, and how
+ * this browser is allowed to fetch it.
+ */
+function defaultIcon(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.origin}/favicon.ico`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What to call the site an address belongs to.
+ *
+ * Three copies of the plain hostname form existed, and two more that each added
+ * one case to it - the browser's own pages folded into a single "site" so that
+ * Settings and the new tab page do not get a colour each, and `file:` named
+ * rather than left blank. Both of those are right everywhere, so this is one
+ * function with both, rather than five functions with a subset each.
+ *
+ * Returns the address itself when it cannot be parsed: the callers use this as
+ * a label and as the seed for `siteHue`, and an empty string is a worse answer
+ * than a strange one.
+ */
+function siteOf(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'debrowser:') return 'debrowser';
+    if (parsed.protocol === 'file:') return 'local file';
+    return parsed.hostname.replace(/^www\./, '') || parsed.protocol;
+  } catch {
+    return String(url || '');
+  }
+}
+
+/**
+ * The site mark: a letter on a coloured tile, with the site's own logo over it
+ * once one loads.
+ *
+ * Four views built this element by hand, character for character, and the
+ * stylesheet half is already shared (`.chip` in theme.css). The DOM half is the
+ * part that carries the rule that actually matters: the icon is fetched through
+ * the browser, never by the page, and the letter underneath stops painting when
+ * a real logo arrives - because almost every favicon is transparent, and a chip
+ * left painting behind one shows through it.
+ *
+ * The two class names are parameters rather than derived from each other: the
+ * tab strip's mark is `tab-chip`/`tab-favicon`, which no naming rule would
+ * produce, and a helper that guesses a class is one that fails silently when a
+ * view is renamed.
+ *
+ * @param {string} url - the page the mark stands for
+ * @param {object} [opts]
+ * @param {string|null} [opts.icon] - an icon address the browser reported
+ * @param {string} [opts.chipClass] - the view's class for the tile
+ * @param {string} [opts.iconClass] - the view's class for the logo
+ */
+/* eslint-disable-next-line no-unused-vars -- read by chrome.js, history.js, downloads.js, flyout.js, newtab.js */
+function siteChip(url, { icon = null, chipClass = 'chip', iconClass = 'site-icon' } = {}) {
+  const host = siteOf(url);
+
+  const chip = document.createElement('span');
+  chip.className = chipClass;
+  chip.setAttribute('aria-hidden', 'true');
+  chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+  chip.style.setProperty('--hue', String(siteHue(host)));
+
+  const src = iconSrc(icon || defaultIcon(url));
+  if (src) {
+    const img = document.createElement('img');
+    img.className = iconClass;
+    img.alt = '';
+    // Decoded off the main thread, and only for the rows on screen: three
+    // hundred history rows at once would be a burst of requests for a list the
+    // user has scrolled two screens of.
+    img.decoding = 'async';
+    img.loading = 'lazy';
+    img.src = src;
+    img.addEventListener('load', () => chip.classList.add('has-icon'));
+    img.addEventListener('error', () => img.remove());
+    chip.append(img);
+  }
+
+  return chip;
+}
+
 function applyThemePrefs(prefs) {
   if (!prefs) return;
   const body = document.body;
@@ -164,23 +255,19 @@ function anchorSheet(sheet, anchor, edge = 8, align = 'right') {
 /*
  * The theme, before anything has been asked for.
  *
- * The three sheets - menu, downloads flyout, context menu - take their
- * preferences off a reply, and a reply arrives after the view has painted. Until
- * it did, they rendered in whatever `prefers-color-scheme` says, so on a machine
- * set to Light with Dark chosen in Settings the menu came up white and then went
- * dark a frame later. The browser knows the answer when it creates the view, so
- * it puts it in the query string and this stamps it before first paint.
+ * Every view here themes itself from the preferences, and every view used to
+ * receive its first set *after* it had painted - on a reply, or on the
+ * governor's next broadcast. So a sheet came up in whatever the machine's
+ * `prefers-color-scheme` said and turned into the browser's palette a frame
+ * later: on a machine set to Light with Dark chosen, a white menu flashing over
+ * a dark browser.
  *
- * Harmless on the views that have no such parameters, which is why it is here
- * rather than copied into three files.
+ * The browser knows the answer when it creates the view and hands it over
+ * through the preload, so this applies the whole set - not the two values a
+ * query string could carry, which left the layout, strip colour and motion
+ * settings still arriving late.
  */
-(function applyEarlyTheme() {
-  const params = new URLSearchParams(location.search);
-  const theme = params.get('theme');
-  const accent = params.get('accent');
-  if (theme === 'light' || theme === 'dark') document.body.dataset.theme = theme;
-  if (accent) document.body.style.setProperty('--accent', accent);
-})();
+if (window.debrowser && window.debrowser.prefs) applyThemePrefs(window.debrowser.prefs);
 
 /**
  * Report typed-but-unsent text to the browser.

@@ -435,11 +435,8 @@ function main() {
       prefs,
       log,
       onCommand: (name) => { if (name === 'chrome-ready' || name === 'view-ready') publish(); },
-      // The task manager and the panels are views, not tabs, so nothing was
-      // binding the browser's shortcuts to them - and with the task manager
-      // focused, Ctrl+T did nothing at all. They get the same table the tabs
-      // do. Not the chrome itself: that has its own handler in chrome.js, and
-      // binding both would open two tabs per keypress.
+      // Every view the shell owns answers the same table the tabs do - the
+      // chrome included, since its own DOM handler is gone.
       bindShortcuts
     });
 
@@ -614,6 +611,11 @@ function main() {
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null }) {
+  /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
+  const goTo = (id) => tabs.activate(id)
+    .then(publish)
+    .catch((err) => log(`activate failed: ${err.message}`));
+
   const runCommand = (command, payload, sender = null) => {
     const active = tabs.activeTab();
 
@@ -637,7 +639,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'activate-tab':
-        tabs.activate(payload?.id).then(publish).catch((e) => log(`activate failed: ${e.message}`));
+        goTo(payload?.id);
         break;
 
       case 'prefetch-tab':
@@ -717,7 +719,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const list = tabs.all();
         const index = Number(payload?.index);
         const tab = index === -1 ? list[list.length - 1] : list[index];
-        if (tab) tabs.activate(tab.id).then(publish).catch((e) => log(`activate failed: ${e.message}`));
+        if (tab) goTo(tab.id);
         break;
       }
 
@@ -728,7 +730,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const at = list.findIndex((tab) => tab.id === tabs.activeId);
         const delta = Number(payload?.delta) || 1;
         const next = list[(((at === -1 ? 0 : at) + delta) % list.length + list.length) % list.length];
-        if (next) tabs.activate(next.id).then(publish).catch((e) => log(`activate failed: ${e.message}`));
+        if (next) goTo(next.id);
         break;
       }
 
@@ -802,12 +804,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'find-next':
       case 'find-prev': {
         const query = String(payload?.query ?? find?.query ?? '');
-        // Pressing F3 with the bar closed opens it, which is what the key is
-        // for when there is nothing to step through yet - and, as above, the
-        // keyboard has to follow it there.
-        if (!query) { shell.setFindOpen(true); shell.focusChrome(); break; }
-        if (!active?.isLive) break;
+        // Either way the bar ends up open, so it is opened once rather than in
+        // each branch. Pressing F3 with nothing to step through is what the key
+        // is for before a search exists: it opens the bar and puts the keyboard
+        // in it, exactly as Ctrl+F does.
         shell.setFindOpen(true);
+        if (!query || !active?.isLive) { shell.focusChrome(); break; }
         active.wc.findInPage(query, { findNext: true, forward: command === 'find-next' });
         break;
       }
@@ -885,7 +887,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const right = Number(payload?.right);
         const anchored = Number.isFinite(right) && right > 0
           ? payload
-          : { x: 0, y: shell.chromeHeight() - 8,
+          : { x: 0, y: shell.toolbarAnchor() - 8,
               right: shell.window.getContentBounds().width - 12 };
         shell.openSheet('downloads', anchored);
         break;

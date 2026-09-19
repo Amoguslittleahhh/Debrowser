@@ -58,25 +58,6 @@ function mb(n) {
   return `${Math.max(0, Math.round(bytes / 1024))} KB`;
 }
 
-function hostOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
-/** Where a site's icon is if it never said - the address Chromium would try. */
-function defaultIcon(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return `${parsed.origin}/favicon.ico`;
-  } catch {
-    return null;
-  }
-}
-
 function describe(item) {
   switch (item.state) {
     case 'done': return null;               // the row offers "Open file" instead
@@ -97,26 +78,11 @@ function createRow(item) {
   const root = document.createElement('div');
   root.className = 'dl';
 
-  const chip = document.createElement('span');
-  chip.className = 'dl-chip';
-  chip.setAttribute('aria-hidden', 'true');
-  const host = hostOf(item.url);
-  chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
-  chip.style.setProperty('--hue', String(siteHue(host)));
-
-  // Through the browser's icon route, never at the site: an <img> here would be
-  // fetched by this page with this session's cookies. See icons.js.
-  const src = iconSrc(defaultIcon(item.url));
-  if (src) {
-    const icon = document.createElement('img');
-    icon.className = 'dl-icon';
-    icon.alt = '';
-    icon.decoding = 'async';
-    icon.src = src;
-    icon.addEventListener('load', () => chip.classList.add('has-icon'));
-    icon.addEventListener('error', () => icon.remove());
-    chip.append(icon);
-  }
+  // Through the browser's icon route, never at the site - see `siteChip`. The
+  // shared classes rather than `dl-chip`/`dl-icon`: this row's mark was a
+  // twenty-line copy of the shared one differing only in a 1px margin, which is
+  // a rule, not a component.
+  const chip = siteChip(item.url);
 
   const text = document.createElement('div');
   text.className = 'dl-text';

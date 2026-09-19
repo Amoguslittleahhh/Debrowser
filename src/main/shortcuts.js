@@ -97,9 +97,12 @@ const TABLE = [
   { command: 'toggle-fullscreen', key: 'f11' }
 ];
 
-/** Every spelling an entry answers to. */
-function keysOf(entry) {
-  return entry.keys || [entry.key];
+// Every entry answers to a list of spellings, normalised once here rather than
+// built per row per keystroke. `match` runs on every key the browser sees, and
+// a modified keystroke reaches most of the table: the old shape allocated a
+// throwaway array for each row it tested.
+for (const entry of TABLE) {
+  if (!entry.keys) entry.keys = [entry.key];
 }
 
 /**
@@ -133,7 +136,7 @@ function match(input) {
     if (Boolean(entry.mod) !== mod) continue;
     if (Boolean(entry.shift) !== shift) continue;
     if (Boolean(entry.alt) !== alt) continue;
-    if (!keysOf(entry).includes(key)) continue;
+    if (!entry.keys.includes(key)) continue;
     return { command: entry.command, payload: entry.payload || null };
   }
   return null;
@@ -146,10 +149,10 @@ function labelFor(entry) {
   if (entry.alt) parts.push(ALT_LABEL);
   if (entry.shift) parts.push(SHIFT_LABEL);
 
-  const key = keysOf(entry)[0];
+  const key = entry.keys[0];
   const named = {
     arrowleft: '←', arrowright: '→', pagedown: 'PgDn', pageup: 'PgUp',
-    tab: 'Tab', ',': ',', '=': '+', '-': '−'
+    tab: 'Tab', '=': '+', '-': '−'
   };
   parts.push(named[key] || key.toUpperCase());
   // A Mac menu writes ⌘T with nothing between the symbols; everywhere else the

@@ -7,6 +7,10 @@ const ANSWERS = JSON.parse(process.argv.find((a) => a.startsWith('--answers=')).
 
 contextBridge.exposeInMainWorld('debrowser', {
   platform: 'win32',
+  // The real preload hands the view its palette before a line of script runs,
+  // so theme.js can apply it at parse time; without it here every photograph
+  // comes back in whatever `prefers-color-scheme` the harness's X server says.
+  prefs: STATE.prefs,
   send() {},
   request(command) { return Promise.resolve(ANSWERS[command] ?? null); },
   onState(handler) {

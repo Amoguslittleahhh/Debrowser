@@ -47,14 +47,6 @@ function mb(n) {
   return `${Math.max(0, Math.round(bytes / 1024))} KB`;
 }
 
-function hostOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
 /**
  * The line under the filename.
  *
@@ -93,26 +85,8 @@ function createRow(item) {
   const root = document.createElement('div');
   root.className = 'download';
 
-  const chip = document.createElement('span');
-  chip.className = 'chip';
-  chip.setAttribute('aria-hidden', 'true');
-  const host = hostOf(item.url);
-  chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
-  chip.style.setProperty('--hue', String(siteHue(host)));
-
-  const icon = document.createElement('img');
-  icon.className = 'site-icon';
-  icon.alt = '';
-  icon.decoding = 'async';
-  // Through the browser's icon route, never at the site: an <img> here would be
-  // fetched by this page with this session's cookies. See icons.js.
-  const src = iconSrc(defaultIcon(item.url));
-  if (src) {
-    icon.src = src;
-    icon.addEventListener('load', () => chip.classList.add('has-icon'));
-    icon.addEventListener('error', () => icon.remove());
-    chip.append(icon);
-  }
+  // Through the browser's icon route, never at the site - see `siteChip`.
+  const chip = siteChip(item.url);
 
   const text = document.createElement('div');
   text.className = 'download-text';
@@ -211,17 +185,6 @@ function updateRow(node, item) {
     node.action.setAttribute('aria-label',
       `${running ? 'Cancel' : 'Clear'} ${item.filename || item.url}`);
     prev.state = item.state;
-  }
-}
-
-/** Where a site's icon is if it never said - the address Chromium would try. */
-function defaultIcon(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return `${parsed.origin}/favicon.ico`;
-  } catch {
-    return null;
   }
 }
 

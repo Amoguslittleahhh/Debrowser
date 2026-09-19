@@ -643,6 +643,7 @@ async function renderCredentials() {
     rows.push(credentialRow('payment', item.id, item.label, `•••• ${item.last4} · ${item.expiry}`));
   }
   host.replaceChildren(...rows);
+  reapplyFilter();
 }
 
 function credentialRow(kind, id, title, subtitle) {
@@ -721,10 +722,6 @@ api.onState((state) => {
   }
   renderDownloads();
   for (const [key, control] of controls) control.write(state.prefs[key]);
-  // The lists above are rebuilt from scratch, and a rebuilt row has never been
-  // filtered - so a search typed into the box was wiped by the next governor
-  // tick, twice a second, while the user was still reading the results of it.
-  reapplyFilter();
 });
 
 /* ------------------------------------------------------------------ */
@@ -741,11 +738,22 @@ api.onState((state) => {
  */
 const railButtons = new Map();
 
+/**
+ * The sections, collected once.
+ *
+ * Three pieces of code wanted this list - the rail, the scroll-spy and the
+ * filter - and each re-queried for it, which is three copies of one selector to
+ * keep in step. Sections are static markup; they do not appear or disappear.
+ */
+let sections = [];
+
 function buildRail() {
   const rail = document.getElementById('rail');
   if (!rail) return;
 
-  for (const section of document.querySelectorAll('section[data-section]')) {
+  sections = [...document.querySelectorAll('section[data-section]')];
+
+  for (const section of sections) {
     const name = section.dataset.section;
     const heading = section.querySelector('h2');
     const button = document.createElement('button');
@@ -781,29 +789,20 @@ function markRail(name) {
  * crosses some line. An observer rather than a scroll handler: this fires only
  * when a boundary is crossed, where a scroll listener would run on every frame
  * of every scroll for the life of the page.
+ *
+ * Whether a section is on screen is recorded on the section, so the callback
+ * does not keep a second collection in step with the first.
  */
 function watchSections() {
   if (typeof IntersectionObserver !== 'function') return;
-  const main = document.querySelector('main');
-  const visible = new Set();
 
   const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      const name = entry.target.dataset.section;
-      if (entry.isIntersecting) visible.add(name);
-      else visible.delete(name);
-    }
-    for (const section of document.querySelectorAll('section[data-section]')) {
-      if (visible.has(section.dataset.section)) {
-        markRail(section.dataset.section);
-        return;
-      }
-    }
-  }, { root: main, rootMargin: '0px 0px -55% 0px' });
+    for (const entry of entries) entry.target.dataset.onScreen = String(entry.isIntersecting);
+    const first = sections.find((section) => section.dataset.onScreen === 'true');
+    if (first) markRail(first.dataset.section);
+  }, { root: document.querySelector('main'), rootMargin: '0px 0px -55% 0px' });
 
-  for (const section of document.querySelectorAll('section[data-section]')) {
-    observer.observe(section);
-  }
+  for (const section of sections) observer.observe(section);
 }
 
 /**
@@ -812,25 +811,33 @@ function watchSections() {
  * Over the rows that are already on the page rather than over a list of
  * settings kept for the purpose: there is one list of settings in this file,
  * and a second one written for search is a second one to forget to update. A
- * row's whole text is matched - label and hint both - because people search
- * for what a setting does at least as often as for what it is called.
+ * row's whole text is matched - label and hint both - because people search for
+ * what a setting does at least as often as for what it is called.
+ *
+ * The text is taken once, when a row is filtered for the first time, and kept
+ * on the row. `textContent` walks the row's whole subtree and allocates a
+ * string, and this page can hold five hundred bookmark rows.
  */
 function filterSettings(query) {
   const needle = query.trim().toLowerCase();
   let shown = 0;
 
-  for (const section of document.querySelectorAll('section[data-section]')) {
+  for (const section of sections) {
     let any = false;
     for (const row of section.querySelectorAll('.row')) {
-      const hit = !needle || row.textContent.toLowerCase().includes(needle);
-      row.hidden = !hit;
+      if (row.dataset.find === undefined) row.dataset.find = row.textContent.toLowerCase();
+      const hit = !needle || row.dataset.find.includes(needle);
+      // Written only on a change: `hidden` is an attribute, and setting it
+      // invalidates style for the row whether or not the value moved.
+      if (row.hidden === hit) row.hidden = !hit;
       if (hit) { any = true; shown += 1; }
     }
     // A section whose rows have all gone takes its heading and its notes with
     // it. A page of empty headings is a worse answer than a short list.
-    section.hidden = Boolean(needle) && !any;
+    const gone = Boolean(needle) && !any;
+    if (section.hidden !== gone) section.hidden = gone;
     const button = railButtons.get(section.dataset.section);
-    if (button) button.hidden = section.hidden;
+    if (button && button.hidden !== gone) button.hidden = gone;
   }
 
   const note = document.getElementById('no-match');
@@ -838,8 +845,19 @@ function filterSettings(query) {
   note.textContent = shown ? '' : `No setting matches “${query.trim()}”.`;
 }
 
-/** Re-run the current filter over rows that have just been rebuilt. */
+/**
+ * Re-run the current filter over rows that have just been rebuilt.
+ *
+ * Called by the three lists that rebuild themselves, not by the state
+ * broadcast: that arrives twice a second for the life of the tab, and nothing
+ * else in it touches a row.
+ */
 function reapplyFilter() {
+  const search = document.getElementById('q');
+  if (search && search.value.trim()) filterSettings(search.value);
+}
+
+{
   const search = document.getElementById('q');
   if (search && search.value.trim()) filterSettings(search.value);
 }
@@ -888,6 +906,9 @@ async function renderDownloads() {
   const items = (res && res.items) || [];
   if (!items.length) { host.replaceChildren(); return; }
   host.replaceChildren(...items.map(downloadRow));
+  // A rebuilt row has never been filtered, and this list redraws itself while
+  // a search is on screen.
+  reapplyFilter();
 }
 
 function downloadRow(item) {
@@ -995,6 +1016,7 @@ async function renderBookmarks() {
     more.textContent = `…and ${items.length - 500} more, saved but not listed here.`;
     host.appendChild(more);
   }
+  reapplyFilter();
 }
 
 function bookmarkAction(title, hint, buttonText, onClick) {

@@ -104,7 +104,33 @@ const COMMANDS = new Set([
   'forget-site'
 ]);
 
+/**
+ * The preferences as they were when this view was created.
+ *
+ * Every view here themes itself from `applyThemePrefs`, and every view used to
+ * get its first prefs *after* it had painted - on a reply, or on the governor's
+ * next broadcast. So a sheet came up in whatever `prefers-color-scheme` said
+ * and turned into the browser's palette a frame later, which on a machine set
+ * to Light with Dark chosen is a white menu flashing over a dark browser.
+ *
+ * The browser knows the answer when it builds the view, so it passes it here
+ * and theme.js applies it at parse time. A snapshot, deliberately: this is the
+ * starting state, and the broadcast is what keeps it current.
+ */
+function initialPrefs() {
+  const arg = process.argv.find((a) => a.startsWith('--prefs='));
+  if (!arg) return null;
+  try {
+    return Object.freeze(JSON.parse(arg.slice('--prefs='.length)));
+  } catch {
+    return null;
+  }
+}
+
 contextBridge.exposeInMainWorld('debrowser', {
+  /** What the palette was when this view was created. See `initialPrefs`. */
+  prefs: initialPrefs(),
+
   /**
    * Which OS this is, so the chrome can reserve the right gutter for the
    * system's window buttons.

@@ -156,6 +156,18 @@ const CHROME_PRELOAD = path.join(__dirname, '..', 'preload', 'chrome-preload.js'
  * anyway: a browser that will not start because a cosmetic API moved would be a
  * poor trade, and square corners are a miss rather than a fault.
  */
+/**
+ * What a view of ours is told before it runs a line of script.
+ *
+ * Only the preferences, and only so the view can theme itself at parse time
+ * rather than a frame after it paints - see `initialPrefs` in the preload. It
+ * is a snapshot of something the same view receives on every broadcast anyway,
+ * so nothing crosses this boundary that was not already crossing it.
+ */
+function preloadArgs(prefs) {
+  return prefs ? [`--prefs=${JSON.stringify(prefs.all())}`] : [];
+}
+
 function setRadius(view, radius) {
   if (!view || typeof view.setBorderRadius !== 'function') return;
   try {
@@ -220,8 +232,6 @@ class BrowserShell {
 
     /** Whether the find bar is showing, which the content area has to know. */
     this.findOpen = false;
-    /** Something other than the pointer is keeping the side strip out. */
-    this.sidebarHeld = false;
 
     /**
      * The sheet, while one is open: the app menu or the downloads flyout.
@@ -313,7 +323,8 @@ class BrowserShell {
         sandbox: true,
         // The chrome must never be throttled: it owns the tab strip, and a
         // throttled tab strip is a browser that feels broken.
-        backgroundThrottling: false
+        backgroundThrottling: false,
+        additionalArguments: preloadArgs(this.prefs)
       }
     });
 
@@ -525,6 +536,7 @@ class BrowserShell {
         nodeIntegration: false,
         sandbox: true,
         backgroundThrottling: false,
+        additionalArguments: preloadArgs(this.prefs),
         // Without this the view composites its own opaque white first, and the
         // whole window flashes before the menu paints.
         transparent: true
@@ -551,13 +563,7 @@ class BrowserShell {
         // The button's right edge, which is what the menu aligns to. Passed
         // through rather than derived: only the renderer knows how wide its own
         // button ended up.
-        right: String(Number.isFinite(right) ? Math.round(right) : 0),
-        // The palette, before the page has asked for anything. A sheet takes
-        // its preferences off a reply, and a reply arrives a frame after the
-        // view has painted - so without this the menu came up in the machine's
-        // colours and turned into the browser's a moment later.
-        theme: String(this.prefs ? this.prefs.get('theme') : 'dark'),
-        accent: String(this.prefs ? this.prefs.get('accent') : '')
+        right: String(Number.isFinite(right) ? Math.round(right) : 0)
       }
       // A menu dismissed before it finished loading cancels its own load. That
       // is an ordinary thing for a menu and not worth a line in the log.
@@ -805,7 +811,8 @@ class BrowserShell {
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
-          backgroundThrottling: false
+          backgroundThrottling: false,
+          additionalArguments: preloadArgs(this.prefs)
         }
       });
       this.window.contentView.addChildView(this.panelView);
@@ -1001,13 +1008,23 @@ class BrowserShell {
 
   /** How much vertical room the chrome needs, bars included. */
   chromeHeight() {
-    // Only across the top. Down the side the chrome is a column, so neither bar
-    // takes anything from the content - and adding their heights here would
-    // have moved the downloads flyout's fallback anchor for no reason.
-    if (this.vertical()) return CHROME_HEIGHT;
     return CHROME_HEIGHT +
       (this.bookmarksBarVisible() ? BOOKMARKS_BAR_HEIGHT : 0) +
       (this.findOpen ? FIND_BAR_HEIGHT : 0);
+  }
+
+  /**
+   * Where a panel hanging off the toolbar should start.
+   *
+   * The downloads flyout needs this when it is opened from the menu or from
+   * Ctrl+J, which carry no anchor because only the chrome knows where its own
+   * button ended up. It used to ask `chromeHeight()`, which is the height of
+   * the *top* chrome and means nothing in the side layout - so that accessor
+   * grew a layout special case to keep one unrelated consumer from moving. This
+   * is the number that consumer actually wanted, in both layouts.
+   */
+  toolbarAnchor() {
+    return this.contentArea().y;
   }
 
   /**
@@ -1030,34 +1047,18 @@ class BrowserShell {
     // The bar is drawn inside the chrome, and down the side the chrome is a
     // column that is ten pixels wide until the pointer reaches it - so a find
     // bar opened from the keyboard was laid out off the side of the window,
-    // where it could be neither seen nor typed into. The strip is held out for
-    // as long as the bar is up, and released when it closes.
-    if (this.vertical()) this.holdSidebar(want);
+    // where it could be neither seen nor typed into. Opening the bar slides the
+    // strip out and closing it gives it back to the pointer; `setSidebarOpen`
+    // declines to close it while the bar is up.
+    //
+    // Unconditional rather than `if (vertical())`: across the top the flag is
+    // read by nothing - `sidebarWidth()` returns 0 there - so testing the
+    // layout here would be the caller knowing something the mechanism already
+    // knows.
+    clearTimeout(this.sidebarCloseTimer);
+    this.sidebarOpen = want;
     this.layout();
     this.toChrome(want ? 'find-focus' : 'find-closed');
-  }
-
-  /**
-   * Keep the side strip out regardless of where the pointer is.
-   *
-   * Separate from `sidebarOpen`, which is the pointer's business: a hold that
-   * wrote that flag would be undone by the next `mouseleave`, and one that the
-   * pointer could not close would leave the strip stuck out after the thing
-   * holding it had gone.
-   */
-  holdSidebar(hold) {
-    this.sidebarHeld = Boolean(hold);
-    if (this.sidebarHeld) {
-      clearTimeout(this.sidebarCloseTimer);
-      this.sidebarOpen = true;
-      return;
-    }
-    // Releasing gives the strip back to the pointer, which means letting it
-    // close: the hold set `sidebarOpen` to get the strip out, and leaving that
-    // set would keep it out until the pointer left the window and came back.
-    // If the pointer really is over the strip, the next `mousemove` reopens it
-    // - the chrome reports that continuously for exactly this case.
-    this.sidebarOpen = false;
   }
 
   /** A one-off message to the chrome, for the things that are not state. */
@@ -1079,8 +1080,7 @@ class BrowserShell {
   /** How much width the chrome occupies in sidebar mode, right now. */
   sidebarWidth() {
     if (!this.vertical()) return 0;
-    return this.sidebarPinned() || this.sidebarOpen || this.sidebarHeld
-      ? SIDEBAR_WIDTH : SIDEBAR_EDGE;
+    return this.sidebarPinned() || this.sidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_EDGE;
   }
 
   /**
@@ -1091,7 +1091,10 @@ class BrowserShell {
    * passing through on its way to the page.
    */
   setSidebarOpen(open) {
-    if (!this.vertical() || this.sidebarPinned() || this.sidebarHeld) return;
+    if (!this.vertical() || this.sidebarPinned()) return;
+    // The find bar is drawn inside this column, so while it is up the pointer
+    // does not get to close the thing the bar is in.
+    if (this.findOpen) return;
     clearTimeout(this.sidebarCloseTimer);
     if (open) {
       if (this.sidebarOpen) return;

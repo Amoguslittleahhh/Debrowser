@@ -443,8 +443,12 @@ class Governor {
         // in must not be counted as one it reached.
         const reached = await applyTier(tab, target, this.ctx());
         if (reached === Tier.FROZEN) this.stats.freezes += 1;
-        if (reached === Tier.HIBERNATED && !this.measuredPids.has(tab.pid)) {
-          this.measuredPids.add(tab.pid);
+        // Read once: `Tab#pid` asks the renderer rather than returning a field,
+        // because a cached one goes stale the moment a tab navigates across
+        // sites - so a pair of reads is a pair of native calls.
+        const pid = tab.pid;
+        if (reached === Tier.HIBERNATED && pid && !this.measuredPids.has(pid)) {
+          this.measuredPids.add(pid);
           this.recordHibernation(tab, before);
         }
       }
@@ -691,10 +695,11 @@ class Governor {
     // This renderer's trim was refused recently. Asked here rather than left to
     // fail in `demote`, so the tab simply stays where it is instead of being
     // walked down the ladder every tick to be turned back at the last step.
-    if (platform.trimBackoffMs(tab.pid) > 0) return false;
+    const pid = tab.pid;
+    if (platform.trimBackoffMs(pid) > 0) return false;
 
     // Every tab sharing this renderer must also be ready to go.
-    const group = this.metrics.tabsByPid().get(tab.pid);
+    const group = this.metrics.tabsByPid().get(pid);
     if (!group) return false;
     return group.every((sibling) => sibling === tab || (
       !sibling.visible

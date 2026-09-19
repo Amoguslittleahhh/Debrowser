@@ -9,11 +9,10 @@
  * there is one list of what the menu does, in main.js, rather than two that
  * drift.
  *
- * Replacing a platform menu means owning what a platform menu did for free.
- * The two that matter are implemented below and are not optional: the keyboard
- * (arrows, Home/End, Enter, Escape, and a tab loop that cannot leave the menu)
- * and the accessibility tree (a real `role="menu"` of real buttons, so a screen
- * reader announces this as a menu rather than as a page with buttons on it).
+ * What this file holds is what is particular to *this* menu: the model it asks
+ * for, the zoom stepper, and where it opens. The glyph table, the keyboard and
+ * the click-away are shared with the page's context menu - see sheet-menu.js,
+ * which also says why owning them at all is not optional.
  */
 
 const api = window.debrowser;
@@ -33,38 +32,6 @@ const anchor = {
 
 /** Distance kept from the window's edges when the menu will not fit. */
 const EDGE = 8;
-
-/**
- * The glyphs, as path data.
- *
- * Inline rather than a font or a sprite, for the reason the rest of this UI is:
- * no request, no decode, nothing to load before the menu can be drawn - and it
- * is drawn within a frame of the click.
- */
-const ICONS = {
-  plus:  ['M8 3v10M3 8h10'],
-  print: ['M4.5 6V2.5h7V6', 'M4.5 11.5h-2v-4h11v4h-2', 'M4.5 9.5h7v4h-7z'],
-  clock: ['M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z', 'M8 5v3.2l2.2 1.3'],
-  gauge: ['M2.5 11.5a5.5 5.5 0 1 1 11 0', 'M8 11.5L10.6 7'],
-  code:  ['M6 5.5L3 8l3 2.5', 'M10 5.5L13 8l-3 2.5'],
-  download: ['M8 2.5v7', 'M5 7l3 3 3-3', 'M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5'],
-  star:  ['M8 2.6l1.7 3.45 3.8.55-2.75 2.68.65 3.79L8 11.28l-3.4 1.79.65-3.79L2.5 6.6l3.8-.55z'],
-  expand: ['M6 2.5H2.5V6', 'M10 2.5h3.5V6', 'M6 13.5H2.5V10', 'M10 13.5h3.5V10'],
-  gear:  ['M8 5.8a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z',
-          'M12.6 9.6l1.2.7-1.3 2.2-1.3-.5a4.9 4.9 0 0 1-1.2.7L9.7 14h-2.6L6.9 12.7a4.9 4.9 0 0 1-1.2-.7l-1.3.5L3.1 10.3l1.2-.7a4.9 4.9 0 0 1 0-1.4l-1.2-.7 1.3-2.2 1.3.5a4.9 4.9 0 0 1 1.2-.7L7.1 3h2.6l.3 1.3c.43.17.83.4 1.2.7l1.3-.5 1.3 2.2-1.2.7a4.9 4.9 0 0 1 0 1.4z']
-};
-
-function icon(name) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('aria-hidden', 'true');
-  for (const d of ICONS[name] || []) {
-    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p.setAttribute('d', d);
-    svg.append(p);
-  }
-  return svg;
-}
 
 /* ------------------------------------------------------------------ */
 
@@ -116,7 +83,7 @@ function render(items) {
     if (item.kind === 'checkbox') button.setAttribute('aria-checked', String(Boolean(item.checked)));
     if (item.enabled === false) button.disabled = true;
 
-    button.append(icon(item.icon));
+    button.append(menuIcon(item.icon));
 
     const label = document.createElement('span');
     label.className = 'item-label';
@@ -237,49 +204,9 @@ function place() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Keyboard                                                            */
-/* ------------------------------------------------------------------ */
 
-/** Everything that can be focused, in the order the eye reads them. */
-function focusables() {
-  return [...el.sheet.querySelectorAll('button:not(:disabled)')];
-}
-
-function focusItem(index) {
-  const list = focusables();
-  if (!list.length) return;
-  const wrapped = (index + list.length) % list.length;
-  list[wrapped].focus();
-}
-
-function moveFocus(delta) {
-  const list = focusables();
-  const at = list.indexOf(document.activeElement);
-  focusItem(at === -1 ? 0 : at + delta);
-}
-
-window.addEventListener('keydown', (event) => {
-  switch (event.key) {
-    case 'Escape': close(); break;
-    case 'ArrowDown': moveFocus(1); break;
-    case 'ArrowUp': moveFocus(-1); break;
-    case 'Home': focusItem(0); break;
-    case 'End': focusItem(-1); break;
-    case 'Tab':
-      // Trapped. Focus leaving this view closes the menu (the browser watches
-      // for that), so letting Tab walk out of the sheet would dismiss the menu
-      // the user is trying to walk through.
-      moveFocus(event.shiftKey ? -1 : 1);
-      break;
-    default:
-      return;
-  }
-  event.preventDefault();
-});
-
-// Anywhere outside the sheet. This is the click-away a system menu gets from a
-// pointer grab, and the reason the view is window-sized rather than menu-sized.
-el.backdrop.addEventListener('mousedown', close);
+// The keyboard and the click-away are the same in both menus; see sheet-menu.js.
+wireMenuKeyboard(el.sheet, el.backdrop, close);
 
 /* ------------------------------------------------------------------ */
 

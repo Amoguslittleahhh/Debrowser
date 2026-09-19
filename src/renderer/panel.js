@@ -348,16 +348,6 @@ function updateRow(row, tab) {
 }
 
 /** The site a tab is on, for the chip's letter and colour. */
-function siteOf(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol === 'debrowser:') return 'debrowser';
-    return parsed.hostname.replace(/^www\./, '') || parsed.protocol;
-  } catch {
-    return '';
-  }
-}
-
 function describe(tab) {
   const parts = [TIER_TEXT[tab.tier] || tab.tier];
 

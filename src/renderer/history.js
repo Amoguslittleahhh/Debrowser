@@ -38,26 +38,6 @@ const PAGE = 300;
 const SEARCH_DEBOUNCE_MS = 130;
 let searchTimer = null;
 
-/** Where a site's icon is if it never said: the address Chromium would try. */
-function defaultIcon(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return `${parsed.origin}/favicon.ico`;
-  } catch {
-    return null;
-  }
-}
-
-function hostOf(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'file:' ? 'local file' : parsed.hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
 /** Today and yesterday by name; anything older by date. */
 function dayLabel(ts) {
   const date = new Date(ts);
@@ -77,8 +57,6 @@ function timeLabel(ts) {
 /* ------------------------------------------------------------------ */
 
 function row(entry) {
-  const host = hostOf(entry.url);
-
   const wrap = document.createElement('div');
   wrap.className = 'visit';
 
@@ -90,40 +68,15 @@ function row(entry) {
   time.className = 'time';
   time.textContent = timeLabel(entry.visitedAt);
 
-  // The site's own logo, on top of its letter.
+  // The site's own logo over its letter - built by `siteChip` in theme.js,
+  // which is also where the rule it carries lives: the icon is fetched by the
+  // *browser*, without cookies, because an <img> pointed at the site would be
+  // fetched by this page with this session's cookies, and opening a history
+  // list would tell two hundred sites that the user is reading their history.
   //
   // The store keeps an icon address only for sites that put theirs somewhere
-  // other than the default, so most rows derive it here from the page's origin
-  // - which is exactly the address Chromium itself would have tried. Plenty of
-  // sites do not answer it, and those fall back to the letter underneath rather
-  // than to a broken image.
-  //
-  // The fetch itself goes through `debrowser://icon`, which is the browser
-  // process, without cookies. An <img> pointed at the site would be fetched by
-  // *this page* with this session's cookies - so opening a history list would
-  // tell two hundred sites that the user is reading their history.
-  const chip = document.createElement('span');
-  chip.className = 'chip';
-  chip.setAttribute('aria-hidden', 'true');
-  chip.style.setProperty('--hue', String(siteHue(host)));
-  chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
-
-  const iconUrl = iconSrc(entry.icon || defaultIcon(entry.url));
-  if (iconUrl) {
-    const icon = document.createElement('img');
-    icon.className = 'site-icon';
-    icon.alt = '';
-    icon.decoding = 'async';
-    // Only the rows on screen are fetched. Three hundred at once would be a
-    // burst of requests for a list the user has scrolled two screens of.
-    icon.loading = 'lazy';
-    icon.src = iconUrl;
-    // The letter underneath is a stand-in, not a backdrop: favicons are usually
-    // transparent, so the chip has to stop painting once the real one is up.
-    icon.addEventListener('load', () => chip.classList.add('has-icon'));
-    icon.addEventListener('error', () => icon.remove());
-    chip.append(icon);
-  }
+  // other than the default, so most rows have none and the helper derives it.
+  const chip = siteChip(entry.url, { icon: entry.icon });
 
   const text = document.createElement('span');
   text.className = 'visit-text';

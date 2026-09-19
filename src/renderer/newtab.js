@@ -55,25 +55,6 @@ window.addEventListener('DOMContentLoaded', () => {
  */
 const tiles = document.getElementById('tiles');
 
-function siteOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
-/** Where a site's icon is if it never said - the address Chromium would try. */
-function defaultIcon(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return `${parsed.origin}/favicon.ico`;
-  } catch {
-    return null;
-  }
-}
-
 function tile(item) {
   const host = siteOf(item.url);
 
@@ -85,26 +66,8 @@ function tile(item) {
   open.type = 'button';
   open.title = `${item.title || host}\n${item.url}`;
 
-  const chip = document.createElement('span');
-  chip.className = 'chip';
-  chip.setAttribute('aria-hidden', 'true');
-  chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
-  chip.style.setProperty('--hue', String(siteHue(host)));
-
-  // Through the browser's icon route, never at the site - see theme.js. The
-  // letter underneath is the fallback, and it stops painting once a real icon
-  // loads, because almost every favicon is transparent.
-  const src = iconSrc(item.icon || defaultIcon(item.url));
-  if (src) {
-    const icon = document.createElement('img');
-    icon.className = 'site-icon';
-    icon.alt = '';
-    icon.decoding = 'async';
-    icon.src = src;
-    icon.addEventListener('load', () => chip.classList.add('has-icon'));
-    icon.addEventListener('error', () => icon.remove());
-    chip.append(icon);
-  }
+  // Through the browser's icon route, never at the site - see `siteChip`.
+  const chip = siteChip(item.url, { icon: item.icon });
 
   const label = document.createElement('span');
   label.className = 'tile-label';

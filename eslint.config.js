@@ -105,6 +105,11 @@ module.exports = [
         iconSrc: 'readonly',
         anchorSheet: 'readonly',
         watchTransientInput: 'readonly',
+        defaultIcon: 'readonly',
+        siteOf: 'readonly',
+        siteChip: 'readonly',
+        menuIcon: 'readonly',
+        wireMenuKeyboard: 'readonly',
         URLSearchParams: 'readonly',
         IntersectionObserver: 'readonly',
         // Preloads only.
