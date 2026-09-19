@@ -740,7 +740,9 @@ body[data-layout="left"] .meter-bar { flex: 1; width: auto; }
 /* The strip becomes the column: tabs stacked, + beneath them, filler last so
    the empty space below is still draggable. */
 body[data-layout="left"] .tabstrip {
-  order: 2;
+  /* Third, because the find bar takes the place between the toolbar and the
+     tabs when it is up - see the find bar rules at the foot of this file. */
+  order: 3;
   flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
@@ -1176,3 +1178,39 @@ body[data-layout="left"] .pin { display: grid; }
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   padding-left: var(--s1);
 }
+
+/*
+ * The find bar, down the side.
+ *
+ * Two things differ from the horizontal layout, and both follow from the column
+ * being 240px wide. It sits directly under the toolbar - which is where the
+ * address bar is, and where the eye already is - rather than at the foot of the
+ * tab list; and the row that fits comfortably across a 1280px toolbar wraps
+ * into two here, the field on its own line with the count and the three buttons
+ * under it.
+ *
+ * A body child in a column, so `flex-basis: 100%` would mean the full *height*.
+ * It takes the height it needs and no more.
+ */
+body[data-layout="left"] .findbar {
+  order: 2;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  height: auto;
+  margin: 0 8px 4px;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+
+body[data-layout="left"] .find-icon { order: 0; }
+body[data-layout="left"] #find-input { order: 1; flex: 1 1 60%; height: 22px; }
+/* The count shares the second line with the buttons rather than taking one of
+   its own: three lines for a find bar is a third of the tab list gone. */
+body[data-layout="left"] .find-count { order: 2; flex: 1 1 auto; }
+body[data-layout="left"] .find-step,
+body[data-layout="left"] #find-close { order: 3; }

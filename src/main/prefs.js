@@ -255,7 +255,12 @@ class Prefs {
       // neutral surfaces under a cornflower blue that is no longer offered in
       // Settings, with no swatch showing as chosen. A value the user picked
       // deliberately is left alone; only the ones that *were* our defaults move.
-      if (key === 'accent' && value.toLowerCase() === '#5b8cff') {
+      // `String(value)`, because this runs over whatever is in the file. A
+      // hand-edited `"accent": 12` would have thrown out of the constructor on
+      // `.toLowerCase()`, and the constructor runs before the window exists -
+      // so the browser would not start at all, which is the one outcome this
+      // whole file is written to avoid.
+      if (key === 'accent' && String(value).toLowerCase() === '#5b8cff') {
         this.log('accent was the old default; moving to the new one');
         continue;
       }

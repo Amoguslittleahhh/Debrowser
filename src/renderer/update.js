@@ -68,7 +68,15 @@ api.onState((state) => {
     : 'A new version is ready to install.';
 });
 
-// Restart is the default action, so it is what Enter does. Focused rather than
-// merely styled: a prompt that looks like it has a default and does not is
-// worse than one with no default at all.
-el.restart.focus();
+/*
+ * The keyboard lands on "Later", not on "Restart now".
+ *
+ * This prompt is the one panel in the browser that appears without being asked
+ * for: the updater reaches a state and the sheet opens over whatever the user
+ * was doing, taking the keyboard with it. With Restart focused, an Enter or a
+ * space aimed at the page - a form being submitted, a video being paused -
+ * quits the browser into an installer instead. Restart is still the primary
+ * button and still one Tab away; what a stray keystroke does is nothing worse
+ * than dismissing a prompt that will be back on the next launch.
+ */
+el.later.focus();

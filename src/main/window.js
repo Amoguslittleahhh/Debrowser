@@ -220,6 +220,8 @@ class BrowserShell {
 
     /** Whether the find bar is showing, which the content area has to know. */
     this.findOpen = false;
+    /** Something other than the pointer is keeping the side strip out. */
+    this.sidebarHeld = false;
 
     /**
      * The sheet, while one is open: the app menu or the downloads flyout.
@@ -503,7 +505,14 @@ class BrowserShell {
     // Keyed to the page, because the guard is about one button being pressed
     // twice. Closing the menu by reaching for the downloads button must not
     // make the downloads button dead for a quarter second.
-    if (this.sheetClosedPage === page && Date.now() - this.sheetClosedAt < 250) return;
+    //
+    // Not for the context menu, which has no button and therefore no such race.
+    // There the guard was doing the opposite of its job: a right-click on the
+    // backdrop dismisses the menu, and the right-click that follows - the one
+    // that should raise it at the new point - arrived inside the window and was
+    // swallowed, so the menu appeared to have stopped working for a moment.
+    if (page !== 'context' &&
+        this.sheetClosedPage === page && Date.now() - this.sheetClosedAt < 250) return;
 
     const x = Number(anchor?.x);
     const y = Number(anchor?.y);
@@ -904,13 +913,25 @@ class BrowserShell {
     if (this.laidOutVertical !== this.vertical() ||
         this.laidOutBookmarksBar !== this.bookmarksBarVisible() ||
         this.laidOutPinned !== this.sidebarPinned()) {
+      const wasPinned = this.laidOutPinned;
       this.laidOutVertical = this.vertical();
       this.laidOutBookmarksBar = this.bookmarksBarVisible();
       this.laidOutPinned = this.sidebarPinned();
-      // Unpinning leaves the sidebar out until the pointer goes elsewhere,
-      // which is what it would do if the pointer were over it - and it is,
-      // since the button that unpinned it is in it.
-      if (this.laidOutPinned) this.sidebarOpen = false;
+
+      // Unpinning leaves the strip out until the pointer goes elsewhere, which
+      // is what it would do if the pointer were over it - and it is, since the
+      // button that unpinned it is in it.
+      //
+      // Only on that transition. The test was `if (this.laidOutPinned)`, which
+      // is true exactly when the strip has just been *pinned* - where the flag
+      // is irrelevant - and false when it has just been unpinned, which is the
+      // one case this line is for: so unpinning collapsed the column to ten
+      // pixels under the pointer that had just pressed the button, and neither
+      // `mouseenter` nor the `mousemove` fallback fires again until the pointer
+      // leaves the window and comes back. Writing the flag unconditionally is
+      // the other way to be wrong: it would hold the strip out on every change
+      // that reaches here, including simply switching into this layout.
+      if (wasPinned === true && this.laidOutPinned === false) this.sidebarOpen = true;
       this.layout();
     }
 
@@ -980,6 +1001,10 @@ class BrowserShell {
 
   /** How much vertical room the chrome needs, bars included. */
   chromeHeight() {
+    // Only across the top. Down the side the chrome is a column, so neither bar
+    // takes anything from the content - and adding their heights here would
+    // have moved the downloads flyout's fallback anchor for no reason.
+    if (this.vertical()) return CHROME_HEIGHT;
     return CHROME_HEIGHT +
       (this.bookmarksBarVisible() ? BOOKMARKS_BAR_HEIGHT : 0) +
       (this.findOpen ? FIND_BAR_HEIGHT : 0);
@@ -1002,8 +1027,37 @@ class BrowserShell {
       return;
     }
     this.findOpen = want;
+    // The bar is drawn inside the chrome, and down the side the chrome is a
+    // column that is ten pixels wide until the pointer reaches it - so a find
+    // bar opened from the keyboard was laid out off the side of the window,
+    // where it could be neither seen nor typed into. The strip is held out for
+    // as long as the bar is up, and released when it closes.
+    if (this.vertical()) this.holdSidebar(want);
     this.layout();
     this.toChrome(want ? 'find-focus' : 'find-closed');
+  }
+
+  /**
+   * Keep the side strip out regardless of where the pointer is.
+   *
+   * Separate from `sidebarOpen`, which is the pointer's business: a hold that
+   * wrote that flag would be undone by the next `mouseleave`, and one that the
+   * pointer could not close would leave the strip stuck out after the thing
+   * holding it had gone.
+   */
+  holdSidebar(hold) {
+    this.sidebarHeld = Boolean(hold);
+    if (this.sidebarHeld) {
+      clearTimeout(this.sidebarCloseTimer);
+      this.sidebarOpen = true;
+      return;
+    }
+    // Releasing gives the strip back to the pointer, which means letting it
+    // close: the hold set `sidebarOpen` to get the strip out, and leaving that
+    // set would keep it out until the pointer left the window and came back.
+    // If the pointer really is over the strip, the next `mousemove` reopens it
+    // - the chrome reports that continuously for exactly this case.
+    this.sidebarOpen = false;
   }
 
   /** A one-off message to the chrome, for the things that are not state. */
@@ -1025,7 +1079,8 @@ class BrowserShell {
   /** How much width the chrome occupies in sidebar mode, right now. */
   sidebarWidth() {
     if (!this.vertical()) return 0;
-    return this.sidebarPinned() || this.sidebarOpen ? SIDEBAR_WIDTH : SIDEBAR_EDGE;
+    return this.sidebarPinned() || this.sidebarOpen || this.sidebarHeld
+      ? SIDEBAR_WIDTH : SIDEBAR_EDGE;
   }
 
   /**
@@ -1036,7 +1091,7 @@ class BrowserShell {
    * passing through on its way to the page.
    */
   setSidebarOpen(open) {
-    if (!this.vertical() || this.sidebarPinned()) return;
+    if (!this.vertical() || this.sidebarPinned() || this.sidebarHeld) return;
     clearTimeout(this.sidebarCloseTimer);
     if (open) {
       if (this.sidebarOpen) return;

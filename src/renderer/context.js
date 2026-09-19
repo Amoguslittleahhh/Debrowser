@@ -171,8 +171,18 @@ window.addEventListener('keydown', (event) => {
 });
 
 el.backdrop.addEventListener('mousedown', close);
-// A second right-click somewhere else should move the menu, not stack another
-// one - and the browser's own handler will reopen it at the new point.
+
+/*
+ * A right-click somewhere else dismisses this menu, and does not open the next
+ * one - which is worth stating rather than leaving as a surprise.
+ *
+ * The backdrop is what makes the menu dismissable at all, and it necessarily
+ * swallows the click: the page never sees the right-click, so there is nothing
+ * to hit-test and no new menu to build from. The honest behaviour is therefore
+ * one click to dismiss and one to open again, and the guard in `openSheet`
+ * that would otherwise eat that second click is lifted for this sheet - see the
+ * note there.
+ */
 el.backdrop.addEventListener('contextmenu', (event) => { event.preventDefault(); close(); });
 
 /* ------------------------------------------------------------------ */

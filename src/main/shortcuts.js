@@ -151,7 +151,7 @@ function labelFor(entry) {
     arrowleft: '←', arrowright: '→', pagedown: 'PgDn', pageup: 'PgUp',
     tab: 'Tab', ',': ',', '=': '+', '-': '−'
   };
-  parts.push(named[key] || (key.length === 1 ? key.toUpperCase() : key.toUpperCase()));
+  parts.push(named[key] || key.toUpperCase());
   // A Mac menu writes ⌘T with nothing between the symbols; everywhere else the
   // parts are joined with a plus.
   return IS_MAC ? parts.join('') : parts.join('+');

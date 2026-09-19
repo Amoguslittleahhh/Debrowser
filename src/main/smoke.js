@@ -1234,11 +1234,6 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.closeSheet();
     await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
 
-    shell.openSheet('menu', { x: 100, y: 84, right: 132 });
-    await waitFor(() => shell.sheetView && shell.sheetPage === 'menu', { timeoutMs: 8000 });
-    shell.openSheet('downloads', { x: 900, y: 84, right: 932 });
-    await waitFor(() => shell.sheetView && shell.sheetPage === 'downloads', { timeoutMs: 8000 });
-
     check('the downloads flyout takes over the sheet from the menu',
       menuUp && swapped, `menu up=${menuUp}, swapped to ${shell.sheetPage}`);
     check('the flyout reads the download list and not the credential store',
@@ -1330,12 +1325,35 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const probe = new Prefs(() => {});
     probe.file = file;
     const loaded = probe.load();
-    fs.unlinkSync(file);
 
     check('a retired colour is replaced rather than kept or reset',
       loaded.accent !== '#5B8CFF' && loaded.accent !== '#5b8cff' &&
         loaded.tabBarColor === '#1d1c22' && loaded.theme === 'dark',
       `accent ${loaded.accent}, strip ${loaded.tabBarColor}, theme ${loaded.theme}`);
+
+    // And a file somebody has edited into nonsense still starts the browser.
+    //
+    // This is the migration's own failure mode: it compares colours, so a value
+    // that is not a string threw out of `load()` - which runs in the Prefs
+    // constructor, before there is a window, so the browser would not have
+    // started at all rather than falling back to a default.
+    fs.writeFileSync(file, JSON.stringify({
+      accent: 12, tabBarColor: { r: 1 }, theme: 'dark', maxLiveTabs: 'lots'
+    }));
+    let survived = false;
+    let junk = null;
+    try {
+      junk = probe.load();
+      survived = true;
+    } catch { /* reported below */ }
+    fs.unlinkSync(file);
+
+    check('a hand-edited preferences file cannot stop the browser starting',
+      survived && junk.accent === '#2f857b' && junk.tabBarColor === 'default' &&
+        junk.theme === 'dark',
+      survived
+        ? `accent ${junk.accent}, strip ${junk.tabBarColor}, theme ${junk.theme}`
+        : 'load() threw');
   }
 
   // Right-click, which used to do nothing at all.
@@ -1427,6 +1445,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('the find bar takes its room from the page and gives it back',
       opened && closed,
       `content ${beforeHeight} -> ${opened ? 'shorter' : 'unchanged'} -> ${shell.contentBounds().height}`);
+
+    // And it is reachable with the strip down the side, where the chrome is a
+    // column that is ten pixels wide until the pointer arrives. The bar is
+    // drawn inside that column, so without the window holding the strip out a
+    // find bar opened from the keyboard was laid out off the side of the
+    // window - visible to nobody and typeable into by nobody.
+    {
+      const was = prefs.get('tabBarPosition');
+      prefs.set('tabBarPosition', 'left');
+      shell.applyWindowPrefs();
+      const collapsed = shell.chromeView.getBounds().width;
+
+      runCommand('find-open', null);
+      const out = shell.chromeView.getBounds().width;
+
+      runCommand('find-close', null);
+      const backIn = shell.chromeView.getBounds().width;
+
+      prefs.set('tabBarPosition', was);
+      shell.applyWindowPrefs();
+
+      check('opening find brings the side strip out, and closing it lets go',
+        collapsed < 100 && out > 200 && backIn === collapsed,
+        `strip ${collapsed}px -> ${out}px -> ${backIn}px`);
+    }
     check('a search reports how many matches it found',
       Boolean(result) && result.matches > 0,
       result ? `${result.matches} match(es), on ${result.activeMatchOrdinal}` : 'no result arrived');

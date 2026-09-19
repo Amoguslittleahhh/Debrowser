@@ -756,7 +756,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       /* -- Find in page ---------------------------------------------- */
 
       case 'find-open':
+        // Focus has to move to the *view* as well, exactly as `focus-address`
+        // does above. Ctrl+F is pressed while the page holds the keyboard, so
+        // without this the bar appeared and every letter typed into it went to
+        // the page instead - which on a page with its own `/` or `f` shortcut
+        // is worse than the bar not opening at all.
         shell.setFindOpen(true);
+        shell.focusChrome();
         break;
 
       case 'find-close':
@@ -797,8 +803,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'find-prev': {
         const query = String(payload?.query ?? find?.query ?? '');
         // Pressing F3 with the bar closed opens it, which is what the key is
-        // for when there is nothing to step through yet.
-        if (!query) { shell.setFindOpen(true); break; }
+        // for when there is nothing to step through yet - and, as above, the
+        // keyboard has to follow it there.
+        if (!query) { shell.setFindOpen(true); shell.focusChrome(); break; }
         if (!active?.isLive) break;
         shell.setFindOpen(true);
         active.wc.findInPage(query, { findNext: true, forward: command === 'find-next' });
@@ -1685,13 +1692,20 @@ function topSites(history, bookmarks, limit = 8) {
     if (!seen) {
       byOrigin.set(origin, {
         url: entry.url, title: entry.title, icon: entry.icon || null,
-        visits: entry.visits || 1, origin
+        visits: entry.visits || 1, origin,
+        // The page this tile opens, and how often it was visited.
+        //
+        // Seeded here rather than left undefined: `1 > (undefined || 0)` is
+        // true, so every later page on the same origin won the comparison below
+        // and the tile ended up pointing at whichever page history happened to
+        // list last rather than at the one you actually go to.
+        best: entry.visits || 1
       });
       continue;
     }
     seen.visits += entry.visits || 1;
     // The busiest page on the site is the one the tile opens.
-    if ((entry.visits || 1) > (seen.best || 0)) {
+    if ((entry.visits || 1) > seen.best) {
       seen.best = entry.visits || 1;
       seen.url = entry.url;
       seen.title = entry.title;
