@@ -155,6 +155,15 @@ const padL = (s, n) => String(s).padStart(n);
     console.log(`\n  note: no swap or zram configured, so hibernation is inert on this host.`);
   }
 
+  // What the browser process is holding for tabs that are not live. The middle
+  // term of the memory model, and the only one that grows without a bound.
+  const held = on.retained;
+  if (held) {
+    console.log(`\n  retained: ${held.kb} KB of session state for ${TABS} tabs ` +
+      `(${held.perTabKB} KB per tab, biggest ${held.biggestKB} KB, ` +
+      `${held.navEntries} navigation entries, ${held.tabsWithPageState} with page state)`);
+  }
+
   console.log(`\n  saving: ${pct.toFixed(1)}%`);
   console.log(`  governed tab states: ${JSON.stringify(on.tiers)}\n`);
 

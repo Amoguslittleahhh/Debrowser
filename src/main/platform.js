@@ -17,8 +17,8 @@ const { compressionStatus } = require('./memory');
 
 const PLATFORM = process.platform; // 'linux' | 'darwin' | 'win32'
 const isLinux = PLATFORM === 'linux';
-const isMac = PLATFORM === 'darwin';
 const isWindows = PLATFORM === 'win32';
+const isMac = PLATFORM === 'darwin';
 
 /* ------------------------------------------------------------------ */
 /* Process priority                                                     */
@@ -134,7 +134,7 @@ function helperPath(name) {
   return path.join(__dirname, '..', '..', 'tools', name);
 }
 
-const TRIM_BINARY = helperPath('mem-trim');
+const TRIM_BINARY = helperPath(process.platform === 'win32' ? 'mem-trim.exe' : 'mem-trim');
 const PROBE_BINARY = helperPath(process.platform === 'win32' ? 'mem-probe.exe' : 'mem-probe');
 
 /**
@@ -201,7 +201,11 @@ const TRIM_MAP_LIMIT = 256;
  */
 function replyId(line) {
   const [verb, second] = line.split(' ');
-  return verb === 'caps' ? 'caps' : second;
+  // Two verbs answer about themselves rather than about a pid; everything else
+  // names the process it is about, which is what lets a late reply to a
+  // timed-out request be dropped instead of handed to the next caller.
+  if (verb === 'caps' || verb === 'avail') return verb;
+  return second;
 }
 
 class TrimHelper extends HelperProcess {
@@ -211,7 +215,13 @@ class TrimHelper extends HelperProcess {
       binary: TRIM_BINARY,
       timeoutMs: TRIM_TIMEOUT_MS,
       replyId,
-      precondition: () => (isLinux ? null : `not implemented on ${PLATFORM}`),
+      // Linux and Windows have a mechanism; macOS has none that a program may
+      // reach - `memorystatus_control` is private and `MADV_FREE_REUSABLE` only
+      // works on your own memory - so it refuses by name rather than shipping a
+      // call nobody has run.
+      precondition: () => (isLinux || isWindows
+        ? null
+        : `not implemented on ${PLATFORM}`),
       // Two different audiences, two different remedies. Telling someone with
       // an installed build to run an npm script in a source tree they do not
       // have is the same class of wrong answer as telling them to `setcap` a
@@ -234,6 +244,8 @@ class TrimHelper extends HelperProcess {
      * only place both the trim and its undo pass through.
      */
     this.trimmedAt = new Map();
+    /** Last answer to `avail`, so a failed read can say "unknown" rather than 0. */
+    this.lastAvail = null;
     /**
      * Pids whose trim the kernel refused: `pid -> { until, strikes }`.
      *
@@ -395,6 +407,38 @@ class TrimHelper extends HelperProcess {
     }
     return this.canTrim;
   }
+}
+
+/**
+ * What the machine has spare, and whether trimmed pages have anywhere to go.
+ *
+ * Asked of the helper rather than read here, because the two platforms answer
+ * it with different system calls and this is the one place that already knows
+ * which platform it is talking to. Linux reads MemAvailable and the swap
+ * totals; Windows reads GlobalMemoryStatusEx.
+ *
+ * This is the figure the hibernation tier is judged on. A working set that
+ * shrank by 200MB has proved nothing until the machine has 200MB more
+ * available than it did - pages leaving a process reappear as the compressor's
+ * own allocation, measured at about 2:1, so a per-process reading alone
+ * overstates the saving by roughly double. That mistake has been made twice in
+ * this project and both times it took an independent reading to catch.
+ *
+ * @returns {Promise<{availBytes:number, backingTotalBytes:number, backingFreeBytes:number}|null>}
+ */
+async function availableMemory(log) {
+  const h = trimHelper(log);
+  const reply = await h.request('avail');
+  if (!reply || reply === HELPER_GONE) return null;
+  const [, avail, total, free] = reply.split(' ').map(Number);
+  if (!Number.isFinite(avail) || avail < 0) return null;
+  const out = {
+    availBytes: avail,
+    backingTotalBytes: Number.isFinite(total) && total >= 0 ? total : 0,
+    backingFreeBytes: Number.isFinite(free) && free >= 0 ? free : 0
+  };
+  h.lastAvail = out;
+  return out;
 }
 
 let helper = null;
@@ -594,6 +638,30 @@ function stopTrimHelper() {
 async function trimCapability(log) {
   const h = trimHelper(log);
   const permitted = await h.probe();
+
+  // Windows needs no second condition, and that is a real difference rather
+  // than a shortcut. Its compression store lives in physical memory, so a
+  // trimmed page has somewhere to go whether or not a pagefile is configured -
+  // where Linux with no swap has nowhere at all and the syscall succeeds having
+  // done nothing. The pagefile figure is still reported, because it is what
+  // decides whether pages that *cannot* be compressed have a home.
+  if (isWindows) {
+    const mem = await availableMemory(log);
+    const pagefileMB = mem ? Math.round(mem.backingTotalBytes / MB) : 0;
+    return {
+      available: permitted,
+      permitted,
+      mechanism: permitted ? 'SetProcessWorkingSetSizeEx -> Windows Memory Compression' : null,
+      reason: permitted ? null : (h.reason || `not implemented on ${PLATFORM}`),
+      compression: {
+        available: permitted,
+        applicable: true,
+        compressor: 'windows memory compression',
+        swapMB: pagefileMB,
+        zramMB: 0
+      }
+    };
+  }
 
   // Two independent conditions, and the second is the one that bites. The
   // helper's self-test only proves the syscall is *permitted*: MADV_PAGEOUT
@@ -831,6 +899,7 @@ module.exports = {
   trimBackoffMs,
   forgetProcess,
   trimCapability,
+  availableMemory,
   stopTrimHelper,
   canRaisePriority,
   clampPriority,

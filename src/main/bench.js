@@ -139,7 +139,51 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
     liveDetail,
     breakdown,
     system: systemMemory(),
-    compression: compressionStatus()
+    compression: compressionStatus(),
+    retained: retainedState(tabs)
+  };
+}
+
+/**
+ * What the browser process is holding on behalf of tabs that are not live.
+ *
+ * The one term in the memory model nobody had measured. `total(n) = 238MB
+ * fixed + 0.6MB x tabs_open + 13.2MB x live` - the middle term is this, and it
+ * is the only one that grows without bound in the workload this project exists
+ * for: a discarded tab keeps every navigation entry it ever had, plus whatever
+ * the page had typed into it.
+ *
+ * Measured as bytes of JSON rather than as heap, deliberately. What a V8 string
+ * costs in memory depends on its representation - a nav entry's URL may be a
+ * slice of a larger string, or interned - so heap accounting would be a guess
+ * dressed as a number. Serialised bytes are what the data *is*, they are what
+ * a compressor would work on, and they are reproducible.
+ */
+function retainedState(tabs) {
+  let bytes = 0;
+  let entries = 0;
+  let biggest = 0;
+  let withState = 0;
+
+  for (const tab of tabs.all()) {
+    const held = tab.suspendedState;
+    if (!held) continue;
+    let size = 0;
+    try {
+      size = Buffer.byteLength(JSON.stringify(held));
+    } catch { continue; }   // circular or unserialisable: not ours to measure
+    bytes += size;
+    biggest = Math.max(biggest, size);
+    entries += Array.isArray(held.entries) ? held.entries.length : 0;
+    if (held.state) withState++;
+  }
+
+  return {
+    kb: Math.round(bytes / 1024),
+    perTabKB: tabs.all().length ? Math.round((bytes / tabs.all().length) / 102.4) / 10 : 0,
+    biggestKB: Math.round(biggest / 1024),
+    navEntries: entries,
+    tabsWithPageState: withState
   };
 }
 

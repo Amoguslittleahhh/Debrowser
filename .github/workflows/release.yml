@@ -109,23 +109,28 @@ jobs:
         shell: bash
         run: node -e "require('electron')" > /dev/null || npm rebuild electron
 
-      # The trim helper is Linux-only. On the other two runners it is neither
-      # built nor shipped.
-      - name: Build the trim helper
-        if: matrix.os == 'ubuntu-latest'
-        run: npm run build:memtrim
-
-      # And the measurement helper is the exact opposite: needed only where the
-      # platform will not report per-process memory honestly by itself. Linux
-      # has smaps_rollup and does not build it.
-      #
-      # This is also the only place the Windows and macOS backends are ever
-      # compiled - they cannot be built or run in the container this was written
-      # in - so a compile error here is the first and only warning.
+      # Before either helper is built, because on Windows both are compiled
+      # with `cl`, which exists only inside a Visual Studio developer
+      # environment. This step used to come second and the trim helper would
+      # have looked for a compiler that was not on PATH yet.
       - name: Set up MSVC
         if: matrix.os == 'windows-latest'
         uses: ilammy/msvc-dev-cmd@v1
 
+      # The trim helper has a backend on Linux and on Windows; macOS has no
+      # public API to force its compressor, so there it is neither built nor
+      # shipped.
+      - name: Build the trim helper
+        if: matrix.os != 'macos-latest'
+        run: npm run build:memtrim
+
+      # The measurement helper is the near-opposite: needed only where the
+      # platform will not report per-process memory honestly by itself. Linux
+      # has smaps_rollup and does not build it.
+      #
+      # These two steps are also the only place the Windows and macOS backends
+      # are ever compiled - they cannot be built or run in the container this
+      # was written in - so a compile error here is the first and only warning.
       - name: Build the measurement helper
         if: matrix.os != 'ubuntu-latest'
         run: npm run build:memprobe

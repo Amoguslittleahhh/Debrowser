@@ -16,11 +16,20 @@
  * own allocation at about 2:1, so the per-process figure alone overstates the
  * saving by roughly double.
  *
- * Linux only. Windows would use SetProcessWorkingSetSizeEx(h, -1, -1) to hand
- * pages to MemCompression, and macOS has no public API to force its compressor
- * at all. Neither is implemented here, because neither can be executed on the
- * machine this was written on, and a plausible-looking call nobody has run is
- * worse than an honest refusal - see trimCapability() in src/main/platform.js.
+ * Linux and Windows. macOS has no public API to force its compressor at all -
+ * memorystatus_control is private and MADV_FREE_REUSABLE only works on your own
+ * memory - so it stays an honest refusal rather than a plausible-looking call
+ * nobody has run; see trimCapability() in src/main/platform.js.
+ *
+ * On Windows the mechanism is SetProcessWorkingSetSizeEx(h, -1, -1), which is
+ * the documented way to empty a process's working set. The pages do not
+ * evaporate: Windows Memory Compression takes the ones it can compress and the
+ * pagefile takes the rest, which is the same shape as Linux with zram and has
+ * the same accounting trap - so this helper answers `avail` as well as `trim`,
+ * and the caller compares the two. It needs PROCESS_SET_QUOTA, which one
+ * process holds over another of the same user with no elevation at all; that is
+ * why this half could be written without a machine to run it on, and it is
+ * still gated by a check that runs on a real Windows runner in CI.
  *
  * TWO THINGS THIS MUST GET RIGHT, both learned by getting them wrong:
  *
@@ -69,17 +78,122 @@
  *         Spawned once at startup rather than per trim: a process spawn on every
  *         tier transition would cost more than the trim it performs saves.
  */
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+
+#if defined(_WIN32)
+
+#include <windows.h>
+#include <psapi.h>
+#define MECHANISM "SetProcessWorkingSetSizeEx"
+
+/*
+ * Empty a process's working set, and report what left it.
+ *
+ * `SetProcessWorkingSetSizeEx(h, -1, -1)` is the documented idiom: it is not a
+ * size, it is the flag value that means "trim everything trimmable". The pages
+ * are not freed - the ones that compress go to Windows Memory Compression, the
+ * rest to the pagefile - so the figure returned here is what left *this
+ * process*, never what the machine got back. The caller reads `avail` on both
+ * sides to learn that, for the same reason the Linux half exists beside zram's
+ * own counters.
+ *
+ * Two access masks, in the order mem-probe learned to use them: a Chromium
+ * renderer runs with an Untrusted integrity label and can refuse the full query
+ * right to a caller at medium integrity, while PROCESS_QUERY_LIMITED_INFORMATION
+ * is granted far more widely. PROCESS_SET_QUOTA is the one that actually
+ * authorises the trim and is not negotiable.
+ */
+static long long trim_process(unsigned long pid, int *err) {
+    *err = 0;
+    static const DWORD MASKS[] = {
+        PROCESS_SET_QUOTA | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+        PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+        PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION
+    };
+
+    HANDLE h = NULL;
+    for (size_t i = 0; i < sizeof(MASKS) / sizeof(MASKS[0]) && h == NULL; i++) {
+        h = OpenProcess(MASKS[i], FALSE, (DWORD)pid);
+        if (h == NULL) *err = (int)GetLastError();
+    }
+    if (h == NULL) return -1;
+
+    /* Before and after, from the same counter. A handle that cannot report the
+       working set still trims; it simply cannot say how much, and a zero is a
+       more honest answer there than a guess. */
+    PROCESS_MEMORY_COUNTERS before, after;
+    int measurable = GetProcessMemoryInfo(h, &before, sizeof(before)) != 0;
+
+    if (!SetProcessWorkingSetSizeEx(h, (SIZE_T)-1, (SIZE_T)-1, 0)) {
+        *err = (int)GetLastError();
+        CloseHandle(h);
+        return -1;
+    }
+
+    long long freed = 0;
+    if (measurable && GetProcessMemoryInfo(h, &after, sizeof(after))) {
+        if (before.WorkingSetSize > after.WorkingSetSize) {
+            freed = (long long)(before.WorkingSetSize - after.WorkingSetSize);
+        }
+    }
+    CloseHandle(h);
+    *err = 0;
+    return freed;
+}
+
+/*
+ * Can this build trim at all?
+ *
+ * Trimming ourselves, which on Windows is the same permission path as trimming
+ * anything else of the same user - unlike Linux, where a self-trim skips the
+ * capability check entirely and proves nothing. It says the mechanism is
+ * present and permitted; whether a *particular* renderer can be opened is a
+ * per-pid question that every real trim answers for itself.
+ */
+static int self_test(void) {
+    return SetProcessWorkingSetSizeEx(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1, 0) ? 1 : 0;
+}
+
+/*
+ * Physical memory the machine has spare, and whether there is anywhere for
+ * trimmed pages to go.
+ *
+ * The first figure is the only one that can tell a real reclaim from pages
+ * moving into the compressor: a working set that shrinks by 200MB has proved
+ * nothing until the machine has 200MB more available than it did. The other two
+ * are the Windows answer to /proc/swaps - `ullTotalPageFile` counts physical
+ * memory plus the pagefile, so the difference is the pagefile itself, and
+ * without one a trim of dirty pages has the same nowhere-to-go problem that
+ * Linux has without swap.
+ */
+static void available_bytes(long long *avail, long long *backing_total,
+                            long long *backing_free) {
+    *avail = *backing_total = *backing_free = -1;
+    MEMORYSTATUSEX st;
+    st.dwLength = sizeof(st);
+    if (!GlobalMemoryStatusEx(&st)) return;
+    *avail = (long long)st.ullAvailPhys;
+    /* Commit limit less physical is the pagefile, near enough to say whether
+       one exists; Windows reports no narrower figure without PDH. */
+    *backing_total = st.ullTotalPageFile > st.ullTotalPhys
+        ? (long long)(st.ullTotalPageFile - st.ullTotalPhys) : 0;
+    *backing_free = st.ullAvailPageFile > st.ullAvailPhys
+        ? (long long)(st.ullAvailPageFile - st.ullAvailPhys) : 0;
+}
+
+#else
+
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <signal.h>
+#define MECHANISM "process_madvise"
 
 #ifndef MADV_COLD
 #define MADV_COLD 20
@@ -232,6 +346,36 @@ static int self_test(void) {
     return (r > 0 && err == 0) ? 1 : 0;
 }
 
+/* The same question Windows answers with GlobalMemoryStatusEx. MemAvailable
+   rather than MemFree: free memory on Linux is memory nobody has found a use
+   for yet, and comparing two readings of it would measure the page cache.
+   SwapTotal/SwapFree are the "is there anywhere to put it" half. */
+static void available_bytes(long long *avail, long long *backing_total,
+                            long long *backing_free) {
+    *avail = *backing_total = *backing_free = -1;
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "MemAvailable:", 13) == 0) *avail = strtoll(line + 13, NULL, 10) * 1024;
+        else if (strncmp(line, "SwapTotal:", 10) == 0) *backing_total = strtoll(line + 10, NULL, 10) * 1024;
+        else if (strncmp(line, "SwapFree:", 9) == 0) *backing_free = strtoll(line + 9, NULL, 10) * 1024;
+    }
+    fclose(f);
+}
+
+#endif
+
+/* The name the caller matches on; `caps linux 1` is what shipped first and the
+   Linux half must keep saying exactly that. */
+#if defined(_WIN32)
+#define PLATFORM_NAME "windows"
+#define TRIM_PID_T unsigned long
+#else
+#define PLATFORM_NAME "linux"
+#define TRIM_PID_T pid_t
+#endif
+
 int main(void) {
     char line[128];
 
@@ -240,13 +384,22 @@ int main(void) {
 
     while (fgets(line, sizeof(line), stdin)) {
         if (strncmp(line, "caps", 4) == 0) {
-            printf("caps linux %d\n", self_test());
+            printf("caps %s %d\n", PLATFORM_NAME, self_test());
+            continue;
+        }
+        if (strncmp(line, "avail", 5) == 0) {
+            long long avail, total, free_;
+            available_bytes(&avail, &total, &free_);
+            printf("avail %lld %lld %lld\n", avail, total, free_);
             continue;
         }
         long pid = 0;
         if (sscanf(line, "trim %ld", &pid) == 1 && pid > 0) {
             int err = 0;
-            long long advised = trim_process((pid_t)pid, &err);
+            /* One signature for both halves: the Linux one takes pid_t, the
+               Windows one a DWORD, and both are what an unsigned long converts
+               to cleanly. */
+            long long advised = trim_process((TRIM_PID_T)pid, &err);
             if (advised < 0) printf("err %ld %d\n", pid, err);
             else printf("ok %ld %lld\n", pid, advised);
             continue;

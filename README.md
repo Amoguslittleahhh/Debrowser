@@ -95,7 +95,7 @@ start sandboxed as root.
 | Live-renderer cap, thumbnails, hover-prefetch | yes | yes | yes |
 | Animation boost, background nice-down | yes | yes | yes |
 | Proportional (PSS) memory accounting | yes | falls back to RSS | falls back to RSS |
-| `HIBERNATED` tier — compress a tab's cold pages | with zram/swap **and** `CAP_SYS_NICE` | no public API | not implemented |
+| `HIBERNATED` tier — compress a tab's cold pages | with zram/swap **and** `CAP_SYS_NICE` | no public API | yes, no setup needed |
 | Page merging (KSM) | opt-in, needs root | no | no |
 
 Where a lever is unavailable the browser says so by name in the task manager
@@ -251,7 +251,24 @@ Roughly 29–49% of a renderer's private memory, rising with size. Note *net*: t
 pages reappear as the compressor's own allocation, so a per-process reading alone
 overstates this by about double — the figures above subtract it.
 
-**Linux only, and it needs two things your system probably does not have yet:**
+That subtraction is no longer something a person has to remember to do. Every
+hibernation is measured against what the *machine* has spare, read from the OS
+immediately before and after the trim, and it is that figure the tier's
+self-disable is judged on. The check used to compare the renderer's own memory
+before and after, which is the syscall agreeing with itself: on a host where
+compression achieved nothing, the per-process drop would still have looked large
+and the feature would have kept running forever. The task manager prints both —
+what left the renderers, and what came back to the machine.
+
+**On Windows it needs nothing.** The mechanism there is
+`SetProcessWorkingSetSizeEx`, which empties a renderer's working set and lets
+Windows Memory Compression take what it can; it needs `PROCESS_SET_QUOTA`, which
+one process holds over another of the same user with no elevation and no
+one-time setup. macOS has no public API to force its compressor at all —
+`memorystatus_control` is private and `MADV_FREE_REUSABLE` only works on your own
+memory — so there the tier says so by name rather than pretending.
+
+**On Linux it needs two things your system probably does not have yet:**
 
 ```bash
 npm run build:memtrim

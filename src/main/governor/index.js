@@ -72,7 +72,7 @@ class Governor {
     this.running = false;
     this.stats = {
       discards: 0, freezes: 0, settles: 0, reclaimedMB: 0,
-      hibernations: 0, hibernateReclaimedMB: 0
+      hibernations: 0, hibernateReclaimedMB: 0, hibernateNetMB: 0
     };
 
     /**
@@ -438,6 +438,14 @@ class Governor {
           ? this.metrics.byPid.get(tab.pid)?.privateMB ?? null
           : null;
 
+        // And what the machine had spare before the trim, which is the reading
+        // the tier is actually judged on. Taken here, immediately before the
+        // trim, so the window it brackets is milliseconds wide and whatever
+        // else the machine is doing has as little time as possible to move it.
+        const availBefore = target === Tier.HIBERNATED && before != null
+          ? (await platform.availableMemory(this.log))?.availBytes ?? null
+          : null;
+
         // Where the tab actually landed, not where it was asked to go:
         // freezing and trimming can each be refused, and a tier the tab is not
         // in must not be counted as one it reached.
@@ -449,7 +457,11 @@ class Governor {
         const pid = tab.pid;
         if (reached === Tier.HIBERNATED && pid && !this.measuredPids.has(pid)) {
           this.measuredPids.add(pid);
-          this.recordHibernation(tab, before);
+          // Not awaited: the measurement is bookkeeping, and a tick that waited
+          // on a helper round trip for it would be a tick the ladder is not
+          // running. Failures inside it are logged, never thrown at the tick.
+          this.recordHibernation(tab, before, availBefore)
+            .catch((err) => this.log(`hibernation measurement failed: ${err.message}`));
         }
       }
     }
@@ -718,7 +730,7 @@ class Governor {
    * otherwise keep paying the syscall and the resume stall forever in exchange
    * for nothing, which is exactly the failure this repo deletes levers for.
    */
-  recordHibernation(tab, privateBeforeMB) {
+  async recordHibernation(tab, privateBeforeMB, availBeforeBytes) {
     this.stats.hibernations += 1;
     if (privateBeforeMB == null) return;
 
@@ -727,10 +739,41 @@ class Governor {
     // readings are of the same process, taken the same way - a share compared
     // against a whole is not a measurement.
     const after = readProcessMemory(tab.pid);
-    if (!after) return;
-    const reclaimed = privateBeforeMB - after.privateMB;
-    this.stats.hibernateReclaimedMB += Math.max(0, reclaimed);
-    this.hibernationSamples.push(reclaimed);
+    const leftProcess = after ? privateBeforeMB - after.privateMB : null;
+    if (leftProcess != null) this.stats.hibernateReclaimedMB += Math.max(0, leftProcess);
+
+    /*
+     * What the *machine* got back, which is a different number and the only one
+     * worth judging the tier on.
+     *
+     * Pages leaving a process do not evaporate: zram and Windows Memory
+     * Compression both hold them, compressed, in physical memory - measured at
+     * about 2:1 - so a process that shed 200MB may have handed the machine only
+     * 100MB. The self-disable below used to read the per-process drop, which
+     * means on a host where compression achieved nothing at all it would have
+     * seen a large number and kept the tier switched on forever. That is this
+     * project's own named worst case: "a syscall returning success is not
+     * evidence it did anything", and the per-process figure is the syscall
+     * agreeing with itself.
+     *
+     * The independent reading is what M4b was validated against by hand -
+     * MemAvailable moved +149MB against a claimed 270MB - and this is that
+     * check, made automatic.
+     */
+    let net = null;
+    if (availBeforeBytes != null) {
+      const mem = await platform.availableMemory(this.log);
+      if (mem) net = (mem.availBytes - availBeforeBytes) / MB;
+    }
+    if (net != null) this.stats.hibernateNetMB += net;
+
+    // Judged on the net figure where there is one, and on the per-process drop
+    // only where the platform cannot give one. Never on both: a lever that
+    // passes on either number is a lever with no gate.
+    const sample = net != null ? net : leftProcess;
+    if (sample == null) return;
+    this.hibernationSamples.push(sample);
+    this.hibernationNet = net != null;
 
     const cfg = this.cfg.hibernate;
     if (this.hibernationSamples.length < cfg.sampleSize) return;
@@ -739,8 +782,9 @@ class Governor {
     const median = sorted[Math.floor(sorted.length / 2)];
     if (median < cfg.minReclaimMB) {
       this.hibernationDisabled = true;
-      this.log(`hibernation disabled: median reclaim ${median.toFixed(1)}MB over ` +
-               `${sorted.length} tabs is below the ${cfg.minReclaimMB}MB it costs to bother`);
+      this.log(`hibernation disabled: median ${this.hibernationNet ? 'net system' : 'per-process'} ` +
+               `reclaim ${median.toFixed(1)}MB over ${sorted.length} tabs is below the ` +
+               `${cfg.minReclaimMB}MB it costs to bother`);
     } else {
       // Proven on this host; stop sampling.
       this.hibernationSamples = [];
@@ -844,7 +888,12 @@ class Governor {
       hibernation: {
         available: this.trimAvailable,
         reason: this.trimAvailable ? null : this.trimReason,
-        disabled: this.hibernationDisabled
+        disabled: this.hibernationDisabled,
+        // Whether the figures beside this were checked against the machine or
+        // only against the process that shed them. The difference is the whole
+        // question of whether compression paid, so it is reported rather than
+        // left for the reader to assume the better of the two.
+        netMeasured: this.hibernationNet === true
       },
       tabs: this.tabs.all().map((t) => t.toJSON())
     };

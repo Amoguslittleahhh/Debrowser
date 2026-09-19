@@ -235,7 +235,15 @@ function render(state) {
   } else if (hib && hib.disabled) {
     el.pressure.textContent += ' Hibernation disabled: it reclaimed too little on this machine.';
   } else if (s.hibernations) {
-    line += ` · ${s.hibernations} hibernated, ~${Math.round(s.hibernateReclaimedMB)} MB compressed`;
+    // Two figures, because they are two different claims and only the second
+    // one is about the machine. What left the processes is what the syscall
+    // reports; what the machine got back is that minus whatever the compressor
+    // now holds, measured independently. Quoting only the first is how a
+    // compressor that achieved nothing would still read as a saving.
+    line += ` · ${s.hibernations} hibernated, ~${Math.round(s.hibernateReclaimedMB)} MB left the renderers`;
+    if (hib && hib.netMeasured) {
+      line += `, ~${Math.round(s.hibernateNetMB)} MB back to the machine`;
+    }
   }
 
   // What the reclaim cost, next to what it saved. `restore` is the one that

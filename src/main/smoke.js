@@ -481,19 +481,58 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // where it does nothing - which is exactly what shipped, and what this asserts
   // against.
   const compression = require('./memory').compressionStatus();
-  const cap = await require('./platform').trimCapability();
+  const cap = await platform.trimCapability();
   // Both halves, against an *independent* reading of the compressor, and a
   // named reason whenever either is missing. Asserting on `cap.compression`
   // would restate the expression that produced `cap.available` and could not
   // fail; asserting on the compressor alone passed on a machine with zram and
   // no CAP_SYS_NICE, because the mechanism string was built from the platform
   // rather than from whether the syscall is actually permitted.
+  //
+  // Windows is the one platform where the second half does not apply, and that
+  // is a real difference rather than an exemption: its compression store lives
+  // in physical memory, so a trimmed page has somewhere to go whether or not a
+  // pagefile is configured. What guards it there is the net measurement below,
+  // not a precondition.
+  const needsCompressor = process.platform !== 'win32';
   check('hibernation is only offered where there is somewhere to compress into',
-    cap.available === (cap.permitted && compression.available)
+    cap.available === (cap.permitted && (!needsCompressor || compression.available))
       && (cap.available || typeof cap.reason === 'string'),
     `permitted=${cap.permitted} compressor=${compression.available
-      ? `${compression.compressor} ${compression.swapMB}MB` : 'none'} ` +
+      ? `${compression.compressor} ${compression.swapMB}MB`
+      : (needsCompressor ? 'none' : 'windows memory compression, always present')} ` +
     `available=${cap.available}${cap.available ? '' : ` reason="${cap.reason}"`}`);
+
+  // The independent reading the whole tier is now judged on.
+  //
+  // A working set that shrank by 200MB has proved nothing until the machine
+  // has 200MB more available than it did: pages leaving a process reappear as
+  // the compressor's own allocation, at about 2:1. The self-disable used to
+  // read the per-process drop, which is the syscall agreeing with itself -
+  // on a host where compression achieved nothing it would have seen a large
+  // number and kept the tier on forever.
+  //
+  // Asserted against what the operating system says by itself, since the
+  // point of the figure is that it comes from somewhere else: on Linux that
+  // is /proc/meminfo, read here rather than through the helper.
+  const mem = await platform.availableMemory();
+  let osAvailMB = null;
+  if (process.platform === 'linux') {
+    const info = fs.readFileSync('/proc/meminfo', 'utf8');
+    const m = /MemAvailable:\s+(\d+) kB/.exec(info);
+    if (m) osAvailMB = Number(m[1]) / 1024;
+  }
+  const helperMB = mem ? mem.availBytes / (1024 * 1024) : null;
+
+  check('the helper reports what the machine has spare, and agrees with the OS',
+    Boolean(mem) && helperMB > 0 &&
+    (osAvailMB == null || Math.abs(helperMB - osAvailMB) < 200),
+    mem
+      ? `helper says ${Math.round(helperMB)}MB available, ` +
+        `${osAvailMB == null ? 'no OS figure to compare on this platform' : `/proc says ${Math.round(osAvailMB)}MB`}, ` +
+        `backing store ${Math.round(mem.backingTotalBytes / 1048576)}MB`
+      : 'the helper did not answer');
+
 
   if (!governor.trimAvailable) {
     console.log(`  SKIP  hibernation unavailable here: ${governor.trimReason}`);
@@ -534,7 +573,6 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // refused by the kernel at `pidfd_open` (ESRCH), which is the cheapest
     // honest way to drive this path - the helper answers `err <pid> 3` exactly
     // as it would for an EPERM on a real renderer.
-    const platform = require('./platform');
     const ghost = 0x7ffffffe;
     const first = await platform.trimProcessMemory(ghost);
     const backoff = platform.trimBackoffMs(ghost);

@@ -92,6 +92,13 @@ win:
       filter:
         - mem-probe.exe
         - mem-probe.c
+        # Hibernation works on Windows too now: SetProcessWorkingSetSizeEx
+        # hands a frozen renderer's pages to Windows Memory Compression, and it
+        # needs PROCESS_SET_QUOTA, which one process holds over another of the
+        # same user with no elevation and no one-time setup at all - unlike the
+        # Linux half, which needs a `setcap`.
+        - mem-trim.exe
+        - mem-trim.c
 
   ## Signing.
   ##

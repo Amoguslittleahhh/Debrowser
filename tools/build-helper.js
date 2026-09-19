@@ -2,7 +2,10 @@
 'use strict';
 
 /**
- * Build tools/mem-probe for whatever platform this is.
+ * Build one of the native helpers for whatever platform this is.
+ *
+ *     node tools/build-helper.js mem-probe
+ *     node tools/build-helper.js mem-trim
  *
  * A shell one-liner would not do: the Windows compiler is `cl` with entirely
  * different flags and a different way of naming its output, and it only exists
@@ -16,8 +19,13 @@ const path = require('path');
 const fs = require('fs');
 
 const dir = __dirname;
-const src = path.join(dir, 'mem-probe.c');
-const out = path.join(dir, process.platform === 'win32' ? 'mem-probe.exe' : 'mem-probe');
+const NAME = process.argv[2];
+if (!NAME || !/^[a-z-]+$/.test(NAME)) {
+  console.error('usage: node tools/build-helper.js <mem-probe|mem-trim>');
+  process.exit(2);
+}
+const src = path.join(dir, `${NAME}.c`);
+const out = path.join(dir, process.platform === 'win32' ? `${NAME}.exe` : NAME);
 
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32' });
@@ -36,13 +44,13 @@ if (process.platform === 'win32') {
   // release runner has; MinGW second, so a developer machine with it works too.
   if (have('cl')) {
     ok = run('cl', ['/nologo', '/O2', '/W3', src, '/link', 'psapi.lib', `/OUT:${out}`]);
-    for (const junk of ['mem-probe.obj']) {
+    for (const junk of [`${NAME}.obj`]) {
       try { fs.unlinkSync(path.join(process.cwd(), junk)); } catch { /* nothing to clean */ }
     }
   } else if (have('gcc')) {
     ok = run('gcc', ['-O2', '-Wall', src, '-o', out, '-lpsapi']);
   } else {
-    console.error('build:memprobe: no compiler found. Open a Visual Studio developer prompt, ' +
+    console.error(`build ${NAME}: no compiler found. Open a Visual Studio developer prompt, ` +
                   'or run this from a job that has run ilammy/msvc-dev-cmd.');
     process.exit(1);
   }
@@ -64,7 +72,7 @@ if (process.platform === 'win32') {
 }
 
 if (!ok) {
-  console.error('build:memprobe: compilation failed');
+  console.error(`build ${NAME}: compilation failed`);
   process.exit(1);
 }
 console.log(`built ${out}`);

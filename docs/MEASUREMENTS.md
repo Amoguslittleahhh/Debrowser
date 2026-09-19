@@ -538,3 +538,89 @@ Every term in that expression is now at a measured floor. **This browser is
 finished on memory.** What remains is not optimisation but a different
 architecture - a lighter engine, which M6 already argued costs the CDP control
 surface the whole governor depends on.
+
+---
+
+## Compression, revisited: what is left to compress, and what can be trusted
+
+The question was whether a homemade compression system could beat what is here.
+Four candidates, measured before any of them was built.
+
+### 1. The session state a discarded tab keeps — 1 KB per tab. Not worth it.
+
+`bench/bench.js` now reports it on every run rather than leaving it to be
+guessed at, which is how the 0.6MB/tab of the old model got its imagined
+mechanism. Thirty tabs, one site each, after the ladder has discarded most of
+them:
+
+    retained: 31 KB of session state for 30 tabs (1 KB per tab,
+              biggest 1 KB, 29 navigation entries, 29 with page state)
+
+Compressing that perfectly would save 30 KB out of a 372 MB browser. This
+confirms 8a above by a second route: the navigation history and form state a
+discarded tab holds are not a cost worth attacking, and now nobody has to take
+that on trust — the figure prints beside the memory total.
+
+### 2. The history store — real, but only at the ceiling.
+
+10,000 entries (the cap) of realistic URLs and titles, measured in Node:
+
+    raw JSON                        2.03 MB   (213 B/entry)
+    live objects                    4.61 MB   heap
+    deflate-raw L1                  0.17 MB   11.96x    3.3 ms
+    deflate-raw L6                  0.14 MB   14.88x   11.6 ms
+    deflate-raw L6 + dictionary     0.14 MB   14.91x   11.5 ms
+    brotli q4                       0.14 MB   15.04x   10.2 ms
+    brotli q9                       0.07 MB   29.41x   56.2 ms
+    inflate                                             1.5 ms
+
+So a full history costs **4.6 MB of heap** and could be held in 0.14 MB — a
+~4.5 MB saving, at a 1.5 ms decompression whenever the history page searches
+it. Two reasons it is not built. It is 1.2% of a 372 MB browser at the *cap*,
+and a history of 500 entries — what a normal profile holds — costs 0.2 MB, so
+the lever pays nothing for almost everyone and its complexity (a hot head, a
+compressed tail, a hash index to answer "was this visited" without inflating)
+would sit in front of every visit and every keystroke of history search.
+
+Recorded rather than done, with the numbers, so it can be picked up if the cap
+ever rises or the entry shape grows.
+
+**The preset dictionary bought nothing** (14.91x vs 14.88x). It is the right
+tool for many small payloads, not for one 2 MB payload where deflate builds a
+better dictionary from the data itself in its own window. Worth knowing before
+reaching for it.
+
+### 3. The renderers themselves — the only place left, and not ours to compress.
+
+Per the model above, a live renderer is 13.2 MB and everything else is fixed.
+No userspace program can compress another process's pages: the only mechanisms
+are the kernel's (zram/zswap on Linux, Windows Memory Compression on Windows),
+which is what the HIBERNATED tier already drives. What *is* ours is the policy
+and the verification, and both had a hole.
+
+### 4. What was actually wrong, and is now fixed
+
+**The tier was Linux-only.** Windows was an honest stub. It is implemented now:
+`SetProcessWorkingSetSizeEx(h, -1, -1)` empties a renderer's working set and
+Windows Memory Compression takes what it can. It needs `PROCESS_SET_QUOTA`,
+which one process holds over another of the same user with no elevation and no
+one-time setup — unlike the Linux half, which needs `setcap cap_sys_nice+ep`.
+That is why this half could be written without a machine to run it on. It is
+compiled on a real Windows runner in CI, and the suite's checks run there.
+
+**The self-disable was measuring the wrong thing.** It compared a renderer's
+private bytes before and after the trim — which is the syscall agreeing with
+itself. Pages leaving a process reappear as the compressor's own allocation, at
+about 2:1, so on a host where compression achieved nothing the per-process drop
+would still have been large and the tier would have stayed on forever. This is
+the project's own named worst case ("a syscall returning success is not
+evidence it did anything") and it was sitting in the one place that decides
+whether the feature keeps running.
+
+The gate is now the machine's own figure — `MemAvailable` on Linux,
+`GlobalMemoryStatusEx` on Windows, read through the same helper on both — taken
+immediately before and after each trim. That is the reading which caught M4b's
+first two false positives by hand; it is automatic now. The panel reports both
+numbers side by side ("~270 MB left the renderers, ~146 MB back to the
+machine"), because quoting only the first is how a compressor that achieved
+nothing reads as a saving.
