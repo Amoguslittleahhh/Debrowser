@@ -1186,55 +1186,6 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       governor.shouldSkip(target) === true,
       `devToolsOpen=${target.devToolsOpen}, chromium says ${target.wc.isDevToolsOpened()}`);
 
-    // The same thing, in the layout and on the page it was reported against.
-    //
-    // The check above exercises a website across the top; the report was an
-    // internal page with the strip down the side, and both of those are
-    // separate code paths - `contentArea` has a whole branch for the vertical
-    // layout, and the browser's own pages are realised differently from a site.
-    {
-      const wasSide = prefs.get('tabBarPosition');
-      prefs.set('tabBarPosition', 'left');
-      shell.applyWindowPrefs();
-
-      const own = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
-      await waitFor(() => own.isLive && !own.loading, { timeoutMs: 10_000 });
-
-      const before = shell.contentBounds().width;
-      toggleDevTools(own, shell);
-      await waitFor(() => shell.devToolsView, { timeoutMs: 8000 });
-      const after = shell.contentBounds().width;
-      // What the view was actually given, not what the geometry says it should
-      // be: the report is that the page did not move, and only the view's own
-      // bounds can answer that.
-      const given = own.view ? own.view.getBounds().width : -1;
-
-      // And the page itself has to agree. A view can be resized while the
-      // document inside it keeps its old layout viewport, which is exactly what
-      // "the page did not make space" looks like: the content stays the width
-      // it was and the inspector is drawn over the end of it.
-      const settled = await waitFor(async () => {
-        const seen = await own.wc.executeJavaScript('window.innerWidth').catch(() => 0);
-        return seen > 0 && Math.abs(seen - after) <= 2;
-      }, { timeoutMs: 4000 });
-      const inner = await own.wc.executeJavaScript('window.innerWidth').catch(() => -1);
-
-      check('one of our own pages gives up room for the inspector, down the side too',
-        after > 0 && after < before && given === after && settled,
-        `page ${before}px -> ${after}px, view says ${given}px, document says ${inner}px`);
-
-      toggleDevTools(own, shell);
-      tabs.close(own.id);
-      prefs.set('tabBarPosition', wasSide);
-      shell.applyWindowPrefs();
-
-      // Put the section back the way it found it. There is one inspector at a
-      // time, so opening this one closed the one on `target` - and everything
-      // below is written against a `target` that still has its dock.
-      await tabs.activate(target.id);
-      toggleDevTools(target, shell);
-      await waitFor(() => shell.devToolsView && target.devToolsOpen, { timeoutMs: 8000 });
-    }
 
     // The dock belongs to one tab and goes away when you leave it.
     //
@@ -1274,6 +1225,82 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('a tab under the inspector is not frozen or discarded',
       floor === Tier.WARM && floorAfter === Tier.DISCARDED,
       `with tools: ${floor}, without: ${floorAfter}`);
+
+    // The same thing, in every combination it was reported in.
+    //
+    // The check above is one cell of a grid: a website, across the top, with
+    // the inspector on the right. The report was an internal page with the
+    // strip down the side, and each of those is a separate code path -
+    // `contentArea` has a whole branch for the vertical layout, and the
+    // browser's own pages are realised differently from a site. Rather than
+    // guess which cell is broken, walk all of them: four pages in two layouts,
+    // asserted the same way each time.
+    //
+    // A dock along the bottom is included because it is the other half of
+    // `contentBounds`'s arithmetic and nothing else exercises it.
+    {
+      const wasSide = prefs.get('tabBarPosition');
+      const wasDock = prefs.get('devToolsDock');
+      const cases = [];
+
+      for (const position of ['top', 'left']) {
+        for (const dock of ['right', 'bottom']) {
+          for (const [what, url] of [
+            ['a website', pageUrl('idle.html')],
+            ['the new tab page', pages.NEW_TAB_URL],
+            ['settings', pages.SETTINGS_URL],
+            ['history', pages.HISTORY_URL]
+          ]) {
+            prefs.set('tabBarPosition', position);
+            prefs.set('devToolsDock', dock);
+            shell.applyWindowPrefs();
+
+            const own = tabs.create({ url, activate: true, realise: true });
+            await waitFor(() => own.isLive && !own.loading, { timeoutMs: 10_000 });
+
+            const axis = dock === 'bottom' ? 'height' : 'width';
+            const viewport = dock === 'bottom' ? 'window.innerHeight' : 'window.innerWidth';
+            const before = shell.contentBounds()[axis];
+            toggleDevTools(own, shell);
+            await waitFor(() => shell.devToolsView, { timeoutMs: 8000 });
+            const after = shell.contentBounds()[axis];
+
+            // What the view was actually given, not what the geometry says it
+            // should be: the report is that the page did not move, and only the
+            // view's own bounds can answer that.
+            const given = own.view ? own.view.getBounds()[axis] : -1;
+
+            // And the page itself has to agree. A view can be resized while the
+            // document inside it keeps its old layout viewport, which is exactly
+            // what "the page did not make space" looks like: the content stays
+            // the size it was and the inspector is drawn over the end of it.
+            const settled = await waitFor(async () => {
+              const seen = await own.wc.executeJavaScript(viewport).catch(() => 0);
+              return seen > 0 && Math.abs(seen - after) <= 2;
+            }, { timeoutMs: 4000 });
+            const inner = await own.wc.executeJavaScript(viewport).catch(() => -1);
+
+            const ok = after > 0 && after < before && given === after && settled;
+            if (!ok) {
+              cases.push(`${what} ${position}/${dock}: ${before}->${after}, ` +
+                `view ${given}, document ${inner}`);
+            }
+
+            toggleDevTools(own, shell);
+            tabs.close(own.id);
+          }
+        }
+      }
+
+      check('every page gives up room for the inspector, in both layouts and both docks',
+        cases.length === 0,
+        cases.length === 0 ? '16 combinations, all shrank' : cases.join(' · '));
+
+      prefs.set('tabBarPosition', wasSide);
+      prefs.set('devToolsDock', wasDock);
+      shell.applyWindowPrefs();
+
+    }
 
     prefs.set('devToolsDock', 'right');
     tabs.close(target.id);
