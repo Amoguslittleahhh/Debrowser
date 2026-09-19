@@ -67,7 +67,26 @@ function start() {
         /** URL for `page` on its own distinct site, keyed by `index`. */
         url: (page, index) =>
           `http://t${index}.test:${port}/${String(page).replace(/^\/+/, '')}`,
-        close: () => new Promise((done) => server.close(done))
+        /*
+         * Shut down without waiting for the tabs still holding it open.
+         *
+         * `server.close()` stops accepting and then waits for every existing
+         * connection to end - and a browser with twenty live tabs on these
+         * fixtures is keeping twenty keep-alive sockets open, none of which
+         * will close on their own. The suite ran all of its checks and then
+         * hung on the way out, more often the more tabs it left alive, which
+         * read as the machine being slow and was not: it was this, waiting for
+         * connections that had no reason to end.
+         *
+         * `closeAllConnections` is the documented way to say "and drop what is
+         * still attached". Guarded because it arrived in Node 18.2 and this
+         * file is the one place that would break silently on an older one - by
+         * hanging, which is exactly the failure being fixed.
+         */
+        close: () => new Promise((done) => {
+          server.close(done);
+          if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+        })
       });
     });
   });
