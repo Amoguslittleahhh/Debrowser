@@ -66,7 +66,42 @@ const COMMANDS = new Set([
   'reveal-download',
   'open-download',
   'open-downloads-page',
-  'update-restart'
+  'update-restart',
+
+  // The single shortcut table lives in the browser process, so the keys the
+  // chrome used to bind itself are commands now like any other.
+  'focus-address',
+  'bookmark-page',
+  'reopen-closed-tab',
+  'select-tab',
+  'cycle-tab',
+  'reload-hard',
+  'view-source',
+
+  // Find in page. The bar is drawn by the chrome; the searching is done by the
+  // page's own renderer, which only the browser process can reach.
+  'find-open',
+  'find-close',
+  'find-query',
+  'find-next',
+  'find-prev',
+
+  // The page's context menu, drawn in the sheet like the app menu.
+  'context-model',
+  'open-link-tab',
+  'copy-link',
+  'copy-text',
+  'save-link',
+  'search-selection',
+  'edit-cut',
+  'edit-copy',
+  'edit-paste',
+  'edit-select-all',
+  'inspect',
+
+  // The new tab page's tiles.
+  'top-sites',
+  'forget-site'
 ]);
 
 contextBridge.exposeInMainWorld('debrowser', {
@@ -113,5 +148,20 @@ contextBridge.exposeInMainWorld('debrowser', {
     const listener = (_event, state) => handler(state);
     ipcRenderer.on('debrowser:state', listener);
     return () => ipcRenderer.removeListener('debrowser:state', listener);
+  },
+
+  /**
+   * One-off messages from the browser, for the things that are not state.
+   *
+   * Focus the address bar, open or close the find bar, report a match count,
+   * report that the page in front was bookmarked. None of these belong on the
+   * state broadcast: they are events with a moment attached, and a snapshot
+   * that carried "focus the address bar" would re-focus it on every tick.
+   */
+  onMessage(handler) {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, message) => handler(message || {});
+    ipcRenderer.on('debrowser:ui', listener);
+    return () => ipcRenderer.removeListener('debrowser:ui', listener);
   }
 });

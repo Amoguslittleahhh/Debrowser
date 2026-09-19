@@ -119,6 +119,34 @@
   -->
   <nav class="bookmarks" id="bookmarks" aria-label="Bookmarks"></nav>
 
+  <!--
+    Find in page.
+
+    A strip of chrome rather than a card floating over the page's top right
+    corner, which is where Chrome puts it and where, on a page of search
+    results, it covers the first result. The window gives it its 38px the same
+    way it gives the bookmarks bar its 34, so nothing is painted over.
+  -->
+  <div class="findbar" id="findbar" hidden>
+    <svg class="find-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2L13.5 13.5"/>
+    </svg>
+    <input id="find-input" type="text" spellcheck="false" autocomplete="off"
+           placeholder="Find in page" aria-label="Find in page">
+    <span class="find-count" id="find-count" aria-live="polite"></span>
+    <button class="icon-btn find-step" id="find-prev" title="Previous match (Shift+F3)"
+            aria-label="Previous match">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10l4-4 4 4"/></svg>
+    </button>
+    <button class="icon-btn find-step" id="find-next" title="Next match (F3)"
+            aria-label="Next match">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+    </button>
+    <button class="icon-btn" id="find-close" title="Close find bar (Esc)" aria-label="Close find bar">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </div>
+
   <script src="theme.js"></script>
   <script src="chrome.js"></script>
 </body>

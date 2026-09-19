@@ -1097,3 +1097,75 @@ body[data-layout="left"] .pin { display: grid; }
   stroke-linejoin: round;
   transition: transform var(--fast) var(--ease);
 }
+
+/* ------------------------------------------------------------------ */
+/* Find in page                                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A strip of chrome, not a card floating over the page.
+ *
+ * Chrome's find bar hangs over the top right corner of the content, which on a
+ * page of search results covers the first result and on a document covers the
+ * heading. This browser already owns the mechanism for a band that takes its
+ * room from the page rather than borrowing it - the bookmarks bar - so the find
+ * bar is one too, and the window adds its 38px to the chrome while it is up.
+ */
+.findbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 38px;
+  padding: 0 var(--s2) 0 var(--s3);
+  background: var(--tint-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.find-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  color: var(--text-dim);
+}
+
+#find-input {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+/* The count sits between the field and the steppers, which is where every
+   browser puts it - and it is tabular, because it changes on every keystroke
+   and digits of different widths make it twitch. */
+.find-count {
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Nothing matched. The field is what went wrong, so the field is what says so -
+   a red count beside a normal-looking box reads as a decoration. */
+.findbar.none #find-input { color: var(--crit); }
+.findbar.none .find-count { color: var(--crit); }
+
+.find-step svg { stroke-width: 1.6; }
+
+/* A divider between the steppers and the close button: they do different
+   things, and at 28px apart with no rule between them they read as one group
+   of three. */
+#find-close {
+  margin-left: var(--s1);
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding-left: var(--s1);
+}

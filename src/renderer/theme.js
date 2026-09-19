@@ -136,16 +136,19 @@ function applyThemePrefs(prefs) {
  *   the button; `right` is its right edge, which is the one a panel aligns to.
  * @param {number} edge - how close to the window's sides it may come
  */
-/* eslint-disable-next-line no-unused-vars -- read by menu.js and flyout.js */
-function anchorSheet(sheet, anchor, edge = 8) {
+/* eslint-disable-next-line no-unused-vars -- read by menu.js, flyout.js, context.js */
+function anchorSheet(sheet, anchor, edge = 8, align = 'right') {
   const width = sheet.offsetWidth;
   const height = sheet.offsetHeight;
   const right = anchor.right || anchor.x;
 
-  let left = right - width;
+  // A panel hangs from a button's right edge; a context menu opens down and to
+  // the right of the pointer, the way every menu opened by a right-click does.
+  // Both still get clamped to the window, which is the part that matters.
+  let left = align === 'left' ? anchor.x : right - width;
   left = Math.min(Math.max(edge, left), Math.max(edge, window.innerWidth - width - edge));
 
-  let top = anchor.y + 6;
+  let top = align === 'left' ? anchor.y : anchor.y + 6;
   if (top + height > window.innerHeight - edge) {
     // Above the button if it fits there, otherwise pinned to the bottom edge -
     // a panel hanging off the screen is worse than one that is not quite where
@@ -157,6 +160,27 @@ function anchorSheet(sheet, anchor, edge = 8) {
   sheet.style.left = `${Math.round(left)}px`;
   sheet.style.top = `${Math.round(top)}px`;
 }
+
+/*
+ * The theme, before anything has been asked for.
+ *
+ * The three sheets - menu, downloads flyout, context menu - take their
+ * preferences off a reply, and a reply arrives after the view has painted. Until
+ * it did, they rendered in whatever `prefers-color-scheme` says, so on a machine
+ * set to Light with Dark chosen in Settings the menu came up white and then went
+ * dark a frame later. The browser knows the answer when it creates the view, so
+ * it puts it in the query string and this stamps it before first paint.
+ *
+ * Harmless on the views that have no such parameters, which is why it is here
+ * rather than copied into three files.
+ */
+(function applyEarlyTheme() {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get('theme');
+  const accent = params.get('accent');
+  if (theme === 'light' || theme === 'dark') document.body.dataset.theme = theme;
+  if (accent) document.body.style.setProperty('--accent', accent);
+})();
 
 /**
  * Report typed-but-unsent text to the browser.

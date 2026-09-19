@@ -11,7 +11,8 @@
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session, Menu, dialog, shell: electronShell } = require('electron');
+const { app, ipcMain, session, Menu, dialog, clipboard,
+        shell: electronShell } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
@@ -30,6 +31,8 @@ const { Prewarm } = require('./prewarm');
 const { IpcHub } = require('./ipc');
 const { pageMergingStatus } = require('./memory');
 const pages = require('./pages');
+const shortcuts = require('./shortcuts');
+const contextMenu = require('./context-menu');
 
 const path = require('path');
 
@@ -210,30 +213,129 @@ function main() {
   };
 
   /**
-   * Let the browser's shortcuts through while a page holds the keyboard.
+   * Give a view the browser's keyboard shortcuts.
    *
    * `before-input-event` is the only hook that sees a keystroke before the page
-   * does. Only keys in the table are taken - everything else, including every
-   * shortcut a web application defines for itself, is left alone.
+   * does, and it is per-webContents - so every view that can hold focus is
+   * bound here, the chrome included. Only keys in `shortcuts.TABLE` are taken;
+   * everything else, including every shortcut a web application defines for
+   * itself, is left alone.
    *
-   * Every view that can hold focus needs this *except* the chrome, which has its
-   * own DOM handler over the same table: binding it there too would run each
-   * shortcut twice per keypress. That left the task manager and the sheets - the
-   * panel has no key handling of its own and the sheets handle only Escape - so
-   * with either of them focused no browser shortcut worked at all.
+   * The chrome used to be the exception, because it ran a second table in its
+   * own DOM. That is what made which shortcuts existed depend on where focus
+   * happened to be, so the DOM table is gone and this is the only one.
    */
   const bindShortcuts = (wc) => {
     if (!wc || wc.isDestroyed()) return;
     wc.on('before-input-event', (event, input) => {
-      const command = pageShortcut(input);
-      if (!command) return;
+      const hit = shortcuts.match(input);
+      if (!hit) return;
       event.preventDefault();
-      runCommand(command, null);
+      runCommand(hit.command, hit.payload);
     });
   };
 
   const bindPageShortcuts = (tab) => {
     if (tab.isLive) bindShortcuts(tab.wc);
+  };
+
+  /**
+   * The model for the menu that is open, so the sheet can ask for it.
+   *
+   * Handed over on request rather than pushed into the view's URL: a menu
+   * carries a link address and a slice of the selection, and a query string is
+   * both length-limited and written into a renderer's own location.
+   */
+  const context = { model: null };
+
+  /**
+   * The last few tabs that were closed, newest last, for Ctrl+Shift+T.
+   *
+   * Addresses and titles only - a closed tab's renderer is gone and its session
+   * state with it, so reopening one is a fresh load of the page it was on. That
+   * is what the shortcut means in every browser; keeping more would mean
+   * holding a discarded tab's suspended state alive indefinitely, which is the
+   * one thing this browser is built not to do.
+   */
+  const closedTabs = [];
+  const CLOSED_TABS_KEPT = 10;
+
+  /**
+   * What the find bar is looking for.
+   *
+   * Held here rather than in the chrome because F3 has to work while a page has
+   * focus, and the page's renderer has no idea what was typed into a bar in
+   * another process.
+   */
+  const find = { query: '' };
+
+  const rememberClosed = (tab) => {
+    // A new tab page that was never navigated is not worth reopening: it holds
+    // nothing, and it would sit at the top of the stack in front of the page
+    // the user actually wants back.
+    if (!tab || !tab.url || tab.url === pages.NEW_TAB_URL || tab.url === 'about:blank') return;
+    closedTabs.push({ url: tab.url, title: tab.title || '' });
+    if (closedTabs.length > CLOSED_TABS_KEPT) closedTabs.shift();
+  };
+
+  /**
+   * Draw our own menu when a page is right-clicked.
+   *
+   * Bound per realisation, like the shortcut table above and for the same
+   * reason: a discarded tab comes back with a new renderer, and the listener
+   * died with the old one.
+   */
+  const bindContextMenu = (tab) => {
+    if (!tab.isLive) return;
+    tab.wc.on('context-menu', (_event, params) => {
+      if (!shell || shell.window.isDestroyed()) return;
+      // Only for the tab in front. A background tab firing this - which a page
+      // can cause by scripting a contextmenu event - must not put a menu over
+      // the page the user is actually looking at.
+      if (!tab.visible) return;
+
+      context.model = {
+        items: contextMenu.buildModel(params, {
+          canGoBack: tab.wc.navigationHistory.canGoBack(),
+          canGoForward: tab.wc.navigationHistory.canGoForward(),
+          bookmarked: Boolean(bookmarks && tab.url && bookmarks.has(tab.url)),
+          internal: tab.internal,
+          engineName: prefs ? prefs.engineName() : null
+        }),
+        // Kept beside the model rather than in it: an item's payload is what
+        // the renderer may send back, and the page's own coordinates are not
+        // something it should be able to restate.
+        params: { x: Math.round(params.x || 0), y: Math.round(params.y || 0) },
+        tabId: tab.id
+      };
+
+      // The hit test is in page coordinates and the sheet is window-sized, so
+      // the menu is placed where the content area starts. `right` is the same
+      // point: a context menu hangs from the pointer rather than from a button,
+      // so its two edges are one.
+      const area = shell.contentBounds();
+      const x = area.x + context.model.params.x;
+      const y = area.y + context.model.params.y;
+      shell.openSheet('context', { x, y, right: x });
+    });
+  };
+
+  /**
+   * Report match counts to the find bar.
+   *
+   * `found-in-page` fires once per search and again for each step through the
+   * results, and it is the only source of the count - `findInPage` itself
+   * returns a request id and nothing else.
+   */
+  const bindFind = (tab) => {
+    if (!tab.isLive) return;
+    tab.wc.on('found-in-page', (_event, result) => {
+      if (!shell || shell.window.isDestroyed() || !tab.visible) return;
+      shell.toChrome('find-result', {
+        matches: result.matches || 0,
+        active: result.activeMatchOrdinal || 0
+      });
+    });
   };
 
   const onTabEvent = (tab, event, payload) => {
@@ -243,6 +345,8 @@ function main() {
         // Per realisation, not per tab: a discarded tab comes back with a new
         // renderer, and the listener died with the old one.
         bindPageShortcuts(tab);
+        bindContextMenu(tab);
+        bindFind(tab);
         break;
       case 'loaded':
         // Fill on load, for passwords only. Payment details are never filled
@@ -251,6 +355,9 @@ function main() {
         break;
       case 'activated':
         if (shell) shell.attachTab(tab);
+        // A search belongs to the page it was run on. Carrying the bar over to
+        // another tab would show a match count for a page nobody is looking at.
+        if (shell && shell.findOpen) { find.query = ''; shell.setFindOpen(false); }
         break;
       case 'open-tab':
         if (tabs && payload?.url) tabs.create({ url: payload.url, activate: false, realise: false });
@@ -267,6 +374,7 @@ function main() {
         break;
       case 'closed':
         if (shell) shell.detachTab(tab);
+        rememberClosed(tab);
         break;
       default:
         break;
@@ -381,7 +489,10 @@ function main() {
     // letter until the site was visited again.
     icons.rememberAll(history.all().map((entry) => entry.icon));
 
-    runCommand = wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm });
+    runCommand = wireCommands({
+      tabs, shell, governor, prefs, publish, log, prewarm,
+      bookmarks, closedTabs, context, find
+    });
 
     // Downloads are taken over from Chromium rather than added beside it.
     //
@@ -410,7 +521,7 @@ function main() {
       event.preventDefault();
       downloads.start(url);
     });
-    wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log });
+    wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log, context });
 
     tabs.create({ url: newTabUrl(prefs) });
     shell.layout();
@@ -434,7 +545,7 @@ function main() {
     }
 
     if (SMOKE_TEST) {
-      runSmokeTest({ tabs, governor, shell, prefs, bookmarks });
+      runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context });
     } else if (argv.includes('--bench-test')) {
       const { runBench } = require('./bench');
       const tabCount = Number(argValue('tabs')) || 8;
@@ -500,7 +611,9 @@ function main() {
  * while it has focus. Both must mean the same thing by 'new-tab', so there is
  * one switch and two ways in rather than a second copy for shortcuts.
  */
-function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null }) {
+function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
+                       bookmarks = null, closedTabs = [], context = { model: null },
+                       find = null }) {
   const runCommand = (command, payload, sender = null) => {
     const active = tabs.activeTab();
 
@@ -576,6 +689,170 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'stop':
         if (active?.isLive) active.wc.stop();
         break;
+
+      // A reload that ignores the cache, which is the reason anyone presses
+      // Ctrl+Shift+R rather than Ctrl+R.
+      case 'reload-hard':
+        if (active?.isLive) active.wc.reloadIgnoringCache();
+        break;
+
+      case 'focus-address':
+        // Focus has to move to the *view* as well as to the field inside it:
+        // the keystroke usually arrives while a page holds the keyboard, and
+        // focusing an input in a renderer that does not have focus does
+        // nothing visible at all.
+        shell.focusChrome();
+        shell.toChrome('focus-address');
+        break;
+
+      // Ctrl+Shift+T. Addresses only; see `rememberClosed`.
+      case 'reopen-closed-tab': {
+        const last = closedTabs.pop();
+        if (last) tabs.create({ url: last.url });
+        break;
+      }
+
+      // Ctrl+1 to Ctrl+8, and Ctrl+9 for the last one.
+      case 'select-tab': {
+        const list = tabs.all();
+        const index = Number(payload?.index);
+        const tab = index === -1 ? list[list.length - 1] : list[index];
+        if (tab) tabs.activate(tab.id).then(publish).catch((e) => log(`activate failed: ${e.message}`));
+        break;
+      }
+
+      // Ctrl+Tab and Ctrl+PageDown. Wraps, as it does everywhere else.
+      case 'cycle-tab': {
+        const list = tabs.all();
+        if (list.length < 2) break;
+        const at = list.findIndex((tab) => tab.id === tabs.activeId);
+        const delta = Number(payload?.delta) || 1;
+        const next = list[(((at === -1 ? 0 : at) + delta) % list.length + list.length) % list.length];
+        if (next) tabs.activate(next.id).then(publish).catch((e) => log(`activate failed: ${e.message}`));
+        break;
+      }
+
+      // Ctrl+D, and the context menu's own item. The star in the toolbar goes
+      // through the request channel because it needs the answer back; this
+      // needs the same answer sent to the chrome instead, or the star would go
+      // on lying until the next navigation.
+      case 'bookmark-page': {
+        if (!bookmarks || !active || !active.url) break;
+        const on = bookmarks.has(active.url)
+          ? (bookmarks.remove(active.url), false)
+          : Boolean(bookmarks.add({ url: active.url, title: active.title }));
+        shell.toChrome('bookmarked', { url: active.url, bookmarked: on });
+        break;
+      }
+
+      // Chromium's own view-source, in a tab of its own so the page being read
+      // is still there when the reading is done.
+      case 'view-source':
+        if (active?.url && /^https?:/.test(active.url)) {
+          tabs.create({ url: `view-source:${active.url}` });
+        }
+        break;
+
+      /* -- Find in page ---------------------------------------------- */
+
+      case 'find-open':
+        shell.setFindOpen(true);
+        break;
+
+      case 'find-close':
+        if (active?.isLive) active.wc.stopFindInPage('clearSelection');
+        if (find) find.query = '';
+        shell.setFindOpen(false);
+        // Back to the page, so the next keystroke types into it rather than
+        // into a bar that is no longer there.
+        if (active?.isLive) active.wc.focus();
+        break;
+
+      // Every keystroke in the bar. `findNext: false` is what makes it search
+      // as you type rather than stepping through matches on each letter.
+      case 'find-query': {
+        const query = String(payload?.query ?? '');
+        if (find) find.query = query;
+        if (!active?.isLive) break;
+        if (!query) {
+          active.wc.stopFindInPage('clearSelection');
+          shell.toChrome('find-result', { matches: 0, active: 0 });
+          break;
+        }
+        // No options at all, and this is not a style choice.
+        //
+        // Measured: `findInPage(text, { findNext: false })` - which is what the
+        // documentation describes as "begin a new finding session", and what
+        // this was written as - fires **no** `found-in-page` event whatsoever,
+        // while the same call with the options omitted fires it normally. Since
+        // that event is the only source of a match count, searching as you type
+        // would have shown no count at all. Bisected against the real thing:
+        // `{ forward: true }`, `{ findNext: true }` and `{ matchCase: false }`
+        // all report; `{ findNext: false }` alone is silent.
+        active.wc.findInPage(query);
+        break;
+      }
+
+      case 'find-next':
+      case 'find-prev': {
+        const query = String(payload?.query ?? find?.query ?? '');
+        // Pressing F3 with the bar closed opens it, which is what the key is
+        // for when there is nothing to step through yet.
+        if (!query) { shell.setFindOpen(true); break; }
+        if (!active?.isLive) break;
+        shell.setFindOpen(true);
+        active.wc.findInPage(query, { findNext: true, forward: command === 'find-next' });
+        break;
+      }
+
+      /* -- From the page's own context menu --------------------------- */
+
+      case 'open-link-tab': {
+        const url = String(payload?.url || '');
+        if (openableUrl(url)) tabs.create({ url, activate: false, realise: false });
+        break;
+      }
+
+      case 'copy-link':
+      case 'copy-text': {
+        const text = String(payload?.text ?? '');
+        if (text) clipboard.writeText(text);
+        break;
+      }
+
+      // Straight to the download manager, which names the file and asks where
+      // to put it - the same path a click on a download link takes.
+      case 'save-link': {
+        const url = String(payload?.url || '');
+        if (active?.isLive && /^https?:/.test(url)) active.wc.downloadURL(url);
+        break;
+      }
+
+      case 'search-selection': {
+        const text = String(payload?.text ?? '').trim();
+        if (!text) break;
+        const target = normaliseUrl(text, prefs.searchTemplate(), { search: true });
+        if (target) tabs.create({ url: target });
+        break;
+      }
+
+      // The clipboard set, for an editable field. These go through the
+      // webContents rather than through `clipboard` so that the page sees the
+      // same events it would from Chromium's own menu.
+      case 'edit-cut': if (active?.isLive) active.wc.cut(); break;
+      case 'edit-copy': if (active?.isLive) active.wc.copy(); break;
+      case 'edit-paste': if (active?.isLive) active.wc.paste(); break;
+      case 'edit-select-all': if (active?.isLive) active.wc.selectAll(); break;
+
+      // Opens the inspector on the element that was right-clicked. The dock is
+      // ours, so the inspector has to exist before it can be pointed at a node.
+      case 'inspect': {
+        if (!active?.isLive) break;
+        const { x, y } = context.model?.params || payload || {};
+        if (!active.devToolsOpen) toggleDevTools(active, shell, log);
+        active.wc.inspectElement(Math.round(Number(x) || 0), Math.round(Number(y) || 0));
+        break;
+      }
 
       case 'toggle-panel':
         shell.togglePanel();
@@ -759,45 +1036,6 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 }
 
 /**
- * Keys a page must not keep to itself.
- *
- * A web page has the keyboard while it is focused, so every shortcut bound in
- * the chrome renderer - which is a different renderer - stopped working the
- * moment the user clicked into the page. That is most of the time. Chromium
- * does not bind these itself either: they are the *browser's* shortcuts, and
- * this browser has no application menu for Electron to take them from, so
- * without this table F12 does nothing on the one surface it is for.
- *
- * Kept to commands that need no reply. Ctrl+L belongs on this list and is not
- * on it, because focusing the address bar means moving focus into another view
- * and telling it to select its field - a channel that does not exist yet, and
- * inventing one here would be the wrong place to put it.
- */
-function pageShortcut(input) {
-  if (input.type !== 'keyDown') return null;
-  const mod = process.platform === 'darwin' ? input.meta : input.control;
-  const key = String(input.key || '').toLowerCase();
-
-  if (key === 'f12') return 'toggle-devtools';
-  if (key === 'f11') return 'toggle-fullscreen';
-  if (mod && input.shift && key === 'i') return 'toggle-devtools';
-  if (mod && input.shift && key === 'o') return 'open-bookmarks';
-  if (!mod || input.shift || input.alt) return null;
-
-  switch (key) {
-    case 't': return 'new-tab';
-    case 'w': return 'close-tab';
-    case 'r': return 'reload';
-    case 'm': return 'toggle-panel';
-    case 'h': return 'open-history';
-    case 'j': return 'open-downloads';
-    case 'p': return 'print';
-    case ',': return 'open-settings';
-    default: return null;
-  }
-}
-
-/**
  * Which of the browser's own surfaces a message came from, by its *live* URL.
  *
  * This is the security boundary, and it is deliberately not a flag on the tab
@@ -869,8 +1107,21 @@ const CHROME_REQUESTS = new Set([
   // broadcast reaches three views twice a second - sending a menu's worth of
   // labels to the tab strip forever, so that a dropdown can be current for the
   // moment it exists, is the wrong way round.
-  'menu-model'
+  'menu-model',
+  // And the context menu from this, for the same reason - it exists for even
+  // less time, and what is in it depends on what was under the pointer.
+  'context-model'
 ]);
+
+/**
+ * What the new tab page may ask for.
+ *
+ * It shows the sites you go to most, so it needs to read the history list -
+ * and that is the whole of its business. It is the one internal page a user can
+ * have fifteen of, and it is one navigation away from being a website, so its
+ * surface is the smallest of any page here.
+ */
+const NEWTAB_REQUESTS = new Set(['top-sites', 'forget-site']);
 
 /**
  * What the history page may ask for - its own list, and nothing else.
@@ -891,7 +1142,8 @@ const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-histo
 const DOWNLOAD_REQUESTS = new Set([
   'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download']);
 
-function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log }) {
+function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log,
+                       context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
@@ -899,7 +1151,8 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       sender === 'settings' ||
       (sender === 'chrome' && CHROME_REQUESTS.has(command)) ||
       (sender === 'history' && HISTORY_REQUESTS.has(command)) ||
-      (sender === 'downloads' && DOWNLOAD_REQUESTS.has(command));
+      (sender === 'downloads' && DOWNLOAD_REQUESTS.has(command)) ||
+      (sender === 'newtab' && NEWTAB_REQUESTS.has(command));
     if (!allowed) return null;
 
     switch (command) {
@@ -910,6 +1163,25 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       // browser that did.
       case 'menu-model':
         return { items: menuModel({ tabs, shell }), prefs: prefs.all() };
+
+      // Built when the page was right-clicked, not when this is asked - what
+      // was under the pointer is gone by now.
+      case 'context-model':
+        return context.model
+          ? { items: context.model.items, prefs: prefs.all() }
+          : { items: [], prefs: prefs.all() };
+
+      // The sites the new tab page offers. Derived from history rather than
+      // stored separately: a second list of "places you go" would be a second
+      // thing to forget when the user clears their history.
+      case 'top-sites':
+        return { items: topSites(history, bookmarks, Number(payload?.limit) || 8) };
+
+      // Removing a tile removes the site from history, which is the only
+      // honest thing it can mean - a tile that came back tomorrow because the
+      // visit was still recorded would be a button that does nothing.
+      case 'forget-site':
+        return { removed: history ? history.forgetSite(String(payload?.url || '')) : 0 };
 
       // Newest first, filtered by the page's search box. Filtered here rather
       // than in the renderer: ten thousand entries is a list worth not copying
@@ -1281,9 +1553,6 @@ function stepZoom(tab, direction) {
   tab.wc.setZoomFactor(ZOOM_FACTORS[index]);
 }
 
-/** How a shortcut is spelled in the menu on this platform. */
-const MOD = process.platform === 'darwin' ? '\u2318' : 'Ctrl';
-
 /**
  * What the menu contains, as data.
  *
@@ -1302,31 +1571,37 @@ function menuModel({ tabs, shell }) {
   const live = Boolean(active?.isLive);
   const full = !shell.window.isDestroyed() && shell.window.isFullScreen();
 
+  // Accelerators come from the shortcut table rather than being written here.
+  // They were written here, and `Ctrl+Shift+B` was advertised in Settings for a
+  // binding that only worked while the toolbar had focus - a label and the key
+  // it names cannot be two separate pieces of knowledge.
+  const accel = shortcuts.accelFor;
+
   // Grouped the way Chrome groups it - what you opened, where you have been,
   // what this page can do, what the browser can do - because that ordering is
   // twenty years of muscle memory and there is nothing to gain by being
   // different. What is in each group is ours.
   return [
-    { id: 'new-tab', label: 'New tab', accel: `${MOD}+T`, icon: 'plus' },
+    { id: 'new-tab', label: 'New tab', accel: accel('new-tab'), icon: 'plus' },
     { kind: 'separator' },
-    { id: 'open-history', label: 'History', accel: `${MOD}+H`, icon: 'clock' },
-    { id: 'open-downloads', label: 'Downloads', accel: `${MOD}+J`, icon: 'download' },
+    { id: 'open-history', label: 'History', accel: accel('open-history'), icon: 'clock' },
+    { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },
     { kind: 'separator' },
     { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live },
     {
       id: 'toggle-fullscreen',
       label: 'Full screen',
-      accel: 'F11',
+      accel: accel('toggle-fullscreen'),
       icon: 'expand',
       kind: 'checkbox',
       checked: full
     },
-    { id: 'print', label: 'Print\u2026', accel: `${MOD}+P`, icon: 'print', enabled: live },
+    { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print', enabled: live },
     { kind: 'separator' },
     {
       id: 'toggle-panel',
       label: 'Task manager',
-      accel: `${MOD}+M`,
+      accel: accel('toggle-panel'),
       icon: 'gauge',
       kind: 'checkbox',
       checked: shell.panelOpen
@@ -1334,13 +1609,13 @@ function menuModel({ tabs, shell }) {
     {
       id: 'toggle-devtools',
       label: 'Developer tools',
-      accel: 'F12',
+      accel: accel('toggle-devtools'),
       icon: 'code',
       kind: 'checkbox',
       checked: Boolean(live && active.devToolsOpen),
       enabled: live
     },
-    { id: 'open-settings', label: 'Settings', accel: `${MOD}+,`, icon: 'gear' },
+    { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
     { kind: 'separator' },
     { kind: 'note', label: `Debrowser ${app.getVersion()}` }
   ];
@@ -1380,10 +1655,97 @@ function toggleDevTools(tab, shell, log = () => {}) {
  */
 const DEFAULT_SEARCH = 'https://duckduckgo.com/?q=%s';
 
-function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
+/**
+ * The sites the new tab page offers, most-visited first.
+ *
+ * Folded by origin rather than listed by page: twelve rows of the same forum
+ * is a list of what you read this morning, not of where you go. Within an
+ * origin the most-visited page wins, which is usually its front page but is
+ * correctly the inbox for a mail host.
+ *
+ * Bookmarks fill the gap on a fresh profile. Without them the page a user sees
+ * on first run - the one that is supposed to show them what the browser is -
+ * would be an empty grid, and the first thing anyone does in a new browser is
+ * import their bookmarks.
+ */
+function topSites(history, bookmarks, limit = 8) {
+  const byOrigin = new Map();
+
+  for (const entry of history ? history.all() : []) {
+    let origin;
+    try {
+      const parsed = new URL(entry.url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+      origin = parsed.origin;
+    } catch {
+      continue;
+    }
+
+    const seen = byOrigin.get(origin);
+    if (!seen) {
+      byOrigin.set(origin, {
+        url: entry.url, title: entry.title, icon: entry.icon || null,
+        visits: entry.visits || 1, origin
+      });
+      continue;
+    }
+    seen.visits += entry.visits || 1;
+    // The busiest page on the site is the one the tile opens.
+    if ((entry.visits || 1) > (seen.best || 0)) {
+      seen.best = entry.visits || 1;
+      seen.url = entry.url;
+      seen.title = entry.title;
+      seen.icon = entry.icon || null;
+    }
+  }
+
+  const items = [...byOrigin.values()]
+    .sort((a, b) => b.visits - a.visits)
+    .slice(0, limit);
+
+  if (items.length >= limit || !bookmarks) return items;
+
+  const have = new Set(items.map((item) => item.origin));
+  for (const mark of bookmarks.all()) {
+    if (items.length >= limit) break;
+    let origin;
+    try {
+      origin = new URL(mark.url).origin;
+    } catch {
+      continue;
+    }
+    if (have.has(origin)) continue;
+    have.add(origin);
+    items.push({ url: mark.url, title: mark.title, icon: mark.icon || null, visits: 0, origin });
+  }
+
+  return items;
+}
+
+/**
+ * Addresses the browser will open on a menu item's say-so.
+ *
+ * The URL comes from Chromium's hit test rather than from the page's DOM, but
+ * it is still a string that crossed a process boundary, and `javascript:` in a
+ * new tab would run in whatever page that tab lands on.
+ */
+function openableUrl(url) {
+  try {
+    return ['http:', 'https:', 'debrowser:'].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false } = {}) {
   if (typeof input !== 'string') return null;
   const text = input.trim();
   if (!text) return null;
+
+  // "Search for the selected text" means search, even when the selection
+  // happens to look like a hostname. Someone who highlighted `example.com` in
+  // an article and asked to search for it wants the results page.
+  if (search) return searchTemplate.replace('%s', encodeURIComponent(text));
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
   if (/^(about|data|blob|file):/i.test(text)) return text;
@@ -1399,10 +1761,15 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH) {
 /* Smoke test - exercises the full lifecycle headlessly                */
 /* ------------------------------------------------------------------ */
 
-function runSmokeTest({ tabs, governor, shell, prefs, bookmarks }) {
+function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context }) {
   const { runSmoke } = require('./smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
-            senderPage: (t, sender) => senderPage(t, shell, sender) }).then((code) => {
+            senderPage: (t, sender) => senderPage(t, shell, sender),
+            // The command dispatcher itself, so the suite exercises find and
+            // the context menu the way a keystroke does rather than by calling
+            // into their parts.
+            runCommand: (command, payload) => runCommand(command, payload),
+            history, context }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

@@ -264,6 +264,36 @@ class History {
     return true;
   }
 
+  /**
+   * Forget every page on a site, which is what removing a new tab tile means.
+   *
+   * A tile stands for a site rather than for one page - it is built by folding
+   * every visit to an origin together - so removing one has to remove all of
+   * them, or the tile would be rebuilt from the pages left behind and reappear
+   * on the next new tab.
+   *
+   * @returns {number} how many entries went
+   */
+  forgetSite(url) {
+    let origin = null;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      return 0;
+    }
+    const before = this.items.length;
+    this.items = this.items.filter((entry) => {
+      try {
+        return new URL(entry.url).origin !== origin;
+      } catch {
+        return true;
+      }
+    });
+    const removed = before - this.items.length;
+    if (removed) this.queueSave();
+    return removed;
+  }
+
   /** Forget everything, and write that immediately rather than in four seconds. */
   clear() {
     const removed = this.items.length;

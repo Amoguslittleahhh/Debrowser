@@ -1,0 +1,171 @@
+'use strict';
+
+/**
+ * Every keyboard shortcut the browser has, in one table.
+ *
+ * There used to be two, and they disagreed. The chrome bound its own set in the
+ * DOM (`Ctrl+L`, `Ctrl+D`, `Ctrl+Shift+B`) and the browser process bound
+ * another to each page's renderer (`Ctrl+P`, `Ctrl+Shift+O`) - so which
+ * shortcuts existed depended on which view happened to hold focus, and since a
+ * page holds it nearly all the time, the address bar could not be reached from
+ * the keyboard at all. Settings advertised `Ctrl+Shift+B` for a binding that
+ * only ever ran when the toolbar was focused, which is almost never.
+ *
+ * So: one table, here, and `before-input-event` on every view including the
+ * chrome. That hook is the only one that sees a keystroke before the page does,
+ * and it is per-webContents, which is why every view has to be bound rather
+ * than there being one global handler. Nothing is registered as a system
+ * accelerator: this browser has no application menu, and a global shortcut
+ * would fire while another application was in front.
+ *
+ * The same table names the accelerators shown in the menu, so a label and the
+ * key it advertises cannot drift apart - which is the failure this replaces.
+ */
+
+const IS_MAC = process.platform === 'darwin';
+
+/** What to call the modifier in a label. */
+const MOD_LABEL = IS_MAC ? '⌘' : 'Ctrl';
+const ALT_LABEL = IS_MAC ? '⌥' : 'Alt';
+const SHIFT_LABEL = IS_MAC ? '⇧' : 'Shift';
+
+/**
+ * The bindings.
+ *
+ * `key` is matched against `input.key`, lowercased - so it is the character the
+ * layout actually produces, not a scan code. `keys` lists alternatives where a
+ * shortcut genuinely has more than one spelling (`Ctrl+=` and `Ctrl++` are the
+ * same keypress on most layouts, and `+` is what a US layout reports).
+ *
+ * Modifiers are exact: an entry with no `shift` requires shift *up*, so
+ * `Ctrl+Shift+T` cannot be swallowed by the `Ctrl+T` row above it. That
+ * exactness is the whole reason the old chrome-side table mis-bound
+ * `Ctrl+Shift+B` - it matched `b` first and only then looked at shift.
+ *
+ * Order matters only for `accelFor`, which reports the first spelling listed.
+ */
+const TABLE = [
+  // Tabs
+  { command: 'new-tab', mod: true, key: 't' },
+  { command: 'close-tab', mod: true, key: 'w' },
+  { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
+  { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'tab' },
+  { command: 'cycle-tab', payload: { delta: -1 }, mod: true, shift: true, key: 'tab' },
+  { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'pagedown' },
+  { command: 'cycle-tab', payload: { delta: -1 }, mod: true, key: 'pageup' },
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+    { command: 'select-tab', payload: { index: n - 1 }, mod: true, key: String(n) })),
+  // The ninth is the last tab, not the ninth tab, in every browser that has it.
+  { command: 'select-tab', payload: { index: -1 }, mod: true, key: '9' },
+
+  // Navigation
+  { command: 'reload', mod: true, key: 'r' },
+  { command: 'reload', key: 'f5' },
+  { command: 'reload-hard', mod: true, shift: true, key: 'r' },
+  { command: 'back', alt: true, key: 'arrowleft' },
+  { command: 'forward', alt: true, key: 'arrowright' },
+  { command: 'focus-address', mod: true, key: 'l' },
+  { command: 'focus-address', alt: true, key: 'd' },
+  { command: 'focus-address', key: 'f6' },
+
+  // Find
+  { command: 'find-open', mod: true, key: 'f' },
+  { command: 'find-next', key: 'f3' },
+  { command: 'find-next', mod: true, key: 'g' },
+  { command: 'find-prev', shift: true, key: 'f3' },
+  { command: 'find-prev', mod: true, shift: true, key: 'g' },
+
+  // Zoom. Both spellings of the same physical key, plus the numpad's.
+  { command: 'zoom', payload: { direction: 'in' }, mod: true, keys: ['=', '+'] },
+  { command: 'zoom', payload: { direction: 'out' }, mod: true, keys: ['-', '_'] },
+  { command: 'zoom', payload: { direction: 'reset' }, mod: true, key: '0' },
+
+  // Places
+  { command: 'bookmark-page', mod: true, key: 'd' },
+  { command: 'toggle-bookmarks-bar', mod: true, shift: true, key: 'b' },
+  { command: 'open-bookmarks', mod: true, shift: true, key: 'o' },
+  { command: 'open-history', mod: true, key: 'h' },
+  { command: 'open-downloads', mod: true, key: 'j' },
+  { command: 'open-settings', mod: true, key: ',' },
+
+  // Tools
+  { command: 'print', mod: true, key: 'p' },
+  { command: 'view-source', mod: true, key: 'u' },
+  { command: 'toggle-panel', mod: true, key: 'm' },
+  { command: 'toggle-devtools', key: 'f12' },
+  { command: 'toggle-devtools', mod: true, shift: true, key: 'i' },
+  { command: 'toggle-fullscreen', key: 'f11' }
+];
+
+/** Every spelling an entry answers to. */
+function keysOf(entry) {
+  return entry.keys || [entry.key];
+}
+
+/**
+ * The command a keystroke means, or null to leave it to the page.
+ *
+ * Deliberately conservative: anything not in the table above is passed straight
+ * through, including every shortcut a web application defines for itself. A
+ * browser that swallowed `Ctrl+S` in a document editor because it might one day
+ * want the key would be worse than one with no shortcuts at all.
+ *
+ * @param {Electron.Input} input
+ * @returns {{command: string, payload: object|null}|null}
+ */
+function match(input) {
+  if (!input || input.type !== 'keyDown') return null;
+
+  // Cmd on a Mac, Ctrl everywhere else. Never both: `Ctrl+T` on macOS is a
+  // terminal binding (transpose) and taking it would be rude.
+  const mod = IS_MAC ? Boolean(input.meta) : Boolean(input.control);
+  // The other one is a modifier we must *not* see. Without this, `Ctrl+Alt+T`
+  // - which is a desktop-wide terminal shortcut on most Linux machines - would
+  // open a tab here as well.
+  const other = IS_MAC ? Boolean(input.control) : Boolean(input.meta);
+  if (other) return null;
+
+  const key = String(input.key || '').toLowerCase();
+  const shift = Boolean(input.shift);
+  const alt = Boolean(input.alt);
+
+  for (const entry of TABLE) {
+    if (Boolean(entry.mod) !== mod) continue;
+    if (Boolean(entry.shift) !== shift) continue;
+    if (Boolean(entry.alt) !== alt) continue;
+    if (!keysOf(entry).includes(key)) continue;
+    return { command: entry.command, payload: entry.payload || null };
+  }
+  return null;
+}
+
+/** How a key is written in a menu. */
+function labelFor(entry) {
+  const parts = [];
+  if (entry.mod) parts.push(MOD_LABEL);
+  if (entry.alt) parts.push(ALT_LABEL);
+  if (entry.shift) parts.push(SHIFT_LABEL);
+
+  const key = keysOf(entry)[0];
+  const named = {
+    arrowleft: '←', arrowright: '→', pagedown: 'PgDn', pageup: 'PgUp',
+    tab: 'Tab', ',': ',', '=': '+', '-': '−'
+  };
+  parts.push(named[key] || (key.length === 1 ? key.toUpperCase() : key.toUpperCase()));
+  // A Mac menu writes ⌘T with nothing between the symbols; everywhere else the
+  // parts are joined with a plus.
+  return IS_MAC ? parts.join('') : parts.join('+');
+}
+
+/**
+ * The accelerator to print beside a menu item, or '' if the command has none.
+ *
+ * Takes the first entry for the command, which is why the table lists the
+ * canonical spelling first - `Ctrl+R` before `F5`.
+ */
+function accelFor(command) {
+  const entry = TABLE.find((row) => row.command === command);
+  return entry ? labelFor(entry) : '';
+}
+
+module.exports = { match, accelFor, TABLE, IS_MAC };

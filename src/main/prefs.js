@@ -302,6 +302,17 @@ class Prefs {
   searchTemplate() {
     return (SEARCH_ENGINES[this.values.searchEngine] || SEARCH_ENGINES.google).url;
   }
+
+  /**
+   * The chosen engine's name, for the one place a menu has to say it.
+   *
+   * "Search Google for …" is a promise about where the text is going, so it
+   * comes from the same table the query template does rather than from a label
+   * written beside it.
+   */
+  engineName() {
+    return (SEARCH_ENGINES[this.values.searchEngine] || SEARCH_ENGINES.google).name;
+  }
 }
 
 module.exports = { Prefs, SCHEMA, SEARCH_ENGINES };

@@ -18,6 +18,7 @@ const { applyPrefs } = require('./prefs');
 const platform = require('./platform');
 const fixtureServer = require('./fixture-server');
 const pages = require('./pages');
+const contextMenu = require('./context-menu');
 
 /** The process a tab's page is in, asked of the renderer rather than the tab. */
 const safePidOf = (tab) => {
@@ -79,7 +80,8 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
 }
 
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
-                          openInternalPage, senderPage, bookmarks }) {
+                          openInternalPage, senderPage, bookmarks,
+                          runCommand = () => {}, history = null, context = { model: null } }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -1247,37 +1249,159 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
   }
 
-  // Which window can be typed at, and still answer a browser shortcut.
+  // Every window that can be typed at answers the same shortcuts.
   //
-  // Ctrl+T works while a page has focus because every tab's renderer is bound
-  // to the shortcut table. The browser's other views were not: the task manager
-  // has no key handling at all and the sheets handle only Escape, so with
-  // either of them focused - and the task manager is a window people leave open
-  // - no shortcut in the browser did anything. The chrome is deliberately left
-  // out: it runs the same table in the DOM, and a second binding would open two
-  // tabs per Ctrl+T.
+  // There were two tables and they disagreed: the chrome bound Ctrl+L, Ctrl+D
+  // and Ctrl+Shift+B in its own DOM, the browser process bound a different set
+  // to each page. Which shortcuts existed therefore depended on which view held
+  // focus - and a page holds it nearly all the time, so the address bar could
+  // not be reached from the keyboard at all. Now there is one table and every
+  // view is bound to it, each exactly once: two listeners on the same view
+  // would open two tabs per Ctrl+T, which is the failure that kept the chrome
+  // out of this in the first place.
   {
-    const bound = (view) => Boolean(view) && !view.webContents.isDestroyed() &&
-      view.webContents.listenerCount('before-input-event') > 0;
+    const listeners = (view) => (view && !view.webContents.isDestroyed()
+      ? view.webContents.listenerCount('before-input-event')
+      : -1);
 
     shell.togglePanel(true);
-    const panelReady = await waitFor(() => Boolean(shell.panelView), { timeoutMs: 8000 });
-    const panelBound = panelReady && bound(shell.panelView);
-
+    await waitFor(() => Boolean(shell.panelView), { timeoutMs: 8000 });
     shell.openSheet('menu', { x: 100, y: 84, right: 132 });
-    const sheetReady = await waitFor(
-      () => shell.sheetView && shell.sheetPage === 'menu', { timeoutMs: 8000 });
-    const sheetBound = sheetReady && bound(shell.sheetView);
+    await waitFor(() => shell.sheetView && shell.sheetPage === 'menu', { timeoutMs: 8000 });
 
-    const chromeDouble = bound(shell.chromeView);
+    const counts = {
+      chrome: listeners(shell.chromeView),
+      panel: listeners(shell.panelView),
+      sheet: listeners(shell.sheetView),
+      tab: tabs.activeTab()?.isLive
+        ? tabs.activeTab().wc.listenerCount('before-input-event') : -1
+    };
 
-    check('the browser\'s own views answer its keyboard shortcuts',
-      panelBound && sheetBound && !chromeDouble,
-      `panel=${panelBound} sheet=${sheetBound} chrome bound twice=${chromeDouble}`);
+    check('every view answers the browser\'s shortcuts, and none answers twice',
+      Object.values(counts).every((n) => n === 1),
+      Object.entries(counts).map(([name, n]) => `${name}=${n}`).join(' '));
+
+    // And the table itself agrees with what the menu advertises.
+    const table = require('./shortcuts');
+    // Built with this platform's modifier, because the table uses Cmd on macOS
+    // and Ctrl elsewhere - and this suite runs on all three.
+    const press = (key, extra = {}) => ({
+      type: 'keyDown', key,
+      ...(process.platform === 'darwin' ? { meta: true } : { control: true }),
+      ...extra
+    });
+    const sample = [
+      ['focus-address', press('l')],
+      ['toggle-bookmarks-bar', press('b', { shift: true })],
+      ['new-tab', press('t')],
+      ['reopen-closed-tab', press('t', { shift: true })],
+      ['find-open', press('f')]
+    ];
+    const resolved = sample.map(([, input]) => table.match(input)?.command || null);
+    check('the keys the browser advertises are the keys it answers',
+      resolved.every((got, i) => got === sample[i][0]) &&
+        table.accelFor('new-tab').length > 0,
+      `${resolved.join(', ')} · menu says ${table.accelFor('toggle-bookmarks-bar')}`);
 
     shell.closeSheet();
     await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
     shell.togglePanel(false);
+  }
+
+  // Right-click, which used to do nothing at all.
+  //
+  // Two properties, and the second is the one that could go wrong quietly: the
+  // menu offers what was actually under the pointer, and the address it offers
+  // to open is the one Chromium's hit test reported - never something the page
+  // put there. A menu that will open any URL a renderer names is a page opening
+  // tabs on the user's behalf.
+  {
+    const link = contextMenu.buildModel(
+      { linkURL: 'https://example.com/a', x: 40, y: 60 },
+      { canGoBack: true, canGoForward: false, engineName: 'Google' });
+    const plain = contextMenu.buildModel({ x: 4, y: 4 }, {});
+    const editable = contextMenu.buildModel(
+      { isEditable: true, selectionText: 'abc', editFlags: { canPaste: true, canCut: true } }, {});
+    const script = contextMenu.buildModel({ linkURL: 'javascript:alert(1)' }, {});
+
+    const ids = (model) => model.filter((i) => i.id).map((i) => i.id);
+    check('the page menu offers what was under the pointer',
+      ids(link).includes('open-link-tab') && ids(link).includes('copy-link') &&
+        ids(editable).includes('edit-paste') && !ids(plain).includes('open-link-tab') &&
+        ids(plain).includes('back'),
+      `link: ${ids(link).slice(0, 3).join(',')} · editable: ${ids(editable).slice(0, 2).join(',')}`);
+
+    check('a link the browser would not open is not offered',
+      !ids(script).includes('open-link-tab'),
+      `javascript: link produced ${ids(script).slice(0, 3).join(',') || 'nothing but the page items'}`);
+
+    // And it draws in the same sheet the app menu does, rather than in a
+    // mechanism of its own that would drift away from it. The model has to be
+    // there first: the menu closes itself rather than showing an empty card,
+    // which is the right behaviour and would otherwise read as a failure here.
+    context.model = { items: link, params: { x: 200, y: 200 }, tabId: null };
+    shell.openSheet('context', { x: 200, y: 200, right: 200 });
+    const up = await waitFor(
+      () => shell.sheetView && shell.sheetPage === 'context' &&
+        shell.sheetView.webContents.getURL().includes('context.html'),
+      { timeoutMs: 8000 });
+    check('the page menu is drawn in the sheet, like every other panel',
+      up, `sheet is ${shell.sheetPage}`);
+    shell.closeSheet();
+    await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
+  }
+
+  // Find in page.
+  //
+  // The bar takes its room from the page rather than floating over it, which is
+  // the half that can break invisibly: a bar the window has not accounted for
+  // is painted over the top of the content. So the assertion is on the *page's*
+  // rectangle, not on the bar.
+  {
+    // Its own tab, in front and loaded, rather than whatever the suite left
+    // active - a frozen or discarded renderer has nothing to search.
+    const target = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await tabs.activate(target.id);
+    await waitFor(() => target.isLive && !target.loading, { timeoutMs: 10_000 });
+
+    const beforeHeight = shell.contentBounds().height;
+    const beforeChrome = shell.chromeHeight();
+
+    runCommand('find-open', null);
+    const opened = shell.findOpen && shell.chromeHeight() > beforeChrome &&
+      shell.contentBounds().height < beforeHeight;
+
+    // A real search on the page in front, through the same command a keystroke
+    // would run. `found-in-page` is the only source of a count - `findInPage`
+    // itself returns a request id and nothing else.
+    // Measured, after this check failed with no event at all: `findInPage`
+    // answers nothing until the page has actually been laid out, and a tab that
+    // has finished loading has not necessarily been painted yet. Not a focus
+    // problem - tested both ways, and an unfocused view searches perfectly
+    // well, which matters because the keyboard is in the find bar by then.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    let result = null;
+    if (target?.isLive) {
+      const heard = new Promise((resolve) => {
+        target.wc.once('found-in-page', (_event, found) => resolve(found));
+        setTimeout(() => resolve(null), 4000);
+      });
+      runCommand('find-query', { query: 'timers' });
+      result = await heard;
+    }
+
+    runCommand('find-close', null);
+    const closed = !shell.findOpen && shell.contentBounds().height === beforeHeight;
+
+    check('the find bar takes its room from the page and gives it back',
+      opened && closed,
+      `content ${beforeHeight} -> ${opened ? 'shorter' : 'unchanged'} -> ${shell.contentBounds().height}`);
+    check('a search reports how many matches it found',
+      Boolean(result) && result.matches > 0,
+      result ? `${result.matches} match(es), on ${result.activeMatchOrdinal}` : 'no result arrived');
+
+    tabs.close(target.id);
   }
 
   // The downloads page.

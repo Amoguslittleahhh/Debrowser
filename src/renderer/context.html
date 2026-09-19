@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Context menu</title>
+  <!--
+    The app menu's stylesheet, not one of its own. The two are the same object -
+    a floating card of rows with icons, labels and accelerators - and a context
+    menu that looked like a different program's would be the most obvious seam
+    in the browser, because it is the menu people open most.
+  -->
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="menu.css">
+</head>
+<body class="menu-body">
+  <div class="backdrop" id="backdrop"></div>
+  <div class="sheet context" id="sheet" role="menu" tabindex="-1" aria-label="Page menu"></div>
+
+  <script src="theme.js"></script>
+  <script src="context.js"></script>
+</body>
+</html>

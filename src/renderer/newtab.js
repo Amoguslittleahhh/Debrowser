@@ -41,6 +41,118 @@ window.addEventListener('DOMContentLoaded', () => {
   q.focus();
 });
 
+/* ------------------------------------------------------------------ */
+/* Tiles                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The sites you go to most, folded by origin in the browser process.
+ *
+ * Asked for once, when the page loads, rather than kept current: a new tab page
+ * is open for a second and the list it shows was true when it opened. Subscribing
+ * it to anything would be a cost paid by every tab in the browser for a page
+ * nobody is looking at any more.
+ */
+const tiles = document.getElementById('tiles');
+
+function siteOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+/** Where a site's icon is if it never said - the address Chromium would try. */
+function defaultIcon(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.origin}/favicon.ico`;
+  } catch {
+    return null;
+  }
+}
+
+function tile(item) {
+  const host = siteOf(item.url);
+
+  const root = document.createElement('div');
+  root.className = 'tile';
+
+  const open = document.createElement('button');
+  open.className = 'tile-open';
+  open.type = 'button';
+  open.title = `${item.title || host}\n${item.url}`;
+
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.setAttribute('aria-hidden', 'true');
+  chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+  chip.style.setProperty('--hue', String(siteHue(host)));
+
+  // Through the browser's icon route, never at the site - see theme.js. The
+  // letter underneath is the fallback, and it stops painting once a real icon
+  // loads, because almost every favicon is transparent.
+  const src = iconSrc(item.icon || defaultIcon(item.url));
+  if (src) {
+    const icon = document.createElement('img');
+    icon.className = 'site-icon';
+    icon.alt = '';
+    icon.decoding = 'async';
+    icon.src = src;
+    icon.addEventListener('load', () => chip.classList.add('has-icon'));
+    icon.addEventListener('error', () => icon.remove());
+    chip.append(icon);
+  }
+
+  const label = document.createElement('span');
+  label.className = 'tile-label';
+  label.textContent = host;
+
+  open.append(chip, label);
+  open.addEventListener('click', (event) => {
+    if (event.ctrlKey || event.metaKey) api.send('new-tab', { url: item.url });
+    else api.send('navigate', { url: item.url });
+  });
+  open.addEventListener('auxclick', (event) => {
+    if (event.button === 1) api.send('new-tab', { url: item.url });
+  });
+
+  // Removing a tile forgets the site, which is the only thing it can honestly
+  // mean: the list is derived from history, so a tile that was merely hidden
+  // would be a button that appears to do nothing the next time you look.
+  const forget = document.createElement('button');
+  forget.className = 'tile-forget';
+  forget.type = 'button';
+  forget.textContent = '×';
+  forget.title = `Forget ${host}`;
+  forget.setAttribute('aria-label', `Forget ${host}`);
+  forget.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    await api.request('forget-site', { url: item.url });
+    // Removed here rather than by redrawing: a redraw would slide every
+    // remaining tile sideways under the pointer that is still over this one.
+    root.remove();
+    if (!tiles.children.length) tiles.hidden = true;
+  });
+
+  root.append(open, forget);
+  return root;
+}
+
+async function loadTiles() {
+  const res = await api.request('top-sites', { limit: 8 });
+  const items = (res && res.items) || [];
+  tiles.hidden = items.length === 0;
+  if (!items.length) return;
+  const frag = document.createDocumentFragment();
+  for (const item of items) frag.append(tile(item));
+  tiles.replaceChildren(frag);
+}
+
+loadTiles();
+
 // One line of the thing this browser is actually for. It costs nothing to
 // render because the numbers are already in the state message the chrome gets.
 api.onState((state) => {

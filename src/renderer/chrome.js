@@ -45,7 +45,13 @@ const el = {
   downloads: document.getElementById('downloads'),
   downloadsRing: document.getElementById('downloads-ring'),
   pin: document.getElementById('pin'),
-  omnibox: document.getElementById('omnibox')
+  omnibox: document.getElementById('omnibox'),
+  findbar: document.getElementById('findbar'),
+  findInput: document.getElementById('find-input'),
+  findCount: document.getElementById('find-count'),
+  findPrev: document.getElementById('find-prev'),
+  findNext: document.getElementById('find-next'),
+  findClose: document.getElementById('find-close')
 };
 
 // The whole pill focuses the address bar, not just the text inside it.
@@ -751,44 +757,91 @@ el.url.addEventListener('keydown', (event) => {
   }
 });
 
-window.addEventListener('keydown', (event) => {
-  const mod = event.ctrlKey || event.metaKey;
-  if (!mod) return;
+/* ------------------------------------------------------------------ */
+/* Find in page                                                        */
+/* ------------------------------------------------------------------ */
 
-  switch (event.key.toLowerCase()) {
-    case 't': api.send('new-tab'); break;
-    case 'w': api.send('close-tab'); break;
-    case 'r': api.send('reload'); break;
-    case 'l': el.url.focus(); break;
-    case 'm': api.send('toggle-panel'); break;
-    // The star's tooltip has advertised this since the star existed; it was
-    // never bound, so the one discoverable way to learn the shortcut taught it
-    // wrongly.
-    case 'd': api.request('toggle-bookmark').then((res) => {
-      if (res) setStar(Boolean(res.bookmarked));
-    }); break;
-    // Ctrl+Shift+B shows and hides the bookmarks bar, as it does everywhere
-    // else. The browser owns the preference, so this asks rather than toggling
-    // a class here - the window has to give the page its 34px back too.
-    case 'b':
-      if (event.shiftKey) api.send('toggle-bookmarks-bar');
-      break;
-    case ',': api.send('open-settings'); break;
-    case 'h': api.send('open-history'); break;
-    case 'j': openDownloads(); break;
-    // Ctrl+Shift+I, the other half of F12. F12 itself needs no modifier and is
-    // handled below.
-    case 'i': if (event.shiftKey) api.send('toggle-devtools'); else return; break;
-    default: return;
+/*
+ * The bar is drawn here; the searching is done by the page's own renderer,
+ * which only the browser process can reach. So this sends what was typed and
+ * renders what came back, and holds no state about the search itself - the
+ * browser has to own that anyway, because F3 works while the page has focus
+ * and the page's renderer has never seen what was typed into this bar.
+ */
+function showFind(open) {
+  el.findbar.hidden = !open;
+  document.body.classList.toggle('with-find', open);
+  if (!open) {
+    el.findInput.value = '';
+    el.findCount.textContent = '';
+    return;
   }
-  event.preventDefault();
+  el.findInput.focus();
+  el.findInput.select();
+}
+
+function renderFindResult({ matches = 0, active = 0 }) {
+  const query = el.findInput.value;
+  // Nothing at all rather than "0/0" for an empty field: the count is an answer
+  // to a question, and no question has been asked yet.
+  el.findCount.textContent = !query ? '' : matches ? `${active}/${matches}` : 'No matches';
+  el.findbar.classList.toggle('none', Boolean(query) && matches === 0);
+}
+
+el.findInput.addEventListener('input', () => {
+  api.send('find-query', { query: el.findInput.value });
+  if (!el.findInput.value) renderFindResult({});
 });
 
-// Unmodified keys, which the loop above deliberately ignores.
-window.addEventListener('keydown', (event) => {
-  if (event.key !== 'F12') return;
-  api.send('toggle-devtools');
-  event.preventDefault();
+el.findInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    api.send(event.shiftKey ? 'find-prev' : 'find-next', { query: el.findInput.value });
+    event.preventDefault();
+  } else if (event.key === 'Escape') {
+    api.send('find-close');
+    event.preventDefault();
+  }
+});
+
+el.findPrev.addEventListener('click', () => api.send('find-prev', { query: el.findInput.value }));
+el.findNext.addEventListener('click', () => api.send('find-next', { query: el.findInput.value }));
+el.findClose.addEventListener('click', () => api.send('find-close'));
+
+/* ------------------------------------------------------------------ */
+
+/*
+ * Messages from the browser that are not state.
+ *
+ * The keyboard table used to live in this file, which is why the address bar
+ * could not be focused from the keyboard: a page holds the keyboard nearly all
+ * the time, and a binding in this renderer never saw the keystroke. The table
+ * is in the browser process now, so what arrives here is the *effect* - focus
+ * this, open that - rather than the key that caused it.
+ */
+api.onMessage((message) => {
+  switch (message.kind) {
+    case 'focus-address':
+      el.url.focus();
+      el.url.select();
+      break;
+    case 'find-focus':
+      showFind(true);
+      break;
+    case 'find-closed':
+      showFind(false);
+      break;
+    case 'find-result':
+      renderFindResult(message);
+      break;
+    // Ctrl+D and the context menu both bookmark through the command channel,
+    // which returns nothing - so the browser says what it decided, and the star
+    // follows that rather than guessing.
+    case 'bookmarked':
+      if (message.url === starUrl) setStar(Boolean(message.bookmarked));
+      break;
+    default:
+      break;
+  }
 });
 
 api.onState((state) => {

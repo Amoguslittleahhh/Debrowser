@@ -29,6 +29,17 @@ const PANEL_WIDTH = 360;
  */
 const BOOKMARKS_BAR_HEIGHT = 34;
 
+/**
+ * Height the find bar adds while it is open.
+ *
+ * Drawn inside the chrome, like the bookmarks bar, rather than floating over
+ * the page as Chrome's does. Over the page it would cover whatever is in the
+ * top right corner - which on a search results page is the first result - and
+ * this browser already owns the mechanism for a strip of chrome that takes its
+ * room from the content rather than borrowing it.
+ */
+const FIND_BAR_HEIGHT = 38;
+
 /** Width of the chrome when it runs down the side instead of across the top. */
 const SIDEBAR_WIDTH = 240;
 
@@ -125,7 +136,11 @@ const SHEET_PAGES = {
   // everything the sheet gives it is what a prompt needs: a view over the whole
   // window, a backdrop that catches a click, the keyboard, and nothing held
   // while it is closed.
-  update: 'update.html'
+  update: 'update.html',
+  // Right-click on a page. Same view, same dismissal, same styling as the app
+  // menu - a context menu that looked like a different program's would be the
+  // most obvious seam in the browser, and it is the menu people open most.
+  context: 'context.html'
 };
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
@@ -165,10 +180,10 @@ class BrowserShell {
     /**
      * Give a view of ours the browser's keyboard shortcuts.
      *
-     * The chrome has its own handler in its page; everything else here - the
-     * task manager, the menu, the downloads flyout, the update prompt - had
-     * none, and a view that holds focus and ignores Ctrl+T is a browser whose
-     * keyboard has stopped working as far as anyone can tell.
+     * Every view that can hold focus: the chrome, the task manager, the menu,
+     * the downloads flyout, the context menu and the update prompt. A view that
+     * holds focus and ignores Ctrl+T is a browser whose keyboard has stopped
+     * working as far as anyone can tell.
      */
     this.bindShortcuts = bindShortcuts;
 
@@ -201,6 +216,9 @@ class BrowserShell {
 
     this.panelView = null;
     this.panelOpen = false;
+
+    /** Whether the find bar is showing, which the content area has to know. */
+    this.findOpen = false;
 
     /**
      * The sheet, while one is open: the app menu or the downloads flyout.
@@ -297,6 +315,10 @@ class BrowserShell {
     });
 
     this.window.contentView.addChildView(this.chromeView);
+    // The chrome answers the same shortcut table as every other view. It used
+    // to run a second one in its own DOM, which is how the browser ended up
+    // with shortcuts that existed only while the toolbar had focus.
+    this.bindShortcuts(this.chromeView.webContents);
     this.chromeView.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'));
 
     // Links in our own UI (there should be none) open externally rather than
@@ -519,7 +541,13 @@ class BrowserShell {
         // The button's right edge, which is what the menu aligns to. Passed
         // through rather than derived: only the renderer knows how wide its own
         // button ended up.
-        right: String(Number.isFinite(right) ? Math.round(right) : 0)
+        right: String(Number.isFinite(right) ? Math.round(right) : 0),
+        // The palette, before the page has asked for anything. A sheet takes
+        // its preferences off a reply, and a reply arrives a frame after the
+        // view has painted - so without this the menu came up in the machine's
+        // colours and turned into the browser's a moment later.
+        theme: String(this.prefs ? this.prefs.get('theme') : 'dark'),
+        accent: String(this.prefs ? this.prefs.get('accent') : '')
       }
       // A menu dismissed before it finished loading cancels its own load. That
       // is an ordinary thing for a menu and not worth a line in the log.
@@ -921,9 +949,43 @@ class BrowserShell {
     return this.prefs ? this.prefs.get('showBookmarksBar') !== false : true;
   }
 
-  /** How much vertical room the chrome needs, bar included. */
+  /** How much vertical room the chrome needs, bars included. */
   chromeHeight() {
-    return CHROME_HEIGHT + (this.bookmarksBarVisible() ? BOOKMARKS_BAR_HEIGHT : 0);
+    return CHROME_HEIGHT +
+      (this.bookmarksBarVisible() ? BOOKMARKS_BAR_HEIGHT : 0) +
+      (this.findOpen ? FIND_BAR_HEIGHT : 0);
+  }
+
+  /**
+   * Show or hide the find bar, and give the page its room back when it closes.
+   *
+   * The bar is drawn by the chrome, but its height is the window's business,
+   * exactly as the bookmarks bar's is: the content area starts below the
+   * chrome, so a bar the window has not accounted for is painted over the page.
+   */
+  setFindOpen(open) {
+    const want = Boolean(open);
+    if (this.findOpen === want) {
+      // Already up. A second Ctrl+F puts the caret back in it and selects what
+      // is there, which is what every browser does; closing the bar someone is
+      // trying to type into would not be.
+      if (want) this.toChrome('find-focus');
+      return;
+    }
+    this.findOpen = want;
+    this.layout();
+    this.toChrome(want ? 'find-focus' : 'find-closed');
+  }
+
+  /** A one-off message to the chrome, for the things that are not state. */
+  toChrome(kind, payload = null) {
+    send(this.chromeView, 'debrowser:ui', { kind, ...(payload || {}) });
+  }
+
+  /** Put the keyboard back in the chrome - for Ctrl+L, and for the find bar. */
+  focusChrome() {
+    const wc = this.chromeView && this.chromeView.webContents;
+    if (wc && !wc.isDestroyed()) wc.focus();
   }
 
   /** Is the sidebar held open, rather than sliding away when the pointer goes? */
