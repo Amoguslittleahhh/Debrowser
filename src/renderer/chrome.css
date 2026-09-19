@@ -385,9 +385,24 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
 
 .audio-dot {
   flex: none;
-  font-size: 10px;
+  /* A control now rather than a mark, so it needs a target rather than a
+     glyph's worth of room - grown by its padding and given the space back with
+     a negative margin, which leaves the strip's layout exactly where it was. */
+  padding: 4px;
+  margin: -4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  cursor: default;
 }
+.audio-dot:hover { background: var(--wash); color: var(--text); }
+/* Muted reads as off rather than as another kind of sound: dimmer than the
+   playing mark, and the glyph itself changes to a cross. */
+.audio-dot.muted { color: var(--text-dim); opacity: 0.75; }
 
 /* ---------------------------------------------------------------- */
 /* Toolbar                                                           */

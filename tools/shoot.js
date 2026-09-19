@@ -118,6 +118,20 @@ const ANSWERS = {
     { id: 'view-source', label: 'View page source', icon: 'code', accel: 'Ctrl+U' },
     { id: 'inspect', label: 'Inspect', icon: 'inspect', accel: 'F12' }
   ] },
+  // The tab strip's own menu. The sheet always asks for `context-model`, so
+  // this is swapped in by the shot that wants it rather than served under a
+  // name nothing requests.
+  'tab-menu-model': { prefs: null, items: [
+    { id: 'duplicate-tab', label: 'Duplicate', icon: 'copy' },
+    { id: 'pin-tab', label: 'Pin', icon: 'star' },
+    { id: 'mute-tab', label: 'Mute', icon: 'mute' },
+    { kind: 'separator' },
+    { id: 'close-tab', label: 'Close', icon: 'close' },
+    { id: 'close-other-tabs', label: 'Close other tabs', icon: 'close' },
+    { id: 'close-tabs-right', label: 'Close tabs to the right', icon: 'close' },
+    { kind: 'separator' },
+    { id: 'reopen-closed-tab', label: 'Reopen closed tab', icon: 'clock' }
+  ] },
   'check-for-updates': STATE.updates
 };
 
@@ -149,7 +163,10 @@ const SHOTS = [
   { name: 'flyout',   file: 'flyout.html',   w: 700,  h: 520 },
   { name: 'update',   file: 'update.html',   w: 900,  h: 560 },
   { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 },
-  { name: 'context',  file: 'context.html',  w: 900,  h: 560 }
+  { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
+  // The same sheet holding the tab strip's menu, which is the other thing it
+  // draws and has its own set of icons to get wrong.
+  { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' }
 ];
 
 
@@ -161,6 +178,11 @@ process.on('uncaughtException', (e) => console.log('uncaught:', e && e.message))
 
 app.whenReady().then(async () => {
   for (const shot of WANTED) {
+    // A shot may serve a different model through the channel the page asks on.
+    // Before the window, because the answers are serialised into its preload
+    // arguments - set after it, and the page has already been given the old set.
+    if (shot.answers) ANSWERS['context-model'] = ANSWERS[shot.answers];
+
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';
       STATE.sidebar = shot.collapsed
@@ -191,7 +213,7 @@ app.whenReady().then(async () => {
     // exactly as the browser passes them. Without the theme they render in
     // whatever `prefers-color-scheme` says, which is how this harness produced a
     // photograph of a white menu over a dark browser.
-    const anchored = ['flyout', 'update', 'menu', 'context'].includes(shot.name);
+    const anchored = ['flyout', 'update', 'menu', 'context', 'tab-menu'].includes(shot.name);
     const opts = anchored
       ? { query: { x: '520', y: '40', right: '560',
                    theme: STATE.prefs.theme, accent: STATE.prefs.accent } }

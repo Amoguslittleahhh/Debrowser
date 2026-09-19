@@ -2171,6 +2171,67 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     require('fs').rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // Right-clicking a tab, and what the menu's items actually do.
+  //
+  // The menu people reach for without thinking - close the other twelve,
+  // duplicate this, silence whichever tab is making that noise - and the browser
+  // had none. Built in the browser rather than in the strip: every item is a
+  // command with a tab id, and the chrome holds no authority over tabs beyond
+  // naming one.
+  {
+    const keep = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: false });
+    const pinned = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: false });
+    const left = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: false });
+    const right = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: false });
+    pinned.pinned = true;
+
+    // The model first: the two "close several" items are the ones that must go
+    // dim when there is nothing for them to close, and a menu that offers an
+    // action it cannot perform is worse than one that does not offer it.
+    runCommand('tab-menu', { id: keep.id, x: 40, y: 40 });
+    const model = context.model;
+    const byId = new Map((model?.items || []).filter((i) => i.id).map((i) => [i.id, i]));
+    const labels = [...byId.keys()].join(', ');
+    shell.closeSheet();
+
+    // Duplicate lands beside the tab it came from, not at the end.
+    const before = tabs.all().length;
+    runCommand('duplicate-tab', { id: keep.id });
+    const copy = tabs.all()[tabs.all().indexOf(keep) + 1];
+    const duplicated = tabs.all().length === before + 1 && copy && copy.url === keep.url;
+    if (copy) tabs.close(copy.id);
+
+    // Muting is remembered by the tab, not only by the renderer, so it survives
+    // the tab being discarded and rebuilt - otherwise a noisy tab you silenced
+    // starts talking again the moment the governor reclaims it.
+    runCommand('mute-tab', { id: keep.id });
+    const mutedNow = keep.muted === true;
+    await governor.enforceManualDiscard(keep);
+    await tabs.activate(keep.id);
+    await waitFor(() => keep.isLive && !keep.loading, { timeoutMs: 10_000 });
+    const stillMuted = keep.muted === true && keep.wc.isAudioMuted() === true;
+    runCommand('mute-tab', { id: keep.id });
+
+    // Close to the right takes what is after it and nothing before it.
+    const rightGone = tabs.all().includes(right);
+    runCommand('close-tabs-right', { id: left.id });
+    const afterRight = tabs.all();
+
+    check('a tab has a menu, and its items do what they say',
+      byId.has('duplicate-tab') && byId.has('mute-tab') &&
+      byId.get('close-other-tabs')?.enabled === true &&
+      duplicated && mutedNow && stillMuted &&
+      rightGone && !afterRight.includes(right) && afterRight.includes(left) &&
+      afterRight.includes(pinned),
+      `items: ${labels}; duplicate beside=${duplicated}; ` +
+      `mute survived a discard=${stillMuted}; ` +
+      `close-to-the-right left ${afterRight.length} tabs, pinned kept=${afterRight.includes(pinned)}`);
+
+    for (const tab of [keep, pinned, left]) {
+      if (tabs.all().includes(tab)) { tab.pinned = false; tabs.close(tab.id); }
+    }
+  }
+
   // The address bar finishes what is being typed.
   //
   // Two letters and a return is how anyone reaches a site they visit daily.

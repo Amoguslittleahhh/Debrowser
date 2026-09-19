@@ -48,7 +48,14 @@ const MENU_ICONS = {
   back: ['M10 3L5 8l5 5'],
   forward: ['M6 3l5 5-5 5'],
   reload: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
-  inspect: ['M2.5 2.5h5v5h-5z', 'M7.5 7.5l6 6', 'M9.5 13.5h4v-4']
+  inspect: ['M2.5 2.5h5v5h-5z', 'M7.5 7.5l6 6', 'M9.5 13.5h4v-4'],
+  // Drawn to the same 11px extent as the rest of the set, so a cross in a menu
+  // is the weight of the glyph above it rather than whatever an X happens to be.
+  close: ['M3.5 3.5l9 9', 'M12.5 3.5l-9 9'],
+  // A speaker with the sound struck through. One glyph for both directions:
+  // the label says which way the item goes, and a menu that changes its icon as
+  // well as its words is two things to read where one would do.
+  mute: ['M8.5 3.5L5.5 6H3.5v4h2l3 2.5z', 'M11 6.5l3 3', 'M14 6.5l-3 3']
 };
 
 /* eslint-disable-next-line no-unused-vars -- read by menu.js and context.js */

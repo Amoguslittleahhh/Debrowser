@@ -131,6 +131,15 @@ class Tab {
     this.tier = Tier.DISCARDED; // becomes ACTIVE/WARM once realised
     this.visible = false;
     this.audible = false;
+    /**
+     * Silenced by the user.
+     *
+     * Kept on the tab rather than only on the renderer, because a discarded tab
+     * has no renderer to hold it: mute a noisy tab, leave it long enough to be
+     * reclaimed, come back, and it would start talking again. Re-applied on
+     * every realisation for that reason.
+     */
+    this.muted = false;
     this.loading = false;
     this.crashed = false;
 
@@ -489,6 +498,11 @@ class Tab {
      * does next, and set on the view rather than as a stylesheet scale, so
      * ctrl+wheel and the zoom shortcuts move from here rather than fighting it.
      */
+    // A muted tab stays muted through a discard and its rebuild.
+    if (this.muted) {
+      try { wc.setAudioMuted(true); } catch { /* the view is going away */ }
+    }
+
     wc.once('dom-ready', () => {
       if (pages.pageName(this.url) !== 'settings') return;
       try { wc.setZoomFactor(SETTINGS_ZOOM); } catch { /* the view is going away */ }
@@ -731,6 +745,20 @@ class Tab {
     fs.promises.unlink(file).catch(() => { /* already gone */ });
   }
 
+  /**
+   * Silence this tab, or let it speak again.
+   *
+   * Applied to the renderer when there is one and remembered either way, so the
+   * answer survives the tab being discarded and rebuilt.
+   */
+  setMuted(muted) {
+    this.muted = Boolean(muted);
+    if (this.isLive) {
+      try { this.wc.setAudioMuted(this.muted); } catch { /* gone */ }
+    }
+    return this.muted;
+  }
+
   /** Replay stored navigation history into a freshly realised renderer. */
   restoreNavigation() {
     const saved = this.suspendedState;
@@ -826,6 +854,7 @@ class Tab {
       visible: this.visible,
       everVisible: this.everVisible,
       audible: this.audible,
+      muted: this.muted,
       loading: this.loading,
       crashed: this.crashed,
       pinned: this.pinned,

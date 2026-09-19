@@ -577,9 +577,15 @@ function createTabElement(id) {
    */
 
 
-  const audio = document.createElement('span');
+  // A button, not a decoration: the thing you want when a tab starts talking is
+  // to silence *that* tab, and the mark saying which one it is should be what
+  // you press. Chrome does the same.
+  const audio = document.createElement('button');
   audio.className = 'audio-dot';
-  audio.textContent = '▶';
+  audio.type = 'button';
+  audio.textContent = '\u25b6';
+  audio.title = 'Mute this tab';
+  audio.setAttribute('aria-label', audio.title);
   audio.hidden = true;
 
   const title = document.createElement('span');
@@ -595,6 +601,26 @@ function createTabElement(id) {
   root.addEventListener('mousedown', (event) => {
     if (event.button === 1) { api.send('close-tab', { id }); return; }
     if (event.button === 0) api.send('activate-tab', { id });
+  });
+
+  // Right-click: close the other twelve, duplicate this one, silence whichever
+  // tab is making that noise. The menu is built by the browser - the strip
+  // names a tab and nothing else - and drawn in the sheet the page menu uses.
+  root.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    api.send('tab-menu', {
+      id, x: Math.round(event.clientX), y: Math.round(event.clientY)
+    });
+  });
+
+  // The speaker mark mutes, without first switching to the tab to find out what
+  // is making the sound. `mousedown` stopped for the same reason the close
+  // button stops it: the root activates on mousedown, and a discarded tab would
+  // be rebuilt purely to be silenced.
+  audio.addEventListener('mousedown', (event) => event.stopPropagation());
+  audio.addEventListener('click', (event) => {
+    event.stopPropagation();
+    api.send('mute-tab', { id });
   });
 
   // Start restoring a discarded tab while the pointer is still on its way to
@@ -687,9 +713,17 @@ function updateTabElement(node, tab) {
     prev.boosted = tab.boosted;
   }
 
-  if (prev.audible !== tab.audible) {
-    node.audio.hidden = !tab.audible;
-    prev.audible = tab.audible;
+  // Shown while a tab is making sound *or* while it is muted: a muted tab with
+  // no mark is a tab you cannot unmute without guessing which one you silenced.
+  const sound = tab.audible || tab.muted;
+  if (prev.sound !== sound || prev.muted !== tab.muted) {
+    node.audio.hidden = !sound;
+    node.audio.classList.toggle('muted', tab.muted === true);
+    node.audio.textContent = tab.muted ? '\u2715' : '\u25b6';
+    node.audio.title = tab.muted ? 'Unmute this tab' : 'Mute this tab';
+    node.audio.setAttribute('aria-label', node.audio.title);
+    prev.sound = sound;
+    prev.muted = tab.muted;
   }
 
   // The spinner is Chrome's, and it belongs in the tab rather than only in the

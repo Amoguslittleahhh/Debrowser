@@ -344,6 +344,26 @@ class BrowserShell {
     // itself differently as a floating panel and only the window knows.
     this.window.on('enter-full-screen', () => { this.layout(); this.publishSidebar(); });
     this.window.on('leave-full-screen', () => { this.layout(); this.publishSidebar(); });
+    /*
+     * The two extra buttons on a mouse.
+     *
+     * Windows and Linux deliver them to the window as `app-command`, not as a
+     * click in the page, so nothing sees them unless this does - and anyone
+     * whose thumb reaches for back has a browser that ignores it. macOS has no
+     * equivalent event, and a two-finger swipe there is a different mechanism
+     * this does not implement.
+     *
+     * Unverified on real hardware: there is no mouse in the container this was
+     * written in, and a synthetic event cannot raise this. The failure mode if
+     * the name is wrong is the behaviour that exists today - nothing happens.
+     */
+    this.window.on('app-command', (event, command) => {
+      if (command === 'browser-backward') this.onCommand('back');
+      else if (command === 'browser-forward') this.onCommand('forward');
+      else return;
+      event.preventDefault();
+    });
+
     this.window.on('maximize', () => this.layout());
     this.window.on('unmaximize', () => this.layout());
     this.window.once('ready-to-show', () => this.window.show());

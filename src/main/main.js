@@ -1036,6 +1036,79 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         shell.setChromeHeight(payload?.height);
         break;
 
+      /*
+       * Right-click on a tab.
+       *
+       * The one menu this browser was missing, and the one people reach for
+       * without thinking: close the other twelve, duplicate this, silence
+       * whichever tab is making that noise. Built here rather than in the strip
+       * because every item is a command with a tab id, and the chrome holds no
+       * authority over tabs beyond naming one.
+       *
+       * Drawn in the context sheet, which is already a list of labelled
+       * commands anchored to a point - the same view the page menu and the
+       * bookmarks overflow use.
+       */
+      case 'tab-menu': {
+        const tab = tabs.byId(payload?.id);
+        if (!tab) break;
+        const all = tabs.all();
+        const at = all.indexOf(tab);
+        const others = all.filter((t) => t !== tab && !t.pinned).length;
+        const right = all.slice(at + 1).filter((t) => !t.pinned).length;
+        const id = tab.id;
+
+        context.model = {
+          params: {},
+          items: [
+            { id: 'duplicate-tab', label: 'Duplicate', icon: 'copy', payload: { id } },
+            {
+              id: 'pin-tab',
+              label: tab.pinned ? 'Unpin' : 'Pin',
+              icon: 'star',
+              payload: { id }
+            },
+            {
+              id: 'mute-tab',
+              // Named for what it will do, not for what is true now: a menu
+              // item that says "Muted" leaves you guessing whether pressing it
+              // mutes or unmutes.
+              label: tab.muted ? 'Unmute' : 'Mute',
+              icon: 'mute',
+              payload: { id }
+            },
+            { kind: 'separator' },
+            { id: 'close-tab', label: 'Close', icon: 'close', payload: { id } },
+            {
+              id: 'close-other-tabs',
+              label: 'Close other tabs',
+              icon: 'close',
+              payload: { id },
+              enabled: others > 0
+            },
+            {
+              id: 'close-tabs-right',
+              label: 'Close tabs to the right',
+              icon: 'close',
+              payload: { id },
+              enabled: right > 0
+            },
+            { kind: 'separator' },
+            {
+              id: 'reopen-closed-tab',
+              label: 'Reopen closed tab',
+              icon: 'clock',
+              enabled: closedTabs.length > 0
+            }
+          ]
+        };
+
+        const x = Math.round(Number(payload?.x) || 0);
+        const y = Math.round(Number(payload?.y) || 0);
+        shell.openSheet('context', { x, y, right: x });
+        break;
+      }
+
       // The bookmarks that did not fit on the bar, as a menu.
       //
       // The chrome names them by id and nothing else: it holds no addresses,
@@ -1103,6 +1176,48 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'pin-tab': {
         const tab = tabs.byId(payload?.id);
         if (tab) tab.pinned = !tab.pinned;
+        break;
+      }
+
+      // Silence a tab without hunting for the thing making the noise, which is
+      // the reason anyone reaches for this: an autoplaying video three tabs
+      // over, in a page you have not scrolled to yet.
+      case 'mute-tab': {
+        const tab = tabs.byId(payload?.id);
+        if (tab) tab.setMuted(!tab.muted);
+        break;
+      }
+
+      // The same page again, beside the one it came from. Copying the address
+      // rather than the history: a duplicate is a second copy of where you are,
+      // and carrying the back stack over would make the two share a past they
+      // did not share.
+      case 'duplicate-tab': {
+        const tab = tabs.byId(payload?.id);
+        if (!tab || !tab.url) break;
+        const at = tabs.all().indexOf(tab);
+        tabs.create({ url: tab.url, activate: true, index: at + 1 });
+        break;
+      }
+
+      /*
+       * Close everything but this one, or everything after it.
+       *
+       * Closed oldest-last, because `close` mutates the list this is walking -
+       * taking a copy first and going backwards is what stops the third tab
+       * being skipped when the second one goes. Pinned tabs are left alone,
+       * which is what pinning is for.
+       */
+      case 'close-other-tabs':
+      case 'close-tabs-right': {
+        const tab = tabs.byId(payload?.id);
+        if (!tab) break;
+        const all = tabs.all();
+        const from = all.indexOf(tab);
+        const doomed = all.filter((t, i) => t !== tab && !t.pinned &&
+          (command === 'close-other-tabs' || i > from));
+        for (const other of doomed.reverse()) tabs.close(other.id);
+        if (tabs.all().length === 0) shell.close();
         break;
       }
 
