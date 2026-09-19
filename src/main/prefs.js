@@ -137,6 +137,20 @@ const SCHEMA = {
   saveHistory:  { def: true,     ok: (v) => typeof v === 'boolean' },
 
   /**
+   * Whether the tabs you had open come back when the browser starts.
+   *
+   * On, and that default is the whole argument of this browser applied to its
+   * own front door: tabs are cheap to keep, so keeping them across a restart is
+   * what someone with forty of them expects. They come back unrealised - a row
+   * in the strip and a saved address - so a restored session costs about what
+   * one tab costs until you touch them.
+   *
+   * What comes back is the page, not the scroll position or anything typed into
+   * it. That state is never written to disk on purpose; see session.js.
+   */
+  restoreSession: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /**
    * Where a bookmark opens when it is clicked.
    *
    * A new tab by default. Replacing the page in front of you is the other

@@ -76,6 +76,8 @@ const COMMANDS = new Set([
   'toggle-sidebar-pin',
   'toggle-bookmarks-bar',
   'list-bookmarks',
+  // The address bar asking how what is being typed ends.
+  'complete',
   'toggle-bookmark',
   'remove-bookmark',
   'bookmark-profiles',

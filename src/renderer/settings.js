@@ -148,6 +148,12 @@ const SECTIONS = {
       ]
     },
     {
+      key: 'restoreSession',
+      label: 'Reopen my tabs when I start the browser',
+      hint: 'They come back without loading until you visit them.',
+      type: 'checkbox'
+    },
+    {
       key: 'homepage',
       label: 'New tab page',
       hint: 'Leave empty for the built-in page.',

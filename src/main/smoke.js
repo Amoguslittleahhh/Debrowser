@@ -2171,6 +2171,104 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     require('fs').rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // The address bar finishes what is being typed.
+  //
+  // Two letters and a return is how anyone reaches a site they visit daily.
+  // What is asserted is the ranking rule, because that is where this goes
+  // wrong: a *prefix* of the address rather than a substring - "git" should
+  // find github.com and not every page with "git" somewhere in it - and not
+  // firing on a single letter, where the answer is a guess.
+  //
+  // Driven through bookmarks rather than history, and not because history is
+  // untrusted: recording is switched off for the whole run under
+  // `--smoke-test`, so nothing typed here would be stored. Both lists are
+  // matched by the same predicate, and bookmarks outrank history by design - a
+  // page saved on purpose beats one merely visited.
+  //
+  // Asked the way the address bar asks - through the chrome's own bridge - so
+  // the sender check and both allowlists are part of what is tested. They are
+  // two separate lists, and the first run of this check failed because the
+  // browser allowed a request the bridge in front of it did not.
+  {
+    const ask = (text) => shell.chromeView.webContents.executeJavaScript(
+      `window.debrowser.request('complete', { text: ${JSON.stringify(text)} })`);
+
+    bookmarks.add({ url: 'https://gitlab.test/saved-page', title: 'Saved' });
+
+    const prefix = await ask('gitlab');
+    const tooShort = await ask('g');
+    const substring = await ask('saved');
+    const noMatch = await ask('nothing-like-this');
+
+    check('the address bar finishes an address, on a prefix and not a substring',
+      prefix && prefix.url === 'https://gitlab.test/saved-page' &&
+      tooShort && tooShort.url === null &&
+      substring && substring.url === null &&
+      noMatch && noMatch.url === null,
+      `"gitlab" -> ${prefix && prefix.url}, one letter -> ${tooShort && tooShort.url}, ` +
+      `a substring -> ${substring && substring.url}, ` +
+      `no match -> ${noMatch && noMatch.url}`);
+
+    bookmarks.remove('https://gitlab.test/saved-page');
+  }
+
+  // The tabs you had open come back, and a hand-edited session file cannot make
+  // the browser open anything it likes on launch.
+  //
+  // This is the gap that sends somebody back to the browser they came from, and
+  // it is worse here than elsewhere: the whole design invites you to keep forty
+  // tabs, and until now closing the window lost every one of them.
+  //
+  // Driven through the store rather than by restarting the browser, which one
+  // process cannot do. What a restart adds beyond this is `main.js` calling
+  // `load()` - four lines - and the round trip below is the part with the rules
+  // in it.
+  {
+    const { Session } = require('./session');
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-session-'));
+    const store = new Session(() => {}, dir);
+
+    const open = [
+      { id: 1, url: 'https://one.test/a', title: 'One', pinned: true },
+      { id: 2, url: 'https://two.test/b', title: 'Two', pinned: false },
+      { id: 3, url: 'debrowser://settings', title: 'Settings', pinned: false }
+    ];
+    store.save(open, 2);
+    const back = store.load();
+
+    const sameOrder = back.tabs.map((t) => t.url).join(' ') ===
+      open.map((t) => t.url).join(' ');
+
+    // A session file is read at startup and turned into navigations, so it is
+    // untrusted input in the same way an imported bookmarks file is.
+    fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify({
+      version: 1,
+      activeIndex: 0,
+      tabs: [
+        { url: 'javascript:alert(1)', title: 'script' },
+        { url: 'file:///etc/passwd', title: 'local' },
+        { url: 'https://good.test/', title: 'fine' }
+      ]
+    }));
+    const filtered = new Session(() => {}, dir).load();
+
+    // And a file somebody edited into nonsense is a first run, not a browser
+    // that will not start.
+    fs.writeFileSync(path.join(dir, 'session.json'), '{ not json');
+    const broken = new Session(() => {}, dir).load();
+
+    check('the tabs you had open come back, and a tampered session cannot open anything',
+      sameOrder && back.activeIndex === 1 && back.tabs[0].pinned === true &&
+      filtered.tabs.length === 1 && filtered.tabs[0].url === 'https://good.test/' &&
+      broken.tabs.length === 0,
+      `${back.tabs.length} tabs restored in order, active ${back.activeIndex}, ` +
+      `pinned kept=${back.tabs[0].pinned}; tampered file kept ` +
+      `${filtered.tabs.map((t) => t.url).join(',') || 'nothing'}; ` +
+      `unreadable file gave ${broken.tabs.length} tabs`);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   // The bookmarks bar, which is two separate things that both have to be true.
   //
   // It was saving bookmarks with nowhere to show them: the star worked, the

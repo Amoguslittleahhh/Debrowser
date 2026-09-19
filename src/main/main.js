@@ -22,6 +22,7 @@ const { Prefs, applyPrefs } = require('./prefs');
 const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
+const { Session } = require('./session');
 const { History } = require('./history');
 const icons = require('./icons');
 const presence = require('./presence');
@@ -191,6 +192,11 @@ function main() {
   /** @type {Credentials|null} */
   let credentials = null;
   let bookmarks = null;
+  // `sessionStore`, not `session`: Electron's own `session` is imported at the
+  // top of this file and used to reach the browsing partition a few lines
+  // below. A local called `session` shadows it, and the first thing that
+  // happens then is `null.fromPartition` at startup.
+  let sessionStore = null;
   /** @type {Prewarm|null} */
   let prewarm = null;
   let downloads = null;
@@ -379,6 +385,13 @@ function main() {
       default:
         break;
     }
+    // The session is whatever is open right now, written a couple of seconds
+    // later. Every one of the events above can change it - a tab created, a
+    // page navigated, a tab closed - and a page that redirects twice fires
+    // three of them in a second, which is why this is a debounce and not a
+    // write. `tabs` is passed as a function because it does not exist yet when
+    // this closure is built.
+    if (sessionStore) sessionStore.schedule(() => tabs.all(), () => tabs.activeId);
     publish();
   };
 
@@ -520,7 +533,36 @@ function main() {
     });
     wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log, context });
 
-    tabs.create({ url: newTabUrl(prefs) });
+    /*
+     * The tabs from last time, or one new one.
+     *
+     * Restored unrealised - a strip entry and a saved address, no renderer -
+     * which is the same state the idle ladder leaves a tab in. Forty restored
+     * tabs are forty rows and one renderer for the one you are looking at, so a
+     * restart costs about what a single tab costs. That is the point: the
+     * browser that argues tabs should be cheap to keep should not lose them all
+     * when you close the window.
+     *
+     * Never under a test or a benchmark, which must start from a known state
+     * rather than from whatever the machine's last real run left behind.
+     */
+    sessionStore = OFFLINE_MODE ? null : new Session(log);
+    const saved = sessionStore && prefs.get('restoreSession') !== false
+      ? sessionStore.load()
+      : { tabs: [], activeIndex: 0 };
+
+    if (saved.tabs.length) {
+      saved.tabs.forEach((entry, i) => {
+        const tab = tabs.create({ url: entry.url, activate: false, realise: false });
+        tab.title = entry.title || tab.title;
+        tab.pinned = entry.pinned === true;
+      });
+      const active = tabs.all()[saved.activeIndex] || tabs.all()[0];
+      if (active) tabs.activate(active.id).catch((err) => log(`restore failed: ${err.message}`));
+      log('session', `restored ${saved.tabs.length} tab(s)`);
+    } else {
+      tabs.create({ url: newTabUrl(prefs) });
+    }
     shell.layout();
 
     // Updates last, and never under a test or a benchmark: both assert on
@@ -580,6 +622,10 @@ function main() {
     // Writes are debounced by a few seconds, and quit does not wait for a
     // timer, so the last few pages visited would be lost on every close.
     if (history) history.flush();
+    // Before `closeAll`, which empties the list this describes. Written
+    // synchronously because quit does not wait for a timer, and the debounce
+    // above means the last thing the user did is usually still pending.
+    if (sessionStore && tabs) sessionStore.flush(tabs.all(), tabs.activeId);
     if (tabs) tabs.closeAll();
     // The trim helper is a long-lived child process of ours. Nothing else ends
     // it, and it holds an open stdin on a pipe that outlives us.
@@ -1163,6 +1209,10 @@ function senderMayCommand(tabs, shell, sender) {
  */
 const CHROME_REQUESTS = new Set([
   'list-bookmarks', 'toggle-bookmark', 'remove-bookmark',
+  // The address bar asking how the address it is being given ends. It returns
+  // one address the user has already been to or saved, which is theirs and
+  // which the omnibox is about to navigate to anyway.
+  'complete',
   // The downloads flyout is drawn in the sheet, which is one of the chrome's
   // own views. Downloads are not secrets - they are files the user asked for,
   // sitting in their own downloads directory - so this is a list the chrome may
@@ -1320,6 +1370,39 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       case 'check-for-updates':
         return shell.updater ? shell.updater.checkNow()
           : { available: false, reason: 'updates are off in this build' };
+
+      /*
+       * The rest of the address, while it is being typed.
+       *
+       * One answer, not a list: a dropdown needs a sheet of its own, and the
+       * completion people actually use is the one that finishes the word in
+       * place so Enter goes where they meant. Two letters and a return is how
+       * anyone reaches a site they visit daily, and without this every one of
+       * those was a full address typed out.
+       *
+       * Matched on where a URL *starts*, after dropping the scheme and `www.`,
+       * because that is what someone is typing: "git" should find github.com
+       * and not every page with "git" anywhere in its address. Bookmarks first
+       * - a page saved on purpose outranks one merely visited - then history by
+       * how often it was visited.
+       */
+      case 'complete': {
+        const typed = String(payload?.text || '').trim().toLowerCase();
+        if (typed.length < 2 || /\s/.test(typed)) return { url: null };
+
+        const stem = (url) => String(url).replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+        const starts = (url) => stem(url).toLowerCase().startsWith(typed);
+
+        const saved = bookmarks ? bookmarks.all().find((b) => starts(b.url)) : null;
+        if (saved) return { url: saved.url, stem: stem(saved.url) };
+
+        let best = null;
+        for (const entry of history ? history.all() : []) {
+          if (!starts(entry.url)) continue;
+          if (!best || (entry.visits || 0) > (best.visits || 0)) best = entry;
+        }
+        return best ? { url: best.url, stem: stem(best.url) } : { url: null };
+      }
 
       case 'list-bookmarks':
         return { items: bookmarks.all() };

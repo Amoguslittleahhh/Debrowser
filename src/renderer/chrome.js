@@ -897,6 +897,48 @@ el.menu.addEventListener('click', () => {
 el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); });
 el.url.addEventListener('blur', () => { urlFocused = false; });
 
+/*
+ * Finish the address as it is being typed.
+ *
+ * Two letters and Enter is how anyone reaches a site they visit daily, and
+ * without this every one of those was an address typed out in full. The rest of
+ * the match is inserted and left selected, so carrying on typing replaces it
+ * and Enter takes the completed address.
+ *
+ * Only while adding characters. Completing after a backspace is the classic way
+ * to make a field impossible to clear: you delete a letter, the browser puts it
+ * straight back, and the caret has not moved.
+ *
+ * Answers are dropped unless what is in the field is still what was asked
+ * about - the reply crosses a process boundary, and typing does not stop while
+ * it is in flight.
+ */
+let completing = false;
+
+el.url.addEventListener('beforeinput', (event) => {
+  // `insertText` is typing; every other input type is a deletion, a paste or a
+  // composition, none of which should complete.
+  completing = event.inputType === 'insertText';
+});
+
+el.url.addEventListener('input', async () => {
+  if (!completing) return;
+  const typed = el.url.value;
+  if (typed.length < 2) return;
+
+  const res = await api.request('complete', { text: typed });
+  const stem = res && res.stem;
+  if (!stem || el.url.value !== typed) return;
+
+  const lower = typed.toLowerCase();
+  if (!stem.toLowerCase().startsWith(lower) || stem.length <= typed.length) return;
+
+  // What the user typed, with their own capitalisation, plus the rest of the
+  // match - and the rest selected, so the next keystroke overwrites it.
+  el.url.value = typed + stem.slice(typed.length);
+  el.url.setSelectionRange(typed.length, el.url.value.length);
+});
+
 el.url.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     api.send('navigate', { url: el.url.value });
