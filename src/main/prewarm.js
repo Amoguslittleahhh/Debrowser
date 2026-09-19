@@ -17,11 +17,27 @@
  * So this starts it early. On a dwell over the + button or the menu, a
  * WebContentsView is created on the browsing partition and pointed at the new
  * tab page. It is never added to the window and never seen - measured, an
- * unattached view still spawns its renderer, and the real tab created
- * afterwards lands in the same process:
+ * unattached view still spawns its renderer, and the tab created afterwards
+ * opens in about half the time:
  *
- *   cold                                            79.3ms   pid 5013
- *   after a warmer created on hover                 46.1ms   pid 5022, the warmer's
+ *   cold                                            79.3ms
+ *   after a warmer created on hover                 46.1ms
+ *
+ * ## Not for the reason this comment used to give
+ *
+ * It said the real tab "lands in the same process" as the warmer, with two pids
+ * quoted as evidence. Re-measured, it does not: a warmer on debrowser://newtab
+ * gets pid 2092 and the tab that follows gets 2106, a process of its own - and
+ * two views on the *same host* still do not share one, because Chromium's
+ * default is a process per site *instance*, not per site. (With
+ * `--process-per-site` they do share, which is what the economy profile turns
+ * on and what made the original reading look like process reuse.)
+ *
+ * The saving is real and the figures above are reproducible; what buys it is
+ * everything a first renderer pays for once and a second one does not - the
+ * zygote fork path, the scheme and partition setup, V8's code cache for our own
+ * scripts. Worth stating correctly, because "it reuses the process" invites the
+ * wrong fix the next time this is slow.
  *
  * ## Why it expires
  *

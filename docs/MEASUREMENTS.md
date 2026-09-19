@@ -689,3 +689,47 @@ This is the same conclusion 8b and 8c reached from other directions, now stated
 for the startup case specifically: **initial memory is Electron's and Chromium's,
 not this project's.** The bench prints the breakdown and our own heap on every
 run so the claim can be rechecked rather than believed.
+
+## Startup memory, attacked directly: one lever, worth 9MB, with a cost
+
+"Can the initial memory be smaller?" — asked after the breakdown above showed
+2.5% of it is ours. Four configurations, three runs each, GPU pinned off because
+SwiftShader under xvfb swings the total by 70MB and would swamp the comparison.
+The chrome view and the new tab page are both up, which is what a freshly
+started browser has.
+
+```
+baseline                                    235 MB   2 renderers
+--process-per-site alone                    235 MB   2 renderers   no change
+--js-flags=--optimize-for-size (browser)    235 MB   2 renderers   no change
+chrome on debrowser:// + process-per-site   226 MB   1 renderer    -9 MB
+```
+
+Only the last one moves, and it needs both halves. The chrome is loaded from
+`file://` and the pages from `debrowser://`, which are two sites, so no process
+model can merge them; and same-site pages only share a renderer under
+`--process-per-site`, because Chromium's default is a process per site
+*instance*. With both, the chrome and the new tab page share one renderer: the
+renderer total falls 66MB → 49MB while the browser process grows ~3MB.
+
+**Not taken, and the reason is not the 9MB.** Merging them makes the chrome
+same-origin with the new tab page and puts them in one process. The chrome holds
+the command bridge; every other page in this browser is deliberately kept out of
+that process, and privilege here is decided from the sender's live URL precisely
+so that a compromised renderer cannot borrow it. Trading a boundary that exists
+on purpose for 3% of startup memory is the wrong way round. It also requires
+`process-per-site` globally, which the config already documents as a
+crash-isolation trade offered in the economy profile rather than by default.
+
+Recorded because the number is real and someone will ask again.
+
+### A stale claim found on the way
+
+`prewarm.js` documented that the tab created after a warmed renderer "lands in
+the same process", with two pids as evidence. Re-measured: warmer pid 2092, the
+tab that follows pid 2106 — a process of its own. Two views on the same host do
+not share one either, by default. The *timing* claim holds exactly (79.3ms cold,
+46.1ms warmed), so prewarming works; what buys it is the work a first renderer
+pays for once — the zygote fork path, scheme and partition setup, V8's code
+cache — not process reuse. The comment has been corrected, because a wrong
+mechanism invites the wrong fix next time.
