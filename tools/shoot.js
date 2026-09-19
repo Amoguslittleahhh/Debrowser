@@ -122,6 +122,10 @@ const SHOTS = [
   // flicker that was reported.
   { name: 'strip',    file: 'chrome.html',   w: 10,   h: 820, side: true, collapsed: true },
   { name: 'settings', file: 'settings.html', w: 1280, h: 860 },
+  // The same page, scrolled to a section that would otherwise be eight screens
+  // down. Worth its own shot because the rows there are built by hand rather
+  // than from the settings descriptors, so nothing else photographs them.
+  { name: 'settings-bookmarks', file: 'settings.html', w: 1280, h: 860, hash: 'bookmarks' },
   { name: 'history',  file: 'history.html',  w: 1280, h: 700 },
   { name: 'downloads', file: 'downloads.html', w: 1280, h: 700 },
   { name: 'newtab',   file: 'newtab.html',   w: 1280, h: 700 },
@@ -173,7 +177,10 @@ app.whenReady().then(async () => {
     const opts = anchored
       ? { query: { x: '520', y: '40', right: '560',
                    theme: STATE.prefs.theme, accent: STATE.prefs.accent } }
-      : {};
+      // A section far down a long page is reached the way the browser reaches
+      // it - the fragment the menu's own links carry - rather than by scripting
+      // a scroll from out here, which the page's scroll-spy undoes.
+      : shot.hash ? { hash: shot.hash } : {};
     // The promise rejects spuriously on some of these while the page loads
     // perfectly well, so the paint is what is waited on, not the promise.
     win.loadFile(path.join(R, shot.file), opts).catch(() => {});

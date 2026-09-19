@@ -428,6 +428,8 @@ section.landed .rows {
   align-items: center;
 }
 .bookmark-fields input[type="text"] { min-width: 0; width: 100%; }
+/* The line that says what the two fields are, across both of them. */
+.bookmark-fields .row-label { grid-column: 1 / -1; padding: 0; margin: 0; }
 /* The problem line spans both fields and takes no room until there is one. */
 .bookmark-fields .row-hint { grid-column: 1 / -1; margin: 0; color: var(--crit); }
 .bookmark-fields .row-hint:empty { display: none; }

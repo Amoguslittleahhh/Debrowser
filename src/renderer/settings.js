@@ -1146,6 +1146,13 @@ function bookmarkForm(item = null) {
   const fields = document.createElement('div');
   fields.className = 'row-text bookmark-fields';
 
+  // Two unlabelled boxes at the top of a page are a puzzle; every other row in
+  // Settings says what it is, and this one has to as well.
+  const heading = document.createElement('span');
+  heading.className = 'row-label';
+  heading.textContent = item ? 'Editing this bookmark' : 'Add a bookmark';
+  fields.append(heading);
+
   const title = document.createElement('input');
   title.type = 'text';
   title.placeholder = 'Name';
