@@ -796,6 +796,50 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   check('a tab on the new tab page is one of ours', fresh.internal === true,
     `internal=${fresh.internal} url=${fresh.url}`);
 
+  // The tiles line up with the field above them, with a long hostname in them.
+  //
+  // Reported twice, and it is one bug both times: a grid item's automatic
+  // minimum size is its own content, so `1fr` columns let "accounts.google.com"
+  // push its column - and the whole grid - wider than the search field, and the
+  // start page reads as two things that were laid out separately. It only shows
+  // up with a long hostname in the list, which is why one is planted here
+  // rather than trusting whatever history happens to hold.
+  //
+  // Asserted as both edges rather than the width: a grid that is the right
+  // width and half a pixel to the left is the same defect.
+  {
+    const planted = ['https://accounts.google.com/', 'https://developer.mozilla.org/'];
+    for (const url of planted) bookmarks.add({ url, title: url });
+
+    const page = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+
+    const read = () => page.wc.executeJavaScript(`(() => {
+      const field = document.getElementById('q').getBoundingClientRect();
+      const tiles = document.getElementById('tiles').getBoundingClientRect();
+      return {
+        count: document.querySelectorAll('#tiles .tile').length,
+        fieldLeft: Math.round(field.left), fieldRight: Math.round(field.right),
+        tilesLeft: Math.round(tiles.left), tilesRight: Math.round(tiles.right)
+      };
+    })()`).catch(() => null);
+
+    // The tiles arrive on a request, so the first read can beat them.
+    await waitFor(async () => ((await read()) || {}).count > 0, { timeoutMs: 8000 });
+    const box = await read();
+
+    check('the new tab tiles share both edges with the search field',
+      Boolean(box) && box.count > 0 &&
+      box.fieldLeft === box.tilesLeft && box.fieldRight === box.tilesRight,
+      box
+        ? `${box.count} tiles · field ${box.fieldLeft}-${box.fieldRight}, ` +
+          `tiles ${box.tilesLeft}-${box.tilesRight}`
+        : 'the page did not answer');
+
+    tabs.close(page.id);
+    for (const url of planted) bookmarks.remove(url);
+  }
+
   const webUrl = pageUrl('idle.html');
   await fresh.wc.loadURL(webUrl).catch(() => {});
   await waitFor(() => !fresh.loading && fresh.url.startsWith('http'), { timeoutMs: 10_000 });
