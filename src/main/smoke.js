@@ -1308,6 +1308,36 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.togglePanel(false);
   }
 
+  // A colour the browser no longer offers does not survive as one it does.
+  //
+  // `save()` writes every value, so any profile that has ever changed a setting
+  // carries the *old* defaults on disk - and an old default is still a valid
+  // `#rrggbb`, so it loads cleanly and the browser comes up in the new surfaces
+  // under the previous accent, with no swatch in Settings showing as chosen.
+  // Read from a file of its own rather than from the user's, which this suite
+  // runs against.
+  {
+    const { Prefs } = require('./prefs');
+    const os = require('os');
+    const fs = require('fs');
+    const file = path.join(os.tmpdir(), `debrowser-prefs-${process.pid}.json`);
+    fs.writeFileSync(file, JSON.stringify({
+      accent: '#5B8CFF',            // the old default, in the other case
+      tabBarColor: '#241c2e',       // a strip colour that was retired
+      theme: 'dark'                 // a setting that must be left exactly alone
+    }));
+
+    const probe = new Prefs(() => {});
+    probe.file = file;
+    const loaded = probe.load();
+    fs.unlinkSync(file);
+
+    check('a retired colour is replaced rather than kept or reset',
+      loaded.accent !== '#5B8CFF' && loaded.accent !== '#5b8cff' &&
+        loaded.tabBarColor === '#1d1c22' && loaded.theme === 'dark',
+      `accent ${loaded.accent}, strip ${loaded.tabBarColor}, theme ${loaded.theme}`);
+  }
+
   // Right-click, which used to do nothing at all.
   //
   // Two properties, and the second is the one that could go wrong quietly: the

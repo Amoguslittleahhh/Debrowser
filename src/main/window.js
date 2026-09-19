@@ -15,7 +15,8 @@
  */
 
 const path = require('path');
-const { BaseWindow, WebContentsView, ImageView, nativeImage, shell } = require('electron');
+const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
+        shell } = require('electron');
 
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
@@ -874,7 +875,11 @@ class BrowserShell {
     // Only while translucency is asked for. An opaque surface is cheaper to
     // composite, and a transparent window on a desktop with no compositor is a
     // window with artefacts rather than a window with a view.
-    const sheer = translucent ? '#00000000' : '#161614';
+    // The opaque case follows the theme for the same reason `stripColour` does:
+    // this is what shows in the gap around the content card and behind an
+    // unpainted view, and a dark window under a paper-white UI is a black frame
+    // around the page.
+    const sheer = translucent ? '#00000000' : (this.lightTheme() ? '#f3f1ec' : '#161614');
     try {
       this.window.setBackgroundColor(sheer);
       this.chromeView.setBackgroundColor(sheer);
@@ -913,17 +918,41 @@ class BrowserShell {
     const strip = this.stripColour();
     if (process.platform !== 'darwin' && typeof this.window.setTitleBarOverlay === 'function') {
       try {
-        this.window.setTitleBarOverlay({ color: strip, symbolColor: '#9b978e', height: 40 });
+        this.window.setTitleBarOverlay({ color: strip, symbolColor: this.symbolColour(), height: 40 });
       } catch { /* no overlay on this platform */ }
     }
   }
 
-  /** What colour the tab strip is, resolving 'mirror' and 'default'. */
+  /**
+   * What colour the tab strip is, resolving 'mirror' and 'default'.
+   *
+   * The default follows the theme, which it did not: this fed the system's
+   * caption-button overlay a near-black on a paper-white strip whenever the
+   * light theme was in force, so the window's own minimise and close buttons
+   * sat in a dark band the browser had not drawn. `--strip` is `var(--bg)` in
+   * the stylesheet, and these two have to name the same colour.
+   */
   stripColour() {
     const choice = this.prefs ? this.prefs.get('tabBarColor') : 'default';
     if (choice === 'mirror') return this.prefs.get('accent');
-    if (choice === 'default') return '#161614';
+    if (choice === 'default') return this.lightTheme() ? '#f3f1ec' : '#161614';
     return choice;
+  }
+
+  /**
+   * Whether the light palette is in force, by the same rule the stylesheet
+   * uses: an explicit choice wins, and 'system' follows the machine.
+   */
+  lightTheme() {
+    const choice = this.prefs ? this.prefs.get('theme') : 'system';
+    if (choice === 'light') return true;
+    if (choice === 'dark') return false;
+    return !nativeTheme.shouldUseDarkColors;
+  }
+
+  /** The window buttons' own colour, which has to read against the strip. */
+  symbolColour() {
+    return this.lightTheme() ? '#6b6559' : '#9b978e';
   }
 
   /* ---------------------------------------------------------------- */

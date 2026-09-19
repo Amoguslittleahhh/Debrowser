@@ -26,6 +26,23 @@ const { app } = require('electron');
  * untrusted input: a budget of `-1` or a string where a boolean belongs would
  * either crash a tick or silently disable a protection.
  */
+/**
+ * Tab strip colours that were offered once and are not any more, and what each
+ * one became.
+ *
+ * Mapped rather than reset: someone who chose Plum wanted a purple strip, and
+ * the honest answer is the purple that exists now, not the default. They are
+ * still valid hex, so nothing else would have caught them - the swatch would
+ * simply have shown nothing as chosen while the strip stayed the old colour.
+ */
+const RETIRED_STRIP_COLOURS = {
+  '#1b2430': '#1b1f22',   // Slate  -> Graphite
+  '#241c2e': '#1d1c22',   // Plum   -> Aubergine
+  '#1a2622': '#171f1c',   // Pine
+  '#2b2119': '#221c16',   // Umber
+  '#2a1c22': '#231a1a'    // Wine   -> Oxblood
+};
+
 const SCHEMA = {
   /* --- Personalisation ------------------------------------------- */
   theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
@@ -230,6 +247,23 @@ class Prefs {
     for (const [key, value] of Object.entries(raw)) {
       const spec = SCHEMA[key];
       if (!spec) continue;                       // a key from a newer version
+      // The palette moved, and a saved colour outlives it.
+      //
+      // `save()` writes every value, so any profile that has ever changed a
+      // setting carries the old default on disk - and the old default is still
+      // a valid `#rrggbb`, so it loads cleanly and the browser comes up in warm
+      // neutral surfaces under a cornflower blue that is no longer offered in
+      // Settings, with no swatch showing as chosen. A value the user picked
+      // deliberately is left alone; only the ones that *were* our defaults move.
+      if (key === 'accent' && value.toLowerCase() === '#5b8cff') {
+        this.log('accent was the old default; moving to the new one');
+        continue;
+      }
+      if (key === 'tabBarColor' && RETIRED_STRIP_COLOURS[String(value).toLowerCase()]) {
+        values[key] = RETIRED_STRIP_COLOURS[String(value).toLowerCase()];
+        this.log(`tab strip colour ${value} was retired; using its replacement`);
+        continue;
+      }
       if (key === 'searchEngine' && value === 'brave') {
         // Brave was replaced by Mojeek. Without this the validator rejects the
         // stored value and silently resets the user to Google - their setting

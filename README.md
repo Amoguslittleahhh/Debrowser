@@ -142,14 +142,19 @@ above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 
 ### Keyboard
 
-`Ctrl/Cmd+T` new tab · `+W` close · `+R` reload · `+L` address bar ·
-`+D` bookmark · `+H` history · `+J` downloads · `+Shift+O` bookmarks ·
-`+M` task manager · `+,` settings · `+P` print · `F11` full screen ·
-`F12` or `Ctrl+Shift+I` developer tools
+`Ctrl/Cmd+T` new tab · `+W` close · `+Shift+T` reopen closed · `+Tab` /
+`+1`…`+9` switch tabs · `+R` reload (`+Shift+R` ignoring cache) ·
+`Alt+←` / `Alt+→` back and forward · `+L` address bar · `+F` find in page
+(`F3` next, `Shift+F3` previous) · `+D` bookmark · `+Shift+B` bookmarks bar ·
+`+Shift+O` bookmarks · `+H` history · `+J` downloads · `+M` task manager ·
+`+,` settings · `+P` print · `+U` page source · `+0` / `+−` / `+=` zoom ·
+`F11` full screen · `F12` or `Ctrl+Shift+I` developer tools
 
-All of these work while a page has the keyboard, not only while the chrome
-does — `+L` is the exception, and the one place that is written down is
-`pageShortcut` in `main.js`, which says why.
+Every one of them works wherever the keyboard is — in a page, in the task
+manager, in a panel. There is one table, `src/main/shortcuts.js`, and it is
+also where the app menu gets the key it prints beside each item, so a label and
+the key it advertises cannot drift apart. There used to be two tables that
+disagreed, which is why `Ctrl+L` did nothing for most of this browser's life.
 
 ---
 

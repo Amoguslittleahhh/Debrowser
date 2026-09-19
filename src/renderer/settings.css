@@ -271,13 +271,16 @@ select, input[type="text"], input[type="number"] {
  * bytes, arrives with the stylesheet, hits no network and decodes no file. A
  * pure-CSS triangle would need a pseudo-element, which <select> does not
  * reliably render. Its colour is fixed rather than `currentColor`, which a data
- * URI cannot see - `--text-dim` is chosen to read on both palettes.
+ * URI cannot see - `--text-dim` is chosen to read on both palettes, and it has
+ * to be updated by hand when that token moves. It was missed when the palette
+ * changed, leaving a blue-grey arrow on every dropdown in a browser with no
+ * blue-grey left in it.
  */
 select {
   cursor: default;
   appearance: none;
   padding-right: 26px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa1b1' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239b978e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 9px center;
 }

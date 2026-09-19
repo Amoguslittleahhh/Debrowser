@@ -721,6 +721,10 @@ api.onState((state) => {
   }
   renderDownloads();
   for (const [key, control] of controls) control.write(state.prefs[key]);
+  // The lists above are rebuilt from scratch, and a rebuilt row has never been
+  // filtered - so a search typed into the box was wiped by the next governor
+  // tick, twice a second, while the user was still reading the results of it.
+  reapplyFilter();
 });
 
 /* ------------------------------------------------------------------ */
@@ -832,6 +836,12 @@ function filterSettings(query) {
   const note = document.getElementById('no-match');
   note.hidden = !needle || shown > 0;
   note.textContent = shown ? '' : `No setting matches “${query.trim()}”.`;
+}
+
+/** Re-run the current filter over rows that have just been rebuilt. */
+function reapplyFilter() {
+  const search = document.getElementById('q');
+  if (search && search.value.trim()) filterSettings(search.value);
 }
 
 {
