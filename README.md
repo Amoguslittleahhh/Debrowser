@@ -601,7 +601,9 @@ tried, measured and removed — live on the `claude/research-build` branch.
   caused the over-counting, but it does not divide shared dirty pages, so it is
   not proportional set size and is not described as though it were. If the
   helper is missing or refused, the old summed-working-set figure returns with
-  its "over-counts" label intact.
+  its "over-counts" label intact — and the panel now says how many processes
+  were measured and why the rest were not, because "summed" on its own gives
+  nobody a way to find out which of those two it is.
 - Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
   per-site (the default) several same-site tabs share one, and a page's own CPU
   is read per-document over CDP — which covers its main thread but not its Web

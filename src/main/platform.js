@@ -146,6 +146,14 @@ const PROBE_BINARY = helperPath(process.platform === 'win32' ? 'mem-probe.exe' :
  * the fallback figure rather than waited on.
  */
 const PROBE_TIMEOUT_MS = 400;
+/**
+ * What the *first* measurement may take: a process spawn, and on Windows a
+ * first-run scan of an unsigned helper. Both are one-off and neither is the
+ * governor's tick to pay for, but timing them out costs a whole round of
+ * coverage - and a round that lands late is invisible, while a round that never
+ * lands shows up as a summed total.
+ */
+const PROBE_COLD_TIMEOUT_MS = 5000;
 const TRIM_TIMEOUT_MS = 2000;
 
 /**
@@ -411,6 +419,7 @@ class MeasureHelper extends HelperProcess {
       name: 'mem-probe',
       binary: PROBE_BINARY,
       timeoutMs: PROBE_TIMEOUT_MS,
+      coldTimeoutMs: PROBE_COLD_TIMEOUT_MS,
       replyId,
       precondition: () => (isLinux
         ? 'not needed on Linux - smaps_rollup reports Pss directly'
@@ -423,6 +432,8 @@ class MeasureHelper extends HelperProcess {
     /** null until the helper has been asked; then true/false. */
     this.canMeasure = null;
     this.mechanism = null;
+    /** How measurements have failed, by kind. See `noteFailure`. */
+    this.failures = new Map();
   }
 
   /** `{ pssBytes, privateBytes }`, or null if this pid could not be measured. */
@@ -431,14 +442,47 @@ class MeasureHelper extends HelperProcess {
     if (this.canMeasure === false) return null;
 
     const reply = await this.request(`measure ${pid}`);
-    if (!reply || reply === HELPER_GONE) return null;
+    if (!reply || reply === HELPER_GONE) {
+      this.noteFailure(reply === HELPER_GONE ? 'gone' : 'timeout');
+      return null;
+    }
 
     const parts = reply.split(' ');
-    if (parts[0] !== 'ok') return null;
+    if (parts[0] !== 'ok') {
+      // The helper says why, and until now that answer was thrown away - so a
+      // browser measuring none of its renderers looked exactly like a browser
+      // with no helper at all, and the panel could only say "summed". The code
+      // is the operating system's own: 5 is access denied, which is what an
+      // Untrusted renderer returns to the wrong access mask.
+      this.noteFailure(parts[0] === 'err' ? `os ${parts[2]}` : 'unparsed');
+      return null;
+    }
     const pssBytes = Number(parts[2]);
     const privateBytes = Number(parts[3]);
-    if (!Number.isFinite(pssBytes) || pssBytes <= 0) return null;
+    if (!Number.isFinite(pssBytes) || pssBytes <= 0) {
+      this.noteFailure('nonsense');
+      return null;
+    }
     return { pssBytes, privateBytes: Number.isFinite(privateBytes) ? privateBytes : 0 };
+  }
+
+  /**
+   * Tally why measurements fail, by kind rather than by pid.
+   *
+   * Per-pid would be a map that grows with every renderer the browser has ever
+   * had; the question anyone actually asks is "why is this not being measured",
+   * and the answer is the same for all thirty of them.
+   */
+  noteFailure(kind) {
+    this.failures.set(kind, (this.failures.get(kind) || 0) + 1);
+  }
+
+  /** The failure kinds seen so far, commonest first. */
+  failureSummary() {
+    return [...this.failures.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([kind, count]) => ({ kind, count }));
   }
 
   /** `{available, mechanism, reason}`, in the shape every capability uses. */
@@ -487,6 +531,11 @@ function probeBinaryPath() {
 
 function measureCapability(log) {
   return getMeasureHelper(log).capability();
+}
+
+/** Why measurements are failing, if they are. Commonest kind first. */
+function measureFailures() {
+  return measureHelper ? measureHelper.failureSummary() : [];
 }
 
 function stopMeasureHelper() {
@@ -770,7 +819,7 @@ function chromiumSwitches(cfg) {
 }
 
 module.exports = {
-  measureProcess, measureCapability, stopMeasureHelper, probeBinaryPath,
+  measureProcess, measureCapability, measureFailures, stopMeasureHelper, probeBinaryPath,
   PLATFORM,
   isLinux,
   isMac,

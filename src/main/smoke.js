@@ -1770,7 +1770,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   const probeReady = await waitFor(async () => {
     governor.metrics.sample();
     const cap = await platform.measureCapability(() => {});
-    return cap.available === true && governor.metrics.probed.size > 0;
+    const cov = governor.metrics.probeCoverage();
+    return cap.available === true && cov.total > 0 && cov.measured === cov.total;
   }, { timeoutMs: 8000, pollMs: 400 });
 
   const probeCap = await platform.measureCapability(() => {});
@@ -1785,13 +1786,21 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // which said the helper had not answered but not one word about why - so
     // the reason, the binary it looked for and whether it exists are all
     // printed, pass or fail.
+    //
+    // 'mixed' is a failure here, and used to be a pass. That is the hole this
+    // check had: a helper that measured the browser process and was refused by
+    // every renderer satisfied it, while the panel - correctly - went on
+    // reporting a summed, roughly doubled total. A partial measurement is the
+    // bug, not a degraded pass, and the failure names how many processes
+    // answered and why the rest did not.
     const probePath = platform.probeBinaryPath();
-    check('per-process memory is measured natively rather than summed',
-      probeCap.available === true &&
-      (probeSnap.accounting === 'probe' || probeSnap.accounting === 'mixed') &&
+    const cov = probeSnap.probeCoverage;
+    const why = (cov.failures || []).map((f) => `${f.kind}x${f.count}`).join(',') || 'none';
+    check('per-process memory is measured natively, for every process',
+      probeCap.available === true && probeSnap.accounting === 'probe' &&
       probeSnap.totalMB > 0,
       `mechanism=${probeCap.mechanism} accounting=${probeSnap.accounting} ` +
-      `probed=${governor.metrics.probed.size}/${governor.metrics.byPid.size} ` +
+      `covered=${cov.measured}/${cov.total} failures=${why} ` +
       `ready=${probeReady} reason=${JSON.stringify(probeCap.reason)} ` +
       `binary=${probePath} exists=${fs.existsSync(probePath)}`);
   }

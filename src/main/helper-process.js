@@ -49,10 +49,24 @@ class HelperProcess {
    * @param {() => string|null} spec.precondition - a reason this cannot run, or null
    * @param {(binary: string) => string} spec.missingHint - message when the binary is absent
    */
-  constructor({ name, binary, timeoutMs, replyId, precondition = () => null, missingHint, log = () => {} }) {
+  constructor({ name, binary, timeoutMs, coldTimeoutMs = 0, replyId,
+                precondition = () => null, missingHint, log = () => {} }) {
     this.name = name;
     this.binary = binary;
     this.timeoutMs = timeoutMs;
+    /**
+     * A longer budget until the first reply lands.
+     *
+     * The steady-state deadline is chosen for the work the helper does, which
+     * for a measurement is microseconds. The *first* request also pays for
+     * spawning a process and, on Windows, for whatever scans an unsigned
+     * executable the first time it runs - seconds, not microseconds. Charging
+     * that to the steady-state deadline made the first round time out on every
+     * launch, and a round that times out is a round of unmeasured processes.
+     */
+    this.coldTimeoutMs = coldTimeoutMs || timeoutMs;
+    /** Set once any reply has been received, so the cold budget is used once. */
+    this.warmed = false;
     this.replyId = replyId;
     this.precondition = precondition;
     this.missingHint = missingHint;
@@ -176,6 +190,7 @@ class HelperProcess {
   }
 
   settle(line) {
+    if (line !== null) this.warmed = true;
     const waiting = this.pending;
     this.pending = null;
     if (waiting) {
@@ -209,7 +224,7 @@ class HelperProcess {
       // because it will not name the request outstanding by then.
       this.log(`${this.name} timed out on "${command}"`);
       this.settle(null);
-    }, this.timeoutMs);
+    }, this.warmed ? this.timeoutMs : this.coldTimeoutMs);
     if (typeof timer.unref === 'function') timer.unref();
     this.pending = { id: this.replyId(command), resolve, timer };
     this.hold();

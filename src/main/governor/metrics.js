@@ -21,6 +21,18 @@
  */
 
 const { MB } = require('../config');
+/**
+ * How old a native probe reading may be before the process counts as
+ * unmeasured again.
+ *
+ * The helper is a child process answering on a pipe, so every reading is
+ * already one tick behind - that staleness is accepted and documented in
+ * `refreshProbes`. This is the bound on it when replies stop coming: long
+ * enough that a slow tick or two costs no coverage, short enough that a
+ * renderer which has since doubled cannot be reported at its old size.
+ */
+const PROBE_STALE_MS = 30_000;
+
 const { readProcessMemory, accountingMode, pageMergingStatus,
         unreportedProcessesMB, compressionStatus } = require('../memory');
 const platform = require('../platform');
@@ -100,8 +112,18 @@ class Metrics {
     const pids = raw.map((proc) => proc.pid);
     Promise.all(pids.map(async (pid) => {
       const m = await platform.measureProcess(pid);
-      if (!m) { this.probed.delete(pid); return; }
-      this.probed.set(pid, { pssMB: m.pssBytes / MB, privateMB: m.privateBytes / MB });
+      // A miss keeps the last reading rather than dropping it, and `sample`
+      // stops trusting it once it is `PROBE_STALE_MS` old.
+      //
+      // Dropping it immediately was worse than it looks: the fallback for an
+      // unmeasured process is its summed working set, which is the ~2x figure
+      // the helper exists to replace - so one slow reply per tick fed an
+      // inflated sample into that process's smoothed average and the total
+      // drifted upward for as long as the misses continued.
+      if (!m) return;
+      this.probed.set(pid, {
+        pssMB: m.pssBytes / MB, privateMB: m.privateBytes / MB, at: Date.now()
+      });
     })).catch(() => { /* a failed probe simply leaves the fallback in place */ })
       .finally(() => { this.probing = false; });
   }
@@ -112,6 +134,7 @@ class Metrics {
    * synchronous call into the browser process, not a per-process walk.
    */
   sample() {
+    const now = Date.now();
     const raw = this.app.getAppMetrics();
     this.refreshProbes(raw);
     const seen = new Set();
@@ -141,7 +164,8 @@ class Metrics {
       // pipe. That staleness is bounded by the tick interval and is invisible
       // next to the smoothing every figure here already goes through; blocking
       // the governor for a fresher number would be the worse trade.
-      const probed = this.probed.get(pid) || null;
+      const fresh = this.probed.get(pid);
+      const probed = fresh && (now - fresh.at) < PROBE_STALE_MS ? fresh : null;
       const footprint = detail ? detail.pssMB : (probed ? probed.pssMB : rssMB);
       const priv = detail ? detail.privateMB : (probed ? probed.privateMB : null);
       const cpu = proc.cpu?.percentCPUUsage || 0;
@@ -226,6 +250,22 @@ class Metrics {
    *
    * @returns {boolean}
    */
+  /**
+   * How many processes the native helper is currently measuring.
+   *
+   * Counted fresh rather than by map size: a reading the sampler has stopped
+   * trusting is not coverage, and counting it would let the label say "every
+   * process measured" about a total that is mostly summed working set again.
+   */
+  probeCoverage() {
+    const now = Date.now();
+    let measured = 0;
+    for (const entry of this.probed.values()) {
+      if ((now - entry.at) < PROBE_STALE_MS) measured++;
+    }
+    return { measured, total: this.byPid.size, failures: platform.measureFailures() };
+  }
+
   probeIsProportional() {
     if (this.byPid.size < MIN_PIDS_FOR_SHARING || this.rssTotalMB <= 0) return true;
     return this.totalMB <= this.rssTotalMB * MAX_PROPORTIONAL_RATIO;
@@ -330,6 +370,7 @@ class Metrics {
   }
 
   snapshot() {
+    const coverage = this.probeCoverage();
     return {
       // What the figures actually are, rather than what the platform can do in
       // principle.
@@ -354,9 +395,13 @@ class Metrics {
       // for everything else.
       accounting: accountingMode() === 'pss'
         ? 'pss'
-        : this.probed.size === 0 ? 'rss'
-        : this.probed.size < this.byPid.size ? 'mixed'
+        : coverage.measured === 0 ? 'rss'
+        : coverage.measured < coverage.total ? 'mixed'
         : this.probeIsProportional() ? 'probe' : 'suspect',
+      // Reported rather than merely folded into the label above, because
+      // "summed" has exactly one useful follow-up question - how much of it,
+      // and why - and the browser is the only thing that can answer it.
+      probeCoverage: coverage,
       probeRatio: this.rssTotalMB > 0
         ? Math.round((this.totalMB / this.rssTotalMB) * 100) / 100
         : null,

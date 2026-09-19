@@ -36,6 +36,42 @@ const TIER_TEXT = {
   discarded: 'Discarded · 0 MB'
 };
 
+/**
+ * What the native helper is and is not measuring, in a sentence.
+ *
+ * "Summed" on its own is a dead end: it says the number is inflated and gives
+ * nobody a way to find out why. The two failures behind it look identical from
+ * the panel and have completely different fixes - a helper that is not there at
+ * all, and a helper that runs but is refused by the operating system for the
+ * renderers that hold most of the memory. The counts and the reason separate
+ * them.
+ */
+const FAILURE_TEXT = {
+  'os 5': 'the system refused access to those processes',
+  'os 87': 'the system rejected the request',
+  'os 299': 'only part of the process could be read',
+  timeout: 'the helper did not answer in time',
+  gone: 'the helper is not running',
+  nonsense: 'the helper returned a figure that cannot be right',
+  unparsed: 'the helper returned something unrecognised'
+};
+
+function coverageNote(state) {
+  const cov = state.probeCoverage;
+  if (!cov || !cov.total) return '';
+  if (cov.measured === 0 && !(cov.failures || []).length) {
+    return ' The native helper is not measuring anything on this machine.';
+  }
+
+  const worst = (cov.failures || [])[0];
+  const why = worst
+    ? ` ${FAILURE_TEXT[worst.kind] || `the helper reported ${worst.kind}`} ` +
+      `(${worst.count} time${worst.count === 1 ? '' : 's'}).`
+    : '';
+  return ` The native helper measured ${cov.measured} of ${cov.total} processes;` +
+    ` the rest are counted as working set.${why}`;
+}
+
 const PRESSURE_TEXT = {
   none: 'Under budget. Tabs are demoted on the idle ladder and by the live cap.',
   moderate: 'Approaching budget. Idle tabs are being trimmed sooner.',
@@ -90,7 +126,7 @@ function render(state) {
       'so pages shared between processes - chiefly one copy of Chromium in each ' +
       'of them - are counted once per process. Measured at about 2x the ' +
       'proportional figure, rising with process count. The browser is holding ' +
-      'meaningfully less than this number says.';
+      'meaningfully less than this number says.' + coverageNote(state);
   // One word, because the tile is a third of a 360px panel and the label is
   // set in uppercase at 10.5px: "resident (over-counts)" did not fit and was
   // rendered as "RESIDENT (OVE…", which is a label that has to be hovered to be

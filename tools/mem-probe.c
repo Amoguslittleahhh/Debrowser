@@ -60,8 +60,34 @@
  */
 static int measure_pid(unsigned long pid, unsigned long long *pss,
                        unsigned long long *priv, unsigned long *err) {
-  HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, (DWORD)pid);
-  if (h == NULL) { *err = GetLastError(); return -1; }
+  /*
+   * Two access masks, tried in order, because the first one is refused for
+   * exactly the processes this browser most needs measured.
+   *
+   * A Chromium renderer runs with an Untrusted integrity label, and a process
+   * object carrying one can deny PROCESS_QUERY_INFORMATION to a caller at
+   * medium integrity. PROCESS_QUERY_LIMITED_INFORMATION was added in Vista for
+   * this case and is granted far more widely - and QueryWorkingSet is happy
+   * with it, despite the documentation naming only the full right.
+   *
+   * Getting this wrong does not fail loudly. Every renderer answers "access
+   * denied", the driver quietly falls back to summed working set for those
+   * processes only, and the panel reports a partly-measured total that reads
+   * as if the helper were simply absent. That is what a single mask produced:
+   * the browser's own pages measured, every tab not.
+   */
+  static const DWORD MASKS[] = {
+    PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ
+  };
+
+  HANDLE h = NULL;
+  *err = 0;
+  for (size_t m = 0; m < sizeof(MASKS) / sizeof(MASKS[0]) && h == NULL; m++) {
+    h = OpenProcess(MASKS[m], FALSE, (DWORD)pid);
+    if (h == NULL) *err = GetLastError();
+  }
+  if (h == NULL) return -1;
 
   SYSTEM_INFO si;
   GetSystemInfo(&si);
