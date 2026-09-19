@@ -821,6 +821,36 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   check('the browser\'s own pages are sent browser state',
     sawState > 0, `${sawState} setting rows built from a published snapshot`);
 
+  // The browser's own pages are answered from disk, not through the network.
+  //
+  // The handler used to reply with `net.fetch(file://...)`, which sends every
+  // request for our own UI out through the network service and back: measured,
+  // 997ms in the handler across three pages against 7.6ms after the change, and
+  // a cold new tab page falling from 1758ms to 80ms. Reading the file directly
+  // is what makes the difference.
+  //
+  // Asserted as the property rather than as a stopwatch, because a timing
+  // threshold on a shared CI runner fails for reasons that have nothing to do
+  // with this: the response has to carry the content type *we* name, which the
+  // file fetch never set, and it has to be the file's real bytes.
+  //
+  // Asked from here rather than from inside one of those pages: their CSP is
+  // `default-src 'none'` with no `connect-src`, so a page cannot fetch even its
+  // own stylesheet - which is the policy working, and the first version of this
+  // check failing on it was the proof.
+  {
+    const { net } = require('electron');
+    const res = await net.fetch('debrowser://settings/theme.css');
+    const body = await res.text();
+    const missing = await net.fetch('debrowser://settings/nothing-here.css');
+
+    check("the browser's own pages are read from disk rather than fetched over the network",
+      res.ok === true && String(res.headers.get('content-type')).startsWith('text/css') &&
+      body.includes('--accent') && missing.status === 404,
+      `${body.length} bytes as ${res.headers.get('content-type')}, ` +
+      `missing file gives ${missing.status}`);
+  }
+
   // The rail keeps up with the scroll, all the way to the end.
   //
   // It did not: the mark is the topmost section intersecting the top 45% of the

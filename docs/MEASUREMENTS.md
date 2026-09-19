@@ -624,3 +624,68 @@ first two false positives by hand; it is automatic now. The panel reports both
 numbers side by side ("~270 MB left the renderers, ~146 MB back to the
 machine"), because quoting only the first is how a compressor that achieved
 nothing reads as a saving.
+
+---
+
+## The browser's own pages were loading through the network stack
+
+`debrowser://` is served by a handler in `pages.js`. It answered every request
+with `net.fetch(pathToFileURL(full))` — which sends a request for a file on the
+local disk out through the network service and back. Measured by opening the new
+tab page cold, the new tab page warm, and Settings, with the real partition,
+preload and protocol registration:
+
+```
+                       before          after
+cold new tab         1758.0 ms        80.1 ms
+warm new tab           97.4 ms        81.0 ms
+settings, warm        449.1 ms        94.1 ms
+in the handler        997.5 ms         8.3 ms   (15 sub-resource requests)
+```
+
+Per sub-resource the handler cost 2–6 ms once warm and **60–270 ms on the first
+touch of each file**, five requests per page. The new tab page is the
+most-opened page in the browser and it paid that every time.
+
+The fix is `fs.readFileSync` and a `Response` with the content type we name.
+
+**A cache was built on top of this and then deleted**, which is the more useful
+finding. Reading a page's five files costs **0.040 ms**; a `Map` lookup costs
+0.0003 ms. Saving four hundredths of a millisecond is not worth 47 KB per page
+held for the life of the browser, nor serving a stale stylesheet after an edit.
+The win was never the cache — it was not using the network stack to read a local
+file.
+
+## Initial memory: 2.5% of it is ours
+
+Asked whether the memory a freshly-started browser holds could be reduced. One
+tab, settled, on Linux:
+
+```
+total                285 MB
+  Browser            112 MB     of which our JavaScript: 7 MB heap + 4 MB external
+  Tab (1 renderer)    93 MB
+  Utility             28 MB     network.mojom.NetworkService
+  zygote              28 MB
+  GPU                 23 MB
+```
+
+M1 measured a bare Electron app with one `about:blank` view at 82 MB in its
+browser process before any of this project's code runs. So of the 112 MB, about
+30 MB is attributable to us, and V8's own accounting puts our JavaScript at 7 MB
+of heap plus 4 MB external. **Deleting every line of this project's main-process
+code would save ~11 MB of 285.**
+
+The Windows figure a user reported — 312 MB with the new tab page open, one tab —
+is the same shape: no zygote, a larger browser and GPU process, and a 43 MB
+renderer for the page itself.
+
+The network service starts at launch regardless of what is open; serving our own
+pages off the disk avoids *using* it, not starting it. Confirmed by listing the
+processes after opening only internal pages: `network.mojom.NetworkService` is
+there either way.
+
+This is the same conclusion 8b and 8c reached from other directions, now stated
+for the startup case specifically: **initial memory is Electron's and Chromium's,
+not this project's.** The bench prints the breakdown and our own heap on every
+run so the claim can be rechecked rather than believed.

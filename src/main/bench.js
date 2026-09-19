@@ -16,6 +16,7 @@ const fixtureServer = require('./fixture-server');
 const fs = require('fs');
 const { footprintMB, accountingMode, unreportedProcessesMB,
         compressionStatus } = require('./memory');
+const { MB } = require('./config');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -140,7 +141,18 @@ async function runBench({ tabs, governor, app, cfg, tabCount, settleMs, coldMs, 
     breakdown,
     system: systemMemory(),
     compression: compressionStatus(),
-    retained: retainedState(tabs)
+    retained: retainedState(tabs),
+    // How much of the browser process is *ours*.
+    //
+    // M1 measured a bare Electron app holding 82MB in its browser process
+    // before this project's code runs at all, so the interesting figure is not
+    // what that process weighs but what our own JavaScript adds to it. V8's own
+    // accounting answers that directly, and it is the only part of the fixed
+    // overhead anything here could move.
+    browserHeap: {
+      heapMB: Math.round(process.memoryUsage().heapUsed / MB),
+      externalMB: Math.round(process.memoryUsage().external / MB)
+    }
   };
 }
 
