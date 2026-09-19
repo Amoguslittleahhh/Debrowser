@@ -38,7 +38,7 @@ const STATE = {
   searchEngines: [{ id: 'google', name: 'Google' }, { id: 'ddg', name: 'DuckDuckGo' }],
   updates: { available: true, reason: null, state: 'ready', version: '1.5.0', progress: 100, error: null },
   prefs: {
-    theme: 'dark', accent: '#5b8cff', tabWidth: 'roomy', tabBarColor: 'default',
+    theme: 'dark', accent: '#2f857b', tabWidth: 'roomy', tabBarColor: 'default',
     windowOpacity: 1, tabBarPosition: 'top', backgroundMaterial: 'none',
     reduceMotion: false, showMemoryMeter: true, showTierDots: true,
     searchEngine: 'google', homepage: '', saveHistory: true, memoryBudgetMB: null,
@@ -69,8 +69,47 @@ const ANSWERS = {
   'list-credentials': { available: true, reason: null, logins: [
     { id: 'c1', site: 'https://github.com', username: 'amogus36311@gmail.com' }
   ], payments: [] },
+  'top-sites': { items: [
+    { url: 'https://github.com/', title: 'GitHub', icon: null, visits: 140 },
+    { url: 'https://mail.google.com/', title: 'Gmail', icon: null, visits: 96 },
+    { url: 'https://news.ycombinator.com/', title: 'Hacker News', icon: null, visits: 61 },
+    { url: 'https://developer.mozilla.org/', title: 'MDN', icon: null, visits: 44 },
+    { url: 'https://www.youtube.com/', title: 'YouTube', icon: null, visits: 38 },
+    { url: 'https://en.wikipedia.org/', title: 'Wikipedia', icon: null, visits: 27 },
+    { url: 'https://www.nature.com/', title: 'Nature', icon: null, visits: 12 },
+    { url: 'https://stackoverflow.com/', title: 'Stack Overflow', icon: null, visits: 9 }
+  ] },
   'presence-capability': { available: false, reason: 'no system presence check on linux' },
-  'menu-model': null,
+  'menu-model': { prefs: null, items: [
+    { id: 'new-tab', label: 'New tab', accel: 'Ctrl+T', icon: 'plus' },
+    { kind: 'separator' },
+    { id: 'open-history', label: 'History', accel: 'Ctrl+H', icon: 'clock' },
+    { id: 'open-downloads', label: 'Downloads', accel: 'Ctrl+J', icon: 'download' },
+    { kind: 'separator' },
+    { kind: 'zoom', label: 'Zoom', value: 110, enabled: true },
+    { id: 'toggle-fullscreen', label: 'Full screen', accel: 'F11', icon: 'expand', kind: 'checkbox', checked: false },
+    { id: 'print', label: 'Print\u2026', accel: 'Ctrl+P', icon: 'print', enabled: true },
+    { kind: 'separator' },
+    { id: 'toggle-panel', label: 'Task manager', accel: 'Ctrl+M', icon: 'gauge', kind: 'checkbox', checked: false },
+    { id: 'toggle-devtools', label: 'Developer tools', accel: 'F12', icon: 'code', kind: 'checkbox', checked: false },
+    { id: 'open-settings', label: 'Settings', accel: 'Ctrl+,', icon: 'gear' },
+    { kind: 'separator' },
+    { kind: 'note', label: 'Debrowser 1.5.0' }
+  ] },
+  'context-model': { prefs: null, items: [
+    { id: 'open-link-tab', label: 'Open link in new tab', icon: 'plus' },
+    { id: 'copy-link', label: 'Copy link address', icon: 'copy' },
+    { id: 'save-link', label: 'Save link as\u2026', icon: 'download' },
+    { kind: 'separator' },
+    { id: 'back', label: 'Back', icon: 'back', accel: 'Alt+\u2190', enabled: true },
+    { id: 'forward', label: 'Forward', icon: 'forward', accel: 'Alt+\u2192', enabled: false },
+    { id: 'reload', label: 'Reload', icon: 'reload', accel: 'Ctrl+R' },
+    { kind: 'separator' },
+    { id: 'bookmark-page', label: 'Bookmark this page', icon: 'star', accel: 'Ctrl+D' },
+    { id: 'print', label: 'Print\u2026', icon: 'print', accel: 'Ctrl+P' },
+    { id: 'view-source', label: 'View page source', icon: 'code', accel: 'Ctrl+U' },
+    { id: 'inspect', label: 'Inspect', icon: 'inspect', accel: 'F12' }
+  ] },
   'check-for-updates': STATE.updates
 };
 
@@ -84,7 +123,8 @@ const SHOTS = [
   { name: 'panel',    file: 'panel.html',    w: 360,  h: 700 },
   { name: 'flyout',   file: 'flyout.html',   w: 700,  h: 520 },
   { name: 'update',   file: 'update.html',   w: 900,  h: 560 },
-  { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 }
+  { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 },
+  { name: 'context',  file: 'context.html',  w: 900,  h: 560 }
 ];
 
 
@@ -113,15 +153,22 @@ app.whenReady().then(async () => {
       // window half the size of the real one. Nearly cost a fix to a tab strip
       // that was not broken.
       show: false, width: shot.w, height: shot.h, frame: false,
-      backgroundColor: '#16181d',
+      backgroundColor: '#161614',
       webPreferences: {
         preload: path.join(OUT, 'stub-preload.js'),
         contextIsolation: true, sandbox: false,
         additionalArguments: [`--state=${JSON.stringify(STATE)}`, `--answers=${JSON.stringify(ANSWERS)}`]
       }
     });
-    const anchored = ['flyout', 'update', 'menu'].includes(shot.name);
-    const opts = anchored ? { query: { x: '520', y: '40', right: '560' } } : {};
+    // The sheets take their anchor - and their palette - from the query string,
+    // exactly as the browser passes them. Without the theme they render in
+    // whatever `prefers-color-scheme` says, which is how this harness produced a
+    // photograph of a white menu over a dark browser.
+    const anchored = ['flyout', 'update', 'menu', 'context'].includes(shot.name);
+    const opts = anchored
+      ? { query: { x: '520', y: '40', right: '560',
+                   theme: STATE.prefs.theme, accent: STATE.prefs.accent } }
+      : {};
     // The promise rejects spuriously on some of these while the page loads
     // perfectly well, so the paint is what is waited on, not the promise.
     win.loadFile(path.join(R, shot.file), opts).catch(() => {});

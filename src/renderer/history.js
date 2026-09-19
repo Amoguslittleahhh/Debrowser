@@ -136,7 +136,21 @@ function row(entry) {
   url.className = 'visit-url';
   url.textContent = entry.url;
 
-  text.append(title, url);
+  // The visit count sits beside the title rather than at the far right of the
+  // row. Out there it was 400px from the thing it counts, with nothing in
+  // between, and read as a column of a table that has no other columns.
+  const head = document.createElement('span');
+  head.className = 'visit-head';
+  head.append(title);
+  if (entry.visits > 1) {
+    const visits = document.createElement('span');
+    visits.className = 'visits';
+    visits.textContent = `${entry.visits}×`;
+    visits.title = `Visited ${entry.visits} times`;
+    head.append(visits);
+  }
+
+  text.append(head, url);
   open.append(time, chip, text);
 
   // Middle-click and ctrl-click open in a new tab, as they do on any link
@@ -151,14 +165,6 @@ function row(entry) {
   });
 
   wrap.append(open);
-
-  if (entry.visits > 1) {
-    const visits = document.createElement('span');
-    visits.className = 'visits';
-    visits.textContent = `${entry.visits}×`;
-    visits.title = `Visited ${entry.visits} times`;
-    wrap.append(visits);
-  }
 
   const forget = document.createElement('button');
   forget.className = 'forget';

@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('debrowser', {
   onState(handler) {
     if (typeof handler === 'function') setTimeout(() => handler(STATE), 0);
     return () => {};
-  }
+  },
+  // The chrome subscribes to this at parse time. Without it the call throws,
+  // the rest of chrome.js never runs, and the photograph is of a toolbar with
+  // no tabs in it - which is exactly what it was for one round.
+  onMessage() { return () => {}; }
 });
 ipcRenderer.on('noop', () => {});

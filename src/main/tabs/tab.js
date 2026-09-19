@@ -26,7 +26,7 @@ const pages = require('../pages');
 let nextTabId = 1;
 
 /** Matches the chrome's surface colour, so an unpainted view is not white. */
-const SURFACE_COLOUR = '#16181d';
+const SURFACE_COLOUR = '#161614';
 
 /**
  * Thumbnails are shown behind a loading page for a few hundred milliseconds, so
@@ -497,17 +497,17 @@ class Tab {
 <style>
   :root { color-scheme: dark light; }
   body { margin: 0; display: grid; place-items: center; min-height: 100vh;
-         background: #16181d; color: #e6e8ee;
+         background: #161614; color: #eae7e0;
          /* The same stack theme.css defines, spelled out rather than linked:
             this page is a data: URL with no origin and no stylesheet to load,
             and an error page set in a different face from the browser around it
             is the kind of seam that makes the error look like a crash. */
          font: 14px/1.5 Aptos, Calibri, Carlito, "Segoe UI Variable Text",
                "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
-  @media (prefers-color-scheme: light) { body { background: #f4f5f8; color: #191c23; } }
+  @media (prefers-color-scheme: light) { body { background: #f3f1ec; color: #201f1c; } }
   main { max-width: 27rem; padding: 1.5rem; text-align: center; }
   h1 { font-size: 1.1rem; margin: 0 0 .5rem; }
-  p { margin: .35rem 0; color: #9aa1b1; }
+  p { margin: .35rem 0; color: #9b978e; }
   code { word-break: break-all; font-size: .85em; }
 </style>
 <main>

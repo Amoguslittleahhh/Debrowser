@@ -142,54 +142,23 @@
  * comes from the hostname by the same function the tab strip uses, so a site
  * looks the same in both.
  */
-.chip {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: var(--fw-bold);
-  color: hsl(var(--hue) 70% 72%);
-  background: hsl(var(--hue) 45% 22%);
-  text-transform: uppercase;
-}
 
-/* The logo replaces the letter when it loads, and is removed if it does not -
-   so the row never shows a gap and never shows a broken image. */
-.site-icon {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  object-fit: contain;
-}
-
-body[data-theme="light"] .chip,
-body:not([data-theme="dark"]) .chip { color: hsl(var(--hue) 55% 32%); background: hsl(var(--hue) 70% 92%); }
-@media (prefers-color-scheme: dark) {
-  body:not([data-theme="light"]) .chip { color: hsl(var(--hue) 70% 72%); background: hsl(var(--hue) 45% 22%); }
-}
-
-/*
- * A chip holding a loaded logo stops painting: the tile and its letter are the
- * fallback, and leaving them behind a transparent favicon - which is most of
- * them - puts every logo in the list on a coloured square.
- *
- * `body` is in the selector only to out-specify the theme variants above.
- */
-body .chip.has-icon {
-  background: none;
-  color: transparent;
-}
+/* The chip itself is in theme.css: four views draw one, and two of them held
+   byte-identical copies of these rules. */
 
 .visit-text { flex: 1; min-width: 0; }
 
+/* Title and visit count on one line, the count immediately after the title it
+   counts rather than stranded at the far right of the row. */
+.visit-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+
 .visit-title {
-  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

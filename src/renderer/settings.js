@@ -19,23 +19,32 @@
 
 const api = window.debrowser;
 
-/** Accent choices. Named so the swatches have something to announce. */
+/**
+ * Accent choices, and the reason none of them is bright.
+ *
+ * These were the six saturated primaries every colour picker offers - pure
+ * blue, pure green, pure red - which is what made the browser look stock
+ * whichever one you chose. Each of these is a real pigment name because each is
+ * mixed like one: held around half the saturation, so the accent marks what is
+ * selected without becoming the loudest thing on screen. Teal is first because
+ * it is the default; the rest are what someone might actually want instead.
+ */
 const ACCENTS = [
-  { value: '#5b8cff', name: 'Blue' },
-  { value: '#49c17d', name: 'Green' },
-  { value: '#b07cf0', name: 'Purple' },
-  { value: '#e0a33e', name: 'Amber' },
-  { value: '#e2564a', name: 'Red' },
-  { value: '#43b8c4', name: 'Teal' }
+  { value: '#2f857b', name: 'Petrol' },
+  { value: '#6f8f5f', name: 'Moss' },
+  { value: '#a8694a', name: 'Clay' },
+  { value: '#b08a3c', name: 'Ochre' },
+  { value: '#7b6a9c', name: 'Iris' },
+  { value: '#5f7d9c', name: 'Slate' }
 ];
 
 /** Tab strip colours. Muted on purpose: this is a large area, not an accent. */
 const STRIP_COLORS = [
-  { value: '#1b2430', name: 'Slate',   css: '#1b2430' },
-  { value: '#241c2e', name: 'Plum',    css: '#241c2e' },
-  { value: '#1a2622', name: 'Pine',    css: '#1a2622' },
-  { value: '#2b2119', name: 'Umber',   css: '#2b2119' },
-  { value: '#2a1c22', name: 'Wine',    css: '#2a1c22' }
+  { value: '#1b1f22', name: 'Graphite', css: '#1b1f22' },
+  { value: '#1d1c22', name: 'Aubergine', css: '#1d1c22' },
+  { value: '#171f1c', name: 'Pine',     css: '#171f1c' },
+  { value: '#221c16', name: 'Umber',    css: '#221c16' },
+  { value: '#231a1a', name: 'Oxblood',  css: '#231a1a' }
 ];
 
 const SECTIONS = {
@@ -405,7 +414,7 @@ function buildControl(spec) {
       wrap.className = 'swatches';
 
       const choices = [
-        { value: 'default', name: 'Default', css: '#16181d' },
+        { value: 'default', name: 'Default', css: '#161614' },
         { value: 'mirror', name: 'Match the accent colour', css: 'var(--accent)' },
         ...STRIP_COLORS
       ];
@@ -707,11 +716,139 @@ api.onState((state) => {
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) {
     buildAll(); renderCredentials(); renderBookmarks(); renderPresence();
+    buildRail();
     revealSection();
   }
   renderDownloads();
   for (const [key, control] of controls) control.write(state.prefs[key]);
 });
+
+/* ------------------------------------------------------------------ */
+/* The rail, and search                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A list of the sections, built from the sections.
+ *
+ * Deliberately not a second list of names: the page is eight sections long now,
+ * and a hand-written rail is a list that goes out of step with the page the
+ * first time someone adds a heading. Each button takes its label from the
+ * section's own <h2>.
+ */
+const railButtons = new Map();
+
+function buildRail() {
+  const rail = document.getElementById('rail');
+  if (!rail) return;
+
+  for (const section of document.querySelectorAll('section[data-section]')) {
+    const name = section.dataset.section;
+    const heading = section.querySelector('h2');
+    const button = document.createElement('button');
+    button.className = 'rail-item';
+    button.type = 'button';
+    button.textContent = heading ? heading.textContent : name;
+    button.addEventListener('click', () => {
+      section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      // Marked immediately rather than waiting for the observer: a smooth
+      // scroll takes a few hundred milliseconds, and a rail that lights up
+      // after the page has finished moving feels like it did not register the
+      // click.
+      markRail(name);
+    });
+    rail.append(button);
+    railButtons.set(name, button);
+  }
+
+  watchSections();
+}
+
+function markRail(name) {
+  for (const [key, button] of railButtons) {
+    button.classList.toggle('current', key === name);
+  }
+}
+
+/**
+ * Which section the reader is in.
+ *
+ * The topmost section still intersecting the viewport wins, which is what makes
+ * the mark move *as* you scroll rather than jumping when a section's midpoint
+ * crosses some line. An observer rather than a scroll handler: this fires only
+ * when a boundary is crossed, where a scroll listener would run on every frame
+ * of every scroll for the life of the page.
+ */
+function watchSections() {
+  if (typeof IntersectionObserver !== 'function') return;
+  const main = document.querySelector('main');
+  const visible = new Set();
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const name = entry.target.dataset.section;
+      if (entry.isIntersecting) visible.add(name);
+      else visible.delete(name);
+    }
+    for (const section of document.querySelectorAll('section[data-section]')) {
+      if (visible.has(section.dataset.section)) {
+        markRail(section.dataset.section);
+        return;
+      }
+    }
+  }, { root: main, rootMargin: '0px 0px -55% 0px' });
+
+  for (const section of document.querySelectorAll('section[data-section]')) {
+    observer.observe(section);
+  }
+}
+
+/**
+ * Filter the rows to the ones that match what was typed.
+ *
+ * Over the rows that are already on the page rather than over a list of
+ * settings kept for the purpose: there is one list of settings in this file,
+ * and a second one written for search is a second one to forget to update. A
+ * row's whole text is matched - label and hint both - because people search
+ * for what a setting does at least as often as for what it is called.
+ */
+function filterSettings(query) {
+  const needle = query.trim().toLowerCase();
+  let shown = 0;
+
+  for (const section of document.querySelectorAll('section[data-section]')) {
+    let any = false;
+    for (const row of section.querySelectorAll('.row')) {
+      const hit = !needle || row.textContent.toLowerCase().includes(needle);
+      row.hidden = !hit;
+      if (hit) { any = true; shown += 1; }
+    }
+    // A section whose rows have all gone takes its heading and its notes with
+    // it. A page of empty headings is a worse answer than a short list.
+    section.hidden = Boolean(needle) && !any;
+    const button = railButtons.get(section.dataset.section);
+    if (button) button.hidden = section.hidden;
+  }
+
+  const note = document.getElementById('no-match');
+  note.hidden = !needle || shown > 0;
+  note.textContent = shown ? '' : `No setting matches “${query.trim()}”.`;
+}
+
+{
+  const search = document.getElementById('q');
+  if (search) {
+    search.addEventListener('input', () => filterSettings(search.value));
+    // Escape clears the field first and closes the page only when there is
+    // nothing to clear - the same order every search field in this browser
+    // uses, and the reason the page's own Escape handler is not enough.
+    search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !search.value) return;
+      event.stopPropagation();
+      search.value = '';
+      filterSettings('');
+    });
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Bookmarks                                                           */

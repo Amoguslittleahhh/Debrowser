@@ -91,7 +91,14 @@ function render(state) {
       'of them - are counted once per process. Measured at about 2x the ' +
       'proportional figure, rising with process count. The browser is holding ' +
       'meaningfully less than this number says.';
-  el.totalLabel.textContent = proportional ? 'resident' : 'resident (over-counts)';
+  // One word, because the tile is a third of a 360px panel and the label is
+  // set in uppercase at 10.5px: "resident (over-counts)" did not fit and was
+  // rendered as "RESIDENT (OVE…", which is a label that has to be hovered to be
+  // read. Both words are accurate on their own - a proportional figure is what
+  // the browser is resident in, a non-proportional one is the sum of each
+  // process's working set - and the tooltip carries the explanation either way.
+  el.totalLabel.textContent = proportional ? 'resident' : 'summed';
+  el.totalLabel.classList.toggle('inexact', !proportional);
 
   // Private working set has no sharing to argue about, so printing it beside
   // the total turns "is this figure inflated?" from a judgement into a

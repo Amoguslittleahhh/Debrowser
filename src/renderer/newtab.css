@@ -84,3 +84,113 @@ body.still #wordmark, body.still #search { animation: none; }
   color: var(--text-dim);
   min-height: 1em;
 }
+
+/* ------------------------------------------------------------------ */
+/* Tiles                                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Four across, two rows, and nothing below them.
+ *
+ * Sized so eight tiles are exactly as wide as the search field above, which is
+ * what makes the page read as one block rather than as a box with a grid
+ * underneath it. The grid does not reflow to three or five: a start page whose
+ * tiles move when the window is resized is a page you cannot build muscle
+ * memory for, and at this width four fits from the minimum window size up.
+ */
+.tiles {
+  display: grid;
+  /* `minmax(0, 1fr)`, not `1fr`: a grid item's automatic minimum size is its
+     content, so a long hostname pushed its column - and the whole grid - wider
+     than the search field above it, which is the one thing the tiles are
+     supposed to line up with. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s2);
+  /*
+   * Wider than the field above it, and centred on the same axis.
+   *
+   * Four tiles inside a 560px measure leaves 128px each, which truncates every
+   * hostname longer than "github.com" - and a tile whose label reads
+   * "news.ycombin…" is a tile you have to hover to identify. The field keeps
+   * its reading width; the tiles get the room they need.
+   */
+  width: min(760px, calc(100vw - 48px));
+  margin: var(--s6) auto 0;
+  text-align: left;
+}
+
+.tile {
+  position: relative;
+  animation: rise 260ms var(--ease) 80ms;
+}
+
+body.still .tile { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile { animation: none; }
+}
+
+.tile-open {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--fast) ease, border-color var(--fast) ease,
+              transform var(--fast) var(--ease);
+}
+
+.tile-open:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-raised));
+  border-color: var(--border);
+}
+
+/* A press that moves is the cheapest way to make a tile feel like a button
+   rather than a picture of one. */
+.tile-open:active { transform: scale(0.985); }
+
+.tile-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-small);
+}
+
+/*
+ * The remove button appears on hover, and is a real target when it does.
+ *
+ * Kept out of the flow entirely rather than reserved and hidden: a tile is 80px
+ * of horizontal room and a permanent × in the corner of each one turns eight
+ * tiles into eight dismiss buttons, which is the wrong thing to notice first.
+ */
+.tile-forget {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--fast) ease, color var(--fast) ease;
+}
+
+.tile:hover .tile-forget,
+.tile-forget:focus-visible { opacity: 1; }
+.tile-forget:hover { color: var(--crit); }

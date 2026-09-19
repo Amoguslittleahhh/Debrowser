@@ -11,10 +11,26 @@
 <body>
   <header>
     <h1>Settings</h1>
+    <!--
+      Search, because the page is now eight sections long and the fastest way to
+      a setting you can name is to type its name. It filters the rows that are
+      already here rather than searching a separate index: one list of settings,
+      and nothing to keep in step with it.
+    -->
+    <input id="q" type="search" spellcheck="false" autocomplete="off"
+           placeholder="Search settings" aria-label="Search settings">
     <button class="close" id="close" title="Close settings (Esc)" aria-label="Close settings">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
     </button>
   </header>
+
+  <div class="shell">
+  <!--
+    The rail, built from the sections themselves so a new section appears in it
+    without being listed twice. It marks where you are as you scroll, which is
+    what makes a long page of settings navigable rather than merely long.
+  -->
+  <nav class="rail" id="rail" aria-label="Settings sections"></nav>
 
   <main>
     <!--
@@ -75,7 +91,9 @@
         <button class="ghost-btn" id="check-updates" hidden>Check now</button>
       </div>
     </section>
+    <p class="note empty-search" id="no-match" hidden></p>
   </main>
+  </div>
 
   <script src="theme.js"></script>
   <script src="settings.js"></script>

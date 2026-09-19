@@ -99,40 +99,94 @@
 /* ------------------------------------------------------------------ */
 
 /*
- * Tell the engine which way round this UI is.
+ * Ink and paper, not blue-black and cobalt.
  *
- * Without it every control the *engine* draws - a checkbox, a scrollbar, a
- * select's dropdown, the text caret, an autofill highlight - is rendered with
- * light styling, because `color-scheme` defaults to `normal` and nothing in a
- * stylesheet changes that. Our own CSS cannot reach them: a checkbox with
- * `appearance: auto` is painted by Chromium, not by us.
+ * The palette this replaces was `#16181d` surfaces under a `#5b8cff` accent:
+ * a blue-tinted near-black with a saturated cornflower blue on top. That is the
+ * default of every dark interface generated in the last two years, and it is
+ * what made this browser look like something assembled rather than designed -
+ * you can name the theme from a thumbnail.
  *
- * Photographed, which is how it was found: the unchecked box on Settings' own
- * "Reduce motion" row was a stark white square on a dark page, beside checked
- * boxes that looked fine, and the scrollbar beside it was a light track. One
- * declaration fixes every one of them at once.
+ * So the base is a *warm* neutral. Red and green sit a shade above blue in
+ * every surface below, which is a difference of two or three points per channel
+ * and never reads as brown - it reads as ink rather than as screen. Against it
+ * the one accent is a petrol teal: cool on a warm ground, which is the oldest
+ * pairing there is, and far enough from the alert colours that no two things in
+ * this browser can be confused for each other.
+ *
+ * The rule that keeps it minimal: colour means something. Surfaces are
+ * neutral, the accent marks what is selected or focused, and the three
+ * semantic colours are spent on state and nothing else. Nothing here is
+ * coloured to be interesting.
  */
 :root {
+  /*
+   * Tell the engine which way round this UI is.
+   *
+   * Without it every control the *engine* draws - a checkbox, a scrollbar, a
+   * select's dropdown, the text caret, an autofill highlight - is rendered with
+   * light styling, because `color-scheme` defaults to `normal` and nothing in a
+   * stylesheet changes that. Our own CSS cannot reach them: a checkbox with
+   * `appearance: auto` is painted by Chromium, not by us.
+   *
+   * Photographed, which is how it was found: the unchecked box on Settings' own
+   * "Reduce motion" row was a stark white square on a dark page, beside checked
+   * boxes that looked fine, and the scrollbar beside it was a light track. One
+   * declaration fixes every one of them at once.
+   */
   color-scheme: dark;
 
-  --bg: #16181d;
-  --bg-raised: #1e2128;
-  --bg-input: #24272f;
-  --border: #2c303a;
+  --bg: #161614;
+  --bg-raised: #1e1e1b;
+  --bg-input: #252521;
+  --border: #33332e;
   /* A second, quieter rule for dividers *inside* a surface. One border weight
      for both the edge of a card and the lines between its rows makes a list
      read as a table. */
-  --border-soft: #23262e;
-  --text: #e6e8ee;
-  --text-dim: #9aa1b1;
-  --accent: #5b8cff;
-  --ok: #49c17d;
-  --warn: #e0a33e;
-  --crit: #e2564a;
+  --border-soft: #24241f;
+  --text: #eae7e0;
+  --text-dim: #9b978e;
 
-  --radius-sm: 6px;
-  --radius: 9px;
-  --radius-lg: 13px;
+  /*
+   * One accent, and it has to work on both palettes.
+   *
+   * `--accent` is written to <body> as an inline style from the user's
+   * preference, so a per-theme override in this file could never win - which
+   * means the value has to be legible on warm paper *and* on warm ink. This
+   * teal is the darkest one that still reads on the dark palette and the
+   * lightest that still passes on the light one. Small text is never set in it
+   * for that reason; it marks, fills and rings.
+   */
+  --accent: #2f857b;
+
+  /* State, and only state. Far enough apart in hue and in lightness that the
+     tier dots are distinguishable at 6px without reading their tooltips. */
+  --ok: #6f9f6a;
+  --warn: #c9953f;
+  --crit: #c05c4e;
+
+  /*
+   * The site chip's colour, as saturation and lightness rather than as a
+   * colour.
+   *
+   * Every chip's hue is set per element by `siteHue()`, and a custom property
+   * that referenced `--hue` would be substituted against the element that
+   * *declares* it - the root, where there is no hue - so the colour itself
+   * cannot be a token. These can: each view writes one rule using them, the
+   * theme swaps the numbers, and the six near-identical blocks that used to
+   * exist in four stylesheets are gone.
+   */
+  --chip-fg-s: 34%;
+  --chip-fg-l: 70%;
+  --chip-bg-s: 22%;
+  --chip-bg-l: 24%;
+
+  /* Tighter than they were. A 13px radius on a 34px control is most of the way
+     to a pill, and everything ends up looking soft; at 12 and below the shape
+     still reads as considered without rounding off what it is. */
+  --radius-sm: 5px;
+  --radius: 8px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
 
   /*
@@ -159,39 +213,58 @@
  * a machine set to dark, and vice versa - a media query alone cannot express
  * that, so an explicit choice is stamped on <body> and wins over the OS.
  */
+/*
+ * The light palette is paper, on the same terms: warm, and not white.
+ *
+ * `#ffffff` under `#f4f5f8` was the other half of the stock look. Card on page
+ * here is a warm off-white on a warmer ground, which is the difference between
+ * a document and a dialog box.
+ */
 @media (prefers-color-scheme: light) {
   body:not([data-theme="dark"]) {
     color-scheme: light;
-    --bg: #f4f5f8;
-    --bg-raised: #ffffff;
-    --bg-input: #ffffff;
-    --border: #dcdfe6;
-    --border-soft: #ebedf2;
-    --text: #191c23;
-    --text-dim: #5d6472;
+    --bg: #f3f1ec;
+    --bg-raised: #fbfaf7;
+    --bg-input: #fffefc;
+    --border: #dcd7cc;
+    --border-soft: #e9e5db;
+    --text: #201f1c;
+    --text-dim: #6b6559;
+    --chip-fg-s: 34%;
+    --chip-fg-l: 32%;
+    --chip-bg-s: 30%;
+    --chip-bg-l: 90%;
   }
 }
 
 body[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f5f8;
-  --bg-raised: #ffffff;
-  --bg-input: #ffffff;
-  --border: #dcdfe6;
-  --border-soft: #ebedf2;
-  --text: #191c23;
-  --text-dim: #5d6472;
+  --bg: #f3f1ec;
+  --bg-raised: #fbfaf7;
+  --bg-input: #fffefc;
+  --border: #dcd7cc;
+  --border-soft: #e9e5db;
+  --text: #201f1c;
+  --text-dim: #6b6559;
+  --chip-fg-s: 34%;
+  --chip-fg-l: 32%;
+  --chip-bg-s: 30%;
+  --chip-bg-l: 90%;
 }
 
 body[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #16181d;
-  --bg-raised: #1e2128;
-  --bg-input: #24272f;
-  --border: #2c303a;
-  --border-soft: #23262e;
-  --text: #e6e8ee;
-  --text-dim: #9aa1b1;
+  --bg: #161614;
+  --bg-raised: #1e1e1b;
+  --bg-input: #252521;
+  --border: #33332e;
+  --border-soft: #24241f;
+  --text: #eae7e0;
+  --text-dim: #9b978e;
+  --chip-fg-s: 34%;
+  --chip-fg-l: 70%;
+  --chip-bg-s: 22%;
+  --chip-bg-l: 24%;
 }
 
 /*
@@ -226,10 +299,23 @@ body {
    * Kept at single digits on surfaces. The moment a background is obviously
    * tinted it stops being a surface and starts being a decoration.
    */
-  --tint-1: color-mix(in srgb, var(--accent) 6%, var(--strip));
-  --tint-2: color-mix(in srgb, var(--accent) 3%, var(--bg-input));
-  --wash: color-mix(in srgb, var(--accent) 13%, transparent);
+  --tint-1: color-mix(in srgb, var(--accent) 4%, var(--strip));
+  --tint-2: color-mix(in srgb, var(--accent) 2%, var(--bg-input));
+  --wash: color-mix(in srgb, var(--accent) 14%, transparent);
   --wash-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+
+  /*
+   * The controls Chromium draws follow the accent too.
+   *
+   * `color-scheme` above tells the engine which way round the UI is, but it has
+   * nothing to say about colour: a checked checkbox, a radio, a range slider
+   * and a progress bar are all painted in Chromium's *own* accent, which is a
+   * saturated blue. Photographed on Settings: a column of bright blue
+   * checkboxes and a blue slider beside a browser with no blue anywhere else in
+   * it - the one part of the palette a stylesheet cannot reach by styling the
+   * element, because the element is not ours to style.
+   */
+  accent-color: var(--accent);
 
   /*
    * Focus, as one token used everywhere.
@@ -238,7 +324,7 @@ body {
    * focus moves everything beside it, and a control that shifts as you tab onto
    * it is the clearest sign nobody tabbed onto it while building the thing.
    */
-  --ring: 0 0 0 2px color-mix(in srgb, var(--accent) 34%, transparent);
+  --ring: 0 0 0 2px color-mix(in srgb, var(--accent) 48%, transparent);
 
   /*
    * Elevation, and there is exactly one shadow in this browser's own UI.
@@ -248,7 +334,65 @@ body {
    * opens and destroyed when it closes. A shadow on the chrome would be a blur
    * pass held for the life of the window.
    */
-  --shadow-menu: 0 12px 36px -10px rgba(0, 0, 0, 0.5), 0 2px 8px -3px rgba(0, 0, 0, 0.35);
+  --shadow-menu: 0 14px 34px -12px rgba(18, 16, 12, 0.55), 0 2px 6px -2px rgba(18, 16, 12, 0.3);
+}
+
+/* ------------------------------------------------------------------ */
+/* The site chip                                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A site's logo, over its letter, in one component.
+ *
+ * Four views draw this - history, downloads, the new tab tiles and the flyout -
+ * and two of them held byte-identical copies of these rules. That is the drift
+ * this file exists to prevent, and it had already cost one real bug: the chip
+ * kept painting *behind* transparent favicons, so every site logo in the
+ * browser sat on a coloured tile with the site's initial showing through it.
+ * Fixing that in four places is how it comes back in the fifth.
+ *
+ * `--hue` is set per element by `siteHue()` in theme.js, which is shared for
+ * the same reason: one site has to be one colour everywhere, or the colour
+ * means nothing at all.
+ */
+.chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  /* Desaturated well below what a hue rotation gives by default: at the 45%
+     these used to carry, a list of them reads as a paint chart, and the whole
+     job of the colour is to tell two sites apart at a glance. */
+  color: hsl(var(--hue, 220) var(--chip-fg-s) var(--chip-fg-l));
+  background: hsl(var(--hue, 220) var(--chip-bg-s) var(--chip-bg-l));
+}
+
+.site-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+}
+
+/*
+ * And the chip stops painting once a real icon has loaded.
+ *
+ * Almost no favicon is opaque and square - most are transparent PNG or SVG, and
+ * `object-fit: contain` letterboxes the rest - so a chip left painting behind
+ * one shows through it and around it. `body` on the selector because the theme
+ * blocks qualify their own chip rules and would otherwise win.
+ */
+body .chip.has-icon {
+  background: none;
+  color: transparent;
 }
 
 /* ------------------------------------------------------------------ */

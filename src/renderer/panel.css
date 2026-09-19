@@ -177,21 +177,10 @@ footer {
   font-weight: var(--fw-bold);
   line-height: 1;
   text-transform: uppercase;
-  color: hsl(var(--hue, 220) 70% 74%);
-  background: hsl(var(--hue, 220) 42% 26%);
+  color: hsl(var(--hue, 220) var(--chip-fg-s) var(--chip-fg-l));
+  background: hsl(var(--hue, 220) var(--chip-bg-s) var(--chip-bg-l));
 }
 
-body[data-theme="light"] .row-chip,
-body:not([data-theme="dark"]) .row-chip {
-  color: hsl(var(--hue, 220) 55% 34%);
-  background: hsl(var(--hue, 220) 70% 90%);
-}
-@media (prefers-color-scheme: dark) {
-  body:not([data-theme="light"]) .row-chip {
-    color: hsl(var(--hue, 220) 70% 74%);
-    background: hsl(var(--hue, 220) 42% 26%);
-  }
-}
 
 .row-icon {
   position: absolute;
@@ -213,3 +202,13 @@ body .row-chip.has-icon {
   background: none;
   color: transparent;
 }
+
+/*
+ * A figure that is known to run high says so in its own colour.
+ *
+ * The label reads "summed" rather than "resident" when the platform offers no
+ * proportional measure, and the tooltip explains it - but a word alone is easy
+ * to skim past on a number that can be twice what the browser is really
+ * holding. Warn, not critical: it is an over-count, not a fault.
+ */
+.stat-label.inexact { color: var(--warn); }

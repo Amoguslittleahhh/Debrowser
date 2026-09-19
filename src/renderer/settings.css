@@ -51,11 +51,97 @@ h1 {
   fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round;
 }
 
+/* The rail and the page, side by side, each scrolling on its own. */
+.shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * A rail of section names, which is what every settings page of this length
+ * has and what this one was missing: eight sections in one scroll, with no way
+ * to see what they were without scrolling through them.
+ *
+ * It is furniture, so it is set like the section labels it lists - quiet, and
+ * only the current one at full strength.
+ */
+.rail {
+  flex: none;
+  width: 206px;
+  overflow-y: auto;
+  padding: var(--s5) var(--s3) var(--s6) var(--s5);
+  border-right: 1px solid var(--border);
+}
+
+.rail-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  margin-bottom: 1px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--fast) ease, color var(--fast) ease;
+}
+
+.rail-item:hover { background: var(--wash-soft); color: var(--text); }
+
+/*
+ * Where you are, marked down the leading edge rather than by a filled pill.
+ *
+ * A filled row in a list of eight makes the current section the loudest thing
+ * on the page, next to settings that are the actual content. The bar is the
+ * same mark the active tab carries in the side strip, for the same reason.
+ */
+.rail-item.current {
+  color: var(--text);
+  background: var(--wash-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 main {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: var(--s2) var(--s6) var(--s7);
+}
+
+/*
+ * Search, in the header beside the title.
+ *
+ * Sized so it does not dominate a header whose job is to say which page this
+ * is. `type="search"` for the engine's own clear button, which is drawn in the
+ * right palette because `color-scheme` is declared - see theme.css.
+ */
+header #q {
+  flex: 0 1 280px;
+  margin-left: auto;
+  margin-right: var(--s4);
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  outline: none;
+  user-select: text;
+  cursor: text;
+  transition: border-color var(--fast) ease, box-shadow var(--fast) ease;
+}
+
+header #q:focus { border-color: var(--accent); box-shadow: var(--ring); }
+
+.empty-search {
+  max-width: 840px;
+  margin: var(--s7) auto 0;
 }
 
 /* Centred rather than pinned to the left edge: the content has a fixed comfortable

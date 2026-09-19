@@ -109,40 +109,13 @@
   transition: transform 240ms linear;
 }
 
-/* The site's mark, exactly as the history list draws it. */
-.chip {
-  position: relative;
-  display: grid;
-  place-items: center;
+/* The site's mark is the shared component in theme.css. */
+
+/* Both actions in one group at the end of the row, so the row's right edge is
+   a single column of buttons however many of them a given state has. */
+.download-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
   flex: none;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: var(--fw-bold);
-  color: hsl(var(--hue) 70% 72%);
-  background: hsl(var(--hue) 45% 22%);
-  text-transform: uppercase;
-}
-
-.site-icon {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  object-fit: contain;
-}
-
-body[data-theme="light"] .chip,
-body:not([data-theme="dark"]) .chip { color: hsl(var(--hue) 55% 32%); background: hsl(var(--hue) 70% 92%); }
-@media (prefers-color-scheme: dark) {
-  body:not([data-theme="light"]) .chip { color: hsl(var(--hue) 70% 72%); background: hsl(var(--hue) 45% 22%); }
-}
-
-/* Stops painting once the site's own logo is up, rather than showing through
-   it. `body` is in the selector only to out-specify the variants above. */
-body .chip.has-icon {
-  background: none;
-  color: transparent;
 }

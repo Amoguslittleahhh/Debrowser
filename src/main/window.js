@@ -193,7 +193,7 @@ class BrowserShell {
       minWidth: 620,
       minHeight: 420,
       title: 'Debrowser',
-      backgroundColor: '#16181d',
+      backgroundColor: '#161614',
       show: false,
 
       // The tab strip *is* the title bar, as in every modern browser. A
@@ -210,7 +210,7 @@ class BrowserShell {
         ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 13 } }
         : {
             titleBarStyle: 'hidden',
-            titleBarOverlay: { color: '#16181d', symbolColor: '#9aa1b1', height: 40 }
+            titleBarOverlay: { color: '#161614', symbolColor: '#9b978e', height: 40 }
           })
     });
 
@@ -874,7 +874,7 @@ class BrowserShell {
     // Only while translucency is asked for. An opaque surface is cheaper to
     // composite, and a transparent window on a desktop with no compositor is a
     // window with artefacts rather than a window with a view.
-    const sheer = translucent ? '#00000000' : '#16181d';
+    const sheer = translucent ? '#00000000' : '#161614';
     try {
       this.window.setBackgroundColor(sheer);
       this.chromeView.setBackgroundColor(sheer);
@@ -913,7 +913,7 @@ class BrowserShell {
     const strip = this.stripColour();
     if (process.platform !== 'darwin' && typeof this.window.setTitleBarOverlay === 'function') {
       try {
-        this.window.setTitleBarOverlay({ color: strip, symbolColor: '#9aa1b1', height: 40 });
+        this.window.setTitleBarOverlay({ color: strip, symbolColor: '#9b978e', height: 40 });
       } catch { /* no overlay on this platform */ }
     }
   }
@@ -922,7 +922,7 @@ class BrowserShell {
   stripColour() {
     const choice = this.prefs ? this.prefs.get('tabBarColor') : 'default';
     if (choice === 'mirror') return this.prefs.get('accent');
-    if (choice === 'default') return '#16181d';
+    if (choice === 'default') return '#161614';
     return choice;
   }
 

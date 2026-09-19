@@ -131,13 +131,38 @@ function createRow(item) {
 
   text.append(name, meter, status);
 
+  // Two buttons, because a finished download has two things worth doing to it
+  // and the page offered neither. The flyout has had "Open file" since it was
+  // written; the page - the one you reach by searching for something you
+  // downloaded last week - could only clear the row, which is the least useful
+  // thing you can do with a file you have just found.
+  const open = document.createElement('button');
+  open.className = 'ghost-btn';
+  open.type = 'button';
+  open.textContent = 'Open file';
+  open.hidden = true;
+
   const action = document.createElement('button');
   action.className = 'ghost-btn';
   action.type = 'button';
 
-  root.append(chip, text, action);
+  const buttons = document.createElement('div');
+  buttons.className = 'download-actions';
+  buttons.append(open, action);
 
-  const node = { root, name, meter, fill, status, action, state: {} };
+  root.append(chip, text, buttons);
+
+  const node = { root, name, meter, fill, status, action, open, state: {} };
+
+  // Through the browser, which resolves the id to a path: no path ever crosses
+  // into this renderer, so a page that got hold of this bridge could not be
+  // told where the user's files are.
+  open.addEventListener('click', () => api.request('open-download', { id: item.id }));
+  // The same gesture the flyout uses, and the one a file manager uses: the
+  // middle button shows the file in its folder rather than opening it.
+  open.addEventListener('auxclick', (event) => {
+    if (event.button === 1) api.request('reveal-download', { id: item.id });
+  });
 
   action.addEventListener('click', async () => {
     const running = RUNNING.has(node.state.state);
@@ -177,6 +202,10 @@ function updateRow(node, item) {
 
   if (prev.state !== item.state) {
     node.root.dataset.state = item.state;
+    // Only a file that finished can be opened. A cancelled or failed download
+    // has nothing on disk worth handing to the system.
+    node.open.hidden = item.state !== 'done';
+    node.open.title = `Open ${item.filename || 'file'} · middle-click to show it in its folder`;
     node.action.textContent = running ? 'Cancel' : 'Clear';
     node.action.classList.toggle('danger', running);
     node.action.setAttribute('aria-label',

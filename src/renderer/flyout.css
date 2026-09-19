@@ -160,21 +160,10 @@
   font-weight: var(--fw-bold);
   line-height: 1;
   text-transform: uppercase;
-  color: hsl(var(--hue, 220) 70% 72%);
-  background: hsl(var(--hue, 220) 45% 22%);
+  color: hsl(var(--hue, 220) var(--chip-fg-s) var(--chip-fg-l));
+  background: hsl(var(--hue, 220) var(--chip-bg-s) var(--chip-bg-l));
 }
 
-body[data-theme="light"] .dl-chip,
-body:not([data-theme="dark"]) .dl-chip {
-  color: hsl(var(--hue, 220) 55% 32%);
-  background: hsl(var(--hue, 220) 70% 92%);
-}
-@media (prefers-color-scheme: dark) {
-  body:not([data-theme="light"]) .dl-chip {
-    color: hsl(var(--hue, 220) 70% 72%);
-    background: hsl(var(--hue, 220) 45% 22%);
-  }
-}
 
 /* Stops painting once the site's own logo is up rather than showing through it.
    `body` is in the selector only to out-specify the variants above. */

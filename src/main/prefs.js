@@ -29,7 +29,7 @@ const { app } = require('electron');
 const SCHEMA = {
   /* --- Personalisation ------------------------------------------- */
   theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
-  accent:       { def: '#5b8cff', ok: (v) => /^#[0-9a-f]{6}$/i.test(v) },
+  accent:       { def: '#2f857b', ok: (v) => /^#[0-9a-f]{6}$/i.test(v) },
   tabWidth:     { def: 'roomy',  ok: (v) => ['roomy', 'compact'].includes(v) },
 
   /**
