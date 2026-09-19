@@ -129,6 +129,27 @@ document.addEventListener('mouseleave', () => reportHover(false));
 // fire `mouseenter`.
 document.addEventListener('mousemove', () => reportHover(true));
 
+/*
+ * The wheel over the tab strip moves the strip.
+ *
+ * Across the top the strip scrolls sideways once the tabs stop shrinking, and
+ * a mouse with one wheel has no sideways to give - so a vertical wheel is taken
+ * as horizontal here, which is what every browser does over a tab strip. A
+ * trackpad's horizontal swipe arrives as `deltaX` and is used directly.
+ *
+ * Down the side the strip scrolls vertically and the browser needs no help, so
+ * this stands aside. Ctrl is never touched: that is the zoom gesture, and it
+ * belongs to the page.
+ */
+el.tabs.addEventListener('wheel', (event) => {
+  if (event.ctrlKey) return;
+  if (document.body.dataset.layout === 'left') return;
+  const by = event.deltaX || event.deltaY;
+  if (!by) return;
+  event.preventDefault();
+  el.tabs.scrollLeft += by;
+}, { passive: false });
+
 el.pin.addEventListener('click', () => api.send('toggle-sidebar-pin'));
 
 /**
@@ -655,6 +676,10 @@ function updateTabElement(node, tab) {
   if (prev.active !== tab.visible) {
     node.root.classList.toggle('active', tab.visible);
     prev.active = tab.visible;
+    // Now that the strip scrolls, the tab you switched to can be off the end of
+    // it - Ctrl+Tab through thirty tabs and the highlight walks out of the
+    // window. `nearest` so a tab already on screen does not move the strip.
+    if (tab.visible) node.root.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   if (prev.boosted !== tab.boosted) {

@@ -99,12 +99,12 @@ body.calm .sheet { animation: none; }
 }
 
 .item svg {
-  width: 15px;
-  height: 15px;
+  width: var(--icon);
+  height: var(--icon);
   flex: none;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: var(--icon-stroke);
   stroke-linecap: round;
   stroke-linejoin: round;
   color: var(--text-dim);

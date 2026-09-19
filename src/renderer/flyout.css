@@ -133,9 +133,16 @@
 
 .dl-action {
   flex: none;
-  min-width: 22px;
+  /* One column, whatever the word in it.
+     "Cancel" is a word and the dismiss control is a cross, so with each sized
+     to its own content the two ended at different places and the right-hand
+     edge of the list was ragged - visible the moment a running download sits
+     above a finished one. The width is the widest label this button carries,
+     and everything shorter centres inside it. */
+  min-width: 56px;
   height: 22px;
   padding: 0 6px;
+  text-align: center;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;

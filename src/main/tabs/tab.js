@@ -23,6 +23,15 @@ const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload
 const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
 const pages = require('../pages');
 
+/**
+ * How much larger Settings opens than the rest of the browser.
+ *
+ * A value from the zoom ladder in main.js rather than a number of its own, so
+ * the first press of ctrl+minus lands on a step the ladder knows and not
+ * somewhere between two of them.
+ */
+const SETTINGS_ZOOM = 1.1;
+
 let nextTabId = 1;
 
 /** Matches the chrome's surface colour, so an unpainted view is not white. */
@@ -461,6 +470,28 @@ class Tab {
     wc.once('did-finish-load', () => {
       this.applySuspendedPageState();
       this.emit('updated');
+    });
+
+    /*
+     * Settings opens a notch larger than everything else.
+     *
+     * It is the one page here that is read rather than glanced at - rows of
+     * labels with a hint under each - and it is where somebody goes when
+     * something is hard to see, which is a poor moment to be squinting. The
+     * rest of the browser's pages stay at 1.0, because the new tab page and the
+     * tab strip beside it should not disagree about how big text is.
+     *
+     * After the document exists, not before the load: a zoom factor set on a
+     * view that has not navigated yet is discarded by the navigation. Measured -
+     * it read 1x - and it is why this is not three lines up in `realise`.
+     *
+     * `once`, so a zoom the user sets themselves survives whatever the page
+     * does next, and set on the view rather than as a stylesheet scale, so
+     * ctrl+wheel and the zoom shortcuts move from here rather than fighting it.
+     */
+    wc.once('dom-ready', () => {
+      if (pages.pageName(this.url) !== 'settings') return;
+      try { wc.setZoomFactor(SETTINGS_ZOOM); } catch { /* the view is going away */ }
     });
 
     // Every load, not just the first. `once` above restores suspended state,

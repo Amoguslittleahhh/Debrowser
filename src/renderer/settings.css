@@ -47,8 +47,8 @@ h1 {
 }
 .close:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
 .close svg {
-  width: 15px; height: 15px;
-  fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round;
+  width: var(--icon); height: var(--icon);
+  fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linecap: round;
 }
 
 /* The rail and the page, side by side, each scrolling on its own. */

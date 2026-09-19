@@ -1081,6 +1081,25 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     runCommand(command, payload ?? null, event.sender);
   });
 
+  /*
+   * Ctrl and the wheel, from any page.
+   *
+   * Chromium does not zoom an embedded view on this gesture and does not raise
+   * `zoom-changed` for it either - measured - so the page probe notices it and
+   * this applies it. Resolved to the tab that *sent* it rather than to the
+   * active one: the pointer is over the page it is zooming, which is the tab
+   * the event came from, and on a window with a docked inspector those are not
+   * always the same.
+   *
+   * No privilege is involved - a page asking to zoom itself is a page changing
+   * its own scale - so this needs no sender check beyond being a tab we own.
+   */
+  ipcMain.on('debrowser:zoom-gesture', (event, payload) => {
+    const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
+    if (!tab) return;
+    stepZoom(tab, payload?.direction === 'out' ? -1 : +1);
+  });
+
   return runCommand;
 }
 

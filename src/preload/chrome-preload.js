@@ -11,6 +11,27 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+/**
+ * Ctrl and the wheel zoom the page, here as well as in a website.
+ *
+ * The browser's own pages carry this preload rather than the page probe, so
+ * without this the gesture worked everywhere except on Settings and History -
+ * which are the pages most likely to be read at a size that does not suit
+ * somebody. Sent as the ordinary `zoom` command, which this bridge already
+ * allows.
+ */
+let lastZoomAt = 0;
+
+window.addEventListener('wheel', (event) => {
+  if (!event.ctrlKey || event.deltaY === 0) return;
+  event.preventDefault();
+  const at = Date.now();
+  if (at - lastZoomAt < 60) return;
+  lastZoomAt = at;
+  ipcRenderer.send('debrowser:command', 'zoom',
+    { direction: event.deltaY < 0 ? 'in' : 'out' });
+}, { passive: false, capture: true });
+
 /** Commands the UI is allowed to issue. */
 const COMMANDS = new Set([
   'new-tab',

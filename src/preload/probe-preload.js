@@ -57,6 +57,33 @@ const now = () => Date.now();
 function markInteraction() { lastInteractionAt = now(); }
 function markScroll() { lastScrollAt = now(); }
 
+/**
+ * Ctrl and the wheel: zoom, as it does in every other browser.
+ *
+ * Chromium does not do this for an embedded view - measured, a real
+ * ctrl+wheel neither changes the zoom nor raises `zoom-changed` - so the
+ * gesture has to be noticed here, in the one script that runs inside every
+ * page, and applied by the browser process.
+ *
+ * Capturing and non-passive on purpose. Capture so a page that handles the
+ * wheel itself does not swallow it first; non-passive so the default - which
+ * is scrolling the page under the pointer - can be cancelled. A ctrl+wheel
+ * that both zooms and scrolls is worse than one that does neither.
+ *
+ * Rate-limited, because one notch of a wheel arrives as several events on a
+ * trackpad and each one is a message to another process.
+ */
+let lastZoomAt = 0;
+
+window.addEventListener('wheel', (event) => {
+  if (!event.ctrlKey || event.deltaY === 0) return;
+  event.preventDefault();
+  const at = now();
+  if (at - lastZoomAt < 60) return;
+  lastZoomAt = at;
+  ipcRenderer.send('debrowser:zoom-gesture', { direction: event.deltaY < 0 ? 'in' : 'out' });
+}, { passive: false, capture: true });
+
 const passive = { passive: true, capture: true };
 window.addEventListener('scroll', markScroll, passive);
 window.addEventListener('wheel', markScroll, passive);

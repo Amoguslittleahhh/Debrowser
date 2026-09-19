@@ -851,6 +851,57 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `missing file gives ${missing.status}`);
   }
 
+  // Settings opens a notch larger than the rest of the browser.
+  //
+  // It is the page that is read rather than glanced at, and the one somebody
+  // opens when something is hard to see. Asserted on the view's zoom factor
+  // rather than on a stylesheet scale, because that is what ctrl+wheel and the
+  // zoom shortcuts move - a hard-coded scale would fight them.
+  {
+    const plain = tabs.create({ url: pages.NEW_TAB_URL, activate: false, realise: true });
+    await waitFor(() => plain.isLive, { timeoutMs: 8000 });
+    const settingsZoom = settingsTab.wc.getZoomFactor();
+    const plainZoom = plain.wc.getZoomFactor();
+    check('settings opens larger than the rest of the browser, and only settings',
+      Math.abs(settingsZoom - 1.1) < 0.001 && Math.abs(plainZoom - 1) < 0.001,
+      `settings ${settingsZoom}x, new tab page ${plainZoom}x`);
+    tabs.close(plain.id);
+  }
+
+  // Ctrl and the wheel zoom the page.
+  //
+  // Chromium does not do this for an embedded view - measured, a real
+  // ctrl+wheel neither changes the zoom nor raises `zoom-changed` - so the page
+  // probe notices the gesture and the browser applies it. Driven end to end
+  // here: the event is dispatched in the page's own world, the listener that
+  // sees it lives in the probe's isolated world, and what is asserted is the
+  // zoom factor the browser process ended up setting.
+  {
+    const wheel = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => wheel.isLive && !wheel.loading, { timeoutMs: 10_000 });
+    const before = wheel.wc.getZoomFactor();
+
+    const fire = (deltaY) => wheel.wc.executeJavaScript(
+      `window.dispatchEvent(new WheelEvent('wheel', ` +
+      `{ ctrlKey: true, deltaY: ${deltaY}, bubbles: true, cancelable: true })), true`);
+
+    await fire(-120);
+    const zoomedIn = await waitFor(() => wheel.wc.getZoomFactor() > before, { timeoutMs: 4000 });
+    const after = wheel.wc.getZoomFactor();
+
+    // And back down again, because a gesture that only works one way is worse
+    // than one that does not work at all.
+    await sleep(120);
+    await fire(120);
+    await fire(120);
+    const zoomedOut = await waitFor(() => wheel.wc.getZoomFactor() < after, { timeoutMs: 4000 });
+
+    check('ctrl and the wheel zoom the page, both ways',
+      zoomedIn && zoomedOut,
+      `${before}x -> ${after}x on ctrl+wheel up, then ${wheel.wc.getZoomFactor()}x back down`);
+    tabs.close(wheel.id);
+  }
+
   // The rail keeps up with the scroll, all the way to the end.
   //
   // It did not: the mark is the topmost section intersecting the top 45% of the
@@ -1423,16 +1474,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
             // document inside it keeps its old layout viewport, which is exactly
             // what "the page did not make space" looks like: the content stays
             // the size it was and the inspector is drawn over the end of it.
+            // In CSS pixels, which are not view pixels on a page that is
+            // zoomed - Settings opens at 110%, so its document reports 675
+            // where the view is 742 and the comparison has to scale. Read from
+            // the view rather than assumed, so this stays right if the default
+            // moves.
+            const zoom = own.wc.getZoomFactor() || 1;
             const settled = await waitFor(async () => {
               const seen = await own.wc.executeJavaScript(viewport).catch(() => 0);
-              return seen > 0 && Math.abs(seen - after) <= 2;
+              return seen > 0 && Math.abs(seen * zoom - after) <= 2;
             }, { timeoutMs: 4000 });
             const inner = await own.wc.executeJavaScript(viewport).catch(() => -1);
 
             const ok = after > 0 && after < before && given === after && settled;
             if (!ok) {
               cases.push(`${what} ${position}/${dock}: ${before}->${after}, ` +
-                `view ${given}, document ${inner}`);
+                `view ${given}, document ${inner}${zoom === 1 ? '' : ` at ${zoom}x`}`);
             }
 
             toggleDevTools(own, shell);
