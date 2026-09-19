@@ -1280,6 +1280,36 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
         return { bookmarked: Boolean(added), unsupported: !added };
       }
 
+      // Adding and editing by hand, from the manager in Settings.
+      //
+      // These *do* take a URL from the payload, unlike the star above, and the
+      // difference is the sender: only Settings reaches this channel, and
+      // Settings is one of our own pages driven by a person typing into it. A
+      // website has no route here at all - `CHROME_REQUESTS` does not list
+      // these, so the chrome cannot reach them either. What a bookmark may
+      // point at is still `bookmarks.js`'s decision, which is where
+      // `javascript:` is refused.
+      case 'save-bookmark': {
+        const id = String(payload?.id ?? '');
+        const fields = {
+          url: payload?.url,
+          title: payload?.title,
+          folder: payload?.folder
+        };
+        const saved = id ? bookmarks.update(id, fields) : bookmarks.add(fields);
+        return {
+          ok: Boolean(saved),
+          item: saved,
+          // Said plainly, because the two ways this fails look identical from
+          // the page: an address we will not store, and an address already on
+          // the list.
+          reason: saved ? null
+            : id && !bookmarks.all().some((b) => b.id === id)
+              ? 'that bookmark is no longer there'
+              : 'that address cannot be bookmarked, or is already saved'
+        };
+      }
+
       case 'remove-bookmark':
         return { removed: bookmarks.remove(String(payload?.id ?? '')) };
 

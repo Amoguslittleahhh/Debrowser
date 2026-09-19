@@ -116,6 +116,11 @@ const ANSWERS = {
 const SHOTS = [
   { name: 'chrome',   file: 'chrome.html',   w: 1280, h: 118 },
   { name: 'sidebar',  file: 'chrome.html',   w: 240,  h: 820, side: true },
+  // The collapsed strip, at the width the browser actually gives it. Ten
+  // pixels is a degenerate picture and that is the point: everything in the
+  // strip has to have stopped painting by then, or its fragments show as the
+  // flicker that was reported.
+  { name: 'strip',    file: 'chrome.html',   w: 10,   h: 820, side: true, collapsed: true },
   { name: 'settings', file: 'settings.html', w: 1280, h: 860 },
   { name: 'history',  file: 'history.html',  w: 1280, h: 700 },
   { name: 'downloads', file: 'downloads.html', w: 1280, h: 700 },
@@ -138,7 +143,7 @@ app.whenReady().then(async () => {
   for (const shot of WANTED) {
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';
-      STATE.sidebar = { pinned: true, open: true };
+      STATE.sidebar = shot.collapsed ? { pinned: false, open: false } : { pinned: true, open: true };
       STATE.bookmarksBar = false;
     } else {
       STATE.prefs.tabBarPosition = 'top';

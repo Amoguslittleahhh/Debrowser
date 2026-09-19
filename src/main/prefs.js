@@ -133,6 +133,18 @@ const SCHEMA = {
    */
   saveHistory:  { def: true,     ok: (v) => typeof v === 'boolean' },
 
+  /**
+   * Where a bookmark opens when it is clicked.
+   *
+   * A new tab by default. Replacing the page in front of you is the other
+   * reasonable answer - it is what a bookmarks bar did for twenty years - but
+   * it throws away what you were reading, and the one thing you cannot get
+   * back by clicking again is the page you just lost. Ctrl-click and the
+   * middle button still mean "new tab" whichever way this is set, because
+   * those two gestures mean that everywhere.
+   */
+  bookmarkOpensIn: { def: 'new-tab', ok: (v) => ['new-tab', 'current-tab'].includes(v) },
+
   /* --- Resources -------------------------------------------------- */
   // Null means "size this to the machine", which is different from any number
   // the user could pick, so it needs to be representable. It matters most for

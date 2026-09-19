@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A bookmark opens a new tab, and the list can be edited.** Clicking one replaced the page you were reading, which is what a bookmarks bar did for twenty years and is still the one gesture whose mistake you cannot undo by clicking again — the page you lost is gone. It opens a new tab now, with the old behaviour kept as a preference for anyone who wants it; Ctrl-click and the middle button still mean "new tab" either way, because those mean that in every browser and a preference has no business redefining them. The list in Settings gained add and edit beside the remove that was already there: a name and an address, typed by hand, for the pages you want saved without visiting them first. The star in the toolbar is unchanged. A typed address is held to exactly the same rules as an imported one — `javascript:` is refused there too, which is the whole reason that check exists.
+
 ## 1.5.0
 
 The things a browser is expected to have. Right-clicking a page did nothing at all; `Ctrl+L` could not reach the address bar; there was no find in page; the start page was a wordmark and a box; Settings was eight sections in one scroll with no way to see what they were. None of that was a decision — it was a list of things not written yet, and it is written now.

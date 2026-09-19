@@ -138,6 +138,16 @@ const SECTIONS = {
   browsing: [
     { key: 'searchEngine', label: 'Search engine', type: 'select', options: 'engines' },
     {
+      key: 'bookmarkOpensIn',
+      label: 'Clicking a bookmark',
+      hint: 'Ctrl-click and the middle button always open a new tab.',
+      type: 'select',
+      options: [
+        { value: 'new-tab', name: 'Opens a new tab' },
+        { value: 'current-tab', name: 'Replaces the current tab' }
+      ]
+    },
+    {
       key: 'homepage',
       label: 'New tab page',
       hint: 'Leave empty for the built-in page.',
@@ -966,6 +976,9 @@ async function renderBookmarks() {
   if (!host || !actions) return;
 
   actions.replaceChildren(
+    // First, because adding one by hand is the thing a bookmarks page is for.
+    // Importing is a once-a-year operation and sat above it until now.
+    bookmarkForm(),
     bookmarkAction(
       'Import from a browser on this machine',
       'Looks for Chrome, Edge, Brave, Vivaldi, Arc, Firefox, Zen and their relatives.',
@@ -1093,6 +1106,12 @@ function bookmarkRow(item) {
   open.className = 'ghost-btn';
   open.textContent = 'Open';
   open.addEventListener('click', () => api.send('new-tab', { url: item.url }));
+  const edit = document.createElement('button');
+  edit.className = 'ghost-btn';
+  edit.textContent = 'Edit';
+  // The form replaces the row it edits rather than opening beside it, so the
+  // list never shows a bookmark twice and nothing below it moves.
+  edit.addEventListener('click', () => row.replaceWith(bookmarkForm(item)));
   const remove = document.createElement('button');
   remove.className = 'ghost-btn danger';
   remove.textContent = 'Remove';
@@ -1100,8 +1119,91 @@ function bookmarkRow(item) {
     await api.request('remove-bookmark', { id: item.id });
     renderBookmarks();
   });
-  control.append(open, remove);
+  control.append(open, edit, remove);
 
   row.append(text, control);
+  return row;
+}
+
+/**
+ * The editor, for both jobs it has.
+ *
+ * With an item it edits that one; without, it adds a new bookmark and stays
+ * open so several can be typed in a row. One function for both because they
+ * are the same two fields with the same validation behind them, and two
+ * near-identical forms is how the add path ends up accepting something the
+ * edit path refuses.
+ *
+ * Nothing is validated here. The address is handed to the browser and the
+ * answer comes back: `bookmarks.js` is the one place that decides what may be
+ * stored - it is what refuses `javascript:` in an imported file - and a second
+ * opinion in a renderer would eventually disagree with it.
+ */
+function bookmarkForm(item = null) {
+  const row = document.createElement('div');
+  row.className = 'row bookmark-form';
+
+  const fields = document.createElement('div');
+  fields.className = 'row-text bookmark-fields';
+
+  const title = document.createElement('input');
+  title.type = 'text';
+  title.placeholder = 'Name';
+  title.value = item ? item.title : '';
+  // Typed and unsent, so the governor knows not to discard this page under it.
+  title.setAttribute('data-transient', '');
+
+  const url = document.createElement('input');
+  url.type = 'text';
+  url.placeholder = 'https://';
+  url.value = item ? item.url : '';
+  url.setAttribute('data-transient', '');
+
+  const problem = document.createElement('span');
+  problem.className = 'row-hint';
+
+  fields.append(title, url, problem);
+
+  const control = document.createElement('div');
+  control.className = 'row-control';
+
+  const save = document.createElement('button');
+  save.className = 'ghost-btn';
+  save.textContent = 'Save';
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const res = await api.request('save-bookmark', {
+      id: item ? item.id : '',
+      url: url.value.trim(),
+      title: title.value.trim() || url.value.trim()
+    });
+    save.disabled = false;
+    if (!res || !res.ok) {
+      problem.textContent = (res && res.reason) || 'That could not be saved.';
+      return;
+    }
+    // Adding leaves the form up with empty fields; editing closes it, because
+    // the row it came from is what the user wants to see again.
+    if (!item) { title.value = ''; url.value = ''; problem.textContent = ''; }
+    renderBookmarks();
+  });
+
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost-btn';
+  cancel.textContent = item ? 'Cancel' : 'Clear';
+  cancel.addEventListener('click', () => {
+    if (item) row.replaceWith(bookmarkRow(item));
+    else { title.value = ''; url.value = ''; problem.textContent = ''; }
+  });
+
+  control.append(save, cancel);
+  row.append(fields, control);
+
+  // Enter saves, from either field. A two-field form where the keyboard does
+  // nothing is a form that has to be finished with the mouse.
+  row.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); save.click(); }
+  });
+
   return row;
 }

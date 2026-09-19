@@ -1965,7 +1965,69 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     { timeoutMs: 8000 });
     check('a saved bookmark appears in the bar',
       drawn, `revision ${before} -> ${bookmarks.revision}`);
+
+    // Clicking one opens a tab rather than replacing the page in front of you,
+    // and the preference is what decides that - both halves asserted by
+    // pressing the button in the bar, because a click handler that sends the
+    // right message is not the same as a bar whose buttons are reachable.
+    if (drawn) {
+      const clickFirst = 'document.querySelector("#bookmarks .bookmark").click(), true';
+
+      prefs.set('bookmarkOpensIn', 'new-tab');
+      shell.publish(governor.snapshot());
+      const openedCount = tabs.all().length;
+      await waitFor(async () => await shell.chromeView.webContents.executeJavaScript(clickFirst),
+        { timeoutMs: 2000 });
+      const added = await waitFor(() => tabs.all().length === openedCount + 1, { timeoutMs: 4000 });
+
+      prefs.set('bookmarkOpensIn', 'current-tab');
+      shell.publish(governor.snapshot());
+      // The preference reaches the chrome on a state broadcast, so the click
+      // has to wait for it rather than for the next repaint of the bar - which
+      // never comes, because the bookmarks themselves have not changed.
+      await waitFor(async () => await shell.chromeView.webContents.executeJavaScript(
+        'document.getElementById("bookmarks").dataset.opensIn === "current-tab"'),
+      { timeoutMs: 4000 });
+      const heldCount = tabs.all().length;
+      await shell.chromeView.webContents.executeJavaScript(clickFirst);
+      const held = await waitFor(() => tabs.activeTab()?.url?.includes('bar.test'),
+        { timeoutMs: 6000 }) && tabs.all().length === heldCount;
+
+      check('a bookmark opens a new tab, or replaces the page, as asked',
+        added && held,
+        `new-tab: ${openedCount} -> ${openedCount + (added ? 1 : 0)} tabs; ` +
+        `current-tab: stayed at ${heldCount} and went to ${tabs.activeTab()?.url}`);
+
+      prefs.set('bookmarkOpensIn', 'new-tab');
+      for (const tab of tabs.all().filter((t) => String(t.url).includes('bar.test'))) {
+        tabs.close(tab.id);
+      }
+    }
+
+    // Editing one by hand, which is the manager's whole job. Three properties,
+    // because each of them is a separate way for an editable list to go wrong:
+    // an edit keeps the entry where it was, the scheme rules that refuse an
+    // imported `javascript:` bookmark apply equally to a typed one, and two
+    // rows for one address is a state the store already refuses on the way in.
+    bookmarks.add({ url: 'https://bar.test/two', title: 'Two' });
+    const first = bookmarks.all().find((b) => b.url === 'https://bar.test/one');
+    const positionBefore = bookmarks.all().indexOf(first);
+
+    const renamed = bookmarks.update(first.id, { title: 'One, renamed' });
+    const positionAfter = bookmarks.all().findIndex((b) => b.id === first.id);
+    const script = bookmarks.update(first.id, { url: 'javascript:alert(1)' });
+    const clash = bookmarks.update(first.id, { url: 'https://bar.test/two' });
+
+    check('a bookmark can be edited, and an edit is held to the same rules as an import',
+      renamed?.title === 'One, renamed' && renamed.id === first.id &&
+      positionAfter === positionBefore && script === null && clash === null &&
+      bookmarks.all().find((b) => b.id === first.id)?.url === 'https://bar.test/one',
+      `renamed in place at ${positionAfter} (was ${positionBefore}), ` +
+      `script ${script === null ? 'refused' : 'STORED'}, ` +
+      `duplicate ${clash === null ? 'refused' : 'STORED'}`);
+
     bookmarks.remove('https://bar.test/one');
+    bookmarks.remove('https://bar.test/two');
   }
 
   // The presence check exists to stop someone at an unlocked machine pressing

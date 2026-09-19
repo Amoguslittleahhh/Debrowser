@@ -202,6 +202,41 @@ class Bookmarks {
     return entry;
   }
 
+  /**
+   * Edit one in place.
+   *
+   * Separate from `add`, which is the star's operation and moves an entry to
+   * the front when it is saved again. An edit keeps the entry where it is:
+   * correcting a title should not reorder the bar under the user's pointer.
+   * The id and the date it was saved survive; everything else is re-validated,
+   * so an edited URL is held to the same scheme rules as an imported one.
+   *
+   * @returns {object|null} the stored entry, or null if there is no such
+   *   bookmark, or the new URL is one we will not store
+   */
+  update(id, { url, title, folder } = {}) {
+    const index = this.items.findIndex((b) => b.id === id);
+    if (index === -1) return null;
+    const current = this.items[index];
+
+    const entry = this.normalise({
+      id: current.id,
+      addedAt: current.addedAt,
+      url: url === undefined ? current.url : url,
+      title: title === undefined ? current.title : title,
+      folder: folder === undefined ? current.folder : folder
+    });
+    if (!entry) return null;
+
+    // Two bookmarks for one address is the state `add` already refuses, and an
+    // edit is the other way of reaching it.
+    if (this.items.some((b, i) => i !== index && b.url === entry.url)) return null;
+
+    this.items[index] = entry;
+    this.save();
+    return entry;
+  }
+
   remove(idOrUrl) {
     const before = this.items.length;
     const url = safeUrl(idOrUrl);

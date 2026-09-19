@@ -225,6 +225,19 @@ el.downloads.addEventListener('click', openDownloads);
  */
 let bookmarksRevision = null;
 
+/**
+ * Where a clicked bookmark goes.
+ *
+ * Kept on the bar itself rather than in a variable here, because the bar is
+ * only redrawn when the bookmarks change while this preference can change at
+ * any time - so the click handler reads it at the click, from the one place
+ * that is always current, and the bar's state is visible in the inspector
+ * beside the buttons it governs.
+ */
+function bookmarkOpensIn() {
+  return el.bookmarks.dataset.opensIn === 'current-tab' ? 'current-tab' : 'new-tab';
+}
+
 /** Titles are trimmed to a few words: a bar is a row of labels, not a list. */
 const BOOKMARK_LABEL_MAX = 22;
 
@@ -261,10 +274,18 @@ function renderBookmarks(items) {
 
     button.append(chip, label);
 
-    // Same three gestures a bookmark has in any browser.
+    // Same three gestures a bookmark has in any browser. A plain click follows
+    // the preference - a new tab unless the user asked for the other - while
+    // Ctrl-click and the middle button always mean a new tab, because those two
+    // mean that in every browser and a preference should not redefine them.
+    //
+    // The preference is read here, at the click, rather than captured when the
+    // bar was drawn: the bar is only redrawn when the bookmarks themselves
+    // change, so a captured value would go on opening tabs the old way until
+    // the next time the user saved one.
     button.addEventListener('click', (event) => {
-      if (event.ctrlKey || event.metaKey) api.send('new-tab', { url: item.url });
-      else api.send('navigate', { url: item.url });
+      const newTab = event.ctrlKey || event.metaKey || bookmarkOpensIn() !== 'current-tab';
+      api.send(newTab ? 'new-tab' : 'navigate', { url: item.url });
     });
     button.addEventListener('auxclick', (event) => {
       if (event.button === 1) api.send('new-tab', { url: item.url });
@@ -806,6 +827,7 @@ api.onMessage((message) => {
 
 api.onState((state) => {
   applyThemePrefs(state.prefs);
+  if (state.prefs) el.bookmarks.dataset.opensIn = state.prefs.bookmarkOpensIn || 'new-tab';
   renderTabs(state.tabs);
   renderToolbar(state);
   renderMeter(state);

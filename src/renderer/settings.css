@@ -412,3 +412,26 @@ section.landed .rows {
   box-shadow: -3px 0 0 var(--accent);
   transition: box-shadow var(--slow) ease;
 }
+
+/*
+ * The bookmark editor: two fields where a row usually has a label and a hint.
+ *
+ * They take the label column rather than the control column, because an
+ * address is long and the control column is 172px of right-aligned buttons.
+ * The name is narrower than the address for the same reason names are shorter
+ * than URLs - giving them equal halves wastes the half that needs the room.
+ */
+.bookmark-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 8px;
+  align-items: center;
+}
+.bookmark-fields input[type="text"] { min-width: 0; width: 100%; }
+/* The problem line spans both fields and takes no room until there is one. */
+.bookmark-fields .row-hint { grid-column: 1 / -1; margin: 0; color: var(--crit); }
+.bookmark-fields .row-hint:empty { display: none; }
+
+/* A form is one row taller than the rows around it; the buttons stay with the
+   fields rather than drifting to the middle of that extra height. */
+.bookmark-form .row-control { align-self: center; }
