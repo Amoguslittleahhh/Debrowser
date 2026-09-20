@@ -379,18 +379,38 @@ static void available_bytes(long long *avail, long long *backing_total,
 int main(void) {
     char line[128];
 
-    /* Unbuffered both ways: the parent reads replies synchronously. */
-    setvbuf(stdout, NULL, _IOLBF, 0);
+    /*
+     * Unbuffered, not line-buffered.
+     *
+     * `setvbuf(stdout, NULL, _IOLBF, 0)` is the obvious thing to write and it
+     * is wrong on Windows in two separate ways, which is what this helper
+     * shipped with and what made every Windows reply - `caps` and `avail`
+     * alike - read as "the helper did not answer". MSVC requires size between
+     * 2 and INT_MAX when the buffer is NULL, and an invalid parameter invokes
+     * the invalid-parameter handler, which in a release build terminates the
+     * process. And MSVC documents _IOLBF as behaving like full buffering on
+     * Win32 anyway, so surviving it would only have left each reply sitting in
+     * a buffer that never fills.
+     *
+     * _IONBF ignores the size argument and is valid everywhere. For a protocol
+     * that writes one short line and waits, unbuffered is what we want. The
+     * explicit flushes below cost nothing then and keep the replies arriving
+     * if anyone ever reintroduces a buffer. `tools/mem-probe.c` carries the
+     * same note for the same reason.
+     */
+    setvbuf(stdout, NULL, _IONBF, 0);
 
     while (fgets(line, sizeof(line), stdin)) {
         if (strncmp(line, "caps", 4) == 0) {
             printf("caps %s %d\n", PLATFORM_NAME, self_test());
+            fflush(stdout);
             continue;
         }
         if (strncmp(line, "avail", 5) == 0) {
             long long avail, total, free_;
             available_bytes(&avail, &total, &free_);
             printf("avail %lld %lld %lld\n", avail, total, free_);
+            fflush(stdout);
             continue;
         }
         long pid = 0;

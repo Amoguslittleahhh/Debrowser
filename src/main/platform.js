@@ -155,6 +155,14 @@ const PROBE_TIMEOUT_MS = 400;
  */
 const PROBE_COLD_TIMEOUT_MS = 5000;
 const TRIM_TIMEOUT_MS = 2000;
+/**
+ * What the *first* trim-helper answer may take, for the same reason the probe
+ * has one: the spawn and, on Windows, a first-run scan of an unsigned binary.
+ * `caps` and `avail` are usually the first two things asked of this helper and
+ * both are cheap once it is running, so a cold deadline costs nothing in the
+ * steady state and avoids reporting a healthy helper as absent.
+ */
+const TRIM_COLD_TIMEOUT_MS = 5000;
 
 /**
  * How long a pid stays "just trimmed".
@@ -214,6 +222,7 @@ class TrimHelper extends HelperProcess {
       name: 'mem-trim',
       binary: TRIM_BINARY,
       timeoutMs: TRIM_TIMEOUT_MS,
+      coldTimeoutMs: TRIM_COLD_TIMEOUT_MS,
       replyId,
       // Linux and Windows have a mechanism; macOS has none that a program may
       // reach - `memorystatus_control` is private and `MADV_FREE_REUSABLE` only
