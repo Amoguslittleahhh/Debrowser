@@ -550,11 +550,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `tier=${big.tier} live=${big.isLive}`);
 
     await sleep(1500);
-    const after = require('./memory').readProcessMemory(big.pid);
-    const reclaimed = after ? privateBefore - after.privateMB : 0;
+    // Read the "after" figure from the same two sources the governor reads
+    // `privateMB` from, in the same order: /proc on Linux, the measurement
+    // helper everywhere else. Reading only /proc made this check unsatisfiable
+    // on Windows - `readProcessMemory` returns null off Linux by design, so
+    // `after` was always null and a tier that had just reclaimed 90MB reported
+    // "0MB out". The before figure came from the governor and the after figure
+    // from somewhere that does not exist on that platform, which is not a
+    // comparison at all.
+    const afterDetail = require('./memory').readProcessMemory(big.pid);
+    let afterMB = afterDetail ? afterDetail.privateMB : null;
+    if (afterMB == null) {
+      const probed = await platform.measureProcess(big.pid).catch(() => null);
+      if (probed) afterMB = probed.privateBytes / (1024 * 1024);
+    }
+    const reclaimed = afterMB == null ? 0 : privateBefore - afterMB;
     check('hibernating actually removes memory from the renderer',
       reclaimed > 5,
-      `private ${privateBefore.toFixed(0)}MB -> ${after ? after.privateMB.toFixed(0) : '?'}MB ` +
+      `private ${privateBefore.toFixed(0)}MB -> ${afterMB == null ? '?' : afterMB.toFixed(0)}MB ` +
       `(${reclaimed.toFixed(0)}MB out)`);
 
     // The whole point: no reload, no lost state.
