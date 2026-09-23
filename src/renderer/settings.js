@@ -702,7 +702,8 @@ document.getElementById('check-updates')?.addEventListener('click', async () => 
  * The browser rate-limits this, so scrolling past twice is one check; see
  * MIN_AUTO_INTERVAL_MS in updater.js. The observer is disconnected after the
  * first sighting anyway, since a section that has been seen once has been asked
- * about once.
+ * about once. It is sent as `auto`, so it is held to the automatic-updates
+ * switch too: with that off, looking is not asking - only the button is.
  */
 {
   const section = document.querySelector('section[data-section="updates"]');
@@ -710,7 +711,7 @@ document.getElementById('check-updates')?.addEventListener('click', async () => 
     const seen = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
       seen.disconnect();
-      api.request('check-for-updates').then(renderUpdateState);
+      api.request('check-for-updates', { auto: true }).then(renderUpdateState);
     }, { threshold: 0.4 });
     seen.observe(section);
   }
