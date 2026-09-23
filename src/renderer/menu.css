@@ -41,7 +41,7 @@ html, body {
    * session and where a shadow would be permanent.
    */
   box-shadow: var(--shadow-menu);
-  animation: menu-in 130ms var(--ease);
+  animation: menu-in 160ms var(--ease-out);
   transform-origin: top right;
   outline: none;                 /* it holds focus so the keyboard reaches it */
 }
@@ -69,7 +69,7 @@ body.calm .sheet { animation: none; }
   font: inherit;
   text-align: left;
   cursor: default;
-  transition: background-color var(--fast) ease, color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 /*
@@ -187,7 +187,7 @@ body.calm .sheet { animation: none; }
   font-size: var(--fs-lead);
   line-height: 1;
   cursor: default;
-  transition: background-color var(--fast) ease, border-color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 .step:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 16%, transparent);

@@ -1,32 +1,10 @@
 /*
  * Downloads. Layout, header and notes come from settings.css, which this page
- * links first; the search field and the list frame are shared with the history
- * page and repeated here rather than linked, because history.css also carries a
- * day-heading treatment and a visit row that mean nothing to a download.
+ * links first, including the search field and the tools beside it; the list
+ * frame is shared with the history page and repeated here rather than linked,
+ * because history.css also carries a day-heading treatment and a visit row
+ * that mean nothing to a download.
  */
-
-.head-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  justify-content: flex-end;
-  margin-right: 14px;
-}
-
-#q {
-  width: 260px;
-  height: 30px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-input);
-  color: var(--text);
-  font: inherit;
-  outline: none;
-  user-select: text;
-}
-#q:focus { border-color: var(--accent); }
 
 .bar {
   display: flex;
@@ -56,7 +34,7 @@
   gap: 12px;
   padding: 10px 10px 10px 12px;
   border-radius: var(--radius);
-  transition: background-color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease);
 }
 .download:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 

@@ -73,7 +73,7 @@
   border: 1px solid transparent;
   font: inherit;
   cursor: default;
-  transition: background-color var(--fast) ease, border-color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 /* No focus rule here: theme.css declares one `:focus-visible` treatment for
    every focusable thing in the browser's own UI, so a new button is correct

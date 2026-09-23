@@ -166,12 +166,24 @@ body[data-platform="linux"] { --caption-right: 146px; }
   background: transparent;
   border: none;
   color: var(--text-dim);
-  transition: background-color var(--fast) ease, color var(--fast) ease;
-  animation: tab-in var(--slow) var(--ease);
+  /* The strip's own tab widths can depend on nothing inside a tab, so each is
+     a size container - which is what lets a narrow tab drop its title
+     instead of showing the first two letters of it. See the end of this
+     section. */
+  container: tab / inline-size;
+  /* Containment zeroes a tab's intrinsic width, and the strip hugs its tabs'
+     intrinsic widths - so without this every tab collapsed to the floor. It
+     is the width the basis above asks for. */
+  contain-intrinsic-inline-size: 240px;
+  transition: background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+  animation: tab-in var(--slow) var(--ease-out);
 }
+/* On quickly, off slowly: a sweep across the strip leaves a short trail
+   rather than strobing each tab it crosses. */
+.tab:hover { transition-duration: var(--instant); }
 
 @keyframes tab-in {
-  from { opacity: 0; transform: translateY(3px) scaleX(0.96); }
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
 }
 
@@ -239,7 +251,10 @@ body[data-platform="linux"] { --caption-right: 146px; }
   background: var(--accent);
 }
 
-body[data-tabs="compact"] .tab { flex-basis: 150px; max-width: 170px; gap: 6px; }
+body[data-tabs="compact"] .tab {
+  flex-basis: 150px; max-width: 170px; gap: 6px;
+  contain-intrinsic-inline-size: 150px;
+}
 
 .tab-title {
   flex: 1;
@@ -364,20 +379,22 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
 
 .tab-close {
   flex: none;
+  display: grid;
+  place-items: center;
   width: 18px;
   height: 18px;
-  line-height: 16px;
-  text-align: center;
   border: none;
   border-radius: 4px;
   background: transparent;
   color: var(--text-dim);
-  font-size: 15px;
   cursor: default;
   opacity: 0;
+  transition: opacity var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
+.tab-close .x-icon { width: 11px; height: 11px; stroke-width: 1.6; }
 
-.tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
+.tab:hover .tab-close, .tab.active .tab-close,
+.tab-close:focus-visible { opacity: 1; }
 /* `background-color`, not the `background` shorthand: the shorthand resets
    `background-clip`, which is what keeps the hover square the size of the
    cross rather than the size of the target. See "Hit targets" below. */
@@ -433,7 +450,7 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
   background: transparent;
   color: var(--text-dim);
   cursor: default;
-  transition: background-color var(--fast) ease, color var(--fast) ease,
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
               transform var(--fast) var(--ease);
 }
 
@@ -441,8 +458,8 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
    chrome. A grey hover on a grey button is the state you have to look for. */
 .icon-btn:hover { background: var(--wash); color: var(--text); }
 /* A press that moves is the cheapest possible confirmation that it registered. */
-.icon-btn:active:not(:disabled) { transform: scale(0.92); }
-.new-tab:active { transform: scale(0.9); }
+.icon-btn:active:not(:disabled),
+.new-tab:active { transform: var(--press); }
 .icon-btn:disabled { opacity: 0.32; }
 .icon-btn:disabled:hover { background: transparent; color: var(--text-dim); }
 
@@ -473,7 +490,7 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
   color: var(--text-dim);
   cursor: default;
   -webkit-app-region: no-drag;
-  transition: background-color var(--fast) ease, color var(--fast) ease,
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
               transform var(--fast) var(--ease);
 }
 .new-tab:hover { background: var(--wash); color: var(--accent); }
@@ -493,8 +510,8 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
      enough that an unbordered pill reads as a smudge rather than as a field -
      which is what it looked like photographed. */
   border: 1px solid var(--border);
-  transition: background-color var(--fast) ease, border-color var(--fast) ease,
-              box-shadow var(--fast) ease;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease),
+              box-shadow var(--fast) var(--ease);
 }
 
 .omnibox:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); }
@@ -962,13 +979,16 @@ body.with-bookmarks .bookmarks { display: flex; }
   font: inherit;
   font-size: var(--fs-small);
   cursor: default;
-  transition: background-color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease);
 }
 
 .bookmark:hover { background: var(--wash-soft); }
 .bookmark:active { background: var(--wash); }
 
 .bookmark-label {
+  /* Or the ellipsis never applies: a flex item will not shrink below its
+     content, and a wide-glyph title ran on into the next bookmark. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1135,7 +1155,7 @@ body[data-sidebar="true"][data-sidebar-open="true"] .pin {
   color: var(--text-dim);
   cursor: default;
   -webkit-app-region: no-drag;
-  transition: background-color var(--fast) ease, color var(--fast) ease,
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
               opacity 140ms ease;
 }
 
@@ -1330,3 +1350,27 @@ body[data-floating="true"] .toolbar {
   line-height: 1;
 }
 .bookmark-more:hover { color: var(--text); }
+
+/* ---------------------------------------------------------------- */
+/* Narrow tabs                                                       */
+/* ---------------------------------------------------------------- */
+
+/*
+ * What a tab keeps as it narrows, in the order Chrome gives things up.
+ *
+ * Past the floor of a readable title the strip used to go on drawing one -
+ * two letters and a clipped third, or on a loading tab a lone stroke of a
+ * glyph beside the spinner. Below that width a tab is its icon, centred; the
+ * active one trades the icon for its close button, since that is the one
+ * thing you can still do to it; and a background tab stops offering a close
+ * button a stray click could hit.
+ */
+@container tab (max-width: 96px) {
+  .tab-title, .tier { display: none; }
+  .tab-icon { margin-inline: auto; }
+  .tab:not(.active) .tab-close { display: none; }
+}
+@container tab (max-width: 64px) {
+  .tab.active .tab-icon { display: none; }
+  .tab.active .tab-close { margin-inline: auto; opacity: 1; }
+}

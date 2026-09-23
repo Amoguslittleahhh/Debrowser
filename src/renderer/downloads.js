@@ -61,7 +61,7 @@ function describe(item) {
     case 'done':
       return `Finished — ${mb(item.received)} over ${conns}`;
     case 'failed':
-      return `Failed — ${item.error}`;
+      return item.error ? `Failed — ${item.error}` : 'Failed';
     case 'cancelled':
       return 'Cancelled';
     default: {
@@ -266,7 +266,12 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     // Escape clears the search first and closes the page only when there is
     // nothing to clear - the order every search field in a browser uses.
-    if (el.query.value) { el.query.value = ''; load(); }
+    // Through an `input` event, so the search reloads and the page stops
+    // reporting a half-typed query that is no longer there.
+    if (el.query.value) {
+      el.query.value = '';
+      el.query.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     else api.send('close-tab');
   }
 });

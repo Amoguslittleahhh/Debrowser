@@ -110,6 +110,7 @@ module.exports = [
         defaultIcon: 'readonly',
         siteOf: 'readonly',
         siteChip: 'readonly',
+        crossIcon: 'readonly',
         menuIcon: 'readonly',
         wireMenuKeyboard: 'readonly',
         URLSearchParams: 'readonly',

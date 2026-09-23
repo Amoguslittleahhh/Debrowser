@@ -85,6 +85,7 @@ const COMMANDS = new Set([
   'complete',
   'toggle-bookmark',
   'remove-bookmark',
+  'save-bookmark',
   'bookmark-profiles',
   'import-from-profile',
   'import-bookmark-file',

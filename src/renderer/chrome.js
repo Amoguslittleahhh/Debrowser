@@ -54,11 +54,9 @@ const el = {
   findClose: document.getElementById('find-close')
 };
 
-// The whole pill focuses the address bar, not just the text inside it.
-//
-// The input is 20px tall inside a 32px pill, so six pixels along the top and
-// bottom of the widest control in the browser did nothing at all when clicked -
-// which reads as the address bar ignoring you rather than as a near miss.
+// The whole pill focuses the address bar, not just the text inside it: the
+// padding and the padlock are the pill's, and a click on them that did nothing
+// would read as the address bar ignoring you rather than as a near miss.
 el.omnibox.addEventListener('mousedown', (event) => {
   if (event.target === el.url) return;      // let the caret land where it was aimed
   event.preventDefault();                   // no focus flash on the pill itself
@@ -78,6 +76,7 @@ let progressRunning = null;
  */
 let starred = null;
 let starUrl = null;
+let starRevision = null;
 
 async function refreshStar(url) {
   if (!url) { setStar(false); starUrl = null; return; }
@@ -147,7 +146,9 @@ el.tabs.addEventListener('wheel', (event) => {
   const by = event.deltaX || event.deltaY;
   if (!by) return;
   event.preventDefault();
-  el.tabs.scrollLeft += by;
+  // Instant: the strip is `scroll-behavior: smooth`, and adding to a
+  // scrollLeft that is still mid-animation dropped distance on every notch.
+  el.tabs.scrollBy({ left: by, behavior: 'instant' });
 }, { passive: false });
 
 el.pin.addEventListener('click', () => api.send('toggle-sidebar-pin'));
@@ -440,6 +441,8 @@ function fitBookmarks() {
     if (used > room) { cut = i; break; }
   }
   if (cut === -1) return;              // everything fits; no chevron
+  // `used` still counts the button that overflowed, which is going anyway.
+  used -= buttons[cut].offsetWidth + BOOKMARK_GAP;
 
   // The chevron needs room too, so one more may have to go to make space for
   // the thing that says the rest are there.
@@ -486,10 +489,21 @@ let reloadShows = null;
 /* ------------------------------------------------------------------ */
 
 function renderTabs(tabs) {
-  const seen = new Set();
+  // Gone tabs leave first. Left in place until after the ordering pass, a
+  // closed tab sat at its old index and every tab after it was re-inserted
+  // around it - and moving a node restarts its CSS animation, so closing one
+  // tab replayed the opening animation on every tab to its right.
+  const live = new Set(tabs.map((tab) => tab.id));
+  for (const [id, node] of tabEls) {
+    if (!live.has(id)) {
+      node.root.remove();
+      tabEls.delete(id);
+    }
+  }
+  // A tab opened while the widths are pinned has to get its share.
+  if (tabs.some((tab) => !tabEls.has(tab.id))) releaseTabWidths();
 
   tabs.forEach((tab, index) => {
-    seen.add(tab.id);
     let node = tabEls.get(tab.id);
 
     if (!node) {
@@ -503,14 +517,33 @@ function renderTabs(tabs) {
 
     updateTabElement(node, tab);
   });
-
-  for (const [id, node] of tabEls) {
-    if (!seen.has(id)) {
-      node.root.remove();
-      tabEls.delete(id);
-    }
-  }
 }
+
+/*
+ * Closing tabs in a row, the way Chrome does it.
+ *
+ * With every tab flexing, a close widens the rest and the next tab's x lands
+ * somewhere other than under the pointer, so closing five tabs means chasing
+ * five buttons. A close from the pointer pins each tab at the width it has
+ * now; the strip gives the room back once the pointer leaves it.
+ */
+let tabWidthsFrozen = false;
+
+function freezeTabWidths() {
+  if (document.body.dataset.layout === 'left') return;
+  for (const node of tabEls.values()) {
+    node.root.style.flex = `0 0 ${node.root.getBoundingClientRect().width}px`;
+  }
+  tabWidthsFrozen = true;
+}
+
+function releaseTabWidths() {
+  if (!tabWidthsFrozen) return;
+  tabWidthsFrozen = false;
+  for (const node of tabEls.values()) node.root.style.flex = '';
+}
+
+el.tabs.addEventListener('mouseleave', releaseTabWidths);
 
 function createTabElement(id) {
   const root = document.createElement('div');
@@ -544,38 +577,9 @@ function createTabElement(id) {
   icon.className = 'tab-icon';
   icon.append(chip, favicon);
 
-  /*
-   * An icon that does not load falls back to the letter, rather than to a
-   * broken image.
-   *
-   * This is not an edge case. Chromium reports a favicon URL for *every* page:
-   * measured, a page that declares no icon at all still arrives here as
-   * `<origin>/favicon.ico`, because that is the address Chromium would try.
-   * Plenty of sites do not serve it. Without this the strip showed a broken
-   * image where the site's logo should be - worse than the letter it replaced,
-   * and the reason tabs looked wrong.
-   */
-  // The fallbacks and the order they are tried in live in `showIcon`, which the
-  // bookmarks bar, history and the new tab page all share - see theme.js. What
-  // is left here is only what this view does when the chain runs out.
-
-  /*
-   * And the chip goes away when one *does* load.
-   *
-   * The two are stacked, and the original comment claimed the icon "covers" the
-   * letter underneath. It does not. Nearly every favicon is a transparent PNG
-   * or SVG, and `object-fit: contain` letterboxes the ones that are not square,
-   * so the hue-coloured square and its initial showed through and around every
-   * site logo in the browser - Gmail's M sitting on a green tile with a `g`
-   * behind it. The chip is a *fallback*, so it has to stop painting once it has
-   * been replaced.
-   *
-   * A class rather than `chip.hidden = true`. Both work now - theme.css carries
-   * an author-level `[hidden]` rule, added after that collision turned up in
-   * three more places - but this is a state with a transition on it, and a
-   * class is what a state should be.
-   */
-
+  // Which icon addresses are tried, and the letter it falls back to, live in
+  // `showIcon` in theme.js - shared with the bookmarks bar, history and the
+  // new tab page. `has-icon` on the holder retires the letter once one loads.
 
   // A button, not a decoration: the thing you want when a tab starts talking is
   // to silence *that* tab, and the mark saying which one it is should be what
@@ -593,13 +597,13 @@ function createTabElement(id) {
 
   const close = document.createElement('button');
   close.className = 'tab-close';
-  close.textContent = '×';
+  close.append(crossIcon());
   close.setAttribute('aria-label', 'Close tab');
 
   root.append(tier, icon, title, audio, close);
 
   root.addEventListener('mousedown', (event) => {
-    if (event.button === 1) { api.send('close-tab', { id }); return; }
+    if (event.button === 1) { freezeTabWidths(); api.send('close-tab', { id }); return; }
     if (event.button === 0) api.send('activate-tab', { id });
   });
 
@@ -646,6 +650,8 @@ function createTabElement(id) {
   close.addEventListener('mousedown', (event) => event.stopPropagation());
   close.addEventListener('click', (event) => {
     event.stopPropagation();
+    // `detail` is 0 for a keyboard press, which has no pointer to keep in place.
+    if (event.detail > 0) freezeTabWidths();
     api.send('close-tab', { id });
   });
 
@@ -658,8 +664,13 @@ function updateTabElement(node, tab) {
 
   if (prev.title !== tab.title) {
     node.title.textContent = tab.title || 'New tab';
-    node.root.title = `${tab.title || ''}\n${tab.url || ''}`;
     prev.title = tab.title;
+  }
+  // Its own check: the address changes on navigations that keep the title.
+  const tip = `${tab.title || ''}\n${tab.url || ''}`;
+  if (prev.tip !== tip) {
+    node.root.title = tip;
+    prev.tip = tip;
   }
 
   // The icon is re-armed when the reported address changes *or* when the site
@@ -686,17 +697,21 @@ function updateTabElement(node, tab) {
   // The chip only changes when the site does, which is far less often than the
   // URL: a page moving between paths on one host keeps its letter and colour,
   // and rewriting them on every navigation would be work for no visible change.
-  const host = site;
-  if (prev.host !== host) {
-    node.chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
-    node.chip.style.setProperty('--hue', String(siteHue(host)));
-    prev.host = host;
+  if (prev.host !== site) {
+    node.chip.textContent = (site.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+    node.chip.style.setProperty('--hue', String(siteHue(site)));
+    prev.host = site;
   }
 
   if (prev.tier !== tab.tier) {
     node.tier.dataset.tier = tab.tier;
-    node.tier.title = tierLabel(tab);
     prev.tier = tab.tier;
+  }
+  // The label carries a live figure, so it is compared as text, not by tier.
+  const tierTip = tierLabel(tab);
+  if (prev.tierTip !== tierTip) {
+    node.tier.title = tierTip;
+    prev.tierTip = tierTip;
   }
 
   if (prev.active !== tab.visible) {
@@ -974,6 +989,8 @@ el.url.addEventListener('input', async () => {
 });
 
 el.url.addEventListener('keydown', (event) => {
+  // The Enter that confirms a CJK composition belongs to the IME, not to us.
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Enter') {
     api.send('navigate', { url: el.url.value });
     el.url.blur();
@@ -1018,6 +1035,7 @@ el.findInput.addEventListener('input', () => {
 });
 
 el.findInput.addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Enter') {
     api.send(event.shiftKey ? 'find-prev' : 'find-next', { query: el.findInput.value });
     event.preventDefault();
@@ -1077,8 +1095,16 @@ api.onMessage((message) => {
 
 api.onState((state) => {
   applyThemePrefs(state.prefs);
+  // Pinned widths are a top-strip idea; down the side `flex` is a height.
+  if (document.body.dataset.layout === 'left') releaseTabWidths();
   if (state.prefs) el.bookmarks.dataset.opensIn = state.prefs.bookmarkOpensIn || 'new-tab';
   renderTabs(state.tabs);
+  // Bookmarks changed somewhere else - Settings, an import - so the star's
+  // cached answer for this page is no longer one.
+  if (state.bookmarksRevision !== starRevision) {
+    starRevision = state.bookmarksRevision;
+    starUrl = null;
+  }
   renderToolbar(state);
   renderMeter(state);
 

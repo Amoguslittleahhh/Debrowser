@@ -30,6 +30,9 @@ header {
 h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: var(--ls-title); }
 
 .ghost {
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text-dim);
@@ -40,6 +43,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
   height: 24px;
 }
 .ghost:hover { background: var(--border); color: var(--text); }
+.ghost .x-icon { width: 14px; height: 14px; }
 
 .summary {
   display: grid;
@@ -65,10 +69,8 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 
 .stat-value { font-size: var(--fs-lead); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
 .stat-label {
-  font-size: var(--fs-micro);
+  font-size: var(--fs-small);
   color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: var(--ls-label);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -146,7 +148,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
   cursor: default;
   opacity: 0;
 }
-.row:hover .row-action { opacity: 1; }
+.row:hover .row-action, .row-action:focus-visible { opacity: 1; }
 .row-action:hover { color: var(--text); border-color: var(--text-dim); }
 .row-action:disabled { opacity: 0 !important; }
 

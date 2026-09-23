@@ -4,8 +4,12 @@ html, body { height: 100%; }
 
 body {
   display: grid;
-  place-items: center;
-  overflow: hidden;
+  /* `safe`, so a page taller than the window starts at the top and scrolls
+     rather than centring its head off-screen where nothing can reach it. */
+  place-items: safe center;
+  /* Scrolls rather than clips: Ctrl+wheel zooms this page like any other, and
+     at 200% the tiles fell off the bottom with no way to reach them. */
+  overflow: auto;
 }
 
 /*
@@ -19,15 +23,21 @@ body {
 main {
   width: min(760px, calc(100vw - 48px));
   margin-top: -8vh;          /* optically centred rather than measured-centred */
+  padding: var(--s6) 0;      /* and never flush against an edge once it scrolls */
   text-align: center;
 }
 
+/*
+ * The name, quietly. A 34px bold wordmark over a pill-shaped field is the
+ * stock start page, and this one is opened more than any other page in the
+ * browser - it should read as the browser's own, not as a landing page.
+ */
 #wordmark {
-  margin: 0 0 22px;
-  font-size: var(--fs-hero);
-  font-weight: var(--fw-bold);
-  letter-spacing: var(--ls-title);
-  color: var(--text);
+  margin: 0 0 var(--s4);
+  font-size: var(--fs-title);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.01em;
+  color: var(--text-dim);
   /* One short fade on open. Cheap - opacity and transform stay on the
      compositor - and it runs once rather than looping, so an idle new tab
      costs nothing at all.
@@ -38,19 +48,19 @@ main {
      never runs it, leaving the page permanently faded. Without a fill mode the
      element's own style is what shows, so the worst case is no animation rather
      than an invisible page. */
-  animation: rise 260ms cubic-bezier(0.2, 0, 0.2, 1);
+  animation: rise 140ms var(--ease-out);
 }
 
-#search { animation: rise 260ms cubic-bezier(0.2, 0, 0.2, 1) 40ms; }
-
+/* Opacity only, and short. This page opens on Ctrl+T dozens of times a day,
+   and anything that slides in on a shortcut that frequent reads as lag. */
 @keyframes rise {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 /* Anyone who has asked not to see motion sees none. */
 @media (prefers-reduced-motion: reduce) {
-  #wordmark, #search { animation: none; }
+  #wordmark { animation: none; }
 }
 
 /*
@@ -63,14 +73,14 @@ main {
  * tabs in the background routinely, so that is the common case, not the odd
  * one. newtab.js sets this until the page is actually on screen.
  */
-body.still #wordmark, body.still #search { animation: none; }
+body.still #wordmark { animation: none; }
 
 #q {
   width: 100%;
   height: 46px;
   padding: 0 18px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-lg);
   background: var(--bg-input);
   color: var(--text);
   font: inherit;
@@ -78,12 +88,14 @@ body.still #wordmark, body.still #search { animation: none; }
   outline: none;
   user-select: text;
   cursor: text;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
 }
+
+#q:hover { border-color: color-mix(in srgb, var(--text) 18%, var(--border)); }
 
 #q:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: var(--ring);
 }
 
 .stat {
@@ -120,7 +132,7 @@ body.still #wordmark, body.still #search { animation: none; }
 
 .tile {
   position: relative;
-  animation: rise 260ms var(--ease) 80ms;
+  animation: rise 140ms var(--ease-out);
 }
 
 body.still .tile { animation: none; }
@@ -135,26 +147,30 @@ body.still .tile { animation: none; }
   gap: var(--s2);
   width: 100%;
   min-width: 0;
-  padding: 10px 11px;
-  border: 1px solid var(--border-soft);
+  /* No card. Eight bordered boxes in a grid is the template everyone has seen;
+     a row of marks and names that only gets a surface under the pointer is
+     what a list of shortcuts actually is. */
+  padding: 9px 10px;
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  background: var(--bg-raised);
+  background: transparent;
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: default;
-  transition: background-color var(--fast) ease, border-color var(--fast) ease,
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease),
               transform var(--fast) var(--ease);
 }
 
 .tile-open:hover {
-  background: color-mix(in srgb, var(--accent) 6%, var(--bg-raised));
-  border-color: var(--border);
+  background: var(--bg-raised);
+  border-color: var(--border-soft);
+  transition-duration: var(--instant);
 }
 
 /* A press that moves is the cheapest way to make a tile feel like a button
    rather than a picture of one. */
-.tile-open:active { transform: scale(0.985); }
+.tile-open:active { transform: scale(0.98); }
 
 .tile-label {
   flex: 1;
@@ -163,7 +179,9 @@ body.still .tile { animation: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-small);
+  color: var(--text-dim);
 }
+.tile-open:hover .tile-label { color: var(--text); }
 
 /*
  * The remove button appears on hover, and is a real target when it does.
@@ -184,10 +202,8 @@ body.still .tile { animation: none; }
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--text-dim);
-  font-size: 13px;
-  line-height: 1;
   opacity: 0;
-  transition: opacity var(--fast) ease, color var(--fast) ease;
+  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 .tile:hover .tile-forget,

@@ -61,7 +61,7 @@
   gap: 10px;
   padding: 8px;
   border-radius: var(--radius);
-  transition: background-color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease);
 }
 .dl:hover { background: var(--wash-soft); }
 
@@ -139,6 +139,8 @@
      edge of the list was ragged - visible the moment a running download sits
      above a finished one. The width is the widest label this button carries,
      and everything shorter centres inside it. */
+  display: inline-grid;
+  place-items: center;
   min-width: 56px;
   height: 22px;
   padding: 0 6px;

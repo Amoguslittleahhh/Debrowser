@@ -85,13 +85,8 @@
   --lh-tight: 1.25;     /* headings and single-line rows */
   --lh-body: 1.45;      /* anything that can wrap */
 
-  /*
-   * Tracking. Calibri is loose by default at UI sizes, so headings are pulled
-   * in slightly and small caps labels are opened out - the opposite directions,
-   * for the same reason: each is set at a size the face was not optimised for.
-   */
+  /* Calibri is loose at heading sizes, so headings are pulled in slightly. */
   --ls-title: -0.01em;
-  --ls-label: 0.06em;
 }
 
 /* ------------------------------------------------------------------ */
@@ -351,6 +346,17 @@ body {
   --shadow-menu: 0 14px 34px -12px rgba(18, 16, 12, 0.55), 0 2px 6px -2px rgba(18, 16, 12, 0.3);
 }
 
+/* The shared close cross - see `crossIcon()` in theme.js. */
+.x-icon {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+}
+
 /* ------------------------------------------------------------------ */
 /* The site chip                                                       */
 /* ------------------------------------------------------------------ */
@@ -419,10 +425,29 @@ body .chip.has-icon {
  * chrome is a live renderer for the whole life of the window, and an animation
  * that reflows it would undo part of what the governor saves.
  */
+/*
+ * Three curves, each with one job (Material 3's standard and emphasized
+ * pair; Fluent 2 carries the same shapes):
+ *
+ *   --ease       something already on screen moving or changing
+ *   --ease-out   something arriving - fast start, long settle, which is what
+ *                makes a menu feel like it answered rather than loaded
+ *   --ease-in    something leaving, and leaving quicker than it came
+ *
+ * Hover colour goes on in --fast and comes off slower (--slow), so sweeping
+ * the pointer across a row of controls leaves a short trail rather than a
+ * strobe.
+ */
 :root {
-  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-in: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --instant: 70ms;
   --fast: 120ms;
-  --slow: 220ms;
+  --slow: 200ms;
+  /* How far a pressed control gives. Enough to feel, not enough to see
+     the label wobble. */
+  --press: scale(0.96);
 }
 
 /* Two ways to ask for stillness, and both are honoured everywhere. */

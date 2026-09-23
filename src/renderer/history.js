@@ -122,7 +122,7 @@ function row(entry) {
   const forget = document.createElement('button');
   forget.className = 'forget';
   forget.type = 'button';
-  forget.textContent = '×';
+  forget.append(crossIcon());
   forget.setAttribute('aria-label', `Forget ${title.textContent}`);
   forget.addEventListener('click', async () => {
     const res = await api.request('delete-history', { id: entry.id });
@@ -167,9 +167,14 @@ function render(items) {
       : 'Nothing here yet. Pages you visit will be listed as you go.';
 }
 
+let loads = 0;
+
 async function load() {
+  // Only the newest answer is drawn: a slow search for "gi" landing after the
+  // one for "git" would otherwise put the wrong list under the right query.
+  const asked = ++loads;
   const res = await api.request('list-history', { query: el.query.value, limit: PAGE });
-  if (!res) return;
+  if (!res || asked !== loads) return;
   el.recording.checked = res.recording !== false;
   render(res.items || []);
   showCount(res.total, (res.items || []).length);
@@ -177,7 +182,7 @@ async function load() {
 
 /** Kept separate from `load` so deleting one row does not redraw the list. */
 async function refreshCount() {
-  const res = await api.request('list-history', { query: '', limit: 1 });
+  const res = await api.request('list-history', { query: el.query.value, limit: 1 });
   if (res) showCount(res.total, null);
 }
 
@@ -194,10 +199,32 @@ el.query.addEventListener('input', () => {
   searchTimer = setTimeout(load, SEARCH_DEBOUNCE_MS);
 });
 
+/*
+ * Clearing everything takes two presses.
+ *
+ * One click erased every page on record, on a button that sits beside the
+ * search box where a stray click goes. The second press has to come within a
+ * few seconds, and the button says what it is about to do in the meantime.
+ */
+let clearArmed = null;
+
+function disarmClear() {
+  clearTimeout(clearArmed);
+  clearArmed = null;
+  el.clear.textContent = 'Clear all';
+}
+
 el.clear.addEventListener('click', async () => {
+  if (!clearArmed) {
+    el.clear.textContent = 'Clear all history?';
+    clearArmed = setTimeout(disarmClear, 4000);
+    return;
+  }
+  disarmClear();
   const res = await api.request('clear-history');
   if (res) load();
 });
+el.clear.addEventListener('blur', disarmClear);
 
 el.close.addEventListener('click', () => api.send('close-tab'));
 
@@ -212,7 +239,12 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     // Escape clears the search first and closes the page only when there is
     // nothing to clear - the same order every search field in a browser uses.
-    if (el.query.value) { el.query.value = ''; load(); }
+    // Through an `input` event, so the search reloads and the page stops
+    // reporting a half-typed query that is no longer there.
+    if (el.query.value) {
+      el.query.value = '';
+      el.query.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     else api.send('close-tab');
   }
 });

@@ -11,21 +11,23 @@
 <body>
   <header>
     <h1>Resource governor</h1>
-    <button id="close" class="ghost" aria-label="Close panel">×</button>
+    <button id="close" class="ghost" aria-label="Close panel">
+      <svg class="x-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>
+    </button>
   </header>
 
   <section class="summary">
     <div class="stat">
       <span class="stat-value" id="total">—</span>
-      <span class="stat-label" id="total-label">resident</span>
+      <span class="stat-label" id="total-label">Resident</span>
     </div>
     <div class="stat">
       <span class="stat-value" id="budget">—</span>
-      <span class="stat-label">budget</span>
+      <span class="stat-label">Budget</span>
     </div>
     <div class="stat">
       <span class="stat-value" id="renderers">—</span>
-      <span class="stat-label">live tabs</span>
+      <span class="stat-label">Live tabs</span>
     </div>
   </section>
 

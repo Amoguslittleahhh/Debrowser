@@ -88,7 +88,7 @@ function tile(item) {
   const forget = document.createElement('button');
   forget.className = 'tile-forget';
   forget.type = 'button';
-  forget.textContent = '×';
+  forget.append(crossIcon());
   forget.title = `Forget ${host}`;
   forget.setAttribute('aria-label', `Forget ${host}`);
   forget.addEventListener('click', async (event) => {

@@ -133,7 +133,7 @@ function render(state) {
   // read. Both words are accurate on their own - a proportional figure is what
   // the browser is resident in, a non-proportional one is the sum of each
   // process's working set - and the tooltip carries the explanation either way.
-  el.totalLabel.textContent = proportional ? 'resident' : 'summed';
+  el.totalLabel.textContent = proportional ? 'Resident' : 'Summed';
   el.totalLabel.classList.toggle('inexact', !proportional);
 
   // Private working set has no sharing to argue about, so printing it beside
@@ -165,6 +165,13 @@ function render(state) {
   el.pressure.textContent = PRESSURE_TEXT[state.pressure] || state.pressure;
   el.pressure.dataset.pressure = state.pressure;
 
+  // Held while dragging, and released once the browser reports the value the
+  // drag set - after that the slider follows it again, including changes made
+  // from Settings.
+  if (budgetPinnedByUser && Number(el.budgetInput.value) === state.budgetMB &&
+      document.activeElement !== el.budgetInput) {
+    budgetPinnedByUser = false;
+  }
   if (!budgetPinnedByUser) {
     el.budgetInput.value = String(state.budgetMB);
     el.budgetOut.textContent = `${state.budgetMB} MB`;
@@ -260,8 +267,15 @@ function render(state) {
 function renderRows(tabs) {
   const seen = new Set();
 
-  // Heaviest first: the tabs worth acting on are the ones at the top.
-  const ordered = [...tabs].sort((a, b) => b.rssMB - a.rssMB);
+  // Heaviest first: the tabs worth acting on are the ones at the top. Not
+  // while the pointer is on the list, though - two tabs of similar size
+  // swapping places every tick put the Discard click on the wrong tab.
+  const hold = el.list.matches(':hover') && rows.size === tabs.length &&
+               tabs.every((tab) => rows.has(tab.id));
+  const ordered = hold
+    ? [...el.list.children].map((node) => tabs.find((tab) => rows.get(tab.id)?.root === node))
+        .filter(Boolean)
+    : [...tabs].sort((a, b) => b.rssMB - a.rssMB);
 
   ordered.forEach((tab, index) => {
     seen.add(tab.id);

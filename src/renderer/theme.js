@@ -15,6 +15,25 @@
  */
 
 /**
+ * The cross every close and forget button draws.
+ *
+ * A text `×` sits wherever the face puts it - high in one font, low in the
+ * next - so the same button was centred in one view and a pixel off in the
+ * one beside it. A path is centred by geometry.
+ */
+/* eslint-disable-next-line no-unused-vars -- read by chrome.js, history.js, newtab.js, flyout.js */
+function crossIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('x-icon');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M4.5 4.5l7 7M11.5 4.5l-7 7');
+  svg.append(path);
+  return svg;
+}
+
+/**
  * A stable colour for a site, from its hostname.
  *
  * Used where a page has no favicon to show: the tab strip while one loads or
@@ -294,7 +313,8 @@ function anchorSheet(sheet, anchor, edge = 8, align = 'right') {
     // Above the button if it fits there, otherwise pinned to the bottom edge -
     // a panel hanging off the screen is worse than one that is not quite where
     // it was asked to be.
-    const above = anchor.y - height - 40;
+    // A button's height clears the button; a pointer has none to clear.
+    const above = anchor.y - height - (align === 'left' ? 0 : 40);
     top = above > edge ? above : Math.max(edge, window.innerHeight - height - edge);
   }
 

@@ -4,29 +4,6 @@
  * settings does not.
  */
 
-.head-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  justify-content: flex-end;
-  margin-right: 14px;
-}
-
-#q {
-  width: 260px;
-  height: 30px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg-input);
-  color: var(--text);
-  font: inherit;
-  outline: none;
-  user-select: text;
-}
-#q:focus { border-color: var(--accent); }
-
 .bar {
   display: flex;
   align-items: center;
@@ -78,10 +55,8 @@
      be sticky, and it has to hide the rows passing under it without reading as
      a band drawn across the list. */
   background: var(--bg);
-  font-size: var(--fs-micro);
+  font-size: var(--fs-small);
   font-weight: var(--fw-bold);
-  letter-spacing: var(--ls-label);
-  text-transform: uppercase;
   color: var(--text-dim);
 }
 
@@ -99,7 +74,7 @@
   gap: 10px;
   padding: 2px 10px 2px 0;
   border-radius: var(--radius);
-  transition: background-color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease);
 }
 .visit:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 /* The row carries the focus mark, because the button inside it is the row's

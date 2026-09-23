@@ -61,7 +61,7 @@ function mb(n) {
 function describe(item) {
   switch (item.state) {
     case 'done': return null;               // the row offers "Open file" instead
-    case 'failed': return `Failed — ${item.error}`;
+    case 'failed': return item.error ? `Failed — ${item.error}` : 'Failed';
     case 'cancelled': return 'Cancelled';
     default: {
       const rate = item.bytesPerSecond ? ` · ${mb(item.bytesPerSecond)}/s` : '';
@@ -167,7 +167,7 @@ function updateRow(node, item) {
   if (prev.state !== item.state) {
     node.root.dataset.state = item.state;
     node.open.hidden = item.state !== 'done';
-    node.action.textContent = running ? 'Cancel' : '×';
+    node.action.replaceChildren(running ? 'Cancel' : crossIcon());
     node.action.setAttribute('aria-label',
       `${running ? 'Cancel' : 'Clear'} ${item.filename || item.url}`);
     prev.state = item.state;

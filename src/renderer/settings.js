@@ -456,7 +456,11 @@ function buildControl(spec) {
         input,
         write(value) {
           const v = Number(value);
-          if (document.activeElement !== input) input.value = String(v);
+          // Neither the thumb nor its label while it is being dragged: the
+          // broadcast carries the last *saved* value, and the label jumped
+          // back to it on every tick.
+          if (document.activeElement === input) return;
+          input.value = String(v);
           show(v);
         }
       };
@@ -467,7 +471,7 @@ function buildControl(spec) {
       wrap.className = 'swatches';
 
       const choices = [
-        { value: 'default', name: 'Default', css: '#161614' },
+        { value: 'default', name: 'Default', css: 'var(--bg)' },
         { value: 'mirror', name: 'Match the accent colour', css: 'var(--accent)' },
         ...STRIP_COLORS
       ];
@@ -535,7 +539,17 @@ function save(key, value) {
 // is the point: the overlay that had one is what trapped the browser on it.
 document.getElementById('close').addEventListener('click', () => api.send('close-tab'));
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') api.send('close-tab');
+  if (event.key !== 'Escape') return;
+  // Not from inside a field someone is filling in - the bookmark editor, the
+  // homepage, a number. Escape there means "never mind this edit", and
+  // closing the whole page threw away what was typed. The search box has its
+  // own Escape, and is the exception.
+  const t = event.target;
+  if (t && t.id !== 'q' && t.matches && t.matches('input, select, textarea')) {
+    t.blur();
+    return;
+  }
+  api.send('close-tab');
 });
 
 /**
@@ -997,19 +1011,41 @@ function reapplyFilter() {
  * arrives on the state broadcast and a copy in this page would be a second
  * thing to keep in step with it.
  */
+/*
+ * Keyed rows, updated in place.
+ *
+ * This runs on every state broadcast, and it used to rebuild the list each
+ * time - so a Cancel pressed across a tick was lost with the button it was
+ * pressed on, and keyboard focus fell off the list twice a second. A sequence
+ * number drops answers that arrive after a newer one.
+ */
+const downloadRows = new Map();
+let downloadsAsked = 0;
+
 async function renderDownloads() {
   const host = document.getElementById('download-list');
   if (!host) return;
+  const asked = ++downloadsAsked;
   const res = await api.request('list-downloads');
+  if (asked !== downloadsAsked) return;
   const items = (res && res.items) || [];
-  if (!items.length) { host.replaceChildren(); return; }
-  host.replaceChildren(...items.map(downloadRow));
-  // A rebuilt row has never been filtered, and this list redraws itself while
-  // a search is on screen.
+
+  const live = new Set(items.map((item) => item.id));
+  for (const [id, node] of downloadRows) {
+    if (!live.has(id)) { node.row.remove(); downloadRows.delete(id); }
+  }
+  items.forEach((item, index) => {
+    let node = downloadRows.get(item.id);
+    if (!node) { node = downloadRow(item.id); downloadRows.set(item.id, node); }
+    updateDownloadRow(node, item);
+    if (host.children[index] !== node.row) host.insertBefore(node.row, host.children[index] || null);
+  });
+  // A new row has never been filtered, and this list redraws itself while a
+  // search is on screen.
   reapplyFilter();
 }
 
-function downloadRow(item) {
+function downloadRow(id) {
   const row = document.createElement('div');
   row.className = 'row';
 
@@ -1017,26 +1053,33 @@ function downloadRow(item) {
   text.className = 'row-text';
   const label = document.createElement('span');
   label.className = 'row-label';
-  label.textContent = item.filename || item.url;
   const hint = document.createElement('span');
   hint.className = 'row-hint';
-  hint.textContent = describeDownload(item);
   text.append(label, hint);
 
   const control = document.createElement('div');
   control.className = 'row-control';
   const button = document.createElement('button');
-  const running = item.state === 'running' || item.state === 'starting';
-  button.className = running ? 'ghost-btn danger' : 'ghost-btn';
-  button.textContent = running ? 'Cancel' : 'Clear';
+  const node = { row, label, hint, button, running: false };
   button.addEventListener('click', async () => {
-    await api.request(running ? 'cancel-download' : 'clear-download', { id: item.id });
+    await api.request(node.running ? 'cancel-download' : 'clear-download', { id });
     renderDownloads();
   });
   control.append(button);
 
   row.append(text, control);
-  return row;
+  return node;
+}
+
+function updateDownloadRow(node, item) {
+  const running = item.state === 'running' || item.state === 'starting';
+  node.label.textContent = item.filename || item.url;
+  node.hint.textContent = describeDownload(item);
+  if (node.running !== running || !node.button.textContent) {
+    node.running = running;
+    node.button.className = running ? 'ghost-btn danger' : 'ghost-btn';
+    node.button.textContent = running ? 'Cancel' : 'Clear';
+  }
 }
 
 function describeDownload(item) {
@@ -1045,7 +1088,7 @@ function describeDownload(item) {
     case 'done':
       return `Finished — ${mb(item.received)} over ${item.segments} connection${item.segments === 1 ? '' : 's'}`;
     case 'failed':
-      return `Failed — ${item.error}`;
+      return item.error ? `Failed — ${item.error}` : 'Failed';
     case 'cancelled':
       return 'Cancelled';
     default: {
@@ -1296,9 +1339,18 @@ function bookmarkForm(item = null) {
 
   // Enter saves, from either field. A two-field form where the keyboard does
   // nothing is a form that has to be finished with the mouse.
+  // Escape is Cancel. `isComposing`: the Enter that confirms an IME
+  // composition is not a request to save.
   row.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter') { event.preventDefault(); save.click(); }
+    else if (event.key === 'Escape') cancel.click();
   });
 
   return row;
 }
+
+// The bookmark editor's fields are `data-transient`: a half-typed bookmark
+// keeps this page off the reclaim ladder, as a half-typed search does
+// elsewhere. See theme.js.
+watchTransientInput(api);

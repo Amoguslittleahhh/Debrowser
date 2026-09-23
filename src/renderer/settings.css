@@ -87,7 +87,7 @@ h1 {
   font-size: var(--fs-small);
   text-align: left;
   cursor: default;
-  transition: background-color var(--fast) ease, color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 .rail-item:hover { background: var(--wash-soft); color: var(--text); }
@@ -134,10 +134,26 @@ header #q {
   outline: none;
   user-select: text;
   cursor: text;
-  transition: border-color var(--fast) ease, box-shadow var(--fast) ease;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
 }
 
 header #q:focus { border-color: var(--accent); box-shadow: var(--ring); }
+
+/*
+ * History and Downloads put the search in a group with a button beside it.
+ * Both pages used to restate the field in their own stylesheets, and lost to
+ * the rule above on specificity anyway - so the width never applied and the
+ * gap to the button was the header's margin plus the group's.
+ */
+.head-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  justify-content: flex-end;
+  margin-right: var(--s3);
+}
+.head-tools #q { margin: 0; }
 
 .empty-search {
   max-width: 840px;
@@ -161,20 +177,21 @@ section { max-width: 840px; margin: var(--s7) auto 0; }
 section:first-of-type { margin-top: var(--s5); }
 
 /*
- * Section labels, set as small caps rather than as small headings.
+ * Section headings, as headings.
  *
- * At body size a section name competes with the settings under it; uppercase at
- * a size below the body text reads as a label on a group instead - it is the
- * furniture, not the content. The extra tracking is what keeps uppercase legible
- * that small, and it is opened wider here than anywhere else in the browser.
+ * They were tracked-out small caps, which is the label every generated
+ * settings page wears above every card - and here it sat beside a rail that
+ * already names the same section in sentence case, so the page said
+ * "Appearance" twice in two different voices. A plain heading a step above
+ * the body is what the system settings on every desktop OS use.
  */
 h2 {
   margin: 0 0 var(--s3) 2px;
-  font-size: var(--fs-micro);
+  font-size: var(--fs-lead);
   font-weight: var(--fw-bold);
-  letter-spacing: var(--ls-label);
-  text-transform: uppercase;
-  color: var(--text-dim);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-title);
+  color: var(--text);
 }
 
 .rows {
@@ -325,7 +342,7 @@ input[type="checkbox"] {
   padding: 0;
 }
 .swatch[aria-pressed="true"] { border-color: var(--text); }
-.swatch { transition: transform var(--fast) var(--ease), border-color var(--fast) ease; }
+.swatch { transition: transform var(--fast) var(--ease), border-color var(--fast) var(--ease); }
 .swatch:hover { transform: scale(1.12); }
 
 /* The "follow the accent" swatch says so by showing the accent itself, with a
@@ -338,7 +355,7 @@ input[type="range"] {
   cursor: default;
 }
 
-.row { transition: background-color var(--fast) ease; }
+.row { transition: background-color var(--fast) var(--ease); }
 .row:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg-raised)); }
 
 .ghost-btn {
@@ -351,7 +368,7 @@ input[type="range"] {
   font: inherit;
   font-size: var(--fs-small);
   cursor: default;
-  transition: background-color var(--fast) ease, border-color var(--fast) ease;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 .ghost-btn:hover { background: var(--wash-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .ghost-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
@@ -410,7 +427,7 @@ input[type="range"] {
  */
 section.landed .rows {
   box-shadow: -3px 0 0 var(--accent);
-  transition: box-shadow var(--slow) ease;
+  transition: box-shadow var(--slow) var(--ease);
 }
 
 /*
