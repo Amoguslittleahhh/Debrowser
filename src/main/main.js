@@ -11,18 +11,18 @@
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session, Menu, dialog, clipboard,
+const { app, ipcMain, session, Menu, dialog, clipboard, screen,
         shell: electronShell } = require('electron');
 const { loadConfig } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
-const { Prefs, applyPrefs } = require('./prefs');
+const { Prefs, applyPrefs, ZOOM_STEPS } = require('./prefs');
 const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
-const { Session } = require('./session');
+const { Session, loadWindowState, saveWindowState } = require('./session');
 const { History } = require('./history');
 const icons = require('./icons');
 const presence = require('./presence');
@@ -35,6 +35,7 @@ const pages = require('./pages');
 const shortcuts = require('./shortcuts');
 const contextMenu = require('./context-menu');
 
+const fs = require('fs');
 const path = require('path');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
@@ -206,6 +207,13 @@ function main() {
   /** The command dispatcher, once `wireCommands` has built it. */
   let runCommand = () => {};
 
+  /**
+   * Whether closing a window of several tabs has been agreed to. A close from
+   * the window runs `close` then `before-quit`; a quit from the OS runs them
+   * the other way round. Set once the user says yes, so the second never asks.
+   */
+  const quitState = { confirmed: false, asking: false };
+
   let publishQueued = false;
   const publish = () => {
     // Tab events can arrive in bursts (a load fires several in a row).
@@ -366,7 +374,7 @@ function main() {
         if (shell && shell.findOpen) { find.query = ''; shell.setFindOpen(false); }
         break;
       case 'open-tab':
-        if (tabs && payload?.url) tabs.create({ url: payload.url, activate: false, realise: false });
+        if (tabs && payload?.url) openLinkTab(tabs, prefs, tab, payload.url);
         break;
       case 'visited':
         if (history && payload?.url) history.record({ url: payload.url, title: tab.title });
@@ -430,7 +438,8 @@ function main() {
       onUncover: () => { if (shell) shell.hidePlaceholder(); },
       // A speculative page load must never be the reason a frame is dropped,
       // and must never add to memory the governor is already trying to reclaim.
-      canSpeculate: () => Boolean(governor) && governor.allowsSpeculation()
+      canSpeculate: () => Boolean(governor) && governor.allowsSpeculation(),
+      defaultZoom: () => prefs.get('defaultZoom')
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
@@ -450,7 +459,24 @@ function main() {
       onCommand: (name) => { if (name === 'chrome-ready' || name === 'view-ready') publish(); },
       // Every view the shell owns answers the same table the tabs do - the
       // chrome included, since its own DOM handler is gone.
-      bindShortcuts
+      bindShortcuts,
+      // Never under a test or a benchmark, which assert on the default size.
+      bounds: !OFFLINE_MODE && prefs.get('rememberWindowBounds')
+        ? fitToDisplay(loadWindowState())
+        : null
+    });
+
+    shell.window.on('close', (event) => {
+      if (shouldAskToClose()) {
+        event.preventDefault();
+        askToClose(() => shell.close());
+        return;
+      }
+      if (!OFFLINE_MODE && prefs.get('rememberWindowBounds')) {
+        try {
+          saveWindowState({ ...shell.window.getNormalBounds(), maximized: shell.window.isMaximized() });
+        } catch (err) { log(`could not remember the window: ${err.message}`); }
+      }
     });
 
     // `--no-governor` runs the browser with every tab left fully resident, as
@@ -501,7 +527,7 @@ function main() {
 
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
-      bookmarks, closedTabs, context, find
+      bookmarks, closedTabs, context, find, quitState
     });
 
     // Downloads are taken over from Chromium rather than added beside it.
@@ -511,8 +537,17 @@ function main() {
     // the URL is handed to our manager. Cancelled rather than left running: two
     // downloads of the same file would race for the same name on disk.
     downloads = new DownloadManager({
-      dir: app.getPath('downloads'),
+      dir: () => downloadDir(prefs),
       connections: () => prefs.get('downloadConnections'),
+      // The system's own save dialog, when Settings asks for one. Never under a
+      // test, where nobody is there to answer it.
+      saveAs: (defaultPath) => {
+        if (OFFLINE_MODE || !prefs.get('askWhereToSave')) return undefined;
+        const asked = shell && !shell.window.isDestroyed()
+          ? dialog.showSaveDialog(shell.window, { defaultPath })
+          : dialog.showSaveDialog({ defaultPath });
+        return asked.then((r) => (r.canceled || !r.filePath ? null : r.filePath));
+      },
       // Same session the cancelled download came from, so a file behind a
       // sign-in still fetches as the signed-in user.
       session: session.fromPartition(BROWSING_PARTITION),
@@ -615,13 +650,22 @@ function main() {
 
   app.on('window-all-closed', () => app.quit());
 
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
+    // A quit from the OS arrives here before the window hears of it, and what
+    // follows empties the tab list, so the question has to be asked first.
+    if (shouldAskToClose()) {
+      event.preventDefault();
+      askToClose(() => app.quit());
+      return;
+    }
     if (updater) updater.stop();
     if (prewarm) prewarm.drop();
     if (governor) governor.stop();
     // Writes are debounced by a few seconds, and quit does not wait for a
     // timer, so the last few pages visited would be lost on every close.
-    if (history) history.flush();
+    // Cleared instead, if Settings asks for that; `clear` writes synchronously.
+    if (history && !OFFLINE_MODE && prefs && prefs.get('clearHistoryOnExit')) history.clear();
+    else if (history) history.flush();
     // Before `closeAll`, which empties the list this describes. Written
     // synchronously because quit does not wait for a timer, and the debounce
     // above means the last thing the user did is usually still pending.
@@ -635,6 +679,38 @@ function main() {
     // page screenshots on disk is the one cleanup that must not be best effort.
     sweepThumbnailsSync();
   });
+
+  /** Whether closing now needs the user's say-so: several tabs, and the setting on. */
+  function shouldAskToClose() {
+    return !OFFLINE_MODE && !quitState.confirmed && Boolean(prefs && tabs) &&
+      prefs.get('confirmCloseTabs') === true && tabs.all().length > 1;
+  }
+
+  /** Ask once, however many close attempts arrive while the dialog is up. */
+  function askToClose(proceed) {
+    if (quitState.asking || !shell || shell.window.isDestroyed()) return;
+    quitState.asking = true;
+    const count = tabs.all().length;
+    dialog.showMessageBox(shell.window, {
+      type: 'question',
+      buttons: ['Close tabs', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Close window?',
+      message: `Close the window and its ${count} tabs?`,
+      detail: prefs.get('restoreSession') ? 'They reopen the next time you start the browser.' : '',
+      checkboxLabel: 'Don\'t ask again'
+    }).then(({ response, checkboxChecked }) => {
+      quitState.asking = false;
+      if (checkboxChecked) { prefs.set('confirmCloseTabs', false); publish(); }
+      if (response !== 0) return;
+      quitState.confirmed = true;
+      proceed();
+    }).catch((err) => {
+      quitState.asking = false;
+      log(`close prompt failed: ${err.message}`);
+    });
+  }
 
   // Pages must never be able to open a renderer with elevated privileges.
   app.on('web-contents-created', (_event, contents) => {
@@ -656,11 +732,17 @@ function main() {
  */
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
-                       find = null }) {
+                       find = null, quitState = null }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
     .catch((err) => log(`activate failed: ${err.message}`));
+
+  /** The strip just emptied: close the window, or keep it with a new tab. */
+  const lastTabClosed = () => {
+    if (prefs.get('lastTabCloses') === 'new-tab') tabs.create({ url: newTabUrl(prefs) });
+    else shell.close();
+  };
 
   const runCommand = (command, payload, sender = null) => {
     const active = tabs.activeTab();
@@ -681,7 +763,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // `window-all-closed` handler already owns quitting, and `before-quit`
         // does real work - session state is written there - which a quit from
         // here would be racing.
-        if (tabs.all().length === 0) shell.close();
+        //
+        // Unless the user asked to keep the window, in which case the dead end
+        // becomes a fresh tab instead.
+        if (tabs.all().length === 0) lastTabClosed();
         break;
 
       case 'activate-tab':
@@ -693,7 +778,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // speculation is not a state change the user asked for, and repainting
         // the chrome for every tab the pointer pauses on would cost more than
         // the head start is worth.
-        tabs.speculate(payload?.id);
+        if (prefs.get('hoverPrefetch') !== false) tabs.speculate(payload?.id);
         break;
 
       case 'navigate': {
@@ -864,7 +949,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'open-link-tab': {
         const url = String(payload?.url || '');
-        if (openableUrl(url)) tabs.create({ url, activate: false, realise: false });
+        // The page that was right-clicked, which the menu recorded; the tab in
+        // front is the same one unless something switched tabs meanwhile.
+        const opener = (context.model?.tabId && tabs.byId(context.model.tabId)) || active;
+        if (openableUrl(url)) openLinkTab(tabs, prefs, opener, url);
         break;
       }
 
@@ -875,8 +963,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
-      // Straight to the download manager, which names the file and asks where
-      // to put it - the same path a click on a download link takes.
+      // Straight to the download manager, which names the file - and asks where
+      // to put it, if Settings says to - the same path a click on a download
+      // link takes.
       case 'save-link': {
         const url = String(payload?.url || '');
         if (active?.isLive && /^https?:/.test(url)) active.wc.downloadURL(url);
@@ -954,6 +1043,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // the updater's to do - this only carries the answer.
       case 'update-restart':
         shell.closeSheet();
+        // The user already chose to restart; the tabs come back with the session.
+        if (quitState) quitState.confirmed = true;
         if (prewarm) prewarm.drop();
         if (shell.updater) shell.updater.install();
         break;
@@ -982,7 +1073,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'zoom':
         if (payload?.direction === 'reset') {
-          if (active?.isLive) active.wc.setZoomFactor(1);
+          // Back to the chosen default rather than 100%, or reset would undo
+          // the setting on every page it is pressed on.
+          if (active?.isLive) active.wc.setZoomFactor(prefs.get('defaultZoom') || 1);
         } else {
           stepZoom(active, payload?.direction === 'out' ? -1 : +1);
         }
@@ -1026,7 +1119,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // and all of them share a renderer - so one warm process serves the new
       // tab page, Settings and History alike.
       case 'prefetch-new-tab':
-        if (prewarm) prewarm.warm();
+        if (prewarm && prefs.get('hoverPrefetch') !== false) prewarm.warm();
         break;
 
       // How tall the chrome's own contents come to. Only it can measure that,
@@ -1217,7 +1310,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const doomed = all.filter((t, i) => t !== tab && !t.pinned &&
           (command === 'close-other-tabs' || i > from));
         for (const other of doomed.reverse()) tabs.close(other.id);
-        if (tabs.all().length === 0) shell.close();
+        if (tabs.all().length === 0) lastTabClosed();
         break;
       }
 
@@ -1808,11 +1901,70 @@ function openInternalPage(tabs, url) {
 }
 
 /** The `#section` of one of our own URLs, or '' - never throws on a bad one. */
+/**
+ * A tab opened from a link, by the page itself or from its context menu.
+ *
+ * Placed and focused as Settings says. "After the current tab" also skips the
+ * tabs this opener already opened, so links opened in order read left to right.
+ */
+function openLinkTab(tabs, prefs, opener, url) {
+  const foreground = prefs?.get('linkTabsInBackground') === false;
+  let index = null;
+  if (opener && prefs?.get('newTabPosition') === 'after-current') {
+    const list = tabs.all();
+    let at = list.indexOf(opener);
+    if (at !== -1) {
+      at += 1;
+      while (at < list.length && list[at].openerId === opener.id) at += 1;
+      index = at;
+    }
+  }
+  const tab = tabs.create({ url, activate: foreground, realise: foreground, index });
+  if (opener) tab.openerId = opener.id;
+  return tab;
+}
+
 function hashOf(url) {
   try {
     return new URL(url).hash;
   } catch {
     return '';
+  }
+}
+
+/**
+ * The folder downloads are written to: the chosen one while it exists, else
+ * the system's. Checked per download, since a removable drive comes and goes.
+ */
+function downloadDir(prefs) {
+  const chosen = prefs?.get('downloadDir');
+  if (chosen && !OFFLINE_MODE) {
+    try {
+      if (fs.statSync(chosen).isDirectory()) return chosen;
+    } catch { /* gone; fall back */ }
+  }
+  return app.getPath('downloads');
+}
+
+/**
+ * A saved window rectangle, moved and shrunk to fit the display nearest it,
+ * so a monitor unplugged since last time cannot leave the window off screen.
+ */
+function fitToDisplay(saved) {
+  if (!saved) return null;
+  try {
+    const area = screen.getDisplayMatching(saved).workArea;
+    const width = Math.min(saved.width, area.width);
+    const height = Math.min(saved.height, area.height);
+    return {
+      x: Math.min(Math.max(saved.x, area.x), area.x + area.width - width),
+      y: Math.min(Math.max(saved.y, area.y), area.y + area.height - height),
+      width,
+      height,
+      maximized: saved.maximized
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -1833,8 +1985,8 @@ function newTabUrl(prefs) {
 /* The three-dot menu                                                  */
 /* ------------------------------------------------------------------ */
 
-/** Zoom steps, matching the ones Chrome offers. */
-const ZOOM_FACTORS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+/** Zoom steps, matching the ones Chrome offers. Kept in prefs.js beside `defaultZoom`. */
+const ZOOM_FACTORS = ZOOM_STEPS;
 
 function stepZoom(tab, direction) {
   if (!tab?.isLive) return;

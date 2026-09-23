@@ -62,11 +62,14 @@ class Download {
    * @param {number} opts.connections
    * @param {(...a:any[]) => void} opts.log
    * @param {(d: Download) => void} [opts.onChange]
+   * @param {(defaultPath: string) => any} [opts.saveAs] - see DownloadManager
    */
-  constructor({ url, dir, connections, session = null, log = () => {}, onChange = () => {} }) {
+  constructor({ url, dir, connections, session = null, log = () => {}, onChange = () => {},
+                saveAs = null }) {
     this.id = `dl-${Date.now().toString(36)}-${(nextId += 1).toString(36)}`;
     this.url = url;
     this.dir = dir;
+    this.saveAs = saveAs;
     this.session = session;
     this.wanted = clampConnections(connections);
     this.log = log;
@@ -116,8 +119,12 @@ class Download {
       if (this.cancelled) return;
 
       this.total = probe.total;
-      this.filename = await uniqueName(this.dir, probe.filename);
-      this.file = path.join(this.dir, this.filename);
+      // After the probe, so the dialog can offer the server's name for it.
+      if (!(await this.chooseTarget(probe.filename))) {
+        this.cancel();
+        return;
+      }
+      if (this.cancelled) return;
       this.handle = await fs.promises.open(this.file, 'w');
 
       // Sparse-allocate so the segments have somewhere to write. Without this
@@ -173,6 +180,26 @@ class Download {
       }
       this.report(true);
     }
+  }
+
+  /**
+   * Decide where the file goes. False means the user cancelled the dialog.
+   *
+   * A path picked in the save dialog is taken as given - the dialog has already
+   * asked about replacing an existing file - where the automatic name is made
+   * unique so nothing is overwritten unasked.
+   */
+  async chooseTarget(suggested) {
+    const picked = this.saveAs ? await this.saveAs(path.join(this.dir, suggested)) : undefined;
+    if (picked === null) return false;
+    if (typeof picked === 'string' && path.isAbsolute(picked)) {
+      this.dir = path.dirname(picked);
+      this.filename = path.basename(picked);
+    } else {
+      this.filename = await uniqueName(this.dir, suggested);
+    }
+    this.file = path.join(this.dir, this.filename);
+    return true;
   }
 
   /**
@@ -419,8 +446,15 @@ class Download {
 /* ------------------------------------------------------------------ */
 
 class DownloadManager {
-  constructor({ dir, connections = () => 4, session = null, log = () => {}, onChange = () => {} }) {
+  /**
+   * `dir` may be a function, so a changed download folder applies to the next
+   * file. `saveAs(defaultPath)` resolves to a chosen path, null for cancelled,
+   * or undefined to save without asking.
+   */
+  constructor({ dir, connections = () => 4, session = null, log = () => {}, onChange = () => {},
+                saveAs = null }) {
     this.dir = dir;
+    this.saveAs = saveAs;
     this.connections = connections;
     // The session the download was started from, so the refetch carries the
     // cookies the original request would have.
@@ -445,9 +479,10 @@ class DownloadManager {
 
     const item = new Download({
       url: clean,
-      dir: this.dir,
+      dir: typeof this.dir === 'function' ? this.dir() : this.dir,
       connections: this.connections(),
       session: this.session,
+      saveAs: this.saveAs,
       log: this.log,
       onChange: () => this.onChange(this.list())
     });

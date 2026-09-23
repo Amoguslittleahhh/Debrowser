@@ -2916,6 +2916,68 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   }
 
   /* ---------------------------------------------------------------- */
+  // Tab and window preferences. Each is set, exercised through the command
+  // dispatcher the way a click would be, and put back.
+  {
+    const saved = ['newTabPosition', 'linkTabsInBackground', 'defaultZoom', 'lastTabCloses']
+      .map((key) => [key, prefs.get(key)]);
+
+    // Links open beside the page they came from, in the order they were opened,
+    // and in the background unless asked otherwise. A stale menu model would
+    // name some other tab as the opener, so it is cleared first.
+    context.model = null;
+    const opener = tabs.activeTab();
+    prefs.set('newTabPosition', 'after-current');
+    prefs.set('linkTabsInBackground', true);
+    runCommand('open-link-tab', { url: pageUrl('idle.html') });
+    runCommand('open-link-tab', { url: pageUrl('idle.html') });
+    prefs.set('linkTabsInBackground', false);
+    runCommand('open-link-tab', { url: pageUrl('idle.html') });
+    const list = tabs.all();
+    const at = list.indexOf(opener);
+    const spawned = list.slice(at + 1, at + 4);
+    const inOrder = spawned.length === 3 && spawned.every((t) => t.openerId === opener.id);
+    const focus = await waitFor(() => tabs.activeId === spawned[2]?.id, { timeoutMs: 4000 });
+    check('links open beside their page, in order, in the background unless asked',
+      inOrder && focus && !spawned[0].visible && !spawned[1].visible,
+      `opener at ${at}, next three from opener ${spawned.map((t) => t.openerId).join(',')}, ` +
+      `active=${tabs.activeId} third=${spawned[2]?.id}`);
+    for (const t of spawned) tabs.close(t.id);
+    if (opener && tabs.byId(opener.id)) await tabs.activate(opener.id).catch(() => {});
+
+    // New pages start at the chosen zoom, and resetting returns there.
+    prefs.set('defaultZoom', 1.25);
+    const zoomed = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => zoomed.isLive && !zoomed.loading, { timeoutMs: 10_000 });
+    const startZoom = zoomed.wc.getZoomFactor();
+    runCommand('zoom', { direction: 'in' });
+    runCommand('zoom', { direction: 'reset' });
+    const resetZoom = zoomed.wc.getZoomFactor();
+    check('pages open at the default zoom, and reset goes back to it',
+      Math.abs(startZoom - 1.25) < 0.001 && Math.abs(resetZoom - 1.25) < 0.001,
+      `opened at ${startZoom}x, reset to ${resetZoom}x`);
+    tabs.close(zoomed.id);
+
+    // Closing the last tab: a fresh one, or the window. The window's close is
+    // stood in for, because the real one would end the run.
+    const realClose = shell.close;
+    let windowClosed = 0;
+    shell.close = () => { windowClosed += 1; };
+    prefs.set('lastTabCloses', 'new-tab');
+    for (const t of [...tabs.all()]) runCommand('close-tab', { id: t.id });
+    const kept = tabs.all().length === 1 && windowClosed === 0;
+    prefs.set('lastTabCloses', 'quit');
+    runCommand('close-tab', { id: tabs.all()[0]?.id });
+    const quit = tabs.all().length === 0 && windowClosed === 1;
+    shell.close = realClose;
+    check('closing the last tab keeps a new tab, or closes the window, as asked',
+      kept && quit, `new-tab kept=${kept}, quit closed the window=${quit}`);
+    tabs.create({ url: pageUrl('idle.html') });
+
+    for (const [key, value] of saved) prefs.set(key, value);
+  }
+
+  /* ---------------------------------------------------------------- */
   if (fixtures) await fixtures.close();
 
   const failed = results.filter((r) => !r.passed);

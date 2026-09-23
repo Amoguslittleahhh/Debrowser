@@ -931,6 +931,15 @@ el.menu.addEventListener('click', () => {
 el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); });
 el.url.addEventListener('blur', () => { urlFocused = false; });
 
+/** Preferences the strip reads for itself, from the preload's first copy and then each broadcast. */
+let chromePrefs = api.prefs || {};
+function applyChromePrefs(next) {
+  if (!next) return;
+  chromePrefs = next;
+  document.body.dataset.closeButton = next.tabCloseButton || 'hover';
+}
+applyChromePrefs(api.prefs);
+
 /*
  * Finish the address as it is being typed.
  *
@@ -956,7 +965,7 @@ el.url.addEventListener('beforeinput', (event) => {
 });
 
 el.url.addEventListener('input', async () => {
-  if (!completing) return;
+  if (!completing || chromePrefs.inlineAutocomplete === false) return;
   const typed = el.url.value;
   if (typed.length < 2) return;
 
@@ -1077,6 +1086,7 @@ api.onMessage((message) => {
 
 api.onState((state) => {
   applyThemePrefs(state.prefs);
+  applyChromePrefs(state.prefs);
   if (state.prefs) el.bookmarks.dataset.opensIn = state.prefs.bookmarkOpensIn || 'new-tab';
   renderTabs(state.tabs);
   renderToolbar(state);

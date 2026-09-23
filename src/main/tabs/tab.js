@@ -83,10 +83,12 @@ class Tab {
    * @param {(tab: Tab, event: string, payload?: any) => void} options.onEvent
    * @param {(...args:any[]) => void} options.log
    */
-  constructor({ session, url = 'about:blank', onEvent = () => {}, log = () => {} }) {
+  constructor({ session, url = 'about:blank', onEvent = () => {}, defaultZoom = () => 1,
+                log = () => {} }) {
     this.id = nextTabId++;
     this.session = session;
     this.onEvent = onEvent;
+    this.defaultZoom = defaultZoom;
     this.log = log;
 
     this.url = url;
@@ -120,6 +122,8 @@ class Tab {
     this.title = this.internal ? pages.titleFor(url) : url;
     this.favicon = null;
     this.pinned = false;
+    /** The tab a link opened this one from, so its siblings can queue up beside it. */
+    this.openerId = null;
 
     /** @type {Electron.WebContentsView|null} */
     this.view = null;
@@ -310,6 +314,7 @@ class Tab {
    */
   realise() {
     if (this.isLive) return;
+    const zoom = Number(this.defaultZoom()) || 1;
 
     this.view = new WebContentsView({
       webPreferences: {
@@ -321,7 +326,12 @@ class Tab {
         // Chromium's own background throttling stays on; the governor layers
         // its harder tiers on top rather than replacing it.
         backgroundThrottling: true,
-        transparent: false
+        transparent: false,
+        // Chromium's default for any site the user has not zoomed themselves;
+        // a per-site zoom they chose still wins. Read per realisation, so a
+        // changed setting reaches the next renderer built. Omitted at 100%,
+        // which leaves Chromium's own behaviour exactly as it was.
+        ...(zoom !== 1 ? { zoomFactor: zoom } : {})
       }
     });
 
