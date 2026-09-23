@@ -21,6 +21,15 @@
  * next - so the same button was centred in one view and a pixel off in the
  * one beside it. A path is centred by geometry.
  */
+/** Relative luminance of a `#rrggbb` colour, 0 (black) to 1 (white). */
+function luminance(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 /* eslint-disable-next-line no-unused-vars -- read by chrome.js, history.js, newtab.js, flyout.js */
 function crossIcon() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -259,6 +268,14 @@ function applyThemePrefs(prefs) {
   if (body.style.getPropertyValue('--strip') !== strip) {
     if (strip) body.style.setProperty('--strip', strip);
     else body.style.removeProperty('--strip');
+  }
+  // Every preset strip is dark, and so is most accents' mirror. Under the light
+  // palette that put dim grey titles on near-black; the strip's own lightness
+  // decides which ink its tabs use. See `data-strip-tone` in chrome.css.
+  const tone = strip ? (luminance(strip) < 0.35 ? 'dark' : 'light') : '';
+  if ((body.dataset.stripTone || '') !== tone) {
+    if (tone) body.dataset.stripTone = tone;
+    else delete body.dataset.stripTone;
   }
 
   // Translucency applies to the strip, not the window. See chrome.css; the

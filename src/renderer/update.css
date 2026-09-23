@@ -28,7 +28,7 @@
 .card {
   left: 50%;
   top: 50%;
-  width: 400px;
+  width: min(400px, calc(100vw - 32px));
   padding: 22px 24px 18px;
   transform: translate(-50%, -50%);
   transform-origin: center;

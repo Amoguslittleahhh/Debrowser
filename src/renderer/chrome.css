@@ -251,6 +251,29 @@ body[data-platform="linux"] { --caption-right: 146px; }
   background: var(--accent);
 }
 
+/*
+ * Ink that suits the strip rather than the palette.
+ *
+ * A chosen strip colour can be the opposite way round from the theme - every
+ * preset is dark - and the tabs sitting on it, and the bookmarks bar painted
+ * from it, inherited the theme's text. The active tab is exempt: it is the
+ * toolbar's colour, not the strip's.
+ */
+body[data-strip-tone="dark"] .tab:not(.active),
+body[data-strip-tone="dark"] .new-tab,
+body[data-strip-tone="dark"] .bookmarks {
+  --text: #eae7e0;
+  --text-dim: #aaa69c;
+  --border: #3a3a34;
+}
+body[data-strip-tone="light"] .tab:not(.active),
+body[data-strip-tone="light"] .new-tab,
+body[data-strip-tone="light"] .bookmarks {
+  --text: #201f1c;
+  --text-dim: #4f4a41;
+  --border: #cfc9bd;
+}
+
 body[data-tabs="compact"] .tab {
   flex-basis: 150px; max-width: 170px; gap: 6px;
   contain-intrinsic-inline-size: 150px;
@@ -1248,12 +1271,9 @@ body[data-layout="left"] .pin { display: grid; }
 /* A divider between the steppers and the close button: they do different
    things, and at 28px apart with no rule between them they read as one group
    of three. */
-#find-close {
-  margin-left: var(--s1);
-  border-left: 1px solid var(--border);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  padding-left: var(--s1);
-}
+/* Set apart by space alone. A border on the button itself pushed its icon off
+   centre and gave it a half-square hover beside round neighbours. */
+#find-close { margin-left: var(--s2); }
 
 /*
  * The find bar, down the side.

@@ -177,6 +177,14 @@ const SHOTS = [
 ];
 
 
+// `--theme=light` photographs the other palette, which nothing else checks.
+const THEME = process.argv.find((a) => a.startsWith('--theme='));
+if (THEME) STATE.prefs.theme = THEME.slice(8);
+// `--strip=#rrggbb` paints the tab strip, which is where a colour chosen for
+// one palette meets the other.
+const STRIP = process.argv.find((a) => a.startsWith('--strip='));
+if (STRIP) STATE.prefs.tabBarColor = STRIP.slice(8);
+
 const ONLY = process.argv.find((a) => a.startsWith('--only='));
 const WANTED = ONLY ? SHOTS.filter((s) => s.name === ONLY.slice(7)) : SHOTS;
 
@@ -209,7 +217,7 @@ app.whenReady().then(async () => {
       // window half the size of the real one. Nearly cost a fix to a tab strip
       // that was not broken.
       show: false, width: shot.w, height: shot.h, frame: false,
-      backgroundColor: '#161614',
+      backgroundColor: STATE.prefs.theme === 'light' ? '#f3f1ec' : '#161614',
       webPreferences: {
         preload: path.join(OUT, 'stub-preload.js'),
         contextIsolation: true, sandbox: false,
@@ -249,7 +257,8 @@ app.whenReady().then(async () => {
         win.webContents.capturePage(),
         new Promise((_r, reject) => setTimeout(() => reject(new Error('capture timed out')), 8000))
       ]);
-      fs.writeFileSync(path.join(OUT, `${shot.name}.png`), img.toPNG());
+      const suffix = THEME ? `-${STATE.prefs.theme}` : '';
+      fs.writeFileSync(path.join(OUT, `${shot.name}${suffix}.png`), img.toPNG());
       console.log('shot', shot.name, img.getSize().width + 'x' + img.getSize().height);
     } catch (err) {
       console.log('MISSED', shot.name, err.message);
