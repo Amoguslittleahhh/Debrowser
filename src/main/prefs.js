@@ -43,6 +43,9 @@ const RETIRED_STRIP_COLOURS = {
   '#2a1c22': '#231a1a'    // Wine   -> Oxblood
 };
 
+/** The zoom ladder, shared with main.js so a saved default is always a step. */
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
 const SCHEMA = {
   /* --- Personalisation ------------------------------------------- */
   theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
@@ -162,6 +165,50 @@ const SCHEMA = {
    */
   bookmarkOpensIn: { def: 'new-tab', ok: (v) => ['new-tab', 'current-tab'].includes(v) },
 
+  // On wipes the list as the browser closes, which is the private-window
+  // habit for someone who wants recording without a record of last week.
+  clearHistoryOnExit: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // A completion that is wrong more often than right for someone's habits is
+  // worse than none: Enter takes the suggestion, not what was typed.
+  inlineAutocomplete: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /*
+   * The page zoom a new page starts at, and where "reset zoom" returns to.
+   * One of the steps the zoom shortcuts move between (ZOOM_FACTORS in main.js),
+   * so the first Ctrl+plus lands on a step rather than between two.
+   */
+  defaultZoom: { def: 1, ok: (v) => ZOOM_STEPS.includes(v) },
+
+  /* --- Tabs and windows ------------------------------------------- */
+
+  // 'quit' is what every browser does; 'new-tab' keeps the window for
+  // someone who closes tabs faster than they mean to close the browser.
+  lastTabCloses: { def: 'quit', ok: (v) => ['quit', 'new-tab'].includes(v) },
+
+  // Off by default because restoreSession already brings the tabs back; this
+  // is for anyone who has that off, or who closes windows by accident.
+  confirmCloseTabs: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // Where a tab opened from a link lands. 'after-current' keeps a page's
+  // spawned tabs beside it rather than at the far end of a long strip.
+  newTabPosition: { def: 'end', ok: (v) => ['end', 'after-current'].includes(v) },
+
+  // Links opened in a new tab stay behind the page you are reading by default,
+  // which is also what keeps them unrealised and free until visited.
+  linkTabsInBackground: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // 'hover' keeps a narrow strip clean; 'always' is for anyone who aims for
+  // the cross before the pointer is on the tab.
+  tabCloseButton: { def: 'hover', ok: (v) => ['hover', 'always'].includes(v) },
+
+  // Speculative realisation on a hover dwell costs a renderer the user may not
+  // want, on a machine where memory is the point.
+  hoverPrefetch: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // Size, position and maximised state, put back on the next launch.
+  rememberWindowBounds: { def: true, ok: (v) => typeof v === 'boolean' },
+
   /* --- Resources -------------------------------------------------- */
   // Null means "size this to the machine", which is different from any number
   // the user could pick, so it needs to be representable. It matters most for
@@ -215,6 +262,15 @@ const SCHEMA = {
    */
   downloadConnections: { def: 4, ok: (v) => Number.isInteger(v) && v >= 1 && v <= 16 },
 
+  // Empty means the system's Downloads folder. Absolute only: a relative path
+  // would resolve against wherever the browser happened to be launched from.
+  downloadDir: { def: '', ok: (v) => typeof v === 'string' && v.length < 1024 &&
+                                      (v === '' || path.isAbsolute(v)) },
+
+  // Ask with a save dialog for every file instead of writing straight into
+  // the folder above.
+  askWhereToSave: { def: false, ok: (v) => typeof v === 'boolean' },
+
   /* --- Updates ---------------------------------------------------- */
   // Off means the browser never reaches the network to look for a version,
   // which is a privacy choice as much as a bandwidth one.
@@ -232,10 +288,9 @@ const SCHEMA = {
   // content area 34px only while it is showing.
   showBookmarksBar: { def: true, ok: (v) => typeof v === 'boolean' }
 
-  // Still nothing here for session restore or the resource profile: the first
-  // is not built, and the second cannot take effect without a restart, since a
-  // profile decides Chromium switches applied before the app starts. A settings
-  // page whose controls do nothing is worse than one that is short.
+  // Still nothing here for the resource profile: it decides Chromium switches
+  // applied before the app starts, so it cannot take effect without a restart.
+  // A settings page whose controls do nothing is worse than one that is short.
 };
 
 /** Search engines, as query templates. `%s` is the URL-encoded term. */
@@ -383,7 +438,7 @@ class Prefs {
   }
 }
 
-module.exports = { Prefs, SCHEMA, SEARCH_ENGINES };
+module.exports = { Prefs, SCHEMA, SEARCH_ENGINES, ZOOM_STEPS };
 
 /**
  * Fold saved preferences into the runtime config.

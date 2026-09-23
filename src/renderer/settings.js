@@ -136,7 +136,21 @@ const SECTIONS = {
   ],
 
   browsing: [
+    // First, because it is what someone looking for "why did my tabs vanish"
+    // scans for, and it was once easy to miss below the search engine.
+    {
+      key: 'restoreSession',
+      label: 'Continue where you left off',
+      hint: 'Off opens a fresh tab each time you start. Restored tabs load when you visit them.',
+      type: 'checkbox'
+    },
     { key: 'searchEngine', label: 'Search engine', type: 'select', options: 'engines' },
+    {
+      key: 'inlineAutocomplete',
+      label: 'Complete addresses as I type',
+      hint: 'Fills in the rest of a site you have visited. Keep typing to replace it.',
+      type: 'checkbox'
+    },
     {
       key: 'bookmarkOpensIn',
       label: 'Clicking a bookmark',
@@ -148,17 +162,80 @@ const SECTIONS = {
       ]
     },
     {
-      key: 'restoreSession',
-      label: 'Reopen my tabs when I start the browser',
-      hint: 'They come back without loading until you visit them.',
-      type: 'checkbox'
-    },
-    {
       key: 'homepage',
       label: 'New tab page',
       hint: 'Leave empty for the built-in page.',
       type: 'text',
       placeholder: 'https://'
+    },
+    {
+      key: 'defaultZoom',
+      label: 'Page zoom',
+      hint: 'Where new pages start, and where resetting zoom returns to.',
+      type: 'select',
+      numeric: true,
+      options: [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+        .map((f) => ({ value: String(f), name: `${Math.round(f * 100)}%` }))
+    },
+    {
+      key: 'clearHistoryOnExit',
+      label: 'Clear history when I close the browser',
+      hint: 'The list is emptied as the browser closes. Bookmarks and passwords stay.',
+      type: 'checkbox'
+    }
+  ],
+
+  tabs: [
+    {
+      key: 'newTabPosition',
+      label: 'Tabs opened from links',
+      hint: 'Beside the page they came from keeps related tabs together.',
+      type: 'select',
+      options: [
+        { value: 'end', name: 'Go at the end' },
+        { value: 'after-current', name: 'Go next to the current tab' }
+      ]
+    },
+    {
+      key: 'linkTabsInBackground',
+      label: 'Open links in the background',
+      hint: 'Off switches to a tab as soon as a link opens it.',
+      type: 'checkbox'
+    },
+    {
+      key: 'lastTabCloses',
+      label: 'Closing the last tab',
+      type: 'select',
+      options: [
+        { value: 'quit', name: 'Closes the window' },
+        { value: 'new-tab', name: 'Leaves a new tab open' }
+      ]
+    },
+    {
+      key: 'confirmCloseTabs',
+      label: 'Ask before closing a window with several tabs',
+      type: 'checkbox'
+    },
+    {
+      key: 'tabCloseButton',
+      label: 'Close buttons on tabs',
+      type: 'select',
+      options: [
+        { value: 'hover', name: 'On hover and the current tab' },
+        { value: 'always', name: 'Always' }
+      ]
+    },
+    {
+      key: 'hoverPrefetch',
+      label: 'Preload tabs when I hover them',
+      hint: 'A head start on switching. Off saves the memory a hovered tab would wake.',
+      type: 'checkbox'
+    },
+    {
+      key: 'rememberWindowBounds',
+      label: 'Remember the window size and position',
+      hint: 'Takes effect the next time the browser starts.',
+      type: 'checkbox'
     }
   ],
 
@@ -192,6 +269,18 @@ const SECTIONS = {
       type: 'number',
       min: 1,
       max: 16
+    },
+    {
+      key: 'askWhereToSave',
+      label: 'Ask where to save each file',
+      type: 'checkbox'
+    },
+    {
+      key: 'downloadDir',
+      label: 'Save files to',
+      hint: 'A full folder path. Empty, or a folder that is missing, uses your Downloads folder.',
+      type: 'text',
+      placeholder: 'Your Downloads folder'
     }
   ],
 
@@ -329,7 +418,9 @@ function buildControl(spec) {
   switch (spec.type) {
     case 'select': {
       const select = document.createElement('select');
-      select.addEventListener('change', () => save(spec.key, select.value));
+      // `numeric` for a choice of numbers: an option's value is always a string.
+      select.addEventListener('change', () =>
+        save(spec.key, spec.numeric ? Number(select.value) : select.value));
       return {
         node: select,
         input: select,
@@ -347,7 +438,7 @@ function buildControl(spec) {
               return node;
             }));
           }
-          if (select.value !== value) select.value = value;
+          if (select.value !== String(value)) select.value = String(value);
         }
       };
     }

@@ -395,6 +395,7 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
 
 .tab:hover .tab-close, .tab.active .tab-close,
 .tab-close:focus-visible { opacity: 1; }
+body[data-close-button="always"] .tab-close { opacity: 1; }
 /* `background-color`, not the `background` shorthand: the shorthand resets
    `background-clip`, which is what keeps the hover square the size of the
    cross rather than the size of the target. See "Hit targets" below. */

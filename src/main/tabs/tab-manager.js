@@ -51,6 +51,7 @@ class TabManager {
     onCover = () => false,
     onUncover = () => {},
     canSpeculate = () => true,
+    defaultZoom = () => 1,
     log = () => {}
   } = {}) {
     this.cfg = cfg;
@@ -74,6 +75,8 @@ class TabManager {
      * governor, which owns pressure and the animation quiesce; see `speculate`.
      */
     this.canSpeculate = canSpeculate;
+    /** The zoom a new renderer starts at. A function, so a change applies to the next one. */
+    this.defaultZoom = defaultZoom;
     this.log = log;
 
     /** @type {Tab[]} - ordered as shown in the tab strip */
@@ -136,6 +139,7 @@ class TabManager {
         if (event === 'updated' && !t.loading) this.pumpLoadQueue();
         this.onEvent(t, event, payload);
       },
+      defaultZoom: this.defaultZoom,
       log: this.log
     });
 

@@ -199,7 +199,7 @@ class BrowserShell {
    * @param {object} deps - { tabManager, log, onCommand }
    */
   constructor({ tabManager, prefs = null, updater = null, log = () => {}, onCommand = () => {},
-                bindShortcuts = () => {} }) {
+                bindShortcuts = () => {}, bounds = null }) {
     this.tabs = tabManager;
     this.prefs = prefs;
     this.updater = updater;
@@ -219,9 +219,13 @@ class BrowserShell {
      */
     this.bindShortcuts = bindShortcuts;
 
+    // Where the window was last time, already fitted to a display by the
+    // caller; otherwise the fixed size the smoke suite asserts on.
+    this.startMaximized = Boolean(bounds && bounds.maximized);
     this.window = new BaseWindow({
-      width: 1280,
-      height: 820,
+      ...(bounds
+        ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+        : { width: 1280, height: 820 }),
       minWidth: 620,
       minHeight: 420,
       title: 'Debrowser',
@@ -366,7 +370,17 @@ class BrowserShell {
 
     this.window.on('maximize', () => this.layout());
     this.window.on('unmaximize', () => this.layout());
-    this.window.once('ready-to-show', () => this.window.show());
+    this.window.once('ready-to-show', () => this.reveal());
+  }
+
+  /** Show the window, maximised the first time if that is how it was left. */
+  reveal() {
+    if (this.window.isDestroyed()) return;
+    if (this.startMaximized) {
+      this.startMaximized = false;
+      this.window.maximize();
+    }
+    this.window.show();
   }
 
   createChrome() {
@@ -405,7 +419,7 @@ class BrowserShell {
     });
 
     this.chromeView.webContents.once('did-finish-load', () => {
-      this.window.show();
+      this.reveal();
       this.onCommand('chrome-ready');
     });
   }

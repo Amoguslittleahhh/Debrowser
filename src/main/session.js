@@ -194,4 +194,31 @@ class Session {
   }
 }
 
-module.exports = { Session, safeUrl, MAX_TABS };
+/**
+ * The window's size, position and maximised state, in a file of its own.
+ *
+ * Separate from the tab list because it is written once, on close, rather than
+ * on every navigation - and because it is kept even with session restore off.
+ */
+const WINDOW_FILE = 'window.json';
+
+function loadWindowState(dir = null) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dir || app.getPath('userData'), WINDOW_FILE), 'utf8'));
+    const [x, y, width, height] = [raw?.x, raw?.y, raw?.width, raw?.height].map(Number);
+    if (![x, y, width, height].every(Number.isInteger) || width < 200 || height < 200) return null;
+    return { x, y, width, height, maximized: raw.maximized === true };
+  } catch {
+    return null;                                 // first run, or a file not worth trusting
+  }
+}
+
+function saveWindowState(state, dir = null) {
+  const file = path.join(dir || app.getPath('userData'), WINDOW_FILE);
+  try {
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(state));
+    fs.renameSync(`${file}.tmp`, file);
+  } catch { /* losing the window's position is not worth a failed quit */ }
+}
+
+module.exports = { Session, safeUrl, MAX_TABS, loadWindowState, saveWindowState };
