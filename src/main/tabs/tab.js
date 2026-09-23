@@ -90,6 +90,8 @@ class Tab {
     this.onEvent = onEvent;
     this.defaultZoom = defaultZoom;
     this.log = log;
+    /** Set by the manager once the tab has left the strip for good. */
+    this.closed = false;
 
     this.url = url;
     /**
@@ -741,7 +743,9 @@ class Tab {
       // `discardThumbnail` already ran, so a path recorded now would never be
       // deleted - or the page may have reported a password field, whose
       // picture must not stay on disk. Either way the file just written goes.
-      if (!this.isLive || this.hasSensitiveFields) {
+      // Closed, not merely discarded: a discarded tab is what the picture is
+      // for, shown while it comes back.
+      if (this.closed || this.hasSensitiveFields) {
         this.discardThumbnail();
         return null;
       }

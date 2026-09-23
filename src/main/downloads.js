@@ -78,6 +78,8 @@ class Download {
     this.state = 'starting';       // starting | running | done | failed | cancelled
     this.filename = null;
     this.file = null;
+    /** Where a path picked in the save dialog ends up; `file` is written first. */
+    this.finalFile = null;
     this.total = 0;
     this.received = 0;
     this.segments = 0;
@@ -124,6 +126,13 @@ class Download {
         this.cancel();
         return;
       }
+      // Cancelled while the file was being opened: `cancel` found no handle
+      // and no path yet, so the empty file is ours to remove.
+      if (this.cancelled) {
+        await this.closeHandle();
+        await fs.promises.unlink(this.file).catch(() => {});
+        return;
+      }
 
       // Sparse-allocate so the segments have somewhere to write. Without this
       // a write past the end still works, but the file grows in whatever order
@@ -164,6 +173,15 @@ class Download {
       this.log('downloads', `${this.url}: ${err.message}`);
     } finally {
       await this.closeHandle();
+      if (this.state === 'done' && this.finalFile) {
+        try {
+          await fs.promises.rename(this.file, this.finalFile);
+          this.file = this.finalFile;
+        } catch (err) {
+          this.state = 'failed';
+          this.error = `could not replace ${this.filename}: ${err.message}`;
+        }
+      }
       // A failed download leaves no file behind either - the same rule as a
       // cancelled one, and here it matters more.
       //
@@ -192,11 +210,14 @@ class Download {
     // Cancelled from the list while the dialog was up: nothing to open.
     if (picked === null || this.cancelled) return false;
     if (typeof picked === 'string' && path.isAbsolute(picked)) {
-      // Opened as given: the save dialog has already asked about replacing it.
+      // Written beside it and moved over it only once complete. The dialog has
+      // asked about replacing an existing file, but a download that then fails
+      // must not have destroyed the one the user already had.
       this.dir = path.dirname(picked);
       this.filename = path.basename(picked);
-      this.file = picked;
-      this.handle = await fs.promises.open(picked, 'w');
+      this.finalFile = picked;
+      this.file = `${picked}.part`;
+      this.handle = await fs.promises.open(this.file, 'w');
     } else {
       const { name, handle } = await openUnique(this.dir, suggested);
       this.filename = name;

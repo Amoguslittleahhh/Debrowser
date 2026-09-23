@@ -14,13 +14,6 @@
  * idle would touch the DOM twice a second forever.
  */
 
-/**
- * The cross every close and forget button draws.
- *
- * A text `×` sits wherever the face puts it - high in one font, low in the
- * next - so the same button was centred in one view and a pixel off in the
- * one beside it. A path is centred by geometry.
- */
 /** Relative luminance of a `#rrggbb` colour, 0 (black) to 1 (white). */
 function luminance(hex) {
   const [r, g, b] = [1, 3, 5].map((i) => {
@@ -30,6 +23,13 @@ function luminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+/**
+ * The cross every close and forget button draws.
+ *
+ * A text `×` sits wherever the face puts it - high in one font, low in the
+ * next - so the same button was centred in one view and a pixel off in the
+ * one beside it. A path is centred by geometry.
+ */
 /* eslint-disable-next-line no-unused-vars -- read by chrome.js, history.js, newtab.js, flyout.js */
 function crossIcon() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -385,4 +385,6 @@ function watchTransientInput(api) {
   };
   document.addEventListener('input', report);
   document.addEventListener('change', report);
+  // For a caller that removes a field outright, which fires neither event.
+  return report;
 }

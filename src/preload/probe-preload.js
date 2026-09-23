@@ -267,14 +267,6 @@ start();
 /* ------------------------------------------------------------------ */
 
 /**
- * Snapshot the parts of a page that navigation history alone does not carry:
- * where the user had scrolled to, and anything they had typed.
- *
- * The `dirty` flag is the important one. A tab holding text the user has not
- * submitted is never discarded, whatever the memory pressure - losing typed
- * input to save 60MB is not a trade this browser makes.
- */
-/**
  * Editable regions the user has actually typed into. A contenteditable has no
  * `defaultValue` to compare against, and treating any content as unsubmitted
  * input made every rich-text page - most of which ship with content in their
@@ -303,6 +295,14 @@ function selectIsDirty(el) {
   return el.selectedIndex !== initial;
 }
 
+/**
+ * Snapshot the parts of a page that navigation history alone does not carry:
+ * where the user had scrolled to, and anything they had typed.
+ *
+ * The `dirty` flag is the important one. A tab holding text the user has not
+ * submitted is never discarded, whatever the memory pressure - losing typed
+ * input to save 60MB is not a trade this browser makes.
+ */
 function captureState() {
   const state = {
     scroll: { x: window.scrollX, y: window.scrollY },

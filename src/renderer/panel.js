@@ -26,6 +26,8 @@ const el = {
 
 const rows = new Map();
 let budgetPinnedByUser = false;
+/** What the last release of the slider asked for, until the browser reports it. */
+let budgetSent = null;
 
 const TIER_TEXT = {
   active: 'Active',
@@ -168,9 +170,9 @@ function render(state) {
   // Held while dragging, and released once the browser reports the value the
   // drag set - after that the slider follows it again, including changes made
   // from Settings.
-  if (budgetPinnedByUser && Number(el.budgetInput.value) === state.budgetMB &&
-      document.activeElement !== el.budgetInput) {
+  if (budgetPinnedByUser && budgetSent !== null && state.budgetMB === budgetSent) {
     budgetPinnedByUser = false;
+    budgetSent = null;
   }
   if (!budgetPinnedByUser) {
     el.budgetInput.value = String(state.budgetMB);
@@ -426,11 +428,13 @@ el.close.addEventListener('click', () => api.send('toggle-panel'));
 
 el.budgetInput.addEventListener('input', () => {
   budgetPinnedByUser = true;
+  budgetSent = null;
   el.budgetOut.textContent = `${el.budgetInput.value} MB`;
 });
 
 el.budgetInput.addEventListener('change', () => {
-  api.send('set-budget', { mb: Number(el.budgetInput.value) });
+  budgetSent = Number(el.budgetInput.value);
+  api.send('set-budget', { mb: budgetSent });
 });
 
 api.onState((state) => {

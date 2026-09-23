@@ -629,14 +629,22 @@ function save(key, value) {
 // tab strip does. There is no separate "close settings" concept any more, which
 // is the point: the overlay that had one is what trapped the browser on it.
 document.getElementById('close').addEventListener('click', () => api.send('close-tab'));
+// What each field held when it was focused, so Escape can put it back.
+const valueOnFocus = new WeakMap();
+document.addEventListener('focusin', (event) => {
+  if (event.target.matches?.('input, select, textarea')) valueOnFocus.set(event.target, event.target.value);
+});
+
 window.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   // Not from inside a field someone is filling in - the bookmark editor, the
-  // homepage, a number. Escape there means "never mind this edit", and
-  // closing the whole page threw away what was typed. The search box has its
-  // own Escape, and is the exception.
+  // homepage, a number. Escape there means "never mind this edit": the value
+  // goes back to what it was before the blur, so the blur's `change` has
+  // nothing to save. Closing the whole page threw away what was typed. The
+  // search box has its own Escape, and is the exception.
   const t = event.target;
   if (t && t.id !== 'q' && t.matches && t.matches('input, select, textarea')) {
+    if (valueOnFocus.has(t)) t.value = valueOnFocus.get(t);
     t.blur();
     return;
   }
@@ -1415,7 +1423,9 @@ function bookmarkForm(item = null) {
     // Adding leaves the form up with empty fields; editing closes it, because
     // the row it came from is what the user wants to see again.
     if (!item) { title.value = ''; url.value = ''; problem.textContent = ''; }
-    renderBookmarks();
+    await renderBookmarks();
+    // Cleared or replaced without an input event; say the page is clean.
+    reportTransient();
   });
 
   const cancel = document.createElement('button');
@@ -1424,6 +1434,7 @@ function bookmarkForm(item = null) {
   cancel.addEventListener('click', () => {
     if (item) row.replaceWith(bookmarkRow(item));
     else { title.value = ''; url.value = ''; problem.textContent = ''; }
+    reportTransient();
   });
 
   control.append(save, cancel);
@@ -1445,4 +1456,4 @@ function bookmarkForm(item = null) {
 // The bookmark editor's fields are `data-transient`: a half-typed bookmark
 // keeps this page off the reclaim ladder, as a half-typed search does
 // elsewhere. See theme.js.
-watchTransientInput(api);
+const reportTransient = watchTransientInput(api);

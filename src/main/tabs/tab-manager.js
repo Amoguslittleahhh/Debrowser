@@ -418,6 +418,7 @@ class TabManager {
     // other one used to free the slot while the speculated tab stayed resident.
     if (this.speculatingId === tab.id) this.clearSpeculation(tab);
     // A picture of the page must not outlive the tab it was taken from.
+    tab.closed = true;
     tab.discardThumbnail();
     tab.teardownView();
 

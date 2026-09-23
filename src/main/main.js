@@ -1321,7 +1321,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // just outside it is honoured as near as allowed rather than dropped.
         const mb = Number(payload?.mb);
         if (!Number.isFinite(mb)) break;
-        if (!prefs.set('memoryBudgetMB', Math.min(65536, Math.max(256, Math.round(mb))))) break;
+        const clamped = Math.min(65536, Math.max(256, Math.round(mb)));
+        // A `--budget` on the command line outranks the preference, so saving
+        // one would change nothing this run; the slider then adjusts the run
+        // itself, as it always did, and leaves the saved value alone.
+        if (cfg.pinned?.memoryBudgetMB) { cfg.memoryBudgetMB = clamped; break; }
+        if (!prefs.set('memoryBudgetMB', clamped)) break;
         applyPrefs(cfg, prefs, log);
         break;
       }

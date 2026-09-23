@@ -197,7 +197,9 @@ async function demote(tab, target, ctx) {
     if (!frozen) {
       // Freezing is the one step that can legitimately fail (DevTools
       // attached, page in an unfreezable state such as holding a lock). Stay
-      // at COLD rather than reporting a tier we are not actually in.
+      // at COLD rather than reporting a tier we are not actually in - unless
+      // the tab came forward meanwhile, when it is not ours to move at all.
+      if (superseded(tab, from)) return null;
       log(`tab ${tab.id}: freeze refused; holding at cold`);
       return Tier.COLD;
     }
@@ -221,7 +223,12 @@ async function demote(tab, target, ctx) {
     const advised = await platform.trimProcessMemory(tab.pid, log);
     if (advised == null) {
       // Trimming is unavailable or was refused. The tab is frozen, which is a
-      // legitimate tier, so report that rather than a state it is not in.
+      // legitimate tier, so report that rather than a state it is not in -
+      // or, if it was shown while the trim was asked for, thaw it.
+      if (superseded(tab, from)) {
+        await tab.cdp?.unfreeze();
+        return null;
+      }
       log(`tab ${tab.id}: trim unavailable; holding at frozen`);
       return Tier.FROZEN;
     }
