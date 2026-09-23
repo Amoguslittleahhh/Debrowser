@@ -13,7 +13,7 @@
   gap: 16px;
   max-width: 820px;
   margin: 14px auto 6px;
-  padding: 0 2px;
+  padding: 0 10px 0 12px;      /* the rows' own insets, so the count ends where their buttons do */
 }
 
 .count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
