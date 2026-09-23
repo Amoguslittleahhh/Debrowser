@@ -173,7 +173,12 @@ header #q:focus { border-color: var(--accent); box-shadow: var(--ring); }
  * their settings roughly this. The hint text keeps its own 52ch measure, so
  * widening the card does not turn the explanations into long lines.
  */
-section { max-width: 840px; margin: var(--s7) auto 0; }
+section {
+  max-width: 840px;
+  margin: var(--s7) auto 0;
+  /* A deep link lands with the heading in view, not flush under the edge. */
+  scroll-margin-top: var(--s5);
+}
 section:first-of-type { margin-top: var(--s5); }
 
 /*
@@ -307,6 +312,15 @@ select {
    it - which also shows for a pointer click, where the ring deliberately does
    not. */
 select:focus, input:focus { border-color: var(--accent); }
+
+/*
+ * One width for every dropdown and text field in a row, so the right-hand
+ * column is a column. Sized to their content, "Across the top" and "Google"
+ * ended forty pixels apart on consecutive rows. Numbers keep their own
+ * width: they carry a unit beside them.
+ */
+.row-control > select,
+.row-control > input[type="text"] { width: 212px; }
 
 /* A real checkbox, accented and sized up - a hand-rolled toggle would mean
    reimplementing focus, keyboard activation and the accessibility tree. */

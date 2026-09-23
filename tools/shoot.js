@@ -45,7 +45,11 @@ const STATE = {
     maxLiveTabs: null, showMemoryDetail: false, hardwareAcceleration: true,
     fillPasswords: true, downloadConnections: 4, autoUpdate: true,
     devToolsDock: 'right', showBookmarksBar: true, sidebarPinned: false,
-    requirePresence: false
+    requirePresence: false, restoreSession: true, bookmarkOpensIn: 'new-tab',
+    inlineAutocomplete: true, defaultZoom: 1, clearHistoryOnExit: false,
+    newTabPosition: 'end', linkTabsInBackground: true, lastTabCloses: 'quit',
+    confirmCloseTabs: false, tabCloseButton: 'hover', hoverPrefetch: true,
+    rememberWindowBounds: true, downloadDir: '', askWhereToSave: false
   }
 };
 
@@ -156,6 +160,9 @@ const SHOTS = [
   // down. Worth its own shot because the rows there are built by hand rather
   // than from the settings descriptors, so nothing else photographs them.
   { name: 'settings-bookmarks', file: 'settings.html', w: 1280, h: 860, hash: 'bookmarks' },
+  // Startup, then the tab and window behaviours - the rows people come to
+  // Settings to change most, and several of them selects of unequal width.
+  { name: 'settings-browsing', file: 'settings.html', w: 1280, h: 860, hash: 'browsing' },
   { name: 'history',  file: 'history.html',  w: 1280, h: 700 },
   { name: 'downloads', file: 'downloads.html', w: 1280, h: 700 },
   { name: 'newtab',   file: 'newtab.html',   w: 1280, h: 700 },
