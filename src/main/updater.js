@@ -269,9 +269,13 @@ class Updater {
    * Returns the state the button should draw immediately rather than leaving
    * the page to wait for the next broadcast - a button that does nothing
    * visible for half a second is a button people press twice.
+   *
+   * @param {boolean} manual - false for the Updates section coming into view,
+   *   which is an automatic check: it must respect the preference and the rate
+   *   limit, or merely scrolling Settings reaches GitHub with updates off.
    */
-  checkNow() {
-    this.check(true);
+  checkNow(manual = true) {
+    this.check(manual);
     return this.snapshot();
   }
 

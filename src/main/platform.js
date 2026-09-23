@@ -743,14 +743,6 @@ function recommendedLiveTabs() {
   return 12;
 }
 
-/** Free physical memory as a fraction of total. Used for host-level pressure. */
-function systemMemoryPressure() {
-  const total = os.totalmem();
-  const free = os.freemem();
-  if (!total) return 0;
-  return 1 - free / total;
-}
-
 /**
  * True when we are root on Linux without `--no-sandbox` on the command line -
  * the configuration where Chromium aborts at startup rather than running
@@ -915,7 +907,6 @@ module.exports = {
   runningRootUnsandboxed,
   recommendedBudgetMB,
   recommendedLiveTabs,
-  systemMemoryPressure,
   systemInfo,
   chromiumSwitches
 };

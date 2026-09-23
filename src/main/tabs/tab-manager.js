@@ -410,8 +410,9 @@ class TabManager {
     // The governor's expiry clause only walks tabs that still exist, so a tab
     // closed while it was being speculated on left `speculatingId` set for the
     // rest of the session, and every later speculative restore was refused with
-    // nothing in the log to say why.
-    this.clearSpeculation(tab);
+    // nothing in the log to say why. Only when it is *this* tab: closing any
+    // other one used to free the slot while the speculated tab stayed resident.
+    if (this.speculatingId === tab.id) this.clearSpeculation(tab);
     // A picture of the page must not outlive the tab it was taken from.
     tab.discardThumbnail();
     tab.teardownView();

@@ -274,6 +274,35 @@ start();
  * submitted is never discarded, whatever the memory pressure - losing typed
  * input to save 60MB is not a trade this browser makes.
  */
+/**
+ * Editable regions the user has actually typed into. A contenteditable has no
+ * `defaultValue` to compare against, and treating any content as unsubmitted
+ * input made every rich-text page - most of which ship with content in their
+ * editors - permanently undiscardable. Held in a WeakSet rather than marked on
+ * the element so the page's DOM is left untouched.
+ */
+const editedHosts = new WeakSet();
+document.addEventListener('input', (event) => {
+  for (let node = event.target; node && node.isContentEditable; node = node.parentElement) {
+    editedHosts.add(node);
+  }
+}, { capture: true, passive: true });
+
+/**
+ * Whether a select differs from what the markup chose. A single select with
+ * no `selected` attribute defaults to its first enabled option, so comparing
+ * against `option[selected]` alone - undefined there - reported every such
+ * select as changed.
+ */
+function selectIsDirty(el) {
+  const options = [...el.options];
+  if (el.multiple) return options.some((o) => o.selected !== o.defaultSelected);
+  let initial = -1;
+  for (const o of options) if (o.defaultSelected) initial = o.index; // the last one wins
+  if (initial === -1 && el.size <= 1) initial = options.findIndex((o) => !o.disabled);
+  return el.selectedIndex !== initial;
+}
+
 function captureState() {
   const state = {
     scroll: { x: window.scrollX, y: window.scrollY },
@@ -308,12 +337,11 @@ function captureState() {
       let value = null;
 
       if (el.isContentEditable) {
-        if (el.innerHTML !== (el.dataset.debrowserInitial ?? el.innerHTML)) state.dirty = true;
         value = el.innerHTML;
-        if (value) state.dirty = true;
+        if (editedHosts.has(el)) state.dirty = true;
       } else if (el.tagName === 'SELECT') {
         value = el.value;
-        if (el.selectedIndex !== el.querySelector('option[selected]')?.index) state.dirty = true;
+        if (selectIsDirty(el)) state.dirty = true;
       } else if (type === 'checkbox' || type === 'radio') {
         value = el.checked;
         if (el.checked !== el.defaultChecked) state.dirty = true;
@@ -343,7 +371,12 @@ ipcRenderer.on('debrowser:restore-state', (_event, state) => {
         if (!field.path.startsWith('#')) continue; // index paths are not stable across a reload
         const el = document.querySelector(field.path);
         if (!el) continue;
-        if (field.kind === 'html') el.innerHTML = field.value;
+        if (field.kind === 'html') {
+          el.innerHTML = field.value;
+          // Restored input is still the user's unsubmitted input, exactly as a
+          // restored text field's value still differs from its default.
+          editedHosts.add(el);
+        }
         else if (field.type === 'checkbox' || field.type === 'radio') el.checked = Boolean(field.value);
         else el.value = field.value;
       }

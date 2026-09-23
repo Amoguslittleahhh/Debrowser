@@ -116,9 +116,10 @@ class Download {
       if (this.cancelled) return;
 
       this.total = probe.total;
-      this.filename = await uniqueName(this.dir, probe.filename);
-      this.file = path.join(this.dir, this.filename);
-      this.handle = await fs.promises.open(this.file, 'w');
+      const { name, handle } = await openUnique(this.dir, probe.filename);
+      this.filename = name;
+      this.file = path.join(this.dir, name);
+      this.handle = handle;
 
       // Sparse-allocate so the segments have somewhere to write. Without this
       // a write past the end still works, but the file grows in whatever order
@@ -604,22 +605,38 @@ function sanitiseName(raw) {
   name = name.replace(/^\.+/, '');                       // no dotfiles, no ".."
   name = name.replace(/[<>:"|?*]/g, '_');                // illegal on Windows
   name = name.trim().slice(0, 180);
+  // Windows drops trailing dots and spaces, so `evil.exe.` is saved as
+  // `evil.exe` - a name other than the one the checks above looked at.
+  name = name.replace(/[. ]+$/, '');
+  // And reserves device names whatever the extension: `NUL.txt` opens the null
+  // device, and the download is written to nowhere.
+  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(name)) name = `_${name}`;
   return name || 'download';
 }
 
-/** Never overwrite. `file.zip`, then `file (1).zip`. */
-async function uniqueName(dir, name) {
+/**
+ * Never overwrite. `file.zip`, then `file (1).zip`.
+ *
+ * Creates the file as it chooses the name, with `wx`, rather than checking and
+ * then opening: two downloads of one name starting together both found it
+ * free and then wrote into the same file.
+ */
+async function openUnique(dir, name) {
   const ext = path.extname(name);
   const stem = path.basename(name, ext);
-  for (let i = 0; i < 1000; i++) {
-    const candidate = i === 0 ? name : `${stem} (${i})${ext}`;
+  const candidates = function* () {
+    yield name;
+    for (let i = 1; i < 1000; i++) yield `${stem} (${i})${ext}`;
+    yield `${stem}-${Date.now()}${ext}`;
+  };
+  for (const candidate of candidates()) {
     try {
-      await fs.promises.access(path.join(dir, candidate));
-    } catch {
-      return candidate;                                  // does not exist: take it
+      return { name: candidate, handle: await fs.promises.open(path.join(dir, candidate), 'wx') };
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;              // taken: try the next
     }
   }
-  return `${stem}-${Date.now()}${ext}`;
+  throw new Error(`no free name for ${name} in ${dir}`);
 }
 
 module.exports = {
