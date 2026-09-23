@@ -274,10 +274,13 @@ function renderRows(tabs) {
   // swapping places every tick put the Discard click on the wrong tab.
   const hold = el.list.matches(':hover') && rows.size === tabs.length &&
                tabs.every((tab) => rows.has(tab.id));
-  const ordered = hold
-    ? [...el.list.children].map((node) => tabs.find((tab) => rows.get(tab.id)?.root === node))
-        .filter(Boolean)
-    : [...tabs].sort((a, b) => b.rssMB - a.rssMB);
+  let ordered;
+  if (hold) {
+    const at = new Map([...el.list.children].map((node, i) => [node, i]));
+    ordered = [...tabs].sort((a, b) => at.get(rows.get(a.id).root) - at.get(rows.get(b.id).root));
+  } else {
+    ordered = [...tabs].sort((a, b) => b.rssMB - a.rssMB);
+  }
 
   ordered.forEach((tab, index) => {
     seen.add(tab.id);
@@ -424,6 +427,7 @@ function describe(tab) {
 
 /* ------------------------------------------------------------------ */
 
+el.close.append(crossIcon());
 el.close.addEventListener('click', () => api.send('toggle-panel'));
 
 el.budgetInput.addEventListener('input', () => {

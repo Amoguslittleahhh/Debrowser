@@ -206,6 +206,5 @@ body.still .tile { animation: none; }
   transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.tile:hover .tile-forget,
-.tile-forget:focus-visible { opacity: 1; }
+.tile:hover .tile-forget { opacity: 1; }
 .tile-forget:hover { color: var(--crit); }

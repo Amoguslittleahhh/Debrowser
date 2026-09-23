@@ -531,9 +531,11 @@ let tabWidthsFrozen = false;
 
 function freezeTabWidths() {
   if (document.body.dataset.layout === 'left') return;
-  for (const node of tabEls.values()) {
-    node.root.style.flex = `0 0 ${node.root.getBoundingClientRect().width}px`;
-  }
+  // Every width read before any is written: interleaved, each write forced a
+  // fresh layout of the strip for the next read.
+  const nodes = [...tabEls.values()];
+  const widths = nodes.map((node) => node.root.getBoundingClientRect().width);
+  nodes.forEach((node, i) => { node.root.style.flex = `0 0 ${widths[i]}px`; });
   tabWidthsFrozen = true;
 }
 
@@ -551,6 +553,10 @@ function createTabElement(id) {
 
   const tier = document.createElement('span');
   tier.className = 'tier';
+  tier.addEventListener('pointerenter', () => {
+    const node = tabEls.get(id);
+    if (node?.tab) tier.title = tierLabel(node.tab);
+  });
 
   const favicon = document.createElement('img');
   favicon.className = 'tab-favicon';
@@ -707,12 +713,9 @@ function updateTabElement(node, tab) {
     node.tier.dataset.tier = tab.tier;
     prev.tier = tab.tier;
   }
-  // The label carries a live figure, so it is compared as text, not by tier.
-  const tierTip = tierLabel(tab);
-  if (prev.tierTip !== tierTip) {
-    node.tier.title = tierTip;
-    prev.tierTip = tierTip;
-  }
+  // The dot's tooltip carries a live figure, so it is written when the pointer
+  // arrives rather than rebuilt for every tab on every tick.
+  node.tab = tab;
 
   if (prev.active !== tab.visible) {
     node.root.classList.toggle('active', tab.visible);
@@ -947,11 +950,12 @@ el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); });
 el.url.addEventListener('blur', () => { urlFocused = false; });
 
 /** Preferences the strip reads for itself, from the preload's first copy and then each broadcast. */
-let chromePrefs = api.prefs || {};
+let chromePrefs = {};
 function applyChromePrefs(next) {
   if (!next) return;
   chromePrefs = next;
-  document.body.dataset.closeButton = next.tabCloseButton || 'hover';
+  const closeButton = next.tabCloseButton || 'hover';
+  if (document.body.dataset.closeButton !== closeButton) document.body.dataset.closeButton = closeButton;
 }
 applyChromePrefs(api.prefs);
 
@@ -998,8 +1002,6 @@ el.url.addEventListener('input', async () => {
 });
 
 el.url.addEventListener('keydown', (event) => {
-  // The Enter that confirms a CJK composition belongs to the IME, not to us.
-  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Enter') {
     api.send('navigate', { url: el.url.value });
     el.url.blur();
@@ -1044,7 +1046,6 @@ el.findInput.addEventListener('input', () => {
 });
 
 el.findInput.addEventListener('keydown', (event) => {
-  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Enter') {
     api.send(event.shiftKey ? 'find-prev' : 'find-next', { query: el.findInput.value });
     event.preventDefault();

@@ -187,19 +187,14 @@ async function demote(tab, target, ctx) {
     // tick. A tab with no renderer is already holding nothing, so there is
     // nothing to freeze and COLD is the honest answer.
     const frozen = tab.cdp ? await tab.cdp.freeze() : false;
-    if (frozen && superseded(tab, from)) {
-      // Shown while the freeze was in flight. The promotion that ran meanwhile
-      // saw a tier below FROZEN and so did not unfreeze, which would leave the
-      // page the user is now looking at stopped.
-      await tab.cdp?.unfreeze();
-      return null;
-    }
+    // Shown while the freeze was in flight. The promotion that ran meanwhile
+    // saw a tier below FROZEN and so did not unfreeze, which would leave the
+    // page the user is now looking at stopped.
+    if (superseded(tab, from)) return backOut(tab, { frozen });
     if (!frozen) {
       // Freezing is the one step that can legitimately fail (DevTools
       // attached, page in an unfreezable state such as holding a lock). Stay
-      // at COLD rather than reporting a tier we are not actually in - unless
-      // the tab came forward meanwhile, when it is not ours to move at all.
-      if (superseded(tab, from)) return null;
+      // at COLD rather than reporting a tier we are not actually in.
       log(`tab ${tab.id}: freeze refused; holding at cold`);
       return Tier.COLD;
     }
@@ -225,21 +220,14 @@ async function demote(tab, target, ctx) {
       // Trimming is unavailable or was refused. The tab is frozen, which is a
       // legitimate tier, so report that rather than a state it is not in -
       // or, if it was shown while the trim was asked for, thaw it.
-      if (superseded(tab, from)) {
-        await tab.cdp?.unfreeze();
-        return null;
-      }
+      if (superseded(tab, from)) return backOut(tab, { frozen: true });
       log(`tab ${tab.id}: trim unavailable; holding at frozen`);
       return Tier.FROZEN;
     }
     tab.trimmedAt = Date.now();
-    if (superseded(tab, from)) {
-      // As after the freeze: the promotion that overtook this saw the tier we
-      // started from, so the undo is ours to do.
-      platform.untrimProcessMemory(tab.pid);
-      await tab.cdp?.unfreeze();
-      return null;
-    }
+    // As after the freeze: the promotion that overtook this saw the tier we
+    // started from, so the undo is ours to do.
+    if (superseded(tab, from)) return backOut(tab, { frozen: true, trimmed: true });
   }
 
   return target;
@@ -278,10 +266,7 @@ async function discard(tab, ctx) {
     log(`tab ${tab.id}: discard cancelled, holds unsubmitted input`);
     if (isStopped(tab.tier)) return tab.tier;       // already stopped; leave it there
     const frozen = tab.cdp ? await tab.cdp.freeze() : false;
-    if (frozen && superseded(tab, from)) {
-      await tab.cdp?.unfreeze();
-      return null;
-    }
+    if (superseded(tab, from)) return backOut(tab, { frozen });
     return frozen ? Tier.FROZEN : tab.tier;
   }
 
@@ -297,6 +282,13 @@ async function discard(tab, ctx) {
  */
 function superseded(tab, from) {
   return tab.visible || tab.tier !== from;
+}
+
+/** Undo what a superseded demotion had done so far, and report no move. */
+async function backOut(tab, { frozen = false, trimmed = false } = {}) {
+  if (trimmed) platform.untrimProcessMemory(tab.pid);
+  if (frozen) await tab.cdp?.unfreeze();
+  return null;
 }
 
 /* ------------------------------------------------------------------ */

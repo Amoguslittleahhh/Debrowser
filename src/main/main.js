@@ -18,7 +18,7 @@ const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
-const { Prefs, applyPrefs, ZOOM_STEPS } = require('./prefs');
+const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB } = require('./prefs');
 const { Updater } = require('./updater');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
@@ -1321,7 +1321,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // just outside it is honoured as near as allowed rather than dropped.
         const mb = Number(payload?.mb);
         if (!Number.isFinite(mb)) break;
-        const clamped = Math.min(65536, Math.max(256, Math.round(mb)));
+        const clamped = Math.min(BUDGET_MB.max, Math.max(BUDGET_MB.min, Math.round(mb)));
         // A `--budget` on the command line outranks the preference, so saving
         // one would change nothing this run; the slider then adjusts the run
         // itself, as it always did, and leaves the saved value alone.
@@ -1974,12 +1974,13 @@ function hashOf(url) {
  * The folder downloads are written to: the chosen one while it exists, else
  * the system's. Checked per download, since a removable drive comes and goes.
  */
-function downloadDir(prefs) {
+async function downloadDir(prefs) {
   const chosen = prefs?.get('downloadDir');
+  // Asynchronously: a sleeping drive or a stalled network mount can hold a
+  // stat for seconds, and a synchronous one would hold the whole browser.
   if (chosen && !OFFLINE_MODE) {
-    try {
-      if (fs.statSync(chosen).isDirectory()) return chosen;
-    } catch { /* gone; fall back */ }
+    const stat = await fs.promises.stat(chosen).catch(() => null);
+    if (stat && stat.isDirectory()) return chosen;
   }
   return app.getPath('downloads');
 }
@@ -2023,8 +2024,6 @@ function newTabUrl(prefs) {
 /* The three-dot menu                                                  */
 /* ------------------------------------------------------------------ */
 
-/** Zoom steps, matching the ones Chrome offers. Kept in prefs.js beside `defaultZoom`. */
-const ZOOM_FACTORS = ZOOM_STEPS;
 
 function stepZoom(tab, direction) {
   if (!tab?.isLive) return;
@@ -2032,11 +2031,11 @@ function stepZoom(tab, direction) {
   // Nearest step to where we are, then move one along. Reading the factor back
   // rather than tracking an index keeps this correct after a ctrl+scroll, which
   // sets a factor this list does not contain.
-  const nearest = ZOOM_FACTORS.reduce(
+  const nearest = ZOOM_STEPS.reduce(
     (best, f) => (Math.abs(f - current) < Math.abs(best - current) ? f : best), 1);
-  const index = ZOOM_FACTORS.indexOf(nearest) + direction;
-  if (index < 0 || index >= ZOOM_FACTORS.length) return;
-  tab.wc.setZoomFactor(ZOOM_FACTORS[index]);
+  const index = ZOOM_STEPS.indexOf(nearest) + direction;
+  if (index < 0 || index >= ZOOM_STEPS.length) return;
+  tab.wc.setZoomFactor(ZOOM_STEPS[index]);
 }
 
 /**

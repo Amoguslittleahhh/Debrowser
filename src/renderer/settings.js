@@ -636,7 +636,7 @@ document.addEventListener('focusin', (event) => {
 });
 
 window.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') return;
+  if (event.key !== 'Escape' || event.defaultPrevented) return;
   // Not from inside a field someone is filling in - the bookmark editor, the
   // homepage, a number. Escape there means "never mind this edit": the value
   // goes back to what it was before the blur, so the blur's `change` has
@@ -1160,7 +1160,7 @@ function downloadRow(id) {
   const control = document.createElement('div');
   control.className = 'row-control';
   const button = document.createElement('button');
-  const node = { row, label, hint, button, running: false };
+  const node = { row, label, hint, button, running: null };
   button.addEventListener('click', async () => {
     await api.request(node.running ? 'cancel-download' : 'clear-download', { id });
     renderDownloads();
@@ -1173,9 +1173,12 @@ function downloadRow(id) {
 
 function updateDownloadRow(node, item) {
   const running = item.state === 'running' || item.state === 'starting';
-  node.label.textContent = item.filename || item.url;
-  node.hint.textContent = describeDownload(item);
-  if (node.running !== running || !node.button.textContent) {
+  // Written only on a change: this runs for every row on every broadcast.
+  const label = item.filename || item.url;
+  const hint = describeDownload(item);
+  if (node.label.textContent !== label) node.label.textContent = label;
+  if (node.hint.textContent !== hint) node.hint.textContent = hint;
+  if (node.running !== running) {
     node.running = running;
     node.button.className = running ? 'ghost-btn danger' : 'ghost-btn';
     node.button.textContent = running ? 'Cancel' : 'Clear';
@@ -1442,12 +1445,11 @@ function bookmarkForm(item = null) {
 
   // Enter saves, from either field. A two-field form where the keyboard does
   // nothing is a form that has to be finished with the mouse.
-  // Escape is Cancel. `isComposing`: the Enter that confirms an IME
-  // composition is not a request to save.
+  // Escape is Cancel, and handled: the page's own Escape would otherwise put
+  // back the value the field had on focus, undoing the Clear.
   row.addEventListener('keydown', (event) => {
-    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Enter') { event.preventDefault(); save.click(); }
-    else if (event.key === 'Escape') cancel.click();
+    else if (event.key === 'Escape') { event.preventDefault(); cancel.click(); }
   });
 
   return row;

@@ -30,7 +30,7 @@ function luminance(hex) {
  * next - so the same button was centred in one view and a pixel off in the
  * one beside it. A path is centred by geometry.
  */
-/* eslint-disable-next-line no-unused-vars -- read by chrome.js, history.js, newtab.js, flyout.js */
+/* eslint-disable-next-line no-unused-vars -- read by chrome.js, history.js, newtab.js, flyout.js, panel.js */
 function crossIcon() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
@@ -41,6 +41,17 @@ function crossIcon() {
   svg.append(path);
   return svg;
 }
+
+/*
+ * A key that belongs to an input method is not a command.
+ *
+ * The Enter that confirms a CJK composition, or the Escape that abandons one,
+ * reached every page's own handlers - navigating, saving, closing the page.
+ * Stopped once, here, in the capture phase, for every page that loads this.
+ */
+window.addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229) event.stopImmediatePropagation();
+}, true);
 
 /**
  * A stable colour for a site, from its hostname.

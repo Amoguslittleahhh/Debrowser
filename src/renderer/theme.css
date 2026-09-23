@@ -498,6 +498,10 @@ body {
 :focus-visible {
   outline: none;
   box-shadow: var(--ring);
+  /* And shown. Several controls stay transparent until hover - a tab's close
+     cross, a row's forget button - and one reached by keyboard was a ring
+     around nothing. Declared here so the next such control is covered too. */
+  opacity: 1 !important;
 }
 
 /*

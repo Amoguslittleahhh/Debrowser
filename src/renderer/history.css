@@ -188,5 +188,5 @@
   cursor: default;
   opacity: 0;
 }
-.visit:hover .forget, .forget:focus-visible { opacity: 1; }
+.visit:hover .forget { opacity: 1; }
 .forget:hover { background-color: var(--border); color: var(--text); }

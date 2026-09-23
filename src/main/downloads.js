@@ -206,6 +206,8 @@ class Download {
    * unique so nothing is overwritten unasked.
    */
   async chooseTarget(suggested) {
+    // The folder may still be being checked - see `downloadDir` in main.js.
+    this.dir = await this.dir;
     const picked = this.saveAs ? await this.saveAs(path.join(this.dir, suggested)) : undefined;
     // Cancelled from the list while the dialog was up: nothing to open.
     if (picked === null || this.cancelled) return false;

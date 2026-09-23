@@ -46,6 +46,9 @@ const RETIRED_STRIP_COLOURS = {
 /** The zoom ladder, shared with main.js so a saved default is always a step. */
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
+/** The range a saved budget may take; the task manager's slider clamps to it. */
+const BUDGET_MB = { min: 256, max: 65536 };
+
 const SCHEMA = {
   /* --- Personalisation ------------------------------------------- */
   theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
@@ -175,7 +178,7 @@ const SCHEMA = {
 
   /*
    * The page zoom a new page starts at, and where "reset zoom" returns to.
-   * One of the steps the zoom shortcuts move between (ZOOM_FACTORS in main.js),
+   * One of the steps the zoom shortcuts move between (`stepZoom` in main.js),
    * so the first Ctrl+plus lands on a step rather than between two.
    */
   defaultZoom: { def: 1, ok: (v) => ZOOM_STEPS.includes(v) },
@@ -213,7 +216,7 @@ const SCHEMA = {
   // Null means "size this to the machine", which is different from any number
   // the user could pick, so it needs to be representable. It matters most for
   // the tab cap, where 0 is itself a meaningful choice: it removes the cap.
-  memoryBudgetMB: { def: null,   ok: (v) => v === null || (Number.isFinite(v) && v >= 256 && v <= 65536) },
+  memoryBudgetMB: { def: null,   ok: (v) => v === null || (Number.isFinite(v) && v >= BUDGET_MB.min && v <= BUDGET_MB.max) },
   maxLiveTabs:  { def: null,     ok: (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 200) },
 
   /**
@@ -438,7 +441,7 @@ class Prefs {
   }
 }
 
-module.exports = { Prefs, SCHEMA, SEARCH_ENGINES, ZOOM_STEPS };
+module.exports = { Prefs, SCHEMA, SEARCH_ENGINES, ZOOM_STEPS, BUDGET_MB };
 
 /**
  * Fold saved preferences into the runtime config.

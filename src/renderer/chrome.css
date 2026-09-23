@@ -261,14 +261,16 @@ body[data-platform="linux"] { --caption-right: 146px; }
  */
 body[data-strip-tone="dark"] .tab:not(.active),
 body[data-strip-tone="dark"] .new-tab,
-body[data-strip-tone="dark"] .bookmarks {
+body[data-strip-tone="dark"] .bookmarks,
+body[data-strip-tone="dark"] .pin {
   --text: #eae7e0;
   --text-dim: #aaa69c;
   --border: #3a3a34;
 }
 body[data-strip-tone="light"] .tab:not(.active),
 body[data-strip-tone="light"] .new-tab,
-body[data-strip-tone="light"] .bookmarks {
+body[data-strip-tone="light"] .bookmarks,
+body[data-strip-tone="light"] .pin {
   --text: #201f1c;
   --text-dim: #4f4a41;
   --border: #cfc9bd;
@@ -416,8 +418,7 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
 }
 .tab-close .x-icon { width: 11px; height: 11px; stroke-width: 1.6; }
 
-.tab:hover .tab-close, .tab.active .tab-close,
-.tab-close:focus-visible { opacity: 1; }
+.tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
 body[data-close-button="always"] .tab-close { opacity: 1; }
 /* `background-color`, not the `background` shorthand: the shorthand resets
    `background-clip`, which is what keeps the hover square the size of the
@@ -1393,5 +1394,5 @@ body[data-floating="true"] .toolbar {
 }
 @container tab (max-width: 64px) {
   .tab.active .tab-icon { display: none; }
-  .tab.active .tab-close { margin-inline: auto; opacity: 1; }
+  .tab.active .tab-close { margin-inline: auto; }
 }

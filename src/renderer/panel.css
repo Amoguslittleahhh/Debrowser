@@ -148,7 +148,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
   cursor: default;
   opacity: 0;
 }
-.row:hover .row-action, .row-action:focus-visible { opacity: 1; }
+.row:hover .row-action { opacity: 1; }
 .row-action:hover { color: var(--text); border-color: var(--text-dim); }
 .row-action:disabled { opacity: 0 !important; }
 
