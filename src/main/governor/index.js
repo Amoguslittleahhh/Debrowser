@@ -418,11 +418,6 @@ class Governor {
       // that indefinitely, and it is the only reclaim that returns the whole
       // renderer rather than a fraction of a heap.
       if (idle >= this.cfg.discardAfterMs * accel) target = Tier.DISCARDED;
-      // Discarding on a timer alone is deliberately not done here. An idle
-      // frozen tab costs no CPU and has already been collected; destroying
-      // it buys the remainder only at the price of a reload later. That trade
-      // is only worth making under real memory pressure, which is the
-      // budget's job below.
 
       target = this.clampToProtections(tab, target);
       if (tierRank(target) > tierRank(tab.tier)) {
@@ -529,7 +524,7 @@ class Governor {
     if (this.pressure === Pressure.NONE) return;
     if (this.boost.quiesceRequested) return; // never reclaim mid-animation
 
-    const discardAllowed = tierRank(this.pressure) !== undefined &&
+    const discardAllowed =
       PRESSURE_RANK[this.pressure] >= PRESSURE_RANK[this.cfg.discardFromPressure];
 
     let overBy = this.metrics.totalMB - this.cfg.memoryBudgetMB * this.cfg.pressure.moderate;

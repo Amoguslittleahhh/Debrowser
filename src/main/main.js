@@ -13,7 +13,7 @@
 
 const { app, ipcMain, session, Menu, dialog, clipboard, screen,
         shell: electronShell } = require('electron');
-const { loadConfig } = require('./config');
+const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
@@ -1112,9 +1112,6 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
-      // Ctrl+Shift+B. Through the preference rather than a flag in the chrome,
-      // because showing the bar takes 34px from the page - the window has to
-      // lay out again, and the choice has to survive a restart.
       // A dwell on the + or the menu. Both open one of the browser's own pages,
       // and all of them share a renderer - so one warm process serves the new
       // tab page, Settings and History alike.
@@ -1247,6 +1244,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         shell.applyWindowPrefs();
         break;
 
+      // Ctrl+Shift+B. Through the preference rather than a flag in the chrome,
+      // because showing the bar takes 34px from the page - the window has to
+      // lay out again, and the choice has to survive a restart.
       case 'toggle-bookmarks-bar': {
         // The preference, not `bookmarksBarVisible()` - that is hard-false
         // with the strip down the side, so inverting it there could only ever
@@ -1315,11 +1315,14 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       }
 
       case 'set-budget': {
+        // Through the preference, like Settings' budget field. Writing
+        // `cfg` directly was undone by the next `applyPrefs` and forgotten at
+        // restart. Clamped to the range the preference accepts, so a value
+        // just outside it is honoured as near as allowed rather than dropped.
         const mb = Number(payload?.mb);
-        if (governor && Number.isFinite(mb) && mb >= 256) {
-          governor.cfg.memoryBudgetMB = Math.round(mb);
-          log(`budget set to ${governor.cfg.memoryBudgetMB}MB`);
-        }
+        if (!Number.isFinite(mb)) break;
+        if (!prefs.set('memoryBudgetMB', Math.min(65536, Math.max(256, Math.round(mb))))) break;
+        applyPrefs(cfg, prefs, log);
         break;
       }
 
@@ -1331,7 +1334,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   };
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
-    if (!senderMayCommand(tabs, shell, event.sender)) return;
+    if (!senderMayCommand(tabs, shell, event.sender, command)) return;
     runCommand(command, payload ?? null, event.sender);
   });
 
@@ -1389,9 +1392,29 @@ function senderPage(tabs, shell, sender) {
   return pages.isInternal(live) ? pages.pageName(live) : null;
 }
 
-/** Commands are open to the chrome and to our own pages; nothing else. */
-function senderMayCommand(tabs, shell, sender) {
-  return senderPage(tabs, shell, sender) !== null;
+/**
+ * What each of our pages other than Settings may command, gated like the
+ * request channel below and for the same reason: the new tab page is one
+ * navigation away from being a website, and with the whole command surface it
+ * could `set-pref` a homepage or `set-budget` the governor. Each list is
+ * exactly what that page's script sends, plus the two every page's bridge
+ * sends on its own - `page-dirty` from theme.js and `zoom` from the preload's
+ * Ctrl+wheel handler.
+ */
+const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
+// A Map, not an object: the key is a hostname a page chose, and `constructor`
+// must not find anything.
+const PAGE_COMMANDS = new Map([
+  ['newtab', new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab'])],
+  ['history', new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'close-tab'])],
+  ['downloads', new Set([...PAGE_COMMON_COMMANDS, 'close-tab'])]
+]);
+
+/** Commands are open to the chrome and Settings, and to our other pages by list. */
+function senderMayCommand(tabs, shell, sender, command) {
+  const page = senderPage(tabs, shell, sender);
+  if (page === 'chrome' || page === 'settings') return true;
+  return Boolean(PAGE_COMMANDS.get(page)?.has(command));
 }
 
 /**
@@ -1575,8 +1598,12 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       // state broadcast will carry the eventual result, but the button has to
       // change the moment it is pressed. Inert under a test or a benchmark,
       // where no updater is constructed at all.
+      //
+      // `{ auto: true }` is the section scrolling into view rather than the
+      // button, and is held to the preference and rate limit like any check
+      // the browser starts on its own.
       case 'check-for-updates':
-        return shell.updater ? shell.updater.checkNow()
+        return shell.updater ? shell.updater.checkNow(payload?.auto !== true)
           : { available: false, reason: 'updates are off in this build' };
 
       /*
@@ -1890,11 +1917,17 @@ function openInternalPage(tabs, url) {
     // indistinguishable from the menu item doing nothing. Settings and history
     // are both cheap to rebuild and hold no unsaved state, which is what makes
     // this affordable.
+    //
+    // After the activation, not before: a page left in the background may be
+    // frozen, and navigating a stopped renderer is the same hazard as sending
+    // it IPC. The activation is what thaws it.
     const section = hashOf(url);
-    if (section && existing.isLive && hashOf(existing.url) !== section) {
-      existing.wc.loadURL(url).catch(() => {});
-    }
-    tabs.activate(existing.id).catch(() => {});
+    const reload = section && hashOf(existing.url) !== section;
+    tabs.activate(existing.id).then(() => {
+      if (reload && existing.isLive && !isStopped(existing.tier)) {
+        existing.wc.loadURL(url).catch(() => {});
+      }
+    }).catch(() => {});
     return existing;
   }
   return tabs.create({ url });

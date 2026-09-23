@@ -37,8 +37,9 @@ const SHIFT_LABEL = IS_MAC ? '⇧' : 'Shift';
  * shortcut genuinely has more than one spelling (`Ctrl+=` and `Ctrl++` are the
  * same keypress on most layouts, and `+` is what a US layout reports).
  *
- * Modifiers are exact: an entry with no `shift` requires shift *up*, so
- * `Ctrl+Shift+T` cannot be swallowed by the `Ctrl+T` row above it. That
+ * Modifiers are exact unless a row says `shift: 'any'`: an entry with no
+ * `shift` requires shift *up*, so `Ctrl+Shift+T` cannot be swallowed by the
+ * `Ctrl+T` row above it. That
  * exactness is the whole reason the old chrome-side table mis-bound
  * `Ctrl+Shift+B` - it matched `b` first and only then looked at shift.
  *
@@ -62,10 +63,18 @@ const TABLE = [
   { command: 'reload', mod: true, key: 'r' },
   { command: 'reload', key: 'f5' },
   { command: 'reload-hard', mod: true, shift: true, key: 'r' },
-  { command: 'back', alt: true, key: 'arrowleft' },
-  { command: 'forward', alt: true, key: 'arrowright' },
+  // Alt on a Mac is Option, and Option+arrows move by word and Option+D types
+  // a character - taking them would break every text field. A Mac browser uses
+  // Cmd+[ and Cmd+] for history, and Cmd+L alone for the address bar.
+  ...(IS_MAC ? [
+    { command: 'back', mod: true, key: '[' },
+    { command: 'forward', mod: true, key: ']' }
+  ] : [
+    { command: 'back', alt: true, key: 'arrowleft' },
+    { command: 'forward', alt: true, key: 'arrowright' }
+  ]),
   { command: 'focus-address', mod: true, key: 'l' },
-  { command: 'focus-address', alt: true, key: 'd' },
+  ...(IS_MAC ? [] : [{ command: 'focus-address', alt: true, key: 'd' }]),
   { command: 'focus-address', key: 'f6' },
 
   // Find
@@ -75,9 +84,12 @@ const TABLE = [
   { command: 'find-prev', shift: true, key: 'f3' },
   { command: 'find-prev', mod: true, shift: true, key: 'g' },
 
-  // Zoom. Both spellings of the same physical key, plus the numpad's.
-  { command: 'zoom', payload: { direction: 'in' }, mod: true, keys: ['=', '+'] },
-  { command: 'zoom', payload: { direction: 'out' }, mod: true, keys: ['-', '_'] },
+  // Zoom. Both spellings of the same physical key, plus the numpad's. Shift
+  // either way, because `+` and `_` are the shifted spellings on a US layout
+  // while the numpad's `+` and `-`, and `+` on many other layouts, are not -
+  // requiring shift up made the main-row `Ctrl++` a key that did nothing.
+  { command: 'zoom', payload: { direction: 'in' }, mod: true, shift: 'any', keys: ['=', '+'] },
+  { command: 'zoom', payload: { direction: 'out' }, mod: true, shift: 'any', keys: ['-', '_'] },
   { command: 'zoom', payload: { direction: 'reset' }, mod: true, key: '0' },
 
   // Places
@@ -134,7 +146,7 @@ function match(input) {
 
   for (const entry of TABLE) {
     if (Boolean(entry.mod) !== mod) continue;
-    if (Boolean(entry.shift) !== shift) continue;
+    if (entry.shift !== 'any' && Boolean(entry.shift) !== shift) continue;
     if (Boolean(entry.alt) !== alt) continue;
     if (!entry.keys.includes(key)) continue;
     return { command: entry.command, payload: entry.payload || null };
@@ -147,7 +159,7 @@ function labelFor(entry) {
   const parts = [];
   if (entry.mod) parts.push(MOD_LABEL);
   if (entry.alt) parts.push(ALT_LABEL);
-  if (entry.shift) parts.push(SHIFT_LABEL);
+  if (entry.shift === true) parts.push(SHIFT_LABEL);
 
   const key = entry.keys[0];
   const named = {

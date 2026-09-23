@@ -21,8 +21,8 @@
  *             compressor. Undo cost: the pages fault back, measured at 4-12ms.
  *             Nothing is lost, which is what makes it the one reclaim available
  *             on a tab the protections refuse to destroy.
- *   DISCARDED renderer destroyed. Undo cost: a reload. Reserved for genuine
- *             memory contention, never used on a schedule alone.
+ *   DISCARDED renderer destroyed. Undo cost: a reload. Reserved for memory
+ *             contention and for tabs left unvisited past `discardAfterMs`.
  *
  * Promotion always runs the inverse in the right order, and always completes
  * before the tab is shown.
@@ -164,7 +164,9 @@ async function demote(tab, target, ctx) {
   // in form was never snapshotted, so `hasDirtyInput` stayed false and the
   // protection against discarding unsubmitted input silently did not apply to
   // exactly the tabs most likely to be discarded.
+  const from = tab.tier;
   await tab.capturePageState(ipcHub);
+  if (superseded(tab, from)) return null;
 
   // COLD performs no action on the renderer, and that is deliberate rather
   // than unfinished. Forcing a collection here was measured as a net loss
@@ -185,6 +187,13 @@ async function demote(tab, target, ctx) {
     // tick. A tab with no renderer is already holding nothing, so there is
     // nothing to freeze and COLD is the honest answer.
     const frozen = tab.cdp ? await tab.cdp.freeze() : false;
+    if (frozen && superseded(tab, from)) {
+      // Shown while the freeze was in flight. The promotion that ran meanwhile
+      // saw a tier below FROZEN and so did not unfreeze, which would leave the
+      // page the user is now looking at stopped.
+      await tab.cdp?.unfreeze();
+      return null;
+    }
     if (!frozen) {
       // Freezing is the one step that can legitimately fail (DevTools
       // attached, page in an unfreezable state such as holding a lock). Stay
@@ -217,6 +226,13 @@ async function demote(tab, target, ctx) {
       return Tier.FROZEN;
     }
     tab.trimmedAt = Date.now();
+    if (superseded(tab, from)) {
+      // As after the freeze: the promotion that overtook this saw the tier we
+      // started from, so the undo is ours to do.
+      platform.untrimProcessMemory(tab.pid);
+      await tab.cdp?.unfreeze();
+      return null;
+    }
   }
 
   return target;
@@ -236,12 +252,14 @@ async function discard(tab, ctx) {
   // already has one, taken when it was demoted to COLD.
   // Only an unstopped page can answer; a hibernated one is as mute as a frozen
   // one and already had its snapshot taken on the way down.
+  const from = tab.tier;
   if (!isStopped(tab.tier)) {
     try {
       await tab.capturePageState(ipcHub);
     } catch (err) {
       log(`tab ${tab.id}: page state capture failed: ${err.message}`);
     }
+    if (superseded(tab, from)) return null;
   }
 
   tab.captureNavigation();
@@ -253,11 +271,25 @@ async function discard(tab, ctx) {
     log(`tab ${tab.id}: discard cancelled, holds unsubmitted input`);
     if (isStopped(tab.tier)) return tab.tier;       // already stopped; leave it there
     const frozen = tab.cdp ? await tab.cdp.freeze() : false;
+    if (frozen && superseded(tab, from)) {
+      await tab.cdp?.unfreeze();
+      return null;
+    }
     return frozen ? Tier.FROZEN : tab.tier;
   }
 
   tab.teardownView();
   return Tier.DISCARDED;
+}
+
+/**
+ * Whether a demotion was overtaken while it awaited the page. The capture can
+ * take up to its timeout, and the user can switch to the tab in that window;
+ * carrying on would freeze or tear down the page now on screen. Returning null
+ * from the step reports the tab as unmoved, which is what it should be.
+ */
+function superseded(tab, from) {
+  return tab.visible || tab.tier !== from;
 }
 
 /* ------------------------------------------------------------------ */

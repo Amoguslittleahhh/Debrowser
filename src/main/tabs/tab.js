@@ -298,10 +298,8 @@ class Tab {
       event.preventDefault();
       this.onEvent(this, 'open-tab', { url });
     });
-    this.wc.setWindowOpenHandler(({ url }) => {
-      this.onEvent(this, 'open-tab', { url });
-      return { action: 'deny' };
-    });
+    // New windows are already opened as tabs by the handler `wireEvents`
+    // installs, for every tab; a second one here was replaced by it unseen.
   }
 
   /* ---------------------------------------------------------------- */
@@ -738,6 +736,15 @@ class Tab {
       const file = path.join(dir, `tab-${this.id}.jpg`);
       await fs.promises.writeFile(file, buffer);
       this.thumbPath = file;
+
+      // Asked again after the awaits. The tab may have closed meanwhile - its
+      // `discardThumbnail` already ran, so a path recorded now would never be
+      // deleted - or the page may have reported a password field, whose
+      // picture must not stay on disk. Either way the file just written goes.
+      if (!this.isLive || this.hasSensitiveFields) {
+        this.discardThumbnail();
+        return null;
+      }
       return file;
     } catch (err) {
       // A renderer that went away mid-capture, a full disk, a page that cannot

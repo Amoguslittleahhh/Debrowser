@@ -412,9 +412,11 @@ class BrowserShell {
     this.chromeView.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'));
 
     // Links in our own UI (there should be none) open externally rather than
-    // replacing the browser chrome.
+    // replacing the browser chrome. Web addresses only: `openExternal` hands
+    // anything else to whatever the OS has registered for the scheme, and a
+    // `file:` or custom-protocol URL there is a program being launched.
     this.chromeView.webContents.setWindowOpenHandler(({ url }) => {
-      shell.openExternal(url);
+      if (/^(https?|mailto):/i.test(url)) shell.openExternal(url);
       return { action: 'deny' };
     });
 
@@ -1492,8 +1494,12 @@ class BrowserShell {
     // column of empty headings and the new tab page shows no figures - which is
     // exactly what shipped when the overlay was replaced and this was not
     // updated to follow.
+    //
+    // Through `sendToPage`, which declines a stopped renderer: an internal page
+    // left in the background is frozen like any other, and IPC to a frozen
+    // renderer crashes it. It catches up on the next tick after it is shown.
     for (const tab of this.tabs.all()) {
-      if (tab.internal && tab.isLive) send(tab.view, 'debrowser:state', full);
+      if (tab.internal) tab.sendToPage('debrowser:state', full);
     }
   }
 
