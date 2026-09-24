@@ -20,6 +20,7 @@ const { session: electronSession } = require('electron');
 const { Tab } = require('./tab');
 const { Tier, isStopped } = require('../config');
 const { LatencyTracker } = require('../latency');
+const { kindsFor } = require('../site-permissions');
 
 /**
  * How long a speculatively restored tab is allowed to stay resident before the
@@ -122,9 +123,18 @@ class TabManager {
   configureSession(ses = this.session) {
     /** The last few refusals, newest last - so a test can see one happened. */
     if (!this.deniedPermissions) this.deniedPermissions = [];
-    ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+      // Camera, microphone, location and notifications: asked of the user,
+      // and remembered per site (site-permissions.js). Only in the ordinary
+      // browser - a private window never sets `askPermission`, so there these
+      // fall through to the refusal below with everything else.
+      const kinds = kindsFor(permission, details);
+      if (kinds && this.askPermission) {
+        this.askPermission(wc, kinds, details, callback);
+        return;
+      }
       // Grant only what a page needs to function without user-visible prompts
-      // this prototype has no UI for; everything sensitive is denied. That
+      // this browser has no UI for; everything sensitive is denied. That
       // includes `openExternal`: a `mailto:` or `zoommtg:` link would start
       // another program, which in a private window means a connection that
       // does not go through Tor.
@@ -135,6 +145,18 @@ class TabManager {
         if (this.deniedPermissions.length > 20) this.deniedPermissions.shift();
       }
       callback(ok);
+    });
+
+    // What a page is told when it only asks whether it has a permission.
+    // Electron's default says "granted" to everything, so a site read yes and
+    // then had its request refused. For the four above, the truth: granted
+    // only where the user allowed it. Chromium still sends the request when a
+    // check says no, so this never stops a site from asking. Anything else
+    // keeps the default.
+    ses.setPermissionCheckHandler((_wc, permission, origin, details) => {
+      const kinds = kindsFor(permission, details?.mediaType ? { mediaTypes: [details.mediaType] } : {});
+      if (!kinds) return true;
+      return Boolean(this.permissionGranted && this.permissionGranted(origin, kinds));
     });
   }
 

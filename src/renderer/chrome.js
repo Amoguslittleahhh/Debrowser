@@ -33,6 +33,7 @@ const el = {
   reload: document.getElementById('reload'),
   url: document.getElementById('url'),
   scheme: document.getElementById('scheme'),
+  site: document.getElementById('site'),
   schemePaths: ['scheme-a', 'scheme-b', 'scheme-c'].map((id) => document.getElementById(id)),
   meter: document.getElementById('meter'),
   meterFill: document.getElementById('meter-fill'),
@@ -63,10 +64,26 @@ const el = {
 // would read as the address bar ignoring you rather than as a near miss.
 el.omnibox.addEventListener('mousedown', (event) => {
   if (event.target === el.url) return;      // let the caret land where it was aimed
+  if (el.site.contains(event.target)) return;   // the padlock is its own button
   event.preventDefault();                   // no focus flash on the pill itself
   el.url.focus();
   el.url.select();
 });
+
+/**
+ * The site panel hangs from the padlock, a little below the address bar, its
+ * left edge just left of the glyph. The browser opens it here too when a site
+ * asks for something, so the question appears where the answer is kept.
+ */
+function openSite() {
+  const pill = el.omnibox.getBoundingClientRect();
+  const lock = el.site.getBoundingClientRect();
+  api.send('open-site', {
+    x: Math.round((lock.width ? lock.left : pill.left + 8) - 4),
+    y: Math.round(pill.bottom + 6)
+  });
+}
+el.site.addEventListener('click', openSite);
 
 /** Whether the loading line is currently running, so it is only re-armed on a change. */
 let progressRunning = null;
@@ -926,7 +943,10 @@ function tierLabel(tab) {
 function renderToolbar(state) {
   const active = state.tabs.find((tab) => tab.visible);
 
-  if (active && !urlFocused && active.url !== el.url.value) {
+  // Compared with what was last *shown*, not with the field: after typing a
+  // full address, or picking a suggestion that fills one in, the field
+  // already holds the new URL, and comparing against it skipped the padlock.
+  if (active && !urlFocused && (active.url !== shownAddress || el.url.value !== active.url)) {
     // Only rewrite the address when the tab actually changed or navigated,
     // never mid-edit.
     if (active.id !== lastActiveId || document.activeElement !== el.url) {
@@ -1023,7 +1043,11 @@ function setScheme(kind) {
     kind === 'secure' ? 'Connection is encrypted' : 'Connection is not encrypted');
 }
 
+/** The address the bar last displayed for a tab, padlock included. */
+let shownAddress = null;
+
 function setAddress(url) {
+  shownAddress = url;
   try {
     const parsed = new URL(url);
     // Nothing at all for the browser's own pages: they are not a connection,
@@ -1292,6 +1316,9 @@ el.findClose.addEventListener('click', () => api.send('find-close'));
  */
 api.onMessage((message) => {
   switch (message.kind) {
+    case 'site-ask':
+      openSite();
+      break;
     case 'suggest-done':
       closeList();
       el.url.blur();

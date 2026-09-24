@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>About this site</title>
+  <link rel="stylesheet" href="theme.css">
+  <!-- The menu's sheet, backdrop, shadow and arrival: one treatment for every
+       panel in the toolbar. -->
+  <link rel="stylesheet" href="menu.css">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body class="menu-body">
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="sheet site" id="sheet" role="dialog" tabindex="-1" aria-labelledby="host">
+    <!-- A site asking for something. -->
+    <section class="ask" id="ask" hidden>
+      <p class="ask-line"><strong id="ask-host"></strong> wants to</p>
+      <ul class="kinds" id="ask-kinds"></ul>
+      <div class="actions">
+        <button class="btn" id="block" type="button">Block</button>
+        <button class="btn primary" id="allow" type="button">Allow</button>
+      </div>
+    </section>
+
+    <!-- The padlock: what this site is, and what it may do. -->
+    <section class="info" id="info" hidden>
+      <header class="head">
+        <h2 id="host"></h2>
+        <p class="connection" id="connection"></p>
+      </header>
+      <ul class="kinds rows" id="perms"></ul>
+      <p class="note" id="private-note" hidden>Camera, microphone, location and notifications are always blocked in private windows.</p>
+      <div class="row zoom" id="zoom-row" hidden>
+        <span>Zoom</span>
+        <span class="value" id="zoom"></span>
+        <button class="link" id="zoom-reset" type="button">Reset</button>
+      </div>
+      <footer class="foot">
+        <button class="link" id="clear" type="button">Clear data for this site</button>
+        <button class="link" id="reset-perms" type="button" hidden>Reset permissions</button>
+      </footer>
+    </section>
+  </div>
+
+  <script src="theme.js"></script>
+  <script src="site.js"></script>
+</body>
+</html>

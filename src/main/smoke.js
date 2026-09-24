@@ -2368,6 +2368,90 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     tabs.close(b.id);
   }
 
+  // A site asks for a permission, the panel under the padlock asks the user,
+  // and the answer is remembered for that site: asked once, then not again.
+  // Both answers, and the third - closing the panel - which refuses for now
+  // and lets the page ask again only after it navigates.
+  //
+  // Notifications and location because a machine with no camera refuses a
+  // camera request before any permission is asked for. On 127.0.0.1 rather
+  // than the fixture sites: both are for secure contexts only, and a plain
+  // http:// page on any other host is refused by the engine before anything
+  // is asked.
+  {
+    const http = require('http');
+    const servers = [];
+    const site = () => new Promise((resolve) => {
+      const server = http.createServer((_q, res) => res.end('<title>Asks</title>'))
+        .listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}/`));
+      servers.push(server);
+    });
+    const tab = tabs.create({ url: await site(), activate: true, realise: true });
+    await waitFor(() => tab.isLive && !tab.loading);
+    await tabs.activate(tab.id);
+    const page = (js) => tab.wc.executeJavaScript(js).catch((err) => `threw ${err.message}`);
+    const panel = async () => {
+      const shown = await waitFor(() => shell.sheetPage === 'site' && shell.sheetView &&
+        !shell.sheetView.webContents.isLoading(), { timeoutMs: 4000 });
+      if (!shown) return null;
+      const wc = shell.sheetView.webContents;
+      await waitFor(() => wc.executeJavaScript('!document.getElementById("ask").hidden').catch(() => false),
+        { timeoutMs: 3000 });
+      return wc;
+    };
+
+    // Allow.
+    const asked = page('Notification.requestPermission()');
+    const sheet = await panel();
+    const text = sheet ? await sheet.executeJavaScript('document.getElementById("ask").textContent.replace(/\\s+/g, " ").trim()') : '';
+    if (sheet) await sheet.executeJavaScript('document.getElementById("allow").click()');
+    const answer = await asked;
+    await sleep(200);
+    const again = await page('Notification.requestPermission()');
+    const quiet = shell.sheetPage !== 'site';
+    const told = await page('Notification.permission');
+    check('a site asking for notifications is asked about under the padlock, and Allow is remembered',
+      /wants to Show notifications/.test(text) && answer === 'granted' && again === 'granted' && quiet && told === 'granted',
+      `panel "${text}", answer ${answer}, asked again -> ${again} (panel ${quiet ? 'stayed shut' : 'opened'}), permission ${told}`);
+
+    // Block.
+    const locate = 'new Promise((r) => navigator.geolocation.getCurrentPosition(() => r("ok"), (e) => r("refused " + e.code), { timeout: 4000 }))';
+    const located = page(locate);
+    const sheet2 = await panel();
+    if (sheet2) await sheet2.executeJavaScript('document.getElementById("block").click()');
+    const refusal = await located;
+    const second = await page(locate);
+    check('Block is remembered too: the site is refused without asking again',
+      Boolean(sheet2) && refusal === 'refused 1' && second === 'refused 1' && shell.sheetPage !== 'site',
+      `first ${refusal}, second ${second}`);
+
+    // Dismissed: in a second tab on another site, so nothing above decides it.
+    const other = tabs.create({ url: await site(), activate: true, realise: true });
+    await waitFor(() => other.isLive && !other.loading);
+    await tabs.activate(other.id);
+    const otherPage = (js) => other.wc.executeJavaScript(js).catch((err) => `threw ${err.message}`);
+    const pending = otherPage('Notification.requestPermission()');
+    const sheet3 = await panel();
+    if (sheet3) await sheet3.executeJavaScript('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
+    const dismissed = await pending;
+    const nagged = await otherPage('Notification.requestPermission()');
+    const stayedShut = shell.sheetPage !== 'site';
+    other.wc.reload();
+    await waitFor(() => !other.loading, { timeoutMs: 3000 });
+    const afterReload = otherPage('Notification.requestPermission()');
+    const asksAgain = Boolean(await panel());
+    shell.closeSheet();
+    await afterReload;
+    check('closing the panel refuses for now, and the page cannot ask again until it reloads',
+      Boolean(sheet3) && dismissed === 'denied' && nagged === 'denied' && stayedShut && asksAgain,
+      `dismissed -> ${dismissed}, asked again -> ${nagged} (panel ${stayedShut ? 'shut' : 'open'}), ` +
+      `after reload the panel ${asksAgain ? 'asks' : 'does not ask'}`);
+
+    tabs.close(other.id);
+    tabs.close(tab.id);
+    for (const server of servers) server.close();
+  }
+
   // A page that fails to load says why, in words, and Try again recovers it
   // in place; a tab whose renderer crashes says so, and Reload brings it back.
   //

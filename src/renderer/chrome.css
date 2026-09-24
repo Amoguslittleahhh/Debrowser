@@ -568,11 +568,31 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
    setScheme in chrome.js for why this is an attribute rather than `hidden`. */
 .scheme:not([data-kind]) { display: none; }
 
+/* The padlock opens the site panel. A round target a little larger than the
+   glyph, placed so the glyph sits exactly where it did before it was a button. */
+.site-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0 3px 0 -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  transition: background-color var(--fast) var(--ease);
+}
+.site-btn:hover { background: var(--wash-soft); }
+.site-btn:active { background: var(--wash); }
+.site-btn:has(> .scheme:not([data-kind])) { display: none; }
+
 .scheme {
   flex: none;
   width: var(--icon-sm);
   height: var(--icon-sm);
-  margin-right: 7px;
   fill: none;
   stroke: currentColor;
   stroke-width: var(--icon-stroke);

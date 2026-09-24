@@ -51,6 +51,7 @@ const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
 const { suggest } = require('./suggest');
 const errorPage = require('./error-page');
+const { SitePermissions, PermissionAsks } = require('./site-permissions');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -392,6 +393,9 @@ function main() {
   let downloads = null;
   /** @type {History|null} */
   let history = null;
+  /** Camera, microphone, location and notifications, per site. Never in a private window. */
+  let sitePermissions = null;
+  let permissionAsks = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
   /** Incognito only: which Tor circuit each tab uses. */
@@ -618,6 +622,8 @@ function main() {
         bindPageShortcuts(tab);
         bindContextMenu(tab);
         bindFind(tab);
+        // A new page has asked nothing yet, whatever the last one asked.
+        if (permissionAsks) tab.wc.on('did-navigate', () => permissionAsks.forget(tab));
         // A real page starting to load: the moment a decoy has to start too.
         if (camouflage && !tab.internal) {
           tab.wc.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
@@ -636,6 +642,8 @@ function main() {
         // A search belongs to the page it was run on. Carrying the bar over to
         // another tab would show a match count for a page nobody is looking at.
         if (shell && shell.findOpen) { find.query = ''; shell.setFindOpen(false); }
+        // A question the page asked while it was in the background.
+        if (permissionAsks && permissionAsks.has(tab) && shell) shell.toChrome('site-ask');
         break;
       case 'open-tab':
         if (tabs && payload?.url) openLinkTab(tabs, prefs, tab, payload.url);
@@ -652,6 +660,7 @@ function main() {
         break;
       case 'closed':
         if (circuits) circuits.forgetTab(tab.id);
+        if (permissionAsks) permissionAsks.forget(tab);
         if (shell) shell.detachTab(tab);
         rememberClosed(tab);
         break;
@@ -761,6 +770,19 @@ function main() {
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
+    if (!INCOGNITO) {
+      // In memory under a test, which must not leave answers behind.
+      sitePermissions = new SitePermissions(log, OFFLINE_MODE ? null : app.getPath('userData'));
+      permissionAsks = new PermissionAsks(sitePermissions, {
+        tabFor: (wc) => tabs.all().find((t) => t.isLive && t.wc.id === wc.id) || null,
+        isActive: (tab) => tabs.activeTab() === tab,
+        // The chrome opens the panel, because only it knows where the padlock is.
+        show: () => { if (shell) shell.toChrome('site-ask'); }
+      });
+      tabs.askPermission = (wc, kinds, details, callback) => permissionAsks.request(wc, kinds, details, callback);
+      tabs.permissionGranted = (origin, kinds) => sitePermissions.decide(originOf(origin), kinds) === 'allow';
+    }
+
     // None at all in a private window. Every request that reads or writes it
     // is refused there already, but filling a saved login on page load asked
     // the store for a key - and on Windows, where the keystore always exists,
@@ -789,6 +811,7 @@ function main() {
         : null,
       held: WARM
     });
+    shell.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
     // An error page takes the window's palette and accent, as our own pages do.
     errorPage.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent') }));
 
@@ -937,7 +960,8 @@ function main() {
 
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
-      bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs
+      bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
+      sitePermissions, permissionAsks
     });
 
     // Downloads are taken over from Chromium rather than added beside it.
@@ -970,7 +994,8 @@ function main() {
     // button draws, without carrying the list itself.
     shell.downloads = downloads;
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
-    wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log, context });
+    wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log, context,
+      sitePermissions, permissionAsks });
 
     /*
      * The tabs from last time, or one new one.
@@ -1191,7 +1216,7 @@ function startIncognito({ prefs, log, warm = false }) {
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
-                       circuits = null, slowJs = null }) {
+                       circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -1595,6 +1620,43 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'close-menu':
         shell.closeSheet();
         break;
+
+      // The padlock, or a site asking for something: the site panel, hung
+      // from the padlock. The chrome measures where that is.
+      case 'open-site':
+        shell.openSheet('site', payload);
+        break;
+
+      // An answer to the question the panel is showing, which is always the
+      // active tab's: the origin comes from the tab, never from the payload.
+      case 'permission-answer': {
+        if (!permissionAsks || !active) break;
+        permissionAsks.answer(active, payload?.allow === true);
+        shell.closeSheet();
+        if (permissionAsks.has(active)) shell.toChrome('site-ask');
+        break;
+      }
+
+      // A switch in the panel. Also for the active tab's own site only.
+      case 'site-permission': {
+        const origin = active && originOf(active.url);
+        if (!sitePermissions || !origin) break;
+        const value = payload?.value === 'allow' || payload?.value === 'block' ? payload.value : null;
+        sitePermissions.set(origin, String(payload?.kind), value);
+        if (permissionAsks) permissionAsks.settle(active);
+        break;
+      }
+
+      // Cookies and everything else the site keeps in the browser, for this
+      // one site, then the page reloaded so it starts again without them.
+      case 'site-clear-data': {
+        const origin = active && originOf(active.url);
+        if (!origin || !active.isLive) break;
+        active.wc.session.clearStorageData({ origin })
+          .then(() => { if (active.isLive) active.wc.reload(); })
+          .catch((err) => log(`clearing site data failed: ${err.message}`));
+        break;
+      }
 
       // From the browser's own update prompt. Restarting into the installer is
       // the updater's to do - this only carries the answer.
@@ -2020,6 +2082,8 @@ const CHROME_REQUESTS = new Set([
   // The address bar's list: open tabs, bookmarks and history matching what is
   // typed - the user's own, shown to the user, in the bar they are typing into.
   'suggest',
+  // The site panel: the active tab's connection, permissions and zoom.
+  'site-info',
   // The downloads flyout is drawn in the sheet, which is one of the chrome's
   // own views. Downloads are not secrets - they are files the user asked for,
   // sitting in their own downloads directory - so this is a list the chrome may
@@ -2121,6 +2185,7 @@ function pageMay(page, channel, name) {
 }
 
 function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log,
+                       sitePermissions = null, permissionAsks = null,
                        context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
@@ -2311,6 +2376,28 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
           shell.showSuggestions(result.items, a);
         }
         return result;
+      }
+
+      // What the site panel shows: always about the active tab, and the
+      // question it is asking, if it is asking one.
+      case 'site-info': {
+        const active = tabs.activeTab();
+        if (!active) return null;
+        const origin = originOf(active.url);
+        let host = '';
+        try { host = new URL(active.url).hostname; } catch { /* not a URL */ }
+        const ask = permissionAsks ? permissionAsks.current(active) : null;
+        if (ask) permissionAsks.markShown(active);
+        return {
+          host,
+          secure: /^https:/i.test(active.url),
+          website: Boolean(origin),
+          incognito: INCOGNITO,
+          ask,
+          permissions: sitePermissions && origin ? sitePermissions.forOrigin(origin) : {},
+          zoom: active.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100,
+          zoomDefault: Math.round((Number(prefs.get('defaultZoom')) || 1) * 100)
+        };
       }
 
       case 'list-bookmarks':

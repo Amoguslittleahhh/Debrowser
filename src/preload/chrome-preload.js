@@ -56,6 +56,12 @@ const COMMANDS = new Set([
   'set-budget',
   'discard-tab',
   'move-tab',
+  // The site panel under the padlock, and the permission questions it asks.
+  'open-site',
+  'site-info',
+  'permission-answer',
+  'site-permission',
+  'site-clear-data',
   'pin-tab',
   'mute-tab',
   'duplicate-tab',

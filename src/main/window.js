@@ -162,7 +162,11 @@ const SHEET_PAGES = {
   // Right-click on a page. Same view, same dismissal, same styling as the app
   // menu - a context menu that looked like a different program's would be the
   // most obvious seam in the browser, and it is the menu people open most.
-  context: 'context.html'
+  context: 'context.html',
+  // The padlock's panel: the site's connection, its permissions, its zoom,
+  // and "Clear data". Also where a site's request for the camera, microphone,
+  // location or notifications is asked.
+  site: 'site.html'
 };
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
@@ -743,6 +747,9 @@ class BrowserShell {
     // the session. Nothing is cancelled: the downloaded update is still there
     // and the prompt comes back on the next launch.
     if (page === 'update' && this.updater) this.updater.dismissPrompt();
+    // A permission question closed without an answer is a refusal; main.js
+    // decides that, since it holds the question.
+    if (this.onSheetClosed) this.onSheetClosed(page);
     try {
       this.window.contentView.removeChildView(view);
       view.webContents.close();
