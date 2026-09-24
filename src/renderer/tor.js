@@ -22,6 +22,7 @@ const el = {
   problem: document.getElementById('problem'),
   retry: document.getElementById('retry'),
   guard: document.getElementById('guard'),
+  fp: document.getElementById('fp'),
   normal: document.getElementById('normal'),
   facts: document.querySelector('.facts')
 };
@@ -69,6 +70,15 @@ function render(incognito) {
   el.retry.hidden = !(tor.state === 'failed' || tor.state === 'stopped' ||
                       (tor.state === 'bootstrapping' && tor.warning));
 
+  renderFingerprint(incognito.fingerprint);
+  const capture = document.getElementById('capture');
+  if (incognito.contentProtection === false) {
+    capture.className = 'no';
+    capture.textContent = 'Visible: Linux gives an application no way to prevent it';
+  } else {
+    capture.className = 'yes';
+    capture.textContent = 'Shown blank';
+  }
   renderGuard(incognito.killSwitch, incognito.tripwire);
 
   if (tor.state === 'ready' && moveOnWhenReady && !movedOn) {
@@ -98,6 +108,34 @@ function renderGuard(killSwitch, tripwire) {
     rest = `${why} A stray connection is detected and the window closed, rather than prevented.${sees}`;
   }
   el.guard.replaceChildren(strong, document.createTextNode(rest));
+}
+
+/**
+ * The fingerprint self-check's answer. Shown only once it has run, and a
+ * check that could not run says so - silence would read as a pass.
+ */
+function renderFingerprint(result) {
+  el.fp.hidden = !result;
+  if (!result) return;
+  const strong = document.createElement('strong');
+  const link = document.createElement('a');
+  link.href = 'debrowser://fingerprint';
+  link.textContent = 'See every check';
+  let rest;
+  if (result.error) {
+    el.fp.dataset.level = 'tripwire';
+    strong.textContent = 'Fingerprint check: did not run.';
+    rest = ` ${result.error}. `;
+  } else if (result.problems.length) {
+    el.fp.dataset.level = 'tripwire';
+    strong.textContent = `Fingerprint check: ${result.problems.length} of ${result.checked} show something they should not.`;
+    rest = ` ${result.problems.slice(0, 3).join('; ')}. `;
+  } else {
+    el.fp.dataset.level = 'os';
+    strong.textContent = `Fingerprint check: all ${result.checked} agree.`;
+    rest = ' Time zone, language, user agent, cores, screen and graphics say what every private window says. ';
+  }
+  el.fp.replaceChildren(strong, document.createTextNode(rest), link);
 }
 
 el.retry.addEventListener('click', () => api.send('tor-retry'));

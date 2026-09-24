@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- worker-src blob: because the check runs the same probe inside a
+       dedicated and a shared worker, built from a blob, as a site would. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src blob:;">
+  <title>What sites can see</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="tor.css">
+</head>
+<body>
+  <header>
+    <h1>What sites can see</h1>
+  </header>
+  <main>
+    <section class="status" id="status" data-state="bootstrapping">
+      <div class="line">
+        <span class="dot" aria-hidden="true"></span>
+        <strong id="headline">Checking…</strong>
+      </div>
+      <p class="detail" id="detail" style="margin-top: var(--s3)">
+        Everything below was read the way a site would read it - from this page, from a
+        worker it starts, and from a shared worker - and compared with what a private
+        window is meant to say. Nothing here is sent anywhere.
+      </p>
+    </section>
+    <section class="facts">
+      <table id="results" aria-live="polite"></table>
+      <p class="note" id="limits">
+        Not covered here: service workers, which only a web page can start - the leak test
+        checks those. Installed fonts, canvas and audio output are not normalised and are
+        not claimed to be.
+      </p>
+    </section>
+  </main>
+  <script src="theme.js"></script>
+  <script src="fingerprint.js"></script>
+</body>
+</html>

@@ -47,6 +47,7 @@ const torState = require('./incognito/torstate');
 const { startRelays } = require('./incognito/relay');
 const { Circuits } = require('./incognito/circuits');
 const policy = require('./incognito/policy');
+const { SlowJsHint } = require('./incognito/slowjs');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -360,6 +361,10 @@ function main() {
   let tripwire = null;
   /** Incognito only: which Tor circuit each tab uses. */
   let circuits = null;
+  /** Incognito: what the fingerprint self-check found at startup, once it has run. */
+  let fingerprintAudit = null;
+  /** Incognito: the "this page wants faster JavaScript" hint. See incognito/slowjs.js. */
+  const slowJs = INCOGNITO ? new SlowJsHint(incognitoCtx.jsLevel) : null;
 
   /**
    * Downloads are taken over from Chromium rather than added beside it.
@@ -677,7 +682,12 @@ function main() {
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
-    credentials = new Credentials(log);
+    // None at all in a private window. Every request that reads or writes it
+    // is refused there already, but filling a saved login on page load asked
+    // the store for a key - and on Windows, where the keystore always exists,
+    // that created one in the private profile: the leak test found it left
+    // behind after exit. A store that is not there cannot be asked.
+    credentials = INCOGNITO ? null : new Credentials(log);
 
     // A submitted sign-in becomes a question, never a save. The origin comes
     // from the tab, not from the page that sent the message.
@@ -719,9 +729,10 @@ function main() {
       // site refused every exit it was tried from.
       const activeTabPrivacy = () => {
         const tab = tabs && tabs.activeTab();
-        if (!tab || !tab.isLive) return { onion: null, refused: false };
+        if (!tab || !tab.isLive) return { onion: null, refused: false, slowJs: false };
         const onion = policy.onionFor(tab.wc.id);
         return {
+          slowJs: slowJs ? slowJs.visibleFor(tab) : false,
           onion: onion && !policy.isOnion(tab.wc.getURL()) ? onion : null,
           refused: circuits ? circuits.refused(tab.id) : false
         };
@@ -730,6 +741,9 @@ function main() {
         tor: tor ? { ...tor.status } : { state: 'ready', progress: 100, summary: 'External proxy (test)', transport: 'direct' },
         killSwitch: incognitoCtx.killSwitch,
         tripwire: tripwire ? tripwire.status() : null,
+        fingerprint: fingerprintAudit,
+        // setContentProtection does nothing on Linux; see window.js.
+        contentProtection: process.platform !== 'linux',
         ...activeTabPrivacy()
       });
       onIncognitoChange = publish;
@@ -745,6 +759,20 @@ function main() {
       });
       tripwire.capability().then((caps) => log('tripwire', JSON.stringify(caps)));
       tripwire.start();
+
+      // The fingerprint self-check, once, on a session of its own. What it
+      // finds is shown on the connection page; a check that could not run is
+      // shown too, never taken as a pass.
+      const fp = require('./incognito/fingerprint');
+      const auditSession = circuits ? circuits.newTabSession() : session.defaultSession;
+      pages.serveSession(auditSession, log);
+      fp.audit(auditSession, pages.FINGERPRINT_URL, log).then((result) => {
+        fingerprintAudit = result.error
+          ? { error: result.error }
+          : { checked: result.checks.length, problems: result.problems.map((c) => `${c.name} (${c.surface}): ${c.got}`) };
+        log('fingerprint', JSON.stringify(fingerprintAudit));
+        publish();
+      }).catch((err) => { fingerprintAudit = { error: err.message }; publish(); });
     }
 
     // `--no-governor` runs the browser with every tab left fully resident, as
@@ -757,7 +785,11 @@ function main() {
         tabManager: tabs,
         ipcHub,
         log,
-        onUpdate: (state) => shell && shell.publish(state)
+        onUpdate: (state) => {
+          // Incognito: a page too heavy for Balanced JavaScript gets one hint.
+          if (slowJs && slowJs.observe(tabs.activeTab())) log('incognito', 'slow-page hint shown');
+          if (shell) shell.publish(state);
+        }
       });
       governor.start();
     }
@@ -799,7 +831,7 @@ function main() {
 
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
-      bookmarks, closedTabs, context, find, quitState, siteZoom, circuits
+      bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs
     });
 
     // Downloads are taken over from Chromium rather than added beside it.
@@ -1016,7 +1048,7 @@ function main() {
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
-                       circuits = null }) {
+                       circuits = null, slowJs = null }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -1055,6 +1087,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // cookies, storage and cache cleared, every connection dropped, and Tor
       // told to build new circuits for everything after. One fresh tab is
       // opened first, because closing the last tab closes the window.
+      case 'dismiss-slow-js':
+        if (slowJs) slowJs.dismiss();
+        break;
+
       // The onion address the tab's site offered, opened in the same tab.
       // Taken from what the site sent, never from the renderer's payload.
       case 'open-onion': {
@@ -1888,6 +1924,12 @@ const PAGE_POLICY = new Map([
     commands: new Set([...PAGE_COMMON_COMMANDS, 'tor-retry']),
     requests: new Set()
   }],
+  // The fingerprint self-check: it asks what a private window should report,
+  // and nothing else.
+  ['fingerprint', {
+    commands: new Set(PAGE_COMMON_COMMANDS),
+    requests: new Set(['fingerprint-expected'])
+  }],
   // The plain-HTTP explanation: go back, or continue to that one host - and
   // `allow-http` is also checked against the sender where it is handled.
   ['insecure', {
@@ -1918,6 +1960,10 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       // browser that did.
       case 'menu-model':
         return { items: menuModel({ tabs, shell }), prefs: prefs.all() };
+
+      // What a private window should report, for its self-check to compare.
+      case 'fingerprint-expected':
+        return INCOGNITO ? require('./incognito/fingerprint').expected() : null;
 
       // Built when the page was right-clicked, not when this is asked - what
       // was under the pointer is gone by now.

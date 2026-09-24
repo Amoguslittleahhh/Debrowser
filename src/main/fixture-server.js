@@ -70,6 +70,14 @@ function start() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       if ((req.url || '').startsWith('/challenge')) { challenge(req, res, challenges); return; }
+      // What the browser told the site about itself, for the fingerprint check.
+      if (req.url === '/headers') {
+        const told = Object.fromEntries(Object.entries(req.headers)
+          .filter(([k]) => /^(user-agent|accept-language|sec-ch-ua.*)$/.test(k)));
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(told));
+        return;
+      }
       // Serve only basenames out of the fixtures directory; nothing else is
       // reachable, however the request is spelled.
       const name = path.basename((req.url || '/').split('?')[0]) || 'idle.html';

@@ -271,11 +271,19 @@ function sweep(root) {
   }
 }
 
-/** This run's files, gone. Best-effort: the reaper and sweep() catch the rest. */
+/**
+ * This run's files, gone. Best-effort: the reaper and sweep() catch the rest.
+ *
+ * The root is swept as well, because `userData` is the root (the profile lock
+ * has to be shared between incognito processes) and anything written there
+ * rather than under this run's directory would otherwise outlive the window.
+ * The leak test found exactly that on Windows: the credential store's key.
+ */
 function wipe(ctx) {
   try {
     fs.rmSync(ctx.sessionDir, { recursive: true, force: true });
   } catch { /* open files on Windows; the reaper gets them */ }
+  sweep(ctx.root);
 }
 
 /**
@@ -349,6 +357,9 @@ function prepare(app) {
   // A second layer under the per-page timezone override: every process this
   // one starts, on the platforms that honour it, reports UTC.
   process.env.TZ = 'UTC';
+  // The same for the language every kind of worker reports. See fingerprint.js.
+  require('./fingerprint').prepareEnvironment();
+  require('./fingerprint').prepareApp(app);
 
   // The proxy is Tor, on a port picked here: it has to be on the command line
   // before the app is ready, which is before anything could ask the OS for a
@@ -387,7 +398,8 @@ function switches(ctx) {
     ['proxy-bypass-list', BYPASS_RULES],
     ['host-resolver-rules', RESOLVER_RULES],
     ['disable-quic'],
-    ['force-webrtc-ip-handling-policy', 'disable_non_proxied_udp']
+    ['force-webrtc-ip-handling-policy', 'disable_non_proxied_udp'],
+    ...require('./fingerprint').switches()
   ];
 }
 
@@ -413,6 +425,8 @@ function configureSession(ses, ctx, slot = creating ?? slots.get(ses) ?? 0) {
   try { ses.setSpellCheckerEnabled(false); } catch { /* not on this platform */ }
   // No local network, and HTTPS or an explanation. See policy.js.
   require('./policy').install(ses);
+  // The same user agent and languages everywhere. See fingerprint.js.
+  require('./fingerprint').configureSession(ses);
 }
 
 module.exports = {

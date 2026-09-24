@@ -948,3 +948,79 @@ or pointing at a non-onion address, is ignored.
 
 Leak test: 24/24; with the Linux kill switch, 25/25. Normal-mode smoke suite:
 148/148.
+
+## Incognito, M6 — what a site can read, and what each JavaScript level costs
+
+**Four mechanisms, and where each reaches.** A probe read the user agent,
+client-hint brands, time zone, locale, languages and core count from a page, a
+dedicated worker, a shared worker and a service worker, with the OS set to
+German and Tokyo time:
+
+- `session.setUserAgent` reaches pages and dedicated workers only. Shared and
+  service workers reported Electron's default string, `…Electron/44.3.0…`,
+  until `app.userAgentFallback` was set too.
+- Client-hint brands (`Not?A_Brand/24, Chromium/152`) cannot be changed for
+  shared or service workers. The DevTools protocol's user-agent override can
+  add "Google Chrome" to a page, but its service worker would still say
+  Chromium - and, without metadata, the same override wipes the brands to
+  nothing. So the private window says what its engine really is: Chrome's own
+  reduced string for this OS and major version, `Chrome/152.0.0.0`, with no
+  Electron or Debrowser token. Every surface agrees with it.
+- The protocol's time zone override reached all four kinds of context, since
+  the time zone belongs to the renderer process. `TZ=UTC` stays underneath it.
+- `--lang` did not change `navigator.languages` at all: Electron builds it from
+  the locale variables. With `LANG`, `LC_ALL`, `LC_MESSAGES` at `en_US.UTF-8`
+  and `LANGUAGE=en_US`, pages report `en-US,en` - exactly Chrome's default;
+  with `LANGUAGE` unset it was `en-US,en,en`. A shared worker reports only the
+  locale, `en-US`, whatever is set: Electron's behaviour, not Chrome's, and the
+  same in every private window, so the self-check expects it.
+
+**WebGPU has no off switch.** The binary has `use-webgpu-adapter`,
+`enable-unsafe-webgpu` and nothing that disables it; `disable-blink-features`
+and `disableBlinkFeatures` left `navigator.gpu` in place. The private window
+points WebGPU at SwiftShader, which this Chromium refuses without an unsafe
+flag. This container has no GPU adapter to confirm the result on, so the
+self-check asks for one on the user's machine and reports it if one appears.
+WebGL is off per view (`webgl: false`), confirmed.
+
+**Letterboxing.** The page is sized down to multiples of 200×100 and centred;
+a 1283×777 window shows a 1200×700 page, and `screen` reports 1200×700.
+
+**The overrides fail closed, and survive DevTools.** A tab loads a blank page,
+has its overrides confirmed, and only then loads what was asked for (about
+40 ms). Opening DevTools on the tab did not detach our debugger session, and
+the overrides held across a reload. Detaching it by force, as the leak test
+does, put them straight back.
+
+**The self-check.** `debrowser://fingerprint` reads the same surfaces from the
+page, a dedicated worker and a shared worker - 26 checks - and runs once,
+hidden, when a private window starts. Run without the overrides it flagged six
+mismatches (the Electron user agent in three places, the languages in two, the
+screen), so it is a check that can fail. The leak test repeats it from a web
+page, through the proxy, and reads the request headers the site received:
+`Chrome/152.0.0.0`, `Accept-Language: en-US,en;q=0.9`.
+
+**The JavaScript levels, measured** (`bench/js-levels`, median of five, twice):
+
+```
+level                  dom     json    regex  numeric     wasm
+full                  44ms   21.9ms      7ms    209ms   17.6ms
+balanced              42ms   20.6ms    7.9ms    415ms   28.8ms
+balanced+sparkplug    37ms   19.7ms    9.1ms    417ms   25.3ms
+maximum               36ms   21.4ms   33.4ms    507ms      n/a
+```
+
+Everyday page work - building a DOM, JSON - costs nothing at any level. Heavy
+numeric code runs at half speed under Balanced and WebAssembly at about 60%;
+Maximum also interprets regular expressions (about 4.5× slower) and has no
+WebAssembly. `--always-sparkplug` was not kept: no consistent gain across the
+two runs (37ms and 52ms on the same DOM workload), and one run cost 18 MB more.
+
+**Found on the way: a key file in the private profile.** On Windows, where
+the OS keystore always exists, filling a saved login on page load asked the
+credential store for its key - which created one, in the private profile, and
+the leak test found it left behind after exit. The store no longer exists in
+a private window, and the exit wipe now sweeps the whole private root rather
+than only this run's directory.
+
+Leak test: 29/29; with the Linux kill switch, 30/30. Smoke suite: 148/148.

@@ -43,6 +43,7 @@ const el = {
   star: document.getElementById('star'),
   privatePill: document.getElementById('private'),
   onion: document.getElementById('onion'),
+  slowJs: document.getElementById('slow-js'),
   privateText: document.getElementById('private-text'),
   bookmarks: document.getElementById('bookmarks'),
   downloads: document.getElementById('downloads'),
@@ -1127,7 +1128,7 @@ const PRIVATE_LABELS = {
 function renderPrivate(incognito) {
   document.body.classList.toggle('incognito', Boolean(incognito));
   el.privatePill.hidden = !incognito;
-  if (!incognito) { el.onion.hidden = true; return; }
+  if (!incognito) { el.onion.hidden = true; el.slowJs.hidden = true; return; }
   const tor = incognito.tor || {};
   el.privatePill.dataset.state = tor.state || 'starting';
   el.privateText.textContent = PRIVATE_LABELS[tor.state] || 'Private';
@@ -1136,6 +1137,7 @@ function renderPrivate(incognito) {
     : `Private window - ${tor.summary || 'connecting to Tor'} (${tor.progress || 0}%). Nothing loads until it is connected.`;
   el.star.title = 'Bookmarks cannot be saved from a private window';
   el.onion.hidden = !incognito.onion;
+  el.slowJs.hidden = !incognito.slowJs;
   // Tried from several exits and refused by every one: said, not looped.
   if (tor.state === 'ready' && incognito.refused) {
     el.privatePill.dataset.state = 'refused';
@@ -1145,6 +1147,7 @@ function renderPrivate(incognito) {
 }
 
 el.onion.addEventListener('click', () => api.send('open-onion'));
+el.slowJs.addEventListener('click', () => api.send('dismiss-slow-js'));
 el.privatePill.addEventListener('click', () => api.send('navigate', { url: 'debrowser://tor' }));
 
 api.onState((state) => {

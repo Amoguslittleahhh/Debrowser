@@ -17,6 +17,8 @@
 const path = require('path');
 const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
         shell } = require('electron');
+const { INCOGNITO } = require('./incognito/mode');
+const { letterbox } = require('./incognito/fingerprint');
 
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
@@ -251,6 +253,12 @@ class BrowserShell {
             titleBarOverlay: { color: '#161614', symbolColor: '#9b978e', height: 40 }
           })
     });
+
+    // A private window cannot be captured: screenshots, screen recording and
+    // a screen shared in a meeting show it blank (Windows and macOS). It also
+    // gets in the way of screen-grabbing malware, partly. Linux has no such
+    // control, which the connection page says.
+    if (INCOGNITO) this.window.setContentProtection(true);
 
     this.panelView = null;
     this.panelOpen = false;
@@ -1316,14 +1324,18 @@ class BrowserShell {
     };
   }
 
-  /** What a tab actually gets: the content area less any docked inspector. */
+  /**
+   * What a tab actually gets: the content area less any docked inspector - in
+   * a private window, letterboxed to whole steps, so the page's size (which
+   * is also the screen it reports) says little about the window's.
+   */
   contentBounds() {
     const area = this.contentArea();
     const dock = this.dockBounds(area);
-    if (!dock) return area;
-    return this.dockMode() === 'bottom'
+    const bounds = !dock ? area : this.dockMode() === 'bottom'
       ? { ...area, height: Math.max(0, dock.y - area.y) }
       : { ...area, width: Math.max(0, dock.x - area.x) };
+    return INCOGNITO ? letterbox(bounds) : bounds;
   }
 
   /**

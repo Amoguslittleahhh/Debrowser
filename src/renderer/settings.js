@@ -306,11 +306,14 @@ const SECTIONS = {
     {
       key: 'incognitoJsLevel',
       label: 'JavaScript security',
-      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land. Maximum runs the interpreter alone. From the next private window.',
+      // The costs are measured, by bench/js-levels: everyday page work (DOM,
+      // JSON) runs the same at every level; heavy number-crunching and
+      // WebAssembly are where the optimising compilers earn their keep.
+      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land: everyday pages run as fast, heavy computation about half as fast. Maximum runs the interpreter alone. From the next private window.',
       type: 'select',
       options: [
-        { value: 'balanced', name: 'Balanced' },
-        { value: 'maximum', name: 'Maximum - slowest' },
+        { value: 'balanced', name: 'Balanced - heavy scripts ~2× slower' },
+        { value: 'maximum', name: 'Maximum - no WebAssembly, text search ~4× slower' },
         { value: 'full', name: 'Full speed' }
       ]
     },

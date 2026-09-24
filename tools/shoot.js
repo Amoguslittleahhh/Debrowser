@@ -183,13 +183,19 @@ const SHOTS = [
   { name: 'tor', file: 'tor.html', w: 1280, h: 820,
     incognito: { tor: { state: 'bootstrapping', progress: 45, summary: 'Loading relay descriptors', transport: 'obfs4' },
                  killSwitch: { available: true, mechanism: 'Network namespace (loopback only)' },
-                 tripwire: { available: true } } },
+                 tripwire: { available: true }, contentProtection: false,
+                 fingerprint: { checked: 26, problems: [] } } },
   // A private window whose site refused every exit it was tried from, and
   // offers an onion address: the two things the toolbar says about a site.
   { name: 'chrome-private', file: 'chrome.html', w: 1280, h: 120,
     incognito: { tor: { state: 'ready', progress: 100, summary: 'Done', transport: 'webtunnel' },
                  killSwitch: { available: true }, tripwire: { available: true },
                  onion: 'http://abcdefghijklmnop.onion/', refused: true } },
+  // The fingerprint self-check, run here without the overrides - so it shows
+  // what it looks like when it finds something, which is the state that has
+  // to be readable.
+  { name: 'fingerprint', file: 'fingerprint.html', w: 1280, h: 900,
+    hash: encodeURIComponent(JSON.stringify({"userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36", "major": "152", "timezone": "UTC", "locale": "en-US", "languages": "en-US,en", "sharedWorkerLanguages": "en-US", "cores": 4})) },
   { name: 'tor-failed', file: 'tor.html', w: 1280, h: 820,
     incognito: { tor: { state: 'failed', progress: 10, summary: 'Connected to a relay',
                         warning: 'No progress for 45 seconds at 10% - the network may be blocking Tor' },

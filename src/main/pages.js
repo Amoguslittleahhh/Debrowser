@@ -50,7 +50,9 @@ const PAGES = {
   // not hide. Served to the normal browser too, where it has nothing to say.
   tor: 'tor.html',
   // Incognito only: a page asked for plain HTTP and HTTPS was not available.
-  insecure: 'insecure.html'
+  insecure: 'insecure.html',
+  // Incognito only: the fingerprint self-check - what sites can read.
+  fingerprint: 'fingerprint.html'
 };
 
 /** Where a new tab goes when the user has not chosen a homepage. */
@@ -60,6 +62,7 @@ const HISTORY_URL = `${SCHEME}://history`;
 const DOWNLOADS_URL = `${SCHEME}://downloads`;
 const TOR_URL = `${SCHEME}://tor`;
 const INSECURE_URL = `${SCHEME}://insecure`;
+const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
 
 /**
  * Must run before `app.whenReady()`.
@@ -220,11 +223,12 @@ function titleFor(url) {
     case 'downloads': return 'Downloads';
     case 'tor': return 'Private connection';
     case 'insecure': return 'Not private';
+    case 'fingerprint': return 'What sites can see';
     default: return 'Debrowser';
   }
 }
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, TOR_URL,
-  INSECURE_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
+  INSECURE_URL, FINGERPRINT_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

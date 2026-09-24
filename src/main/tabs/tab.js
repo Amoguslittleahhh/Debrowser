@@ -23,6 +23,7 @@ const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload
 const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
 const pages = require('../pages');
 const { INCOGNITO } = require('../incognito/mode');
+const fingerprint = require('../incognito/fingerprint');
 
 /**
  * How much larger Settings opens than the rest of the browser.
@@ -331,7 +332,10 @@ class Tab {
         transparent: false,
         // A new spellchecker fetches its dictionary on its own; in incognito
         // that is a request no page asked for.
-        spellcheck: !INCOGNITO
+        spellcheck: !INCOGNITO,
+        // WebGL hands a page the graphics card's name and quirks; a private
+        // window gives it none. See incognito/fingerprint.js for WebGPU.
+        webgl: !INCOGNITO
         // No `zoomFactor` here: Chromium records it against the site the page
         // loads, so a default applied this way pinned every site. The zoom is
         // set per document instead, below - see zoom.js.
@@ -356,12 +360,34 @@ class Tab {
 
     this.wireEvents();
 
-    const restored = this.restoreNavigation();
-    if (!restored) {
-      // A rejection here usually just means the navigation was superseded -
-      // by our own error page, or by the user typing somewhere else - so it is
-      // logged, briefly, rather than surfaced.
-      this.wc.loadURL(this.url).catch((err) => this.log(`load failed: ${brief(err.message)}`));
+    // Captured now: in a private window a blank page loads first (see below),
+    // and the tab's own navigation tracking would record it as the address.
+    const target = this.url;
+    const load = () => {
+      this.url = target;
+      const restored = this.restoreNavigation();
+      if (!restored) {
+        // A rejection here usually just means the navigation was superseded -
+        // by our own error page, or by the user typing somewhere else - so it
+        // is logged, briefly, rather than surfaced.
+        this.wc.loadURL(target)
+          .then(() => {
+            // The blank page the overrides went on is not somewhere Back
+            // should go. Cleared once the real page has committed.
+            if (INCOGNITO && this.wc && !this.wc.isDestroyed()) this.wc.navigationHistory.clear();
+          })
+          .catch((err) => this.log(`load failed: ${brief(err.message)}`));
+      }
+    };
+    // A private tab loads nothing until the page cannot read the real
+    // timezone, locale, core count or screen. See incognito/fingerprint.js.
+    // The browser's own pages too: the self-check is one of them, and a page
+    // that reads the real values would report a problem that is not there.
+    if (INCOGNITO) {
+      if (this.bounds) fingerprint.setScreen(this, this.bounds);
+      fingerprint.shield(this, load).catch((err) => this.log(`fingerprint shield failed: ${err.message}`));
+    } else {
+      load();
     }
 
     this.tier = this.visible ? Tier.ACTIVE : Tier.WARM;
@@ -624,6 +650,7 @@ class Tab {
   }
 
   teardownView() {
+    if (INCOGNITO && this.wc) fingerprint.release(this.wc);
     if (this.cdp) {
       this.cdp.detach();
       this.cdp = null;
@@ -879,6 +906,8 @@ class Tab {
   setBounds(bounds) {
     this.bounds = bounds;
     if (this.view) this.view.setBounds(bounds);
+    // The screen a private page reports is its own letterboxed size.
+    if (INCOGNITO && this.wc) fingerprint.setScreen(this, bounds);
   }
 
   emit(event, payload) {

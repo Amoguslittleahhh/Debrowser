@@ -19,6 +19,9 @@ const net = require('net');
 const path = require('path');
 const { session, netLog } = require('electron');
 
+// A private tab loads a blank page first, for its fingerprint overrides to go
+// on, so "not loading" alone can be true before the real page has started:
+// every wait below also names the page it is waiting for.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const argValue = (name) => {
@@ -63,7 +66,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   // way the user does - through the policy's own switch, not a test backdoor.
   // `up.test` is left out on purpose: it is the one that must be upgraded.
   const policy = require('./incognito/policy');
-  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx']) policy.allowHttp(url(host, ''));
+  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp']) policy.allowHttp(url(host, ''));
   const loaded = [];
   const byHost = {};
   for (const host of ['t1', 't2']) {
@@ -78,7 +81,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   // t1 is moved to a new circuit and loads another page there. Where each of
   // these arrived is read from the stand-in for Tor, by the harness.
   const linked = tabs.create({ url: url('link', 'idle.html'), opener: byHost.t1, activate: false, realise: true });
-  await waitFor(() => linked.isLive && !linked.loading, 15_000);
+  await waitFor(() => linked.isLive && !linked.loading && /idle/.test(linked.url), 15_000);
   if (circuits) circuits.newCircuit(byHost.t1.session);
   await byHost.t1.wc.loadURL(url('nc', 'idle.html')).catch(() => {});
   step('circuits', {
@@ -110,7 +113,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   // WebRTC, pointed at a STUN server. Nothing may be gathered that names this
   // machine, and nothing may reach the STUN server at all.
   const rtcTab = tabs.create({ url: `${url('rtc', 'webrtc.html')}?stun=${stun}` });
-  await waitFor(() => rtcTab.isLive && !rtcTab.loading, 15_000);
+  await waitFor(() => rtcTab.isLive && !rtcTab.loading && /webrtc/.test(rtcTab.url), 15_000);
   const candidates = rtcTab.isLive
     ? await within(rtcTab.wc.executeJavaScript('window.__candidates'), 8000, ['timeout'])
     : ['not-loaded'];
@@ -130,7 +133,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   // A page asking for this machine or this network gets nothing - not the
   // proxy's own port, not a router, not a `.local` name.
   const lanTab = tabs.create({ url: url('lan', 'idle.html') });
-  await waitFor(() => lanTab.isLive && !lanTab.loading, 15_000);
+  await waitFor(() => lanTab.isLive && !lanTab.loading && /idle/.test(lanTab.url), 15_000);
   const local = lanTab.isLive ? await within(lanTab.wc.executeJavaScript(`Promise.all(${JSON.stringify([
     `http://127.0.0.1:${ctx.proxyPort}/`, 'http://192.168.1.1/', 'http://printer.local/', 'http://[::1]/'
   ])}.map((u) => fetch(u, { mode: 'no-cors' }).then(() => 'reached', () => 'blocked')))`), 8000, ['timeout']) : ['not-loaded'];
@@ -151,10 +154,57 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   const refused = await waitFor(() => circuits && circuits.refused(chxTab.id), 30_000);
   step('blocked', { passed, title: chTab.title, refused, shown: shell.incognito().refused === true });
 
+  // Fingerprint. What a site reads - from the page, a dedicated worker and a
+  // shared worker, and from the request headers - against what every private
+  // window should say; the page's size against the letterbox steps; and the
+  // startup self-check's own answer.
+  const fp = require('./incognito/fingerprint');
+  const fpTab = tabs.create({ url: url('fp', 'idle.html') });
+  await waitFor(() => fpTab.isLive && !fpTab.loading && /idle/.test(fpTab.url), 15_000);
+  const READ = `(async () => {
+    const d = self.navigator.userAgentData;
+    // userAgentData exists only in secure contexts; these fixtures are plain
+    // HTTP, so it is absent here - the self-check reads it where it exists.
+    return { ua: navigator.userAgent, brands: d ? d.brands.map((b) => b.brand + '/' + b.version).join(',') : null,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: Intl.DateTimeFormat().resolvedOptions().locale,
+      langs: navigator.languages.join(','), cores: navigator.hardwareConcurrency };
+  })()`;
+  const surfaces = fpTab.isLive ? await within(fpTab.wc.executeJavaScript(`(async () => {
+    const blob = (src) => URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    const page = await ${READ};
+    const dedicated = await new Promise((r) => { const w = new Worker(blob('(' + ${JSON.stringify(READ)} + ').then(postMessage)')); w.onmessage = (e) => r(e.data); });
+    const shared = await new Promise((r) => { const w = new SharedWorker(blob('onconnect = (e) => (' + ${JSON.stringify(READ)} + ').then((x) => e.ports[0].postMessage(x))')); w.port.onmessage = (e) => r(e.data); });
+    const headers = await fetch('/headers').then((res) => res.json());
+    return { page, dedicated, shared, headers,
+      screen: screen.width + 'x' + screen.height, viewport: innerWidth + 'x' + innerHeight,
+      webgl: Boolean(document.createElement('canvas').getContext('webgl')) };
+  })()`), 10_000, null) : null;
+  const audited = await waitFor(() => shell.incognito().fingerprint, 15_000);
+  // Take the debugger away, the way the user's DevTools could: the overrides
+  // must come back by themselves. Judged by the screen, the one override the
+  // process environment does not also provide (TZ and the locale are set for
+  // the whole process, so they would read right either way).
+  let afterDetach = null;
+  if (fpTab.isLive) {
+    try { fpTab.wc.debugger.detach(); } catch { /* not attached: that is its own failure, seen below */ }
+    await sleep(500);
+    fpTab.wc.reload();
+    await waitFor(() => !fpTab.loading, 10_000);
+    afterDetach = await within(fpTab.wc.executeJavaScript(
+      '({ screen: screen.width + "x" + screen.height, viewport: innerWidth + "x" + innerHeight })'), 5000, null);
+  }
+  const bounds = fpTab.bounds || {};
+  step('fingerprint', {
+    expected: fp.expected(), surfaces,
+    bounds: { width: bounds.width, height: bounds.height },
+    audit: audited ? shell.incognito().fingerprint : null,
+    afterDetach, reattached: fpTab.isLive && fpTab.wc.debugger.isAttached()
+  });
+
   // An external protocol starts nothing.
   const deniedBefore = tabs.deniedPermissions.length;
   const extTab = tabs.create({ url: url('t2', 'idle.html') });
-  await waitFor(() => extTab.isLive && !extTab.loading, 15_000);
+  await waitFor(() => extTab.isLive && !extTab.loading && /idle/.test(extTab.url), 15_000);
   if (extTab.isLive) extTab.wc.loadURL('mailto:someone@example.com').catch(() => {});
   await waitFor(() => tabs.deniedPermissions.length > deniedBefore, 4000);
   step('externalProtocol', tabs.deniedPermissions.slice(deniedBefore));

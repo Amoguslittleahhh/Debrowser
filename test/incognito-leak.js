@@ -373,8 +373,15 @@ async function main() {
       .map((l) => { const [name, slot] = l.split(' '); return { name, slot: Number(slot) }; })
     : stub.seen;
   const asked = arrivals.map((a) => a.name);
-  /** The slot - the Tor circuit - a host's requests first arrived on. */
-  const slotOf = (host) => (arrivals.find((a) => a.name.startsWith(`${host}.test:`)) || {}).slot;
+  /**
+   * The slot - the Tor circuit - a host's page first arrived on. Slot 1 is
+   * skipped for every host but `icon`: that is the site's icon, fetched over
+   * the icon circuit, and the tab strip can ask for it before the page itself
+   * has started (a private tab loads a blank page first, for its fingerprint
+   * overrides).
+   */
+  const slotOf = (host) => (arrivals.find((a) => a.name.startsWith(`${host}.test:`) &&
+    (host === 'icon' || a.slot !== 1)) || {}).slot;
   const names = [...new Set(asked.map((h) => h.replace(/:\d+$/, '')))];
   const foreign = names.filter((n) => !n.endsWith('.test'));
   check('every request reached the proxy by name, and only test names were asked for',
@@ -417,6 +424,32 @@ async function main() {
   check('a page that always refuses stops after three new circuits, and the window says so',
     s.blocked.refused === true && s.blocked.shown === true && chx.length === 4,
     `refused: ${s.blocked.refused}, shown: ${s.blocked.shown}; attempts on ports ${chx.join(', ')}`);
+
+  // Fingerprint: every surface says the same thing, and what it should.
+  const f = s.fingerprint;
+  const want = f.expected;
+  const surfaceOk = (r, langs) => r && r.ua === want.userAgent && r.tz === want.timezone && r.locale === want.locale &&
+    r.langs === langs && r.cores === want.cores && (r.brands === null || r.brands.includes(`Chromium/${want.major}`));
+  const fs3 = f.surfaces || {};
+  const badSurfaces = ['page', 'dedicated', 'shared']
+    .filter((k) => !surfaceOk(fs3[k], k === 'shared' ? want.sharedWorkerLanguages : want.languages));
+  check('a site reads the same user agent, time zone, language and core count from the page and both kinds of worker',
+    Boolean(f.surfaces) && badSurfaces.length === 0,
+    badSurfaces.length ? `differs in ${badSurfaces.join(', ')}: ${JSON.stringify(badSurfaces.map((k) => fs3[k]))}` : `${want.userAgent}, ${want.timezone}, ${want.languages}, ${want.cores} cores`);
+  const h = (fs3.headers || {});
+  check('the request headers say the same, with no Electron or Debrowser token',
+    h['user-agent'] === want.userAgent && /^en-US,en;q=0\.9$/.test(h['accept-language'] || '') &&
+      !/Electron|Debrowser/i.test(JSON.stringify(h)),
+    JSON.stringify(h));
+  check('the page is letterboxed, and the screen it reports is its own size',
+    f.bounds.width % 200 === 0 && f.bounds.height % 100 === 0 && fs3.screen === fs3.viewport && fs3.webgl === false,
+    `page ${f.bounds.width}x${f.bounds.height}, screen ${fs3.screen}, viewport ${fs3.viewport}, WebGL ${fs3.webgl}`);
+  check('the startup self-check ran and found nothing',
+    Boolean(f.audit) && !f.audit.error && f.audit.checked > 0 && f.audit.problems.length === 0,
+    JSON.stringify(f.audit));
+  check('taking the debugger away does not take the overrides with it',
+    f.reattached === true && f.afterDetach && f.afterDetach.screen === f.afterDetach.viewport,
+    `reattached ${f.reattached}; after: ${JSON.stringify(f.afterDetach)}`);
 
   // Onion-Location: honoured from HTTPS pages only, and only for onion addresses.
   const policy = require('../src/main/incognito/policy');

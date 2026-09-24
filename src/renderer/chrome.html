@@ -101,6 +101,13 @@
       Shown when the site in front offers an onion address (Onion-Location).
       The address comes from the site's own header, read in the main process.
     -->
+    <!--
+      A page too heavy for Balanced JavaScript: said once, over that tab, and
+      dismissed by clicking. Private windows cannot change the level themselves
+      (it is process-wide), so this says where the setting is and what it costs.
+    -->
+    <button class="onion-btn" id="slow-js" hidden
+            title="This page kept a processor core busy for over 10 seconds. Private windows run JavaScript without its optimising compilers, which is where most attacks on the engine land. Full speed is in Settings, Private windows - from the next private window, and anything signed in here is lost with this one. Click to dismiss.">Slow page?</button>
     <button class="onion-btn" id="onion" hidden title="This site has an onion address - open it, end to end inside Tor">.onion</button>
 
     <button class="private-pill" id="private" hidden title="Private connection" aria-label="Private connection">

@@ -40,6 +40,8 @@ const COMMANDS = new Set([
   'allow-http',
   'new-circuit',
   'open-onion',
+  'dismiss-slow-js',
+  'fingerprint-expected',
   'new-identity',
   'close-tab',
   'activate-tab',

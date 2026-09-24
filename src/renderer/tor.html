@@ -25,6 +25,7 @@
       <p class="detail" id="detail"></p>
       <p class="problem" id="problem" hidden></p>
       <p class="guard" id="guard"></p>
+      <p class="guard" id="fp" hidden></p>
       <div class="actions">
         <button class="ghost-btn" id="retry" hidden>Try again</button>
       </div>
@@ -39,6 +40,8 @@
           <tr><th>That you use Tor</th><td class="part" id="tor-visible">Hidden by bridges from protocol inspection; a bridge of your own also hides it from lists of known bridges</td></tr>
           <tr><th>That you are online, and how much</th><td class="no">Visible. Nothing can hide this.</td></tr>
           <tr><th>Your address, from websites</th><td class="yes">Hidden: sites see a Tor exit</td></tr>
+          <tr><th>Your time zone, language, screen and graphics card, from websites</th><td class="yes">The same as every private window's</td></tr>
+          <tr><th>This window, in screenshots and screen sharing</th><td class="part" id="capture">Shown blank on Windows and macOS</td></tr>
           <tr><th>Anything you sign in to</th><td class="no">Identifies you to that site</td></tr>
         </tbody>
       </table>
