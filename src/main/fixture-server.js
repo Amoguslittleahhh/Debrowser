@@ -43,9 +43,33 @@ const TYPES = {
 
 const contentType = (name) => TYPES[path.extname(name).toLowerCase()] || 'text/plain; charset=utf-8';
 
+/**
+ * `/challenge?id=<id>` answers like a site that blocks Tor exits: a 403 with
+ * a challenge page for the first two requests of each id, then the page.
+ * `&always=1` never lets it through. Used by the incognito leak test to show
+ * a blocked tab moves to another circuit, and gives up after a few.
+ */
+const CHALLENGE_REFUSALS = 2;
+function challenge(req, res, seen) {
+  const query = new URL(req.url, 'http://fixture').searchParams;
+  const id = query.get('id') || '';
+  const n = (seen.get(id) || 0) + 1;
+  seen.set(id, n);
+  res.setHeader('Cache-Control', 'no-store');
+  if (query.has('always') || n <= CHALLENGE_REFUSALS) {
+    res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<!doctype html><title>Just a moment...</title><p>Checking your browser. Complete the challenge to continue.</p>');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(`<!doctype html><title>passed</title><p>Loaded on attempt ${n}.</p>`);
+}
+
 function start() {
+  const challenges = new Map();
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
+      if ((req.url || '').startsWith('/challenge')) { challenge(req, res, challenges); return; }
       // Serve only basenames out of the fixtures directory; nothing else is
       // reachable, however the request is spelled.
       const name = path.basename((req.url || '/').split('?')[0]) || 'idle.html';

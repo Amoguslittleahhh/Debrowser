@@ -17,25 +17,34 @@
 
 const fs = require('fs');
 const path = require('path');
-const { socksStub } = require('./socks-stub');
+const { socksPool } = require('./socks-stub');
 
 const torrc = fs.readFileSync(process.argv[process.argv.indexOf('-f') + 1], 'utf8');
 const value = (key) => (new RegExp(`^${key} (.+)$`, 'm').exec(torrc) || [])[1];
 
-const socks = value('SocksPort').replace(/^unix:/, '');
+// Every SocksPort line, as the real Tor would open them - one per slot.
+const sockets = [...torrc.matchAll(/^SocksPort unix:(.+)$/gm)].map((m) => m[1]);
 const cookie = value('CookieAuthFile');
 const owner = Number(value('__OwningControllerProcess'));
 fs.writeFileSync(cookie, Buffer.alloc(32, 7), { mode: 0o600 });
 
-socksStub(Number(process.env.FAKE_TOR_FIXTURE_PORT), { path: socks }, (name) => {
-  if (process.env.FAKE_TOR_NAMES) fs.appendFileSync(process.env.FAKE_TOR_NAMES, `${name}\n`);
-}).then(() => {
+socksPool(sockets.length, Number(process.env.FAKE_TOR_FIXTURE_PORT), (slot) => ({ path: sockets[slot] })).then((pool) => {
+  // Appended as they arrive, so the harness can read them after the browser has gone.
+  const flush = () => {
+    if (!process.env.FAKE_TOR_NAMES || !pool.seen.length) return;
+    fs.appendFileSync(process.env.FAKE_TOR_NAMES, pool.seen.splice(0).map((s) => `${s.name} ${s.slot}\n`).join(''));
+  };
+  setInterval(flush, 100);
   console.log('Sep 24 00:00:00.000 [notice] Tor 0.0.0.0 (fake, for the kill-switch test) running on Linux.');
   console.log('Sep 24 00:00:00.000 [notice] Bootstrapped 100% (done): Done');
   setInterval(() => {
-    try { process.kill(owner, 0); } catch { try { fs.unlinkSync(socks); } catch { /* gone */ } process.exit(0); }
+    try { process.kill(owner, 0); } catch {
+      flush();
+      for (const s of sockets) { try { fs.unlinkSync(s); } catch { /* gone */ } }
+      process.exit(0);
+    }
   }, 250);
 }, (err) => {
-  console.log(`[err] fake tor could not listen on ${path.basename(socks)}: ${err.message}`);
+  console.log(`[err] fake tor could not listen on ${path.basename(sockets[0] || '?')}: ${err.message}`);
   process.exit(1);
 });

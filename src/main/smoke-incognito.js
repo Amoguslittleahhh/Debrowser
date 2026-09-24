@@ -39,7 +39,7 @@ async function waitFor(predicate, timeoutMs = 10_000, pollMs = 100) {
 const within = (promise, ms, fallback) =>
   Promise.race([promise.catch(() => fallback), sleep(ms).then(() => fallback)]);
 
-async function run({ app, tabs, shell, downloads, tripwire, ctx, log, setTripHook }) {
+async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand, ctx, log, setTripHook }) {
   const fixturePort = Number(argValue('leak-fixture-port'));
   const canary = argValue('leak-canary');            // ip:port the harness listens on
   const stun = argValue('leak-stun');                // ip:port for WebRTC's STUN
@@ -63,14 +63,28 @@ async function run({ app, tabs, shell, downloads, tripwire, ctx, log, setTripHoo
   // way the user does - through the policy's own switch, not a test backdoor.
   // `up.test` is left out on purpose: it is the one that must be upgraded.
   const policy = require('./incognito/policy');
-  for (const host of ['t1', 't2', 'rtc', 'lan']) policy.allowHttp(url(host, ''));
+  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx']) policy.allowHttp(url(host, ''));
   const loaded = [];
+  const byHost = {};
   for (const host of ['t1', 't2']) {
     const tab = tabs.create({ url: url(host, 'idle.html') });
     const ok = await waitFor(() => tab.isLive && !tab.loading && /idle/.test(tab.url), 15_000);
     loaded.push({ host, ok, title: tab.title });
+    byHost[host] = tab;
   }
   step('pages', loaded);
+
+  // Circuits. A link opened from t1 shares t1's partition and circuit; then
+  // t1 is moved to a new circuit and loads another page there. Where each of
+  // these arrived is read from the stand-in for Tor, by the harness.
+  const linked = tabs.create({ url: url('link', 'idle.html'), opener: byHost.t1, activate: false, realise: true });
+  await waitFor(() => linked.isLive && !linked.loading, 15_000);
+  if (circuits) circuits.newCircuit(byHost.t1.session);
+  await byHost.t1.wc.loadURL(url('nc', 'idle.html')).catch(() => {});
+  step('circuits', {
+    separateSessions: byHost.t1.session !== byHost.t2.session,
+    linkShares: linked.session === byHost.t1.session
+  });
 
   // The favicon route. It runs in the browser process with its own fetch, in
   // the default session - the path a naive design leaves outside the proxy.
@@ -127,6 +141,16 @@ async function run({ app, tabs, shell, downloads, tripwire, ctx, log, setTripHoo
   const explained = await waitFor(() => upTab.isLive && /^debrowser:\/\/insecure/.test(upTab.wc.getURL()), 15_000);
   step('httpsOnly', { explained, url: upTab.isLive ? upTab.wc.getURL() : null });
 
+  // A site that refuses Tor exits: the tab moves to another circuit and loads
+  // again. `ch` lets the third attempt through; `chx` never does, and the tab
+  // must stop retrying and say so. Which ports the attempts arrived on is read
+  // from the stand-in for Tor, by the harness.
+  const chTab = tabs.create({ url: `http://ch.test:${fixturePort}/challenge?id=ch` });
+  const passed = await waitFor(() => chTab.isLive && !chTab.loading && chTab.title === 'passed', 20_000);
+  const chxTab = tabs.create({ url: `http://chx.test:${fixturePort}/challenge?id=chx&always=1` });
+  const refused = await waitFor(() => circuits && circuits.refused(chxTab.id), 30_000);
+  step('blocked', { passed, title: chTab.title, refused, shown: shell.incognito().refused === true });
+
   // An external protocol starts nothing.
   const deniedBefore = tabs.deniedPermissions.length;
   const extTab = tabs.create({ url: url('t2', 'idle.html') });
@@ -138,6 +162,16 @@ async function run({ app, tabs, shell, downloads, tripwire, ctx, log, setTripHoo
   // Nothing at all, for a while - where background fetches show themselves.
   await sleep(idleMs);
   step('idle', idleMs);
+
+  // New identity, last, because it closes every tab. A cookie set in t1 must
+  // be gone afterwards, and one fresh tab left.
+  const t1Session = byHost.t1.session;
+  await t1Session.cookies.set({ url: url('t1', ''), name: 'marker', value: 'kept?' }).catch(() => {});
+  runCommand('new-identity');
+  await waitFor(() => tabs.all().length === 1, 5000);
+  await sleep(300);
+  const left = await t1Session.cookies.get({}).catch(() => ['error']);
+  step('newIdentity', { tabsAfter: tabs.all().length, cookiesLeft: left.length });
 
   step('tripwireDuringCleanRun', { trips: trips.length, ...tripwire.status() });
   await netLog.stopLogging();

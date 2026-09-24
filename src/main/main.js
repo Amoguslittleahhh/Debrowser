@@ -44,7 +44,9 @@ const { Tripwire } = require('./incognito/tripwire');
 const { Tor, bundleDir: torBundleDir } = require('./incognito/tor');
 const bridges = require('./incognito/bridges');
 const torState = require('./incognito/torstate');
-const { startRelay } = require('./incognito/relay');
+const { startRelays } = require('./incognito/relay');
+const { Circuits } = require('./incognito/circuits');
+const policy = require('./incognito/policy');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -257,8 +259,7 @@ if (!app.requestSingleInstanceLock()) {
     // loopback port that this process relays onto that socket; a port that is
     // taken moves, the same way a Tor that cannot bind does.
     if (incognitoCtx.killSwitch.available && process.env.DEBROWSER_TOR_DIR && !incognitoCtx.externalProxy) {
-      const socket = path.join(process.env.DEBROWSER_TOR_DIR, 'socks');
-      const listen = (tries) => startRelay(incognitoCtx.proxyPort, socket, log).catch((err) => {
+      const listen = (tries) => startRelays(incognitoCtx.poolPorts, process.env.DEBROWSER_TOR_DIR, log).catch((err) => {
         if (err.code === 'EADDRINUSE' && tries > 0) {
           incognito.movePort(incognitoCtx, incognitoSessions);
           return listen(tries - 1);
@@ -357,6 +358,29 @@ function main() {
   let history = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
+  /** Incognito only: which Tor circuit each tab uses. */
+  let circuits = null;
+
+  /**
+   * Downloads are taken over from Chromium rather than added beside it.
+   *
+   * Electron's own download path is one connection, start to finish, and there
+   * is no way to ask it for more - so `will-download` is cancelled and the URL
+   * is handed to our manager, in the session it came from. Cancelled rather
+   * than left running: two downloads of the same file would race for the same
+   * name on disk. Per session, because incognito has one per tab.
+   */
+  const takeDownloads = (ses) => {
+    ses.on('will-download', (event, item) => {
+      const url = item.getURL();
+      // Only what a download can mean. A blob: or data: URL has no server to
+      // ask for ranges and nothing for our manager to fetch, so Chromium keeps
+      // those - taking them over would break them to no purpose.
+      if (!/^https?:/i.test(url) || !downloads) return;
+      event.preventDefault();
+      downloads.start(url, { session: ses });
+    });
+  };
   /** Set by the incognito test suite, which has to watch a trip rather than be closed by one. */
   let onTripForTest = null;
 
@@ -526,6 +550,23 @@ function main() {
     });
   };
 
+  /**
+   * Incognito, after each page load: a site refusing Tor gets the tab moved
+   * to another exit (circuits.checkBlocked), and a site offering an onion
+   * address is either followed there - when the user chose to prefer onions -
+   * or has the address shown as a button in the toolbar.
+   */
+  const onPrivateLoad = (tab) => {
+    circuits.checkBlocked(tab).then((result) => {
+      if (result !== 'ok') log('circuits', `tab ${tab.id} looks blocked: ${result}`);
+      if (result === 'ok' && tab.isLive && prefs.get('incognitoPreferOnion')) {
+        const onion = policy.onionFor(tab.wc.id);
+        if (onion && !policy.isOnion(tab.wc.getURL())) tab.wc.loadURL(onion).catch(() => {});
+      }
+      publish();
+    }).catch((err) => log('circuits', `block check failed: ${err.message}`));
+  };
+
   const onTabEvent = (tab, event, payload) => {
     switch (event) {
       case 'realised':
@@ -540,6 +581,7 @@ function main() {
         // Fill on load, for passwords only. Payment details are never filled
         // without a click; see the note on fillSavedLogin.
         fillSavedLogin(tab, credentials, prefs, log);
+        if (circuits) onPrivateLoad(tab);
         break;
       case 'activated':
         if (shell) shell.attachTab(tab);
@@ -561,6 +603,7 @@ function main() {
         if (payload?.favicon) icons.remember(payload.favicon);
         break;
       case 'closed':
+        if (circuits) circuits.forgetTab(tab.id);
         if (shell) shell.detachTab(tab);
         rememberClosed(tab);
         break;
@@ -590,7 +633,6 @@ function main() {
     // may already exist, so it is configured by hand as well.
     if (INCOGNITO) {
       incognito.configureSession(session.defaultSession, incognitoCtx);
-      icons.useSession(session.fromPartition(BROWSING_PARTITION));
     }
     // Both the default session (chrome, panel) and the browsing partition that
     // tabs run in, which has a protocol registry of its own.
@@ -606,8 +648,17 @@ function main() {
     log('config', `profile=${cfg.profile} budget=${cfg.memoryBudgetMB}MB`);
 
     const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'));
+    // Incognito: a Tor circuit and a partition per tab. See incognito/circuits.js.
+    circuits = INCOGNITO ? new Circuits(incognitoCtx) : null;
+    if (circuits) icons.useSession(circuits.iconSession());
+
     tabs = new TabManager({
       cfg,
+      sessionFor: circuits ? () => circuits.newTabSession() : null,
+      onNewSession: (ses) => {
+        pages.serveSession(ses, log);
+        takeDownloads(ses);
+      },
       onEvent: onTabEvent,
       log,
       // Awaited before a tab is shown, so it is never presented while frozen.
@@ -664,10 +715,22 @@ function main() {
 
     if (INCOGNITO) {
       // What the window shows about the private connection, on every broadcast.
+      // The tab in front: an onion address its site offered, and whether the
+      // site refused every exit it was tried from.
+      const activeTabPrivacy = () => {
+        const tab = tabs && tabs.activeTab();
+        if (!tab || !tab.isLive) return { onion: null, refused: false };
+        const onion = policy.onionFor(tab.wc.id);
+        return {
+          onion: onion && !policy.isOnion(tab.wc.getURL()) ? onion : null,
+          refused: circuits ? circuits.refused(tab.id) : false
+        };
+      };
       shell.incognito = () => ({
         tor: tor ? { ...tor.status } : { state: 'ready', progress: 100, summary: 'External proxy (test)', transport: 'direct' },
         killSwitch: incognitoCtx.killSwitch,
-        tripwire: tripwire ? tripwire.status() : null
+        tripwire: tripwire ? tripwire.status() : null,
+        ...activeTabPrivacy()
       });
       onIncognitoChange = publish;
 
@@ -677,7 +740,7 @@ function main() {
         // The proxy and Tor's control port, and nothing else. Loopback on any
         // other port is a violation too: see net-watch.c for the measurement
         // that made "any loopback" the wrong rule.
-        allowedPorts: () => [incognitoCtx.proxyPort, tor && tor.controlPort].filter(Boolean),
+        allowedPorts: () => [...incognitoCtx.poolPorts, tor && tor.controlPort].filter(Boolean),
         onTrip: onEgressTrip
       });
       tripwire.capability().then((caps) => log('tripwire', JSON.stringify(caps)));
@@ -736,7 +799,7 @@ function main() {
 
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
-      bookmarks, closedTabs, context, find, quitState, siteZoom
+      bookmarks, closedTabs, context, find, quitState, siteZoom, circuits
     });
 
     // Downloads are taken over from Chromium rather than added beside it.
@@ -768,15 +831,7 @@ function main() {
     // So the state broadcast can carry the count and progress the toolbar
     // button draws, without carrying the list itself.
     shell.downloads = downloads;
-    session.fromPartition(BROWSING_PARTITION).on('will-download', (event, item) => {
-      const url = item.getURL();
-      // Only what a download can mean. A blob: or data: URL has no server to
-      // ask for ranges and nothing for our manager to fetch, so Chromium keeps
-      // those - taking them over would break them to no purpose.
-      if (!/^https?:/i.test(url)) return;
-      event.preventDefault();
-      downloads.start(url);
-    });
+    takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log, context });
 
     /*
@@ -835,7 +890,7 @@ function main() {
 
     if (SMOKE_TEST && INCOGNITO) {
       require('./smoke-incognito').run({
-        app, tabs, shell, downloads, tripwire, ctx: incognitoCtx, log,
+        app, tabs, shell, downloads, tripwire, circuits, runCommand, ctx: incognitoCtx, log,
         setTripHook: (fn) => { onTripForTest = fn; }
       }).then((code) => app.exit(code), (err) => {
         console.error('[smoke-incognito] failed:', err.stack || err.message);
@@ -960,7 +1015,8 @@ function main() {
  */
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
-                       find = null, quitState = null, siteZoom = new SiteZoom(() => 1) }) {
+                       find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
+                       circuits = null }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -985,13 +1041,51 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (tor) tor.restart();
         break;
 
+      // A different exit for the tab in front - the thing to try when a site
+      // blocks one exit, or a page is slow on one circuit. The tab reloads on
+      // the new circuit; the pages it opened share its partition and move too.
+      case 'new-circuit': {
+        if (!circuits || !active) break;
+        circuits.newCircuit(active.session);
+        if (active.isLive) active.wc.reload();
+        break;
+      }
+
+      // Everything forgotten at once: every tab closed, every partition's
+      // cookies, storage and cache cleared, every connection dropped, and Tor
+      // told to build new circuits for everything after. One fresh tab is
+      // opened first, because closing the last tab closes the window.
+      // The onion address the tab's site offered, opened in the same tab.
+      // Taken from what the site sent, never from the renderer's payload.
+      case 'open-onion': {
+        if (!INCOGNITO || !active || !active.isLive) break;
+        const onion = policy.onionFor(active.wc.id);
+        if (onion) active.wc.loadURL(onion).catch(() => {});
+        break;
+      }
+
+      case 'new-identity': {
+        if (!INCOGNITO) break;
+        const old = tabs.all().slice();
+        tabs.create({ url: newTabUrl(prefs) });
+        for (const tab of old.reverse()) tabs.close(tab.id);
+        closedTabs.length = 0;
+        for (const ses of incognitoSessions) {
+          ses.clearStorageData().catch(() => {});
+          ses.clearCache().catch(() => {});
+          try { ses.closeAllConnections(); } catch { /* older Electron */ }
+        }
+        if (tor) tor.newIdentity().catch((err) => log('tor', `new identity: ${err.message}`));
+        break;
+      }
+
       // The one way to load a page over plain HTTP in a private window: the
       // explanation page's own button, for that host, until the window closes.
       // Only that page may send it - anything else asking is refused.
       case 'allow-http': {
         if (!INCOGNITO || !sender || pages.pageName(sender.getURL()) !== 'insecure') break;
         const url = String(payload?.url || '');
-        if (!require('./incognito/policy').allowHttp(url)) break;
+        if (!policy.allowHttp(url)) break;
         const tab = tabs.all().find((t) => t.isLive && t.wc === sender) || active;
         if (tab && tab.isLive) tab.wc.loadURL(url).catch(() => {});
         break;
@@ -1552,7 +1646,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const tab = tabs.byId(payload?.id);
         if (!tab || !tab.url) break;
         const at = tabs.all().indexOf(tab);
-        tabs.create({ url: tab.url, activate: true, index: at + 1 });
+        tabs.create({ url: tab.url, activate: true, index: at + 1, opener: tab });
         break;
       }
 
@@ -2263,7 +2357,7 @@ function openLinkTab(tabs, prefs, opener, url) {
       index = at;
     }
   }
-  const tab = tabs.create({ url, activate: foreground, realise: foreground, index });
+  const tab = tabs.create({ url, activate: foreground, realise: foreground, index, opener });
   if (opener) tab.openerId = opener.id;
   return tab;
 }
@@ -2376,7 +2470,10 @@ function menuModel({ tabs, shell }) {
   return [
     { id: 'new-tab', label: 'New tab', accel: accel('new-tab'), icon: 'plus' },
     // Not offered from inside incognito: a second one is just another tab there.
-    ...(INCOGNITO ? [] : [{
+    ...(INCOGNITO ? [
+      { id: 'new-circuit', label: 'New circuit for this tab', accel: accel('new-circuit'), icon: 'reload' },
+      { id: 'new-identity', label: 'New identity', accel: accel('new-identity'), icon: 'shield' }
+    ] : [{
       id: 'new-incognito-window', label: 'New incognito window',
       accel: accel('new-incognito-window'), icon: 'shield'
     }]),

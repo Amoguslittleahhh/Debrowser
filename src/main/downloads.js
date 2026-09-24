@@ -492,7 +492,12 @@ class DownloadManager {
     this.items = new Map();
   }
 
-  start(url) {
+  /**
+   * @param {string} url
+   * @param {{session?: Electron.Session}} [options] - the session the download
+   *   came from, when tabs do not all share one (incognito)
+   */
+  start(url, { session = null } = {}) {
     let clean;
     try {
       const parsed = new URL(url);
@@ -508,7 +513,7 @@ class DownloadManager {
       url: clean,
       dir: typeof this.dir === 'function' ? this.dir() : this.dir,
       connections: this.connections(),
-      session: this.session,
+      session: session || this.session,
       saveAs: this.saveAs,
       log: this.log,
       onChange: () => this.onChange(this.list())

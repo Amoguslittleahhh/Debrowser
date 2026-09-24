@@ -109,8 +109,66 @@ function allowHttp(url) {
   }
 }
 
-function install(ses) {
-  ses.webRequest.onBeforeRequest((details, callback) => callback(judge(details)));
+/**
+ * A site's onion address, from its `Onion-Location` header - honoured only on
+ * an HTTPS page, as the Tor Project specifies, because on plain HTTP the exit
+ * relay could have written the header itself and sent the tab anywhere.
+ */
+function onionFrom(pageUrl, headers) {
+  let page;
+  try { page = new URL(pageUrl); } catch { return null; }
+  if (page.protocol !== 'https:') return null;
+  const key = Object.keys(headers || {}).find((k) => k.toLowerCase() === 'onion-location');
+  const value = key && [].concat(headers[key])[0];
+  if (!value) return null;
+  try {
+    const onion = new URL(String(value).trim());
+    if (!/^https?:$/.test(onion.protocol) || !/\.onion$/.test(onion.hostname)) return null;
+    return onion.toString();
+  } catch {
+    return null;
+  }
 }
 
-module.exports = { isLocalHost, judge, upgradeFailed, allowHttp, install };
+/** Whether a URL is an onion site's. */
+function isOnion(url) {
+  try { return new URL(url).hostname.endsWith('.onion'); } catch { return false; }
+}
+
+/** Per tab (webContents id): the onion address its page offered, and its last status. */
+const offered = new Map();
+const statuses = new Map();
+
+/**
+ * Whether a finished page looks like a site refusing Tor.
+ *
+ * Exit relays are public, so some sites answer them with a block page or a
+ * challenge. The status and a few markers the common ones use are enough to
+ * say "try another exit" - and a wrong guess costs a reload, nothing more.
+ */
+const BLOCK_STATUSES = new Set([403, 429, 503]);
+const BLOCK_MARKERS = /captcha|cf-chl|challenge-platform|just a moment|attention required|access denied|unusual traffic|are you a robot|blocked/i;
+function looksBlocked(status, text) {
+  return BLOCK_STATUSES.has(status) && BLOCK_MARKERS.test(String(text || ''));
+}
+
+function install(ses) {
+  ses.webRequest.onBeforeRequest((details, callback) => callback(judge(details)));
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    if (details.resourceType === 'mainFrame') {
+      const onion = onionFrom(details.url, details.responseHeaders);
+      if (onion) offered.set(details.webContentsId, onion);
+      else offered.delete(details.webContentsId);
+      statuses.set(details.webContentsId, details.statusCode);
+    }
+    callback({});
+  });
+}
+
+module.exports = {
+  isLocalHost, judge, upgradeFailed, allowHttp, install, onionFrom, looksBlocked, BLOCK_STATUSES, isOnion,
+  onionFor: (wcId) => offered.get(wcId) || null,
+  statusFor: (wcId) => statuses.get(wcId) ?? null,
+  /** A tab's renderer is gone; what was recorded for it goes too. */
+  forget: (wcId) => { offered.delete(wcId); statuses.delete(wcId); }
+};

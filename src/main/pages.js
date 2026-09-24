@@ -138,9 +138,12 @@ function contentType(file) {
  *
  * @param {string[]} partitions - extra partitions to register on
  */
+/** The one handler, built once and registered on every session that needs it. */
+let handler = null;
+
 function serve(log = () => {}, partitions = []) {
   const registries = [protocol, ...partitions.map((p) => session.fromPartition(p).protocol)];
-  const handler = async (request) => {
+  handler = async (request) => {
     const url = new URL(request.url);
 
     // Site icons are served rather than read from disk: they come off the
@@ -180,6 +183,19 @@ function serve(log = () => {}, partitions = []) {
   }
 }
 
+/**
+ * Register our pages on a session made after startup - incognito makes one per
+ * tab - so a private tab can open the new tab page like any other.
+ */
+function serveSession(ses, log = () => {}) {
+  if (!handler) return;
+  try {
+    ses.protocol.handle(SCHEME, handler);
+  } catch (err) {
+    log('pages', `could not register ${SCHEME}: ${err.message}`);
+  }
+}
+
 /** Is this one of ours? */
 function isInternal(url) {
   return typeof url === 'string' && url.startsWith(`${SCHEME}://`);
@@ -210,5 +226,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, TOR_URL,
-  INSECURE_URL, registerScheme, serve, isInternal, pageName, titleFor
+  INSECURE_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

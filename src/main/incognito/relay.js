@@ -15,6 +15,7 @@
  */
 
 const net = require('net');
+const path = require('path');
 
 /**
  * @param {number} port        - where Chromium was told the proxy is
@@ -45,4 +46,22 @@ function startRelay(port, socketPath, log = () => {}) {
   });
 }
 
-module.exports = { startRelay };
+/**
+ * One relay per port of the pool, port i onto Tor's socket i - so the pool's
+ * isolation survives the namespace: a tab's connections arrive at Tor on the
+ * same socket every time, and two tabs' never on the same one.
+ */
+async function startRelays(ports, dir, log = () => {}) {
+  const results = await Promise.allSettled(ports.map((port, i) => startRelay(port, path.join(dir, `socks-${i}`), log)));
+  const failed = results.find((r) => r.status === 'rejected');
+  if (failed) {
+    // All or nothing: a pool with a hole in it would send the tab bound to the
+    // missing port nowhere, and a retry on a new range must not leave the old
+    // listeners behind.
+    for (const r of results) if (r.status === 'fulfilled') r.value.close();
+    throw failed.reason;
+  }
+  return results.map((r) => r.value);
+}
+
+module.exports = { startRelay, startRelays };

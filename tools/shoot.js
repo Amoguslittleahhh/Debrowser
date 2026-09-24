@@ -184,6 +184,12 @@ const SHOTS = [
     incognito: { tor: { state: 'bootstrapping', progress: 45, summary: 'Loading relay descriptors', transport: 'obfs4' },
                  killSwitch: { available: true, mechanism: 'Network namespace (loopback only)' },
                  tripwire: { available: true } } },
+  // A private window whose site refused every exit it was tried from, and
+  // offers an onion address: the two things the toolbar says about a site.
+  { name: 'chrome-private', file: 'chrome.html', w: 1280, h: 120,
+    incognito: { tor: { state: 'ready', progress: 100, summary: 'Done', transport: 'webtunnel' },
+                 killSwitch: { available: true }, tripwire: { available: true },
+                 onion: 'http://abcdefghijklmnop.onion/', refused: true } },
   { name: 'tor-failed', file: 'tor.html', w: 1280, h: 820,
     incognito: { tor: { state: 'failed', progress: 10, summary: 'Connected to a relay',
                         warning: 'No progress for 45 seconds at 10% - the network may be blocking Tor' },

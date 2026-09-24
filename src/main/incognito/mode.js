@@ -135,9 +135,46 @@ function windowsFirewall() {
   return { available: false, mechanism: null, reason: 'the firewall rule is missing - reinstall and accept the prompt' };
 }
 
-/** A port for Tor's SOCKS listener, away from the ranges other software favours. */
+/**
+ * How many SOCKS ports Tor listens on.
+ *
+ * Tor never puts streams that arrived on different SOCKS ports on the same
+ * circuit ("By default, streams received on different SocksPorts ... are
+ * always isolated from one another" - tor(1)). So each private tab is given a
+ * port of its own, and two tabs share a circuit only when more are open than
+ * there are ports; then the port handed out longest ago is reused. Port 0 is
+ * the fallback every context the browser did not set up itself uses; port 1
+ * carries site icons, which would otherwise tie tabs together.
+ */
+const POOL_SIZE = 24;
+
+/** The first port of a free-looking range for Tor's SOCKS listeners. */
 function pickPort() {
-  return 30000 + require('crypto').randomInt(0, 29000);
+  return 30000 + require('crypto').randomInt(0, 29000 - POOL_SIZE);
+}
+
+const poolFrom = (base) => Array.from({ length: POOL_SIZE }, (_, i) => base + i);
+
+/** Which slot of the pool each session is bound to. Weak: sessions come and go. */
+const slots = new WeakMap();
+/** Set while a session is being created for a known slot; read by `session-created`. */
+let creating = null;
+
+/**
+ * Make a session bound to one slot of the pool.
+ *
+ * `session-created` fires synchronously inside `fromPartition`, and that is
+ * where the proxy is applied - so the slot is known at that moment rather than
+ * set afterwards, when the session's first request might already be using the
+ * fallback port and sharing a circuit it should not.
+ */
+function sessionWithSlot(electronSession, partition, slot) {
+  creating = slot;
+  try {
+    return electronSession.fromPartition(partition);
+  } finally {
+    creating = null;
+  }
 }
 
 /**
@@ -149,9 +186,11 @@ function pickPort() {
  * process has seen is repointed.
  */
 function movePort(ctx, sessions) {
-  ctx.proxyPort = pickPort();
-  ctx.proxyRules = `socks5://127.0.0.1:${ctx.proxyPort}`;
-  for (const ses of sessions) configureSession(ses, ctx);
+  const base = pickPort();
+  ctx.poolPorts = poolFrom(base);
+  ctx.proxyPort = base;
+  ctx.proxyRules = `socks5://127.0.0.1:${base}`;
+  for (const ses of sessions) configureSession(ses, ctx, slots.get(ses) ?? 0);
   return ctx.proxyPort;
 }
 
@@ -318,6 +357,7 @@ function prepare(app) {
   const requested = Number(argValue('incognito-proxy-port'));
   const external = Number.isInteger(requested) && requested > 0 && requested < 65536;
   const port = external ? requested : pickPort();
+  const poolPorts = poolFrom(port);
 
   return {
     root,
@@ -326,6 +366,8 @@ function prepare(app) {
     normalUserData,
     /** A proxy supplied from outside (the leak test's stand-in), so no Tor is started. */
     externalProxy: external,
+    /** Tor's SOCKS ports; the first is also the command-line fallback. */
+    poolPorts,
     proxyPort: port,
     proxyRules: `socks5://127.0.0.1:${port}`,
     jsLevel: readJsLevel(normalUserData)
@@ -360,8 +402,10 @@ function switches(ctx) {
  * still be a request to Google that no page asked for, sent from every
  * incognito session, which is a fingerprint in itself.
  */
-function configureSession(ses, ctx) {
-  ses.setProxy({ proxyRules: ctx.proxyRules, proxyBypassRules: BYPASS_RULES }).catch(() => {});
+function configureSession(ses, ctx, slot = creating ?? slots.get(ses) ?? 0) {
+  slots.set(ses, slot);
+  const port = ctx.poolPorts ? ctx.poolPorts[slot] : ctx.proxyPort;
+  ses.setProxy({ proxyRules: `socks5://127.0.0.1:${port}`, proxyBypassRules: BYPASS_RULES }).catch(() => {});
   // `setSpellCheckerEnabled(false)` alone does not stop it - measured, the
   // download still went out. An empty language list does: there is then no
   // dictionary to fetch. Both, so the spellchecker is off as well as starved.
@@ -374,5 +418,5 @@ function configureSession(ses, ctx) {
 module.exports = {
   INCOGNITO, JS_LEVELS, DEFAULT_JS_LEVEL, RESOLVER_RULES, BYPASS_RULES,
   profileRoot, isPrivateDir, ensureRoot, sweep, wipe, startReaper, prepare, switches, configureSession,
-  movePort, pickPort, killSwitch
+  movePort, pickPort, killSwitch, POOL_SIZE, sessionWithSlot, slotOf: (ses) => slots.get(ses)
 };

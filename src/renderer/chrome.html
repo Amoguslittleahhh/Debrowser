@@ -97,6 +97,12 @@
       connection is up. Words, not just a colour, because "is this the private
       window?" is a question people get wrong when the only answer is a tint.
     -->
+    <!--
+      Shown when the site in front offers an onion address (Onion-Location).
+      The address comes from the site's own header, read in the main process.
+    -->
+    <button class="onion-btn" id="onion" hidden title="This site has an onion address - open it, end to end inside Tor">.onion</button>
+
     <button class="private-pill" id="private" hidden title="Private connection" aria-label="Private connection">
       <span class="private-dot" aria-hidden="true"></span>
       <span class="private-text" id="private-text">Private</span>

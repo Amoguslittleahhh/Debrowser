@@ -70,7 +70,9 @@
 #include <errno.h>
 
 #define MAX_PIDS 256
-#define MAX_ALLOW 16
+/* Tor's port pool (24) and its control port, with room to spare: a list cut
+   short would trip on a legitimate port, so it must never be the limit. */
+#define MAX_ALLOW 64
 #define MAX_REPORT 32
 #define LINE_MAX_LEN 8192
 
@@ -593,8 +595,8 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        char id[32], ports[256], list[LINE_MAX_LEN];
-        if (sscanf(line, "check %31s %255s %8191s", id, ports, list) == 3) {
+        char id[32], ports[1024], list[LINE_MAX_LEN];
+        if (sscanf(line, "check %31s %1023s %8191s", id, ports, list) == 3) {
             unsigned long tmp[MAX_ALLOW];
             nallow = strcmp(ports, "-") == 0 ? 0 : parse_list(ports, tmp, MAX_ALLOW);
             for (int i = 0; i < nallow; i++) allow[i] = (unsigned)tmp[i];

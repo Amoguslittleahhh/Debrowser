@@ -49,6 +49,9 @@ const TABLE = [
   // Tabs
   { command: 'new-tab', mod: true, key: 't' },
   { command: 'new-incognito-window', mod: true, shift: true, key: 'n' },
+  // Private windows only; the same keys Tor Browser uses.
+  { command: 'new-circuit', mod: true, shift: true, key: 'l' },
+  { command: 'new-identity', mod: true, shift: true, key: 'u' },
   { command: 'close-tab', mod: true, key: 'w' },
   { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
   { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'tab' },

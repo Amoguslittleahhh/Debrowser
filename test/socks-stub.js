@@ -70,4 +70,39 @@ function socksStub(fixturePort, where = { port: 0 }, onName = () => {}) {
   });
 }
 
-module.exports = { socksStub };
+/**
+ * The stand-in on every port of the pool, the way Tor listens on every one:
+ * records which port - which slot - each name arrived on, so the test can
+ * tell whether two tabs really used different circuits.
+ *
+ * @param {number} size         - ports in the pool
+ * @param {number} fixturePort
+ * @param {(slot: number) => {port?: number, path?: string}} where
+ */
+async function socksPool(size, fixturePort, where) {
+  const seen = [];
+  const stubs = [];
+  try {
+    for (let slot = 0; slot < size; slot++) {
+      stubs.push(await socksStub(fixturePort, where(slot), (name) => seen.push({ name, slot })));
+    }
+  } catch (err) {
+    for (const s of stubs) s.close();
+    throw err;
+  }
+  return { seen, close: () => stubs.forEach((s) => s.close()) };
+}
+
+/** A pool on consecutive loopback ports, at a base found free. */
+async function socksPoolOnPorts(size, fixturePort) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const base = 30000 + Math.floor(Math.random() * (29000 - size));
+    try {
+      const pool = await socksPool(size, fixturePort, (slot) => ({ port: base + slot }));
+      return { ...pool, base };
+    } catch { /* a port in the range was taken; try another range */ }
+  }
+  throw new Error('no free range of ports for the SOCKS pool');
+}
+
+module.exports = { socksStub, socksPool, socksPoolOnPorts };

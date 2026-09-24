@@ -52,7 +52,8 @@ const STALL_MS = 45_000;
  */
 function baseConfig({ dir, socks, control, controlFile = null, owner, extra = [] }) {
   return [
-    `SocksPort ${socks}`,
+    // One line per port of the pool: each is its own isolation boundary.
+    ...[].concat(socks).map((s) => `SocksPort ${s}`),
     // Loopback or a Unix socket, authenticated with a cookie only this user
     // can read.
     `ControlPort ${control}`,
@@ -79,8 +80,10 @@ function baseConfig({ dir, socks, control, controlFile = null, owner, extra = []
  * launcher at the moment it starts Tor.
  */
 function launcherTemplate(extra = []) {
+  const { POOL_SIZE } = require('./mode');
+  const socks = Array.from({ length: POOL_SIZE }, (_, i) => `unix:@DIR@/socks-${i}`);
   return `${baseConfig({
-    dir: '@DIR@', socks: 'unix:@DIR@/socks', control: 'unix:@DIR@/control', owner: '@PID@', extra
+    dir: '@DIR@', socks, control: 'unix:@DIR@/control', owner: '@PID@', extra
   }).join('\n')}\n`;
 }
 
@@ -149,7 +152,7 @@ class Tor {
   config() {
     return `${baseConfig({
       dir: this.dir,
-      socks: `127.0.0.1:${this.ctx.proxyPort}`,
+      socks: (this.ctx.poolPorts || [this.ctx.proxyPort]).map((port) => `127.0.0.1:${port}`),
       // Tor picks the control port and writes it to a file, so nothing
       // guesses at it.
       control: 'auto',

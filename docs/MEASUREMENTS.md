@@ -913,3 +913,38 @@ host. And on the Linux runner the network log recorded a UDP `connect()` to
 works. A UDP connect sends nothing; the check now fails on bytes actually sent
 and reports the probe separately. It never appeared here because this
 container has no IPv6 to ask about.
+
+## Incognito, M5 — a circuit per tab, and what happens when a site refuses Tor
+
+**Each tab really does leave from its own circuit.** The leak test's stand-in
+for Tor listens on all 24 pool ports, the way Tor does, and records which port
+each host name arrived on. Two tabs opened side by side arrived on ports 3 and
+4; a link opened from the first arrived on 3, with its opener; "new circuit"
+moved the first tab to 5; site icons arrived on 1, which no tab is ever given.
+Tor never lets two SOCKS ports share a circuit, so different ports means
+different exits.
+
+**"New identity" leaves nothing behind.** After it: one tab, and zero cookies
+in a partition that had one set just before.
+
+**A blocked site is retried, and then given up on.** The fixture server has a
+`/challenge` route that answers a 403 "Just a moment..." page for the first two
+requests. The tab loaded on its third attempt, and the three attempts arrived
+on three different ports. The same route with `always=1` was tried on four
+ports (the first load and three new circuits), then stopped, and the toolbar
+said "site refuses Tor" instead of looping. The page text is only read when the
+status is already 403, 429 or 503, so an ordinary load costs no extra
+round trip to the renderer.
+
+**What was nearly counted wrong.** The first run reported four ports for a
+page that took three attempts. The fourth was port 1: the site's icon, fetched
+on the icon circuit as designed. The check now leaves the icon circuit out.
+
+**Onion-Location is unit-checked, not end to end.** The header is honoured
+only from an HTTPS page, because on plain HTTP the exit could have written it.
+The fixtures are plain HTTP, so the harness checks the rule directly: an HTTPS
+page offering an onion address is followed; the same header on an HTTP page,
+or pointing at a non-onion address, is ignored.
+
+Leak test: 24/24; with the Linux kill switch, 25/25. Normal-mode smoke suite:
+148/148.

@@ -59,10 +59,20 @@ class TabManager {
     onUncover = () => {},
     canSpeculate = () => true,
     applyZoom = () => {},
+    // Incognito gives each tab a session of its own (see incognito/circuits.js);
+    // everywhere else every tab shares the browsing partition.
+    sessionFor = null,
+    // Told about each session the first time a tab uses it, so what is
+    // registered per session - our pages, downloads - reaches it.
+    onNewSession = () => {},
     log = () => {}
   } = {}) {
     this.cfg = cfg;
     this.session = electronSession.fromPartition(partition);
+    this.sessionFor = sessionFor;
+    this.onNewSession = onNewSession;
+    /** Sessions already given the permission policy. */
+    this.configured = new WeakSet([this.session]);
     this.onEvent = onEvent;
     /**
      * Called with a tab that is about to be shown, and awaited before it is.
@@ -109,10 +119,10 @@ class TabManager {
     this.configureSession();
   }
 
-  configureSession() {
+  configureSession(ses = this.session) {
     /** The last few refusals, newest last - so a test can see one happened. */
-    this.deniedPermissions = [];
-    this.session.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (!this.deniedPermissions) this.deniedPermissions = [];
+    ses.setPermissionRequestHandler((_wc, permission, callback) => {
       // Grant only what a page needs to function without user-visible prompts
       // this prototype has no UI for; everything sensitive is denied. That
       // includes `openExternal`: a `mailto:` or `zoommtg:` link would start
@@ -147,9 +157,24 @@ class TabManager {
    * renderer at all - the same state the governor discards a tab into - so
    * background and restored tabs cost nothing until they are first shown.
    */
-  create({ url = 'about:blank', activate = true, realise = activate, index = null } = {}) {
+  /**
+   * The session a new tab runs in: its opener's, so a link opened from a
+   * signed-in page is still signed in; or a new one where each tab gets its
+   * own; or the shared browsing partition.
+   */
+  sessionForNew(opener) {
+    const ses = (opener && opener.session) || (this.sessionFor ? this.sessionFor() : this.session);
+    if (!this.configured.has(ses)) {
+      this.configured.add(ses);
+      this.configureSession(ses);
+      this.onNewSession(ses);
+    }
+    return ses;
+  }
+
+  create({ url = 'about:blank', activate = true, realise = activate, index = null, opener = null } = {}) {
     const tab = new Tab({
-      session: this.session,
+      session: this.sessionForNew(opener),
       url,
       onEvent: (t, event, payload) => {
         // Finishing a load frees an admission slot for whatever is queued.

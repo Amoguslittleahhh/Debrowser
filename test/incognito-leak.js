@@ -73,7 +73,8 @@ function maybeEnterNamespace() {
   process.exit(inner.status ?? 1);
 }
 
-const { socksStub } = require('./socks-stub');
+const { socksPoolOnPorts } = require('./socks-stub');
+const { POOL_SIZE } = require('../src/main/incognito/mode');
 
 /** Where a "direct" connection would go: somewhere that is not loopback. */
 function canaryAddress() {
@@ -163,7 +164,10 @@ function readNetLog(file, proxyPort) {
       // left outside the proxy appeared here and nowhere else.
       offenders.push(`routed direct: ${urls.get(e.source?.id) || 'unknown request'}`);
     } else if (type === 'TCP_CONNECT_ATTEMPT' && p.address) {
-      if (p.address === `127.0.0.1:${proxyPort}`) proxied++;
+      // Any port of Tor's pool - one per tab - and nothing else, not even
+      // another port on loopback.
+      const [host, port] = String(p.address).split(/:(?=\d+$)/);
+      if (host === '127.0.0.1' && Number(port) >= proxyPort && Number(port) < proxyPort + POOL_SIZE) proxied++;
       else offenders.push(`tcp ${p.address}`);
     } else if (type === 'UDP_CONNECT' && p.address) {
       udpTarget.set(e.source?.id, p.address);
@@ -223,7 +227,7 @@ async function main() {
     `${killSwitch ? ', started through the kill switch' : ''}\n`);
 
   const fixtures = await require('../src/main/fixture-server').start();
-  const stub = await socksStub(fixtures.port);
+  const stub = await socksPoolOnPorts(POOL_SIZE, fixtures.port);
   const ip = canaryAddress();
   if (!ip) {
     check('a canary address exists to leak to', false, 'no non-loopback IPv4 address on this machine');
@@ -276,7 +280,7 @@ async function main() {
 
   const electron = require('electron');           // the binary's path, from Node
   const browserArgs = [ROOT, '--incognito', '--smoke-test', '--disable-gpu',
-    `--incognito-proxy-port=${stub.port}`,
+    `--incognito-proxy-port=${stub.base}`,
     `--leak-fixture-port=${fixtures.port}`,
     `--leak-canary=${ip}:${canary.tcpPort}`,
     `--leak-stun=${ip}:${canary.udpPort}`,
@@ -364,13 +368,18 @@ async function main() {
     s.tripwire.mechanism || s.tripwire.reason);
 
   // What the stand-in for Tor was asked for: only fixture names, and all of them.
-  const asked = killSwitch
+  const arrivals = killSwitch
     ? (fs.existsSync(namesFile) ? fs.readFileSync(namesFile, 'utf8').split('\n').filter(Boolean) : [])
+      .map((l) => { const [name, slot] = l.split(' '); return { name, slot: Number(slot) }; })
     : stub.seen;
+  const asked = arrivals.map((a) => a.name);
+  /** The slot - the Tor circuit - a host's requests first arrived on. */
+  const slotOf = (host) => (arrivals.find((a) => a.name.startsWith(`${host}.test:`)) || {}).slot;
   const names = [...new Set(asked.map((h) => h.replace(/:\d+$/, '')))];
   const foreign = names.filter((n) => !n.endsWith('.test'));
   check('every request reached the proxy by name, and only test names were asked for',
-    ['t1.test', 'dl.test', 'icon.test', 'rtc.test', 'up.test'].every((n) => names.includes(n)) && foreign.length === 0,
+    ['t1.test', 'dl.test', 'icon.test', 'rtc.test', 'up.test', 'link.test', 'nc.test'].every((n) => names.includes(n)) &&
+      foreign.length === 0,
     `asked for ${names.join(', ')}${foreign.length ? ` — unexpected: ${foreign.join(', ')}` : ''}`);
   check('the favicon route goes through the proxy', asked.some((h) => h.startsWith('icon.test')),
     `route answered ${s.favicon}`);
@@ -384,12 +393,47 @@ async function main() {
   check('an external protocol link starts nothing', s.externalProtocol.includes('openExternal'),
     `refused: ${JSON.stringify(s.externalProtocol)}`);
 
+  // Circuits, judged by where the requests actually arrived.
+  const [t1, t2, link, moved, icon] = ['t1', 't2', 'link', 'nc', 'icon'].map(slotOf);
+  check('each private tab uses its own Tor circuit', t1 != null && t2 != null && t1 !== t2,
+    `t1 on port ${t1}, t2 on port ${t2}`);
+  check('a link opened from a tab shares that tab\'s circuit', link != null && link === t1,
+    `link on port ${link}, its opener on ${t1}`);
+  check('"new circuit" moves the tab to another circuit', moved != null && moved !== t1,
+    `before ${t1}, after ${moved}`);
+  check('site icons use a circuit no tab uses', icon === 1 && icon !== t1 && icon !== t2, `icons on port ${icon}`);
+  check('"new identity" closes every tab and clears every cookie',
+    s.newIdentity && s.newIdentity.tabsAfter === 1 && s.newIdentity.cookiesLeft === 0,
+    JSON.stringify(s.newIdentity));
+
+  // A site refusing Tor: each attempt on a fresh circuit, then a stop. Slot 1
+  // is left out: that is the site's icon, fetched on the icon circuit.
+  const slotsOf = (host) => [...new Set(arrivals.filter((a) => a.name.startsWith(`${host}.test:`) && a.slot !== 1)
+    .map((a) => a.slot))];
+  const ch = slotsOf('ch');
+  const chx = slotsOf('chx');
+  check('a page that refuses Tor is retried on new circuits until it loads',
+    s.blocked.passed === true && ch.length === 3, `loaded: ${s.blocked.title}; attempts on ports ${ch.join(', ')}`);
+  check('a page that always refuses stops after three new circuits, and the window says so',
+    s.blocked.refused === true && s.blocked.shown === true && chx.length === 4,
+    `refused: ${s.blocked.refused}, shown: ${s.blocked.shown}; attempts on ports ${chx.join(', ')}`);
+
+  // Onion-Location: honoured from HTTPS pages only, and only for onion addresses.
+  const policy = require('../src/main/incognito/policy');
+  const onionCases = [
+    policy.onionFrom('https://example.com/', { 'onion-location': ['http://abcdefghijklmnop.onion/a'] }) === 'http://abcdefghijklmnop.onion/a',
+    policy.onionFrom('http://example.com/', { 'Onion-Location': ['http://abcdefghijklmnop.onion/'] }) === null,
+    policy.onionFrom('https://example.com/', { 'Onion-Location': ['https://evil.example/'] }) === null
+  ];
+  check('Onion-Location is followed from HTTPS pages only, and only to an onion address', onionCases.every(Boolean),
+    JSON.stringify(onionCases));
+
   const exposing = (s.webrtc || []).filter((c) => /^(host|srflx|prflx)$/.test(c));
   check('WebRTC offers no candidate that names this machine', exposing.length === 0,
     `candidates: ${JSON.stringify(s.webrtc)}`);
 
   const clean = readNetLog(path.join(netlogs, 'clean.json'), report.proxyPort);
-  check('Chromium\'s network log shows every socket going to the proxy, and no UDP sent',
+  check('Chromium\'s network log shows every socket going to Tor\'s ports, and no UDP sent',
     clean.offenders.length === 0 && clean.proxied > 0,
     `${clean.proxied} to the proxy${clean.offenders.length ? `; OFFENDERS: ${clean.offenders.slice(0, 8).join(', ')}` : ''}`);
   if (clean.udpProbes.length) console.log(`  NOTE  UDP sockets connected but never sent (Chromium's IPv6 reachability probe): ${clean.udpProbes.join(', ')}`);

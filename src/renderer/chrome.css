@@ -635,6 +635,20 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
 .private-pill[data-state="ready"] .private-dot { background: var(--ok); }
 .private-pill[data-state="failed"] .private-dot,
 .private-pill[data-state="stopped"] .private-dot { background: var(--crit); }
+.private-pill[data-state="refused"] .private-dot { background: var(--warn); }
+.onion-btn {
+  height: 26px;
+  padding: 0 11px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--private) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.onion-btn:hover { background: color-mix(in srgb, var(--private) 18%, transparent); }
 body.incognito { --private: #8a6bd1; }
 body.incognito .toolbar { background: color-mix(in srgb, var(--private) 7%, transparent); }
 body.incognito .star { opacity: 0.35; }
