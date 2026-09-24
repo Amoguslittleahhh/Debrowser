@@ -87,13 +87,33 @@ function createRow(item) {
   action.className = 'ghost-btn';
   action.type = 'button';
 
+  // Private windows only, finished PDFs only: a copy made of pictures of the
+  // pages, so nothing in it can run, submit or fetch. Opening the original
+  // hands it to another program, outside Tor - this is the way to read one
+  // without that.
+  const safe = document.createElement('button');
+  safe.className = 'ghost-btn';
+  safe.type = 'button';
+  safe.textContent = 'Save a safe copy';
+  safe.title = 'A copy with no scripts, forms, links or hidden details: each page as a picture. Text in it is no longer selectable.';
+  safe.hidden = true;
+
   const buttons = document.createElement('div');
   buttons.className = 'download-actions';
-  buttons.append(open, action);
+  buttons.append(safe, open, action);
 
   root.append(chip, text, buttons);
 
-  const node = { root, name, meter, fill, status, action, open, state: {} };
+  const node = { root, name, meter, fill, status, action, open, safe, state: {} };
+
+  safe.addEventListener('click', async () => {
+    safe.disabled = true;
+    safe.textContent = 'Making a safe copy…';
+    const res = await api.request('safe-copy', { id: item.id });
+    safe.disabled = false;
+    safe.textContent = res && res.ok ? `Saved: ${res.name}` : 'Could not make a safe copy';
+    safe.title = res && res.ok ? `${res.pages} page(s), beside the original` : (res && res.reason) || '';
+  });
 
   // Through the browser, which resolves the id to a path: no path ever crosses
   // into this renderer, so a page that got hold of this bridge could not be
@@ -140,6 +160,10 @@ function updateRow(node, item) {
     if (part !== null) node.fill.style.transform = `scaleX(${part})`;
     prev.part = part;
   }
+
+  // Outside the change check: whether this is a private window can be learned
+  // after the row was drawn.
+  node.safe.hidden = !(privateWindow && item.state === 'done' && /\.pdf$/i.test(item.filename || ''));
 
   if (prev.state !== item.state) {
     node.root.dataset.state = item.state;
@@ -236,7 +260,15 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !event.defaultPrevented) api.send('close-tab');
 });
 
-api.onState((state) => applyThemePrefs(state.prefs));
+/** Whether this is a private window's downloads page, from the state broadcast. */
+let privateWindow = false;
+api.onState((state) => {
+  applyThemePrefs(state.prefs);
+  if (Boolean(state.incognito) !== privateWindow) {
+    privateWindow = Boolean(state.incognito);
+    load();
+  }
+});
 
 // A half-written search keeps this page off the reclaim ladder; see theme.js.
 watchTransientInput(api);

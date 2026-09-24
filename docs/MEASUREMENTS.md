@@ -1024,3 +1024,46 @@ a private window, and the exit wipe now sweeps the whole private root rather
 than only this run's directory.
 
 Leak test: 29/29; with the Linux kill switch, 30/30. Smoke suite: 148/148.
+
+## Incognito, M7 — the panic key, clean files in both directions, and camouflage
+
+**The panic key.** Ctrl+Shift+Delete kills Tor with SIGKILL, destroys every
+window and calls `app.exit`, which skips the quit handlers - so nothing, Tor's
+sealed state included, is written on the way out. The Linux kill-switch leak
+run now ends this way and times it: the process was gone 70 ms after the key,
+the private profile 594 ms after (the reaper waits for the process to end,
+then 300 ms for the OS to let go of files), and `pgrep` found nothing still
+running with the profile on its command line.
+
+**Uploads.** Tested on the output of Chromium's own encoders, with metadata
+added: a JPEG with an Exif block carrying GPS coordinates, an ICC profile and
+a comment; a PNG with `tEXt` and `eXIf` chunks; a WebP with EXIF and XMP
+chunks. After stripping: no GPS anywhere, the ICC profile kept, the decoded
+pixels byte-identical - and for JPEG and PNG the result is byte-identical to
+what the encoder produced before the metadata was added. End to end in a
+private tab, a page reading the file it was given saw `holiday.jpg` with no
+GPS and the same pixels.
+
+The interception has a trap worth knowing: without `Page.enable`,
+`Page.setInterceptFileChooserDialog` answers `{}` - success - and does
+nothing; the native picker opens and the page gets the original file.
+Measured, fixed, and the reason is written where the call is made.
+
+**PDFs.** "Save a safe copy" renders each page in Chromium's viewer, in a
+session that refuses every network request, captures it, and prints the
+captures into a new PDF. A two-page fixture carrying JavaScript on open (which
+also tries to submit a form to a tracker), a filled-in form field, a link to a
+remote address and an author came out as two pages with none of the four, in
+1.4 s; the stand-in for Tor saw no request for the tracker's name. What was
+visible stays visible - the form's value is in the picture - and the text is
+no longer selectable.
+
+**Camouflage**, opt-in. Two real page loads with it on brought exactly two
+decoys, arriving on ports 20 and 22 while the pages used 19 and 21; with it
+off, a third load brought none. The decoy runs with JavaScript off in a view
+nobody sees, in a partition whose storage is cleared before each load.
+
+**Private downloads** land in `Private downloads`, mode 0700, inside the
+downloads folder.
+
+Leak test: 32/32; with the Linux kill switch, 34/34.

@@ -42,7 +42,7 @@ async function waitFor(predicate, timeoutMs = 10_000, pollMs = 100) {
 const within = (promise, ms, fallback) =>
   Promise.race([promise.catch(() => fallback), sleep(ms).then(() => fallback)]);
 
-async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand, ctx, log, setTripHook }) {
+async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage, runCommand, ctx, log, setTripHook }) {
   const fixturePort = Number(argValue('leak-fixture-port'));
   const canary = argValue('leak-canary');            // ip:port the harness listens on
   const stun = argValue('leak-stun');                // ip:port for WebRTC's STUN
@@ -66,7 +66,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   // way the user does - through the policy's own switch, not a test backdoor.
   // `up.test` is left out on purpose: it is the one that must be upgraded.
   const policy = require('./incognito/policy');
-  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'up2']) policy.allowHttp(url(host, ''));
+  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'up2', 'cam1', 'cam2', 'cam3', 'decoy']) policy.allowHttp(url(host, ''));
   const loaded = [];
   const byHost = {};
   for (const host of ['t1', 't2']) {
@@ -110,7 +110,10 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   const last = downloads.list ? downloads.list()[0] : null;
   // Where it went: the private downloads folder, not the ordinary one.
   const item = downloads.items ? [...downloads.items.values()].pop() : null;
-  step('download', { finished, state: last?.state || null, folder: item && item.file ? path.basename(path.dirname(item.file)) : null });
+  step('download', {
+    finished, state: last?.state || null, error: last?.error || null,
+    folder: item && item.file ? path.basename(path.dirname(item.file)) : null
+  });
 
   // WebRTC, pointed at a STUN server. Nothing may be gathered that names this
   // machine, and nothing may reach the STUN server at all.
@@ -236,6 +239,54 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
       .equals(nativeImage.createFromBuffer(photo).toBitmap()) : false,
     exactlyTheCleanCopy: received ? received.equals(sanitise.stripImage(photo).data) : false
   });
+
+  // A PDF carrying JavaScript, a form, a remote link and its author: the safe
+  // copy must keep the pages and nothing else. Anything the document tried to
+  // reach would show up at the stand-in for Tor as a name outside `.test`.
+  const pdfBefore = downloads.list().length;
+  downloads.start(url('dl', 'tracked.pdf'));
+  await waitFor(() => downloads.list().length > pdfBefore && ['done', 'failed'].includes(downloads.list()[0].state), 15_000);
+  const pdfItem = [...downloads.items.values()].pop();
+  let safeCopy = { error: 'not downloaded' };
+  if (pdfItem && pdfItem.state === 'done') {
+    const sanitiser = require('./incognito/sanitise');
+    const out = sanitiser.safeCopyName(pdfItem.file);
+    const started = Date.now();
+    try {
+      const pages = await sanitiser.flattenPdf(require('electron'), pdfItem.file, out, log);
+      const text = require('fs').readFileSync(out).toString('latin1');
+      const original = require('fs').readFileSync(pdfItem.file).toString('latin1');
+      safeCopy = {
+        pages, ms: Date.now() - started, name: path.basename(out),
+        originalHad: { js: /\/JavaScript/.test(original), form: /AcroForm/.test(original), uri: /\/URI/.test(original), author: /Alice/.test(original) },
+        copyHas: { js: /\/JavaScript|\/JS\b/.test(text), form: /AcroForm|\/Widget/.test(text), uri: /\/URI|tracker/.test(text), author: /Alice|Secret Corp/.test(text) }
+      };
+    } catch (err) {
+      safeCopy = { error: err.message };
+    }
+  }
+  step('safeCopy', safeCopy);
+
+  // Camouflage: with it on, each real page load brings one decoy load, on a
+  // circuit that page is not using; with it off, none. The harness reads
+  // which ports the pages and the decoys arrived on.
+  let camo = null;
+  if (camouflage) {
+    const firedBefore = camouflage.fired;
+    camouflage.enabled = true;
+    for (const host of ['cam1', 'cam2']) {
+      const t = tabs.create({ url: url(host, 'idle.html') });
+      await waitFor(() => t.isLive && !t.loading && /idle/.test(t.url), 15_000);
+      await sleep(2000);
+    }
+    const firedWhileOn = camouflage.fired - firedBefore;
+    camouflage.enabled = false;
+    const t3 = tabs.create({ url: url('cam3', 'idle.html') });
+    await waitFor(() => t3.isLive && !t3.loading && /idle/.test(t3.url), 15_000);
+    await sleep(1500);
+    camo = { firedWhileOn, firedWhileOff: camouflage.fired - firedBefore - firedWhileOn };
+  }
+  step('camouflage', camo);
 
   // An external protocol starts nothing.
   const deniedBefore = tabs.deniedPermissions.length;

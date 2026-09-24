@@ -198,4 +198,128 @@ function cleanCopy(file, dir, log = () => {}) {
   return out;
 }
 
-module.exports = { stripJpeg, stripPng, stripWebp, stripImage, interceptUploads, cleanCopy };
+/* ------------------------------------------------------------------ */
+/* PDF: a safe copy                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A PDF can run JavaScript, submit forms, fetch remote content and carry its
+ * author's name. The safe copy has none of it, because it is made of nothing
+ * but pictures: each page is rendered by Chromium's own viewer, in a session
+ * where every network request is refused, captured, and the captures are
+ * printed into a new PDF. What was visible is kept - a filled-in field's
+ * value included - as pixels; the text is no longer selectable, which is the
+ * price.
+ *
+ * Page count: read from the file where it is plain to see; where object
+ * streams hide it, pages are taken until one past the end shows the same
+ * image as the page before it (the viewer stays on the last page).
+ */
+const MAX_PAGES = 500;
+
+function countPages(buf) {
+  const n = (buf.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
+  return n > 0 ? Math.min(n, MAX_PAGES) : null;
+}
+
+/** The page itself, without the viewer's grey around it or its scrollbar. */
+function cropToPage(img) {
+  const { width, height } = img.getSize();
+  const b = img.toBitmap();
+  const bg = [b[0], b[1], b[2]];
+  const SCROLLBAR = 20;
+  let x0 = width; let y0 = height; let x1 = -1; let y1 = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width - SCROLLBAR; x++) {
+      const o = (y * width + x) * 4;
+      if (Math.abs(b[o] - bg[0]) + Math.abs(b[o + 1] - bg[1]) + Math.abs(b[o + 2] - bg[2]) > 30) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < x0 || y1 < y0) return img;
+  return img.crop({ x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 });
+}
+
+/** A capture once the page has finished drawing: two in a row that agree. */
+async function settledCapture(wc) {
+  let last = null;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, i ? 150 : 400));
+    const img = await wc.capturePage();
+    const bmp = img.toBitmap();
+    if (last && bmp.equals(last.toBitmap())) return img;
+    last = img;
+  }
+  return last;
+}
+
+/**
+ * Write a flat copy of `file` to `outFile`. Resolves to the page count.
+ * @param {typeof import('electron')} electron
+ */
+async function flattenPdf(electron, file, outFile, log = () => {}) {
+  const { BrowserWindow, session } = electron;
+  const ses = session.fromPartition('incognito-pdf-flatten');
+  // Nothing leaves: the viewer is an extension, the file is local, and the
+  // pictures are data URLs. Anything else the document asks for is refused.
+  ses.webRequest.onBeforeRequest((d, cb) => cb(/^(file|chrome-extension|data|blob|chrome):/.test(d.url) ? {} : { cancel: true }));
+  const known = countPages(fs.readFileSync(file));
+  const view = new BrowserWindow({
+    show: false, width: 900, height: 1000,
+    webPreferences: { plugins: true, sandbox: true, session: ses }
+  });
+  const pages = [];
+  try {
+    let previous = null;
+    for (let n = 1; n <= (known || MAX_PAGES); n++) {
+      await view.loadURL('about:blank');
+      await view.loadURL(`${require('url').pathToFileURL(file).href}#page=${n}&toolbar=0&view=Fit`);
+      const page = cropToPage(await settledCapture(view.webContents));
+      if (!known && previous && page.toBitmap().equals(previous.toBitmap())) break;
+      pages.push(page);
+      previous = page;
+    }
+  } finally {
+    view.destroy();
+  }
+  if (!pages.length) throw new Error('no pages could be drawn');
+
+  const { width, height } = pages[0].getSize();
+  const html = '<!doctype html><style>@page{margin:0}body{margin:0}' +
+    'img{display:block;width:100vw;height:100vh;object-fit:contain;page-break-after:always}</style>' +
+    pages.map((p) => `<img src="${p.toDataURL()}">`).join('');
+  const printer = new BrowserWindow({ show: false, webPreferences: { session: ses, javascript: false, sandbox: true } });
+  try {
+    await printer.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
+    const pdf = await printer.webContents.printToPDF({
+      pageSize: { width: 8.5, height: 8.5 * height / width },
+      margins: { marginType: 'none' },
+      printBackground: true
+    });
+    fs.writeFileSync(outFile, pdf, { mode: 0o600 });
+  } finally {
+    printer.destroy();
+  }
+  log('sanitise', `safe copy of ${path.basename(file)}: ${pages.length} page(s)`);
+  return pages.length;
+}
+
+/** "report.pdf" -> "report (safe copy).pdf", beside it, without overwriting anything. */
+function safeCopyName(file) {
+  const dir = path.dirname(file);
+  const base = path.basename(file, path.extname(file));
+  for (let i = 1; i < 1000; i++) {
+    const name = i === 1 ? `${base} (safe copy).pdf` : `${base} (safe copy ${i}).pdf`;
+    if (!fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+  }
+  throw new Error('no free name for the safe copy');
+}
+
+module.exports = {
+  stripJpeg, stripPng, stripWebp, stripImage, interceptUploads, cleanCopy,
+  countPages, flattenPdf, safeCopyName
+};

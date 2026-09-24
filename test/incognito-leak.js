@@ -285,7 +285,9 @@ async function main() {
     `--leak-canary=${ip}:${canary.tcpPort}`,
     `--leak-stun=${ip}:${canary.udpPort}`,
     `--leak-netlog-dir=${netlogs}`,
-    `--leak-idle-ms=${value('idle-ms', '3000')}`];
+    `--leak-idle-ms=${value('idle-ms', '3000')}`,
+    // Decoys for the camouflage check: the fixture, never a real site.
+    `--leak-decoys=http://decoy.test:${fixtures.port}/idle.html`];
   // The kill-switch run ends through the panic key rather than a normal quit,
   // so both ways out are covered and the panic key is timed.
   if (killSwitch) browserArgs.push('--leak-panic');
@@ -462,6 +464,22 @@ async function main() {
     u.sentHadGps === true && u.receivedHasGps === false && u.samePixels === true && u.exactlyTheCleanCopy === true &&
       u.name === 'holiday.jpg',
     JSON.stringify(u));
+
+  const sc = s.safeCopy || {};
+  const had = sc.originalHad || {};
+  const has = sc.copyHas || {};
+  check('a PDF\'s safe copy keeps both pages and drops its script, form, link and author',
+    !sc.error && sc.pages === 2 && had.js && had.form && had.uri && had.author &&
+      !has.js && !has.form && !has.uri && !has.author,
+    sc.error || `${sc.pages} pages in ${sc.ms} ms; original ${JSON.stringify(had)}, copy ${JSON.stringify(has)}`);
+
+  const camo = s.camouflage || {};
+  const decoySlots = slotsOf('decoy');
+  const [cam1, cam2] = ['cam1', 'cam2'].map(slotOf);
+  check('camouflage: one decoy per page load, on another circuit - and none when it is off',
+    camo.firedWhileOn === 2 && camo.firedWhileOff === 0 && decoySlots.length === 2 &&
+      !decoySlots.includes(cam1) && !decoySlots.includes(cam2),
+    `decoys ${camo.firedWhileOn} on, ${camo.firedWhileOff} off; decoys on ports ${decoySlots.join(', ')}, pages on ${cam1}, ${cam2}`);
 
   // Onion-Location: honoured from HTTPS pages only, and only for onion addresses.
   const policy = require('../src/main/incognito/policy');

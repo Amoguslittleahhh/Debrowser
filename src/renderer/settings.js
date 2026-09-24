@@ -331,13 +331,13 @@ const SECTIONS = {
     {
       key: 'incognitoCamouflage',
       label: 'Traffic camouflage',
-      hint: 'Loads a decoy page beside each real one, so timing and size tell an observer less. About twice the data.',
+      hint: 'Loads a decoy page from a built-in list of popular sites beside each real one, on another circuit, so timing and size tell an observer less. About twice the data; the decoy sites see visits you did not make. From the next private window.',
       type: 'checkbox'
     },
     {
       key: 'incognitoIdleWipeMinutes',
       label: 'Close private windows when idle',
-      hint: 'Minutes with no input. 0 never closes them.',
+      hint: 'Minutes with no input anywhere on this computer. Then everything in them is erased at once, as Ctrl+Shift+Delete does. 0 never closes them.',
       type: 'number',
       min: 0,
       max: 240,

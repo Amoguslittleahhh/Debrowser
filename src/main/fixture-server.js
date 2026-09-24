@@ -38,7 +38,8 @@ const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.pdf': 'application/pdf'
 };
 
 const contentType = (name) => TYPES[path.extname(name).toLowerCase()] || 'text/plain; charset=utf-8';

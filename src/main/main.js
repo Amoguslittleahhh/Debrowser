@@ -48,6 +48,7 @@ const { startRelays } = require('./incognito/relay');
 const { Circuits } = require('./incognito/circuits');
 const policy = require('./incognito/policy');
 const { SlowJsHint } = require('./incognito/slowjs');
+const { Camouflage } = require('./incognito/camouflage');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -377,6 +378,8 @@ function main() {
   let tripwire = null;
   /** Incognito only: which Tor circuit each tab uses. */
   let circuits = null;
+  /** Incognito: decoy loads, when the user has turned them on. */
+  let camouflage = null;
   /** Incognito: what the fingerprint self-check found at startup, once it has run. */
   let fingerprintAudit = null;
   /** Incognito: the "this page wants faster JavaScript" hint. See incognito/slowjs.js. */
@@ -597,6 +600,12 @@ function main() {
         bindPageShortcuts(tab);
         bindContextMenu(tab);
         bindFind(tab);
+        // A real page starting to load: the moment a decoy has to start too.
+        if (camouflage && !tab.internal) {
+          tab.wc.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
+            if (isMainFrame && !isInPlace) camouflage.onNavigation(tab, url);
+          });
+        }
         break;
       case 'loaded':
         // Fill on load, for passwords only. Payment details are never filled
@@ -671,6 +680,14 @@ function main() {
     const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'));
     // Incognito: a Tor circuit and a partition per tab. See incognito/circuits.js.
     circuits = INCOGNITO ? new Circuits(incognitoCtx) : null;
+    // Incognito, opt-in: a decoy page load beside every real one. See
+    // incognito/camouflage.js for what it buys and what it costs.
+    camouflage = INCOGNITO ? new Camouflage({
+      ctx: incognitoCtx, circuits, log,
+      enabled: prefs.get('incognitoCamouflage'),
+      // The leak test aims decoys at its own fixture, never at real sites.
+      list: SMOKE_TEST && argValue('leak-decoys') ? argValue('leak-decoys').split(',') : undefined
+    }) : null;
     // Incognito: every file picked for upload is handed to the page with its
     // image metadata - GPS, camera, owner - removed. See incognito/sanitise.js.
     if (INCOGNITO) {
@@ -964,7 +981,7 @@ function main() {
 
     if (SMOKE_TEST && INCOGNITO) {
       require('./smoke-incognito').run({
-        app, tabs, shell, downloads, tripwire, circuits, runCommand, ctx: incognitoCtx, log,
+        app, tabs, shell, downloads, tripwire, circuits, camouflage, runCommand, ctx: incognitoCtx, log,
         setTripHook: (fn) => { onTripForTest = fn; }
       }).then((code) => app.exit(code), (err) => {
         console.error('[smoke-incognito] failed:', err.stack || err.message);
@@ -1938,7 +1955,7 @@ const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-histo
  * included. A page that lists files has no business reading a password store.
  */
 const DOWNLOAD_REQUESTS = new Set([
-  'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download']);
+  'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download', 'safe-copy']);
 
 /**
  * Who may send what, on both channels, in one table.
@@ -2083,6 +2100,23 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       // this must not become is a way to open an *arbitrary* path, which is why
       // the id is resolved against the download store and why `pathOf` answers
       // only for a download that actually completed.
+      // Incognito: a flat copy of a downloaded PDF, made of pictures of its
+      // pages - no scripts, forms, links or metadata. See incognito/sanitise.js.
+      case 'safe-copy': {
+        if (!INCOGNITO) return { ok: false };
+        const file = downloads && downloads.pathOf(String(payload?.id ?? ''));
+        if (!file || !/\.pdf$/i.test(file)) return { ok: false, reason: 'not a PDF' };
+        const sanitise = require('./incognito/sanitise');
+        try {
+          const out = sanitise.safeCopyName(file);
+          const pages = await sanitise.flattenPdf(require('electron'), file, out, log);
+          return { ok: true, pages, name: path.basename(out) };
+        } catch (err) {
+          log('sanitise', `safe copy failed: ${err.message}`);
+          return { ok: false, reason: err.message };
+        }
+      }
+
       case 'open-download': {
         const file = downloads && downloads.pathOf(String(payload?.id ?? ''));
         if (!file) return { ok: false };

