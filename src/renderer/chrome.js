@@ -995,6 +995,34 @@ applyChromePrefs(api.prefs);
  */
 let completing = false;
 
+/*
+ * The list under the bar: open tabs, bookmarks, history and a search, for what
+ * has been typed. Drawn by the browser in a view of its own (see
+ * src/main/suggest.js and suggest.html); the keyboard stays here, so the
+ * highlight is moved here and only reported. `typed` is what the user wrote,
+ * kept apart from the field because highlighting a row puts that row's address
+ * in the field, and Escape or ArrowUp past the top has to put it back.
+ */
+let typed = '';
+let suggestions = [];
+let selected = -1;
+let asked = 0;
+let listOpen = false;
+
+function anchor() {
+  const r = el.omnibox.getBoundingClientRect();
+  return { x: r.left, y: r.bottom, width: r.width };
+}
+
+function closeList() {
+  if (!listOpen && !suggestions.length) return;
+  listOpen = false;
+  suggestions = [];
+  selected = -1;
+  asked += 1;               // an answer still in flight is now stale
+  api.send('suggest-hide');
+}
+
 el.url.addEventListener('beforeinput', (event) => {
   // `insertText` is typing; every other input type is a deletion, a paste or a
   // composition, none of which should complete.
@@ -1002,31 +1030,65 @@ el.url.addEventListener('beforeinput', (event) => {
 });
 
 el.url.addEventListener('input', async () => {
-  if (!completing || chromePrefs.inlineAutocomplete === false) return;
-  const typed = el.url.value;
-  if (typed.length < 2) return;
+  typed = el.url.value;
+  selected = -1;
+  if (!typed.trim()) { closeList(); return; }
 
-  const res = await api.request('complete', { text: typed });
-  const stem = res && res.stem;
-  if (!stem || el.url.value !== typed) return;
+  const ask = ++asked;
+  const res = await api.request('suggest', { text: typed, anchor: anchor() });
+  // Dropped unless the field still says what was asked about: the answer
+  // crosses a process boundary, and typing does not stop while it is in flight.
+  if (ask !== asked || el.url.value !== typed || !res) return;
+  suggestions = res.items || [];
+  listOpen = suggestions.length > 0;
 
-  const lower = typed.toLowerCase();
-  if (!stem.toLowerCase().startsWith(lower) || stem.length <= typed.length) return;
-
+  if (!completing || chromePrefs.inlineAutocomplete === false || typed.length < 2) return;
+  const stem = res.inline;
+  if (!stem || !stem.toLowerCase().startsWith(typed.toLowerCase()) || stem.length <= typed.length) return;
   // What the user typed, with their own capitalisation, plus the rest of the
   // match - and the rest selected, so the next keystroke overwrites it.
   el.url.value = typed + stem.slice(typed.length);
   el.url.setSelectionRange(typed.length, el.url.value.length);
 });
 
+/** What the bar shows while a row is highlighted: that row's address, or the search. */
+const shown = (item) => (item.kind === 'search' || item.kind === 'go' ? item.title : item.url);
+
 el.url.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    api.send('navigate', { url: el.url.value });
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && listOpen) {
+    event.preventDefault();
+    const n = suggestions.length;
+    // -1 is the typed text itself: moving up past the first row returns to it.
+    selected = event.key === 'ArrowDown'
+      ? (selected + 1 >= n ? -1 : selected + 1)
+      : (selected - 1 < -1 ? n - 1 : selected - 1);
+    el.url.value = selected === -1 ? typed : shown(suggestions[selected]);
+    el.url.setSelectionRange(el.url.value.length, el.url.value.length);
+    api.send('suggest-select', { index: selected });
+  } else if (event.key === 'Enter') {
+    if (listOpen && selected >= 0) {
+      api.send('suggest-pick', { index: selected, newTab: event.altKey });
+    } else {
+      api.send('navigate', { url: el.url.value });
+    }
+    closeList();
     el.url.blur();
   } else if (event.key === 'Escape') {
-    el.url.blur();
+    event.preventDefault();
+    // First Escape: take back the list, and anything a highlight put in the
+    // field. Second: leave the bar, as it always did.
+    if (listOpen) {
+      if (el.url.value !== typed) el.url.value = typed;
+      closeList();
+    } else {
+      el.url.blur();
+    }
   }
 });
+
+// Hidden on the way out, a moment late: a press on a row blurs this field
+// first, and the row has to still be there to be taken.
+el.url.addEventListener('blur', () => setTimeout(() => { if (!urlFocused) closeList(); }, 120));
 
 /* ------------------------------------------------------------------ */
 /* Find in page                                                        */
@@ -1090,6 +1152,10 @@ el.findClose.addEventListener('click', () => api.send('find-close'));
  */
 api.onMessage((message) => {
   switch (message.kind) {
+    case 'suggest-done':
+      closeList();
+      el.url.blur();
+      break;
     case 'focus-address':
       el.url.focus();
       el.url.select();

@@ -49,6 +49,7 @@ const { Circuits } = require('./incognito/circuits');
 const policy = require('./incognito/policy');
 const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
+const { suggest } = require('./suggest');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -1230,6 +1231,35 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         panic('panic key');
         break;
 
+      // The address bar's list: the highlight moved, it was dismissed, or a row
+      // was taken - by the keyboard in the bar, or by a press in the list.
+      case 'suggest-select':
+        shell.selectSuggestion(Number(payload?.index ?? -1));
+        break;
+      case 'suggest-hide':
+        shell.hideSuggestions();
+        break;
+      case 'suggest-size':
+        shell.sizeSuggestions(Number(payload?.height));
+        break;
+      case 'suggest-pick': {
+        const item = (shell.suggestItems || [])[Number(payload?.index)];
+        shell.hideSuggestions();
+        shell.toChrome('suggest-done');
+        if (!item) break;
+        if (item.kind === 'tab') {
+          if (tabs.byId(item.tabId)) goTo(item.tabId);
+          break;
+        }
+        const url = item.kind === 'search'
+          ? normaliseUrl(item.title, prefs.searchTemplate(), { search: true })
+          : normaliseUrl(item.url, prefs.searchTemplate());
+        if (!url) break;
+        if (payload?.newTab) tabs.create({ url });
+        else runCommand('navigate', { url });
+        break;
+      }
+
       case 'dismiss-slow-js':
         if (slowJs) slowJs.dismiss();
         break;
@@ -1978,10 +2008,9 @@ const INCOGNITO_REFUSED = new Set([
 
 const CHROME_REQUESTS = new Set([
   'list-bookmarks', 'toggle-bookmark', 'remove-bookmark',
-  // The address bar asking how the address it is being given ends. It returns
-  // one address the user has already been to or saved, which is theirs and
-  // which the omnibox is about to navigate to anyway.
-  'complete',
+  // The address bar's list: open tabs, bookmarks and history matching what is
+  // typed - the user's own, shown to the user, in the bar they are typing into.
+  'suggest',
   // The downloads flyout is drawn in the sheet, which is one of the chrome's
   // own views. Downloads are not secrets - they are files the user asked for,
   // sitting in their own downloads directory - so this is a list the chrome may
@@ -2253,22 +2282,26 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
        * - a page saved on purpose outranks one merely visited - then history by
        * how often it was visited.
        */
-      case 'complete': {
-        const typed = String(payload?.text || '').trim().toLowerCase();
-        if (typed.length < 2 || /\s/.test(typed)) return { url: null };
-
-        const stem = (url) => String(url).replace(/^https?:\/\//i, '').replace(/^www\./i, '');
-        const starts = (url) => stem(url).toLowerCase().startsWith(typed);
-
-        const saved = bookmarks ? bookmarks.all().find((b) => starts(b.url)) : null;
-        if (saved) return { url: saved.url, stem: stem(saved.url) };
-
-        let best = null;
-        for (const entry of history ? history.all() : []) {
-          if (!starts(entry.url)) continue;
-          if (!best || (entry.visits || 0) > (best.visits || 0)) best = entry;
+      // What the address bar offers for what has been typed so far: drawn in
+      // the list under it, and returned so the bar can complete inline and
+      // move the highlight without asking again. See suggest.js.
+      case 'suggest': {
+        const text = String(payload?.text || '').slice(0, 500);
+        const active = tabs.activeTab();
+        const result = suggest({
+          text,
+          tabs: tabs.all().filter((t) => t !== active).map((t) => ({ id: t.id, title: t.title, url: t.url })),
+          bookmarks: bookmarks ? bookmarks.all() : [],
+          history: history ? history.all() : [],
+          engine: prefs.engineName()
+        });
+        shell.suggestItems = result.items;
+        shell.suggestSelected = -1;
+        const a = payload?.anchor || {};
+        if (Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.width)) {
+          shell.showSuggestions(result.items, a);
         }
-        return best ? { url: best.url, stem: stem(best.url) } : { url: null };
+        return result;
       }
 
       case 'list-bookmarks':

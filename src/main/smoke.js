@@ -2259,44 +2259,68 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     }
   }
 
-  // The address bar finishes what is being typed.
+  // The address bar's suggestions: the list, the ranking rule inline
+  // completion rests on, and the row that switches to an open tab.
   //
-  // Two letters and a return is how anyone reaches a site they visit daily.
-  // What is asserted is the ranking rule, because that is where this goes
-  // wrong: a *prefix* of the address rather than a substring - "git" should
-  // find github.com and not every page with "git" somewhere in it - and not
-  // firing on a single letter, where the answer is a guess.
+  // What is asserted is where this goes wrong. Inline completion takes a
+  // *prefix* of the address, never a substring - "git" fills github.com, not
+  // every page with "git" somewhere in it - while the list itself matches words
+  // anywhere, so the substring still shows up as a row. A page already open in
+  // another tab is offered as that tab, and picking it switches rather than
+  // loading the page a second time. The plain search is always in the list.
   //
-  // Driven through bookmarks rather than history, and not because history is
-  // untrusted: recording is switched off for the whole run under
-  // `--smoke-test`, so nothing typed here would be stored. Both lists are
-  // matched by the same predicate, and bookmarks outrank history by design - a
-  // page saved on purpose beats one merely visited.
+  // Driven through bookmarks and tabs rather than history: recording is
+  // switched off for the whole run under `--smoke-test`, so nothing visited
+  // here would be stored.
   //
   // Asked the way the address bar asks - through the chrome's own bridge - so
   // the sender check and both allowlists are part of what is tested. They are
-  // two separate lists, and the first run of this check failed because the
-  // browser allowed a request the bridge in front of it did not.
+  // two separate lists, and an earlier version of this check failed because
+  // the browser allowed a request the bridge in front of it did not.
   {
-    const ask = (text) => shell.chromeView.webContents.executeJavaScript(
-      `window.debrowser.request('complete', { text: ${JSON.stringify(text)} })`);
+    const chrome = shell.chromeView.webContents;
+    const ask = (text) => chrome.executeJavaScript(
+      `window.debrowser.request('suggest', { text: ${JSON.stringify(text)} })`);
 
     bookmarks.add({ url: 'https://gitlab.test/saved-page', title: 'Saved' });
+    const other = tabs.create({ url: pageUrl('branded.html'), activate: false, realise: true });
+    await waitFor(() => other.isLive && !other.loading && other.title === 'Branded');
+    const before = tabs.activeTab();
 
     const prefix = await ask('gitlab');
-    const tooShort = await ask('g');
     const substring = await ask('saved');
     const noMatch = await ask('nothing-like-this');
+    const open = await ask('branded');
 
-    check('the address bar finishes an address, on a prefix and not a substring',
-      prefix && prefix.url === 'https://gitlab.test/saved-page' &&
-      tooShort && tooShort.url === null &&
-      substring && substring.url === null &&
-      noMatch && noMatch.url === null,
-      `"gitlab" -> ${prefix && prefix.url}, one letter -> ${tooShort && tooShort.url}, ` +
-      `a substring -> ${substring && substring.url}, ` +
-      `no match -> ${noMatch && noMatch.url}`);
+    const kinds = (res) => (res?.items || []).map((i) => i.kind).join(',');
+    const tabRow = (open?.items || []).findIndex((i) => i.kind === 'tab' && i.tabId === other.id);
 
+    check('the address bar completes a prefix of an address, never a substring',
+      prefix?.inline === 'gitlab.test/saved-page' &&
+      substring && substring.inline === null &&
+      substring.items.some((i) => i.url === 'https://gitlab.test/saved-page'),
+      `"gitlab" -> ${prefix?.inline}, "saved" -> ${substring?.inline} ` +
+      `with rows ${kinds(substring)}`);
+
+    check('the suggestions always offer the plain search, and nothing else when nothing matches',
+      [prefix, substring, open].every((r) => r?.items.some((i) => i.kind === 'search')) &&
+      kinds(noMatch) === 'search',
+      `no match -> ${kinds(noMatch)}`);
+
+    // Picking the row: the list is asked for again so the browser holds this
+    // list, then its tab row picked by index, as a click on it sends.
+    let switched = false;
+    if (tabRow >= 0) {
+      await ask('branded');
+      await chrome.executeJavaScript(`window.debrowser.send('suggest-pick', { index: ${tabRow} })`);
+      switched = await waitFor(() => tabs.activeTab() === other, { timeoutMs: 3000 });
+    }
+    check('an open tab is suggested as that tab, and picking it switches to it',
+      tabRow >= 0 && switched && tabs.all().filter((t) => t.url === other.url).length === 1,
+      `tab row at ${tabRow}, switched=${switched}`);
+
+    if (before && tabs.all().includes(before)) await tabs.activate(before.id);
+    tabs.close(other.id);
     bookmarks.remove('https://gitlab.test/saved-page');
   }
 

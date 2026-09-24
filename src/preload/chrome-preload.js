@@ -90,8 +90,12 @@ const COMMANDS = new Set([
   'toggle-sidebar-pin',
   'toggle-bookmarks-bar',
   'list-bookmarks',
-  // The address bar asking how what is being typed ends.
-  'complete',
+  // The address bar's list of suggestions.
+  'suggest',
+  'suggest-select',
+  'suggest-hide',
+  'suggest-size',
+  'suggest-pick',
   'toggle-bookmark',
   'remove-bookmark',
   'save-bookmark',

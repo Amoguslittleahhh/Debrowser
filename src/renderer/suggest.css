@@ -1,0 +1,85 @@
+/*
+ * The address bar's suggestions.
+ *
+ * The view is sized to the list plus room for its shadow, and paints nothing
+ * else: the body is a hole in the window with the list in it, as in menu.css.
+ * One surface, the menu's - same raised colour, border, radius and shadow - so
+ * the list reads as part of the same browser rather than a second program.
+ */
+
+html, body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+/* Room for the list's shadow, which reaches about 22px out and 36px down; the
+   view is cut off at its edges, and a shadow that stops short ends in a line.
+   Padding rather than the list's margin, so the height the list reports
+   includes it. window.js leaves the same --s6 at the sides. */
+body { padding: 0 var(--s6) var(--s7); }
+
+.list {
+  padding: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-menu);
+  color: var(--text);
+}
+
+/* Arrives once, when the list first appears; rows change instantly after,
+   because a list that animated on every keystroke would shimmer. */
+.list.arriving {
+  animation: list-in var(--fast) var(--ease-out);
+}
+@keyframes list-in {
+  from { opacity: 0; transform: translateY(-3px); }
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  height: 34px;
+  padding: 0 var(--s3);
+  border-radius: var(--radius);
+  font-size: var(--fs-body);
+  line-height: var(--lh-tight);
+  cursor: default;
+  white-space: nowrap;
+}
+.row:hover { background: var(--wash-soft); }
+.row.selected { background: var(--wash); }
+
+/* The search and address glyphs sit in a box the size of a site's chip (22px),
+   so every row's text starts on the same line. */
+.row .glyph {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  color: var(--text-dim);
+}
+.row .chip { flex: none; }
+
+.row .title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row .detail {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+}
+.row .action {
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+}
+.row.selected .action { color: var(--accent); }

@@ -283,6 +283,10 @@ class BrowserShell {
      * @type {Electron.WebContentsView|null}
      */
     this.sheetView = null;
+    /** The address bar's suggestion list; see showSuggestions. */
+    this.suggestView = null;
+    this.suggestOpen = false;
+    this.suggestSelected = -1;
     /** Which page the open sheet is showing, or null. */
     this.sheetPage = null;
     /** The sheet whose close armed the reopen guard, and when. */
@@ -355,7 +359,7 @@ class BrowserShell {
     // A resize with the menu open would leave it anchored to a button that has
     // moved. Closed rather than re-anchored: the user is dragging a window
     // edge, not reading a menu.
-    this.window.on('resize', () => { this.closeSheet(); this.layout(); });
+    this.window.on('resize', () => { this.closeSheet(); this.hideSuggestions(); this.layout(); });
     this.window.on('restore', () => this.revive());
     this.window.on('show', () => this.revive());
     // Full screen changes which rectangle everything gets, in both layouts, so
@@ -749,6 +753,107 @@ class BrowserShell {
     const { width, height } = this.window.getContentBounds();
     if (width <= 0 || height <= 0) return;
     this.sheetView.setBounds({ x: 0, y: 0, width, height });
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Address bar suggestions                                           */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Show the list under the address bar.
+   *
+   * Not the sheet: the sheet takes the keyboard, and here the keyboard has to
+   * stay in the address bar while the list is up. So this is a view of its
+   * own, sized to the list, never focused, and kept (hidden) between uses so
+   * the next keystroke's list costs a message rather than a page load. After a
+   * minute unused it is closed, and with it its renderer.
+   *
+   * @param {object[]} items
+   * @param {{x:number, y:number, width:number}} anchor - the address bar's
+   *   bottom-left and width, in the chrome's own coordinates
+   */
+  showSuggestions(items, anchor) {
+    if (this.window.isDestroyed()) return;
+    if (!items || !items.length) { this.hideSuggestions(); return; }
+    clearTimeout(this.suggestCloseTimer);
+    if (!this.suggestView) {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          backgroundThrottling: false,
+          additionalArguments: preloadArgs(this.prefs),
+          transparent: true
+        }
+      });
+      try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+      view.setVisible(false);
+      this.suggestView = view;
+      this.suggestReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
+      view.webContents.loadFile(path.join(RENDERER_DIR, 'suggest.html')).catch(() => {});
+      this.window.contentView.addChildView(view);
+    }
+    const origin = this.chromeView.getBounds();
+    const { width: winW } = this.window.getContentBounds();
+    const EDGE = 28;       // suggest.css's side padding, room for the list's shadow
+    const x = Math.max(0, Math.round(origin.x + anchor.x) - EDGE);
+    const width = Math.min(Math.max(Math.round(anchor.width) + EDGE * 2, 520), winW - x);
+    this.suggestBox = { x, y: Math.round(origin.y + anchor.y) + 4, width };
+    this.placeSuggestions();
+    const wasOpen = this.suggestOpen;
+    this.suggestOpen = true;
+    this.suggestReady.then(() => {
+      if (!this.suggestView || !this.suggestOpen) return;
+      send(this.suggestView, 'debrowser:ui', { kind: 'suggest-items', items, selected: this.suggestSelected ?? -1 });
+      if (!wasOpen) {
+        // Topmost, over the page and over the chrome.
+        this.window.contentView.addChildView(this.suggestView);
+        this.suggestView.setVisible(true);
+      }
+    });
+  }
+
+  placeSuggestions() {
+    if (!this.suggestView || !this.suggestBox) return;
+    const { x, y, width } = this.suggestBox;
+    const height = Math.max(1, this.suggestHeight || 8 * 34 + 24);
+    this.suggestView.setBounds({ x, y, width, height });
+  }
+
+  /** The list measured itself: the view is exactly that tall. */
+  sizeSuggestions(height) {
+    if (!Number.isFinite(height) || height <= 0) return;
+    this.suggestHeight = Math.min(Math.round(height), 600);
+    this.placeSuggestions();
+  }
+
+  selectSuggestion(index) {
+    this.suggestSelected = index;
+    if (this.suggestView && this.suggestOpen) send(this.suggestView, 'debrowser:ui', { kind: 'suggest-select', index });
+  }
+
+  hideSuggestions() {
+    if (!this.suggestView || !this.suggestOpen) return;
+    this.suggestOpen = false;
+    this.suggestSelected = -1;
+    this.suggestView.setVisible(false);
+    send(this.suggestView, 'debrowser:ui', { kind: 'suggest-reset' });
+    clearTimeout(this.suggestCloseTimer);
+    this.suggestCloseTimer = setTimeout(() => this.closeSuggestions(), 60_000);
+    this.suggestCloseTimer.unref?.();
+  }
+
+  closeSuggestions() {
+    const view = this.suggestView;
+    if (!view) return;
+    this.suggestView = null;
+    this.suggestOpen = false;
+    try {
+      this.window.contentView.removeChildView(view);
+      view.webContents.close();
+    } catch { /* already gone */ }
   }
 
   /* ---------------------------------------------------------------- */
@@ -1511,7 +1616,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.panelView, this.sheetView]) {
+    for (const view of [this.chromeView, this.panelView, this.sheetView, this.suggestView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }
