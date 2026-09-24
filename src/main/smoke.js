@@ -1786,20 +1786,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const was = prefs.get('tabBarPosition');
       prefs.set('tabBarPosition', 'left');
       shell.applyWindowPrefs();
-      const collapsed = shell.chromeView.getBounds().width;
+      // Out: a 240px column over the page. In: the whole window, under it.
+      const state = () => (shell.chromeBehind ? 'under the page' : `${shell.chromeView.getBounds().width}px column`);
+      const collapsed = state();
 
       runCommand('find-open', null);
-      const out = shell.chromeView.getBounds().width;
+      const out = state();
 
       runCommand('find-close', null);
-      const backIn = shell.chromeView.getBounds().width;
+      const backIn = state();
 
       prefs.set('tabBarPosition', was);
       shell.applyWindowPrefs();
 
       check('opening find brings the side strip out, and closing it lets go',
-        collapsed < 100 && out > 200 && backIn === collapsed,
-        `strip ${collapsed}px -> ${out}px -> ${backIn}px`);
+        collapsed === 'under the page' && out === '240px column' && backIn === collapsed,
+        `strip ${collapsed} -> ${out} -> ${backIn}`);
     }
     check('a search reports how many matches it found',
       Boolean(result) && result.matches > 0,
@@ -1879,7 +1881,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // reflowed every time the pointer brushed the window edge would be the most
   // distracting thing in the browser.
   {
-    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, CONTENT_GAP } = require('./window');
+    const { SIDEBAR_WIDTH, CONTENT_GAP } = require('./window');
     const chromeWidth = () => shell.chromeView.getBounds().width;
 
     prefs.set('tabBarPosition', 'left');
@@ -1887,16 +1889,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.applyWindowPrefs();
     shell.layout();
 
-    const edgeWide = chromeWidth();
+    const restKids = shell.window.contentView.children;
+    const restTab = tabs.activeTab();
+    const edgeRest = {
+      behind: shell.chromeBehind === true,
+      width: chromeWidth(),
+      pageAbove: Boolean(restTab && restTab.view) &&
+        restKids.indexOf(restTab.view) > restKids.indexOf(shell.chromeView)
+    };
     const shut = shell.contentBounds();
 
     shell.setSidebarOpen(true);
     const openWide = chromeWidth();
     const whileOpen = shell.contentBounds();
 
-    check('the side strip is an edge until the pointer reaches it',
-      edgeWide === SIDEBAR_EDGE && openWide === SIDEBAR_WIDTH,
-      `${edgeWide}px at rest, ${openWide}px open`);
+    // At rest the chrome is the whole window *under* the page: the page covers
+    // all of it but the toolbar band across the top and the edge, so the
+    // window keeps its controls while the strip is away. Open, it is the
+    // strip's column, on top.
+    check('the side strip is an edge, under a toolbar that stays, until the pointer reaches it',
+      edgeRest.behind && edgeRest.width === shell.window.getContentBounds().width &&
+        edgeRest.pageAbove && openWide === SIDEBAR_WIDTH && !shell.chromeBehind,
+      `at rest ${JSON.stringify(edgeRest)}, ${openWide}px open`);
     check('sliding it out does not move the page',
       whileOpen.x === shut.x && whileOpen.width === shut.width,
       `page at ${shut.x}px wide ${shut.width} -> ${whileOpen.x}px wide ${whileOpen.width}`);

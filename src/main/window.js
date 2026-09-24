@@ -455,8 +455,12 @@ class BrowserShell {
   attachTab(tab) {
     if (!tab.view) return;
     const children = this.window.contentView.children;
-    // Insert below the chrome so the chrome always wins the z-order.
-    if (!children.includes(tab.view)) this.window.contentView.addChildView(tab.view, 0);
+    // Insert below the chrome so the chrome always wins the z-order - except
+    // while the chrome is itself underneath the page (a collapsed side strip,
+    // see chromeCompact), where the page goes just above it.
+    if (!children.includes(tab.view)) {
+      this.window.contentView.addChildView(tab.view, this.chromeBehind ? 1 : 0);
+    }
 
     // Bounds are re-asserted on every present, not only on the first.
     //
@@ -522,8 +526,8 @@ class BrowserShell {
         // Above the tab views, below the chrome: the tab strip and toolbar stay
         // live and clickable while a page is restoring behind them.
         const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
-        this.window.contentView.addChildView(
-          this.placeholderView, chromeIndex === -1 ? undefined : chromeIndex);
+        this.window.contentView.addChildView(this.placeholderView,
+          chromeIndex === -1 || this.chromeBehind ? undefined : chromeIndex);
       }
       this.placeholderView.setImage(image);
       this.placeholderView.setBounds(this.contentBounds());
@@ -1219,7 +1223,8 @@ class BrowserShell {
     return {
       pinned: this.sidebarPinned(),
       open: this.sidebarPinned() || this.sidebarOpen,
-      floating: this.chromeFloats()
+      floating: this.chromeFloats(),
+      compact: this.chromeCompact()
     };
   }
 
@@ -1252,6 +1257,33 @@ class BrowserShell {
   /** Is the sidebar held open, rather than sliding away when the pointer goes? */
   sidebarPinned() {
     return this.prefs ? this.prefs.get('sidebarPinned') === true : false;
+  }
+
+  /**
+   * The side strip collapsed to its edge.
+   *
+   * It used to be a ten-pixel column holding the whole chrome, toolbar and
+   * all, so collapsing it took the address bar, back and the menu with it -
+   * the window had no controls until the pointer found the edge. Now the
+   * chrome covers the window underneath the page: the page covers everything
+   * but the band across the top, where a toolbar is drawn, and the edge,
+   * which still opens the strip.
+   */
+  chromeCompact() {
+    return this.vertical() && !this.fullScreen() && !this.sidebarPinned() && !this.sidebarOpen;
+  }
+
+  /** Put the chrome under the page, or back on top of it. */
+  setChromeBehind(behind) {
+    if (this.chromeBehind === behind) return;
+    this.chromeBehind = behind;
+    // Removed and added again: adding a child that is already there, with an
+    // index, left it where it was - measured, the chrome stayed on top and
+    // covered the page.
+    const root = this.window.contentView;
+    root.removeChildView(this.chromeView);
+    if (behind) root.addChildView(this.chromeView, 0);
+    else root.addChildView(this.chromeView);
   }
 
   /** How much width the chrome occupies in sidebar mode, right now. */
@@ -1405,12 +1437,18 @@ class BrowserShell {
           width: this.sidebarWidth(),
           height: Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
         });
+      } else if (this.chromeCompact()) {
+        // Collapsed down the side: the chrome is the whole window, *under*
+        // the page (see setChromeBehind), so what shows of it is the band
+        // across the top - where it draws a toolbar - and the edge.
+        this.chromeView.setBounds({ x: 0, y: 0, width, height });
       } else {
         this.chromeView.setBounds(this.vertical()
           ? { x: 0, y: 0, width: this.sidebarWidth(), height }
           : { x: 0, y: 0, width, height: this.chromeHeight() });
       }
     }
+    this.setChromeBehind(!hidden && this.chromeCompact());
     // Rounded only while it floats. A panel over a page needs corners; a column
     // against the window's own edge does not, and rounding one would leave four
     // notches of window background at the screen's corners.

@@ -130,12 +130,17 @@ function reportHover(over) {
   api.send('sidebar-hover', { over });
 }
 
-document.addEventListener('mouseenter', () => reportHover(true));
+// Collapsed, the chrome is the whole window under the page, so being over it
+// is not the signal: only the edge opens the strip, never the toolbar above.
+const EDGE = 12;
+const TOP_BAND = 40;
+const opens = (e) => document.body.dataset.compact !== 'true' || (e.clientX <= EDGE && e.clientY >= TOP_BAND);
+document.addEventListener('mouseenter', (e) => reportHover(opens(e)));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside
 // - which is what happens when the strip slides out from under it - does not
 // fire `mouseenter`.
-document.addEventListener('mousemove', () => reportHover(true));
+document.addEventListener('mousemove', (e) => reportHover(opens(e)));
 
 /*
  * The wheel over the tab strip moves the strip.
@@ -174,7 +179,7 @@ function renderSidebar(sidebar) {
   if (document.body.dataset.sidebar !== String(side)) {
     document.body.dataset.sidebar = String(side);
   }
-  if (!side) return;
+  if (!side) { document.body.dataset.compact = 'false'; return; }
 
   const pinned = sidebar.pinned === true;
   if (el.pin.getAttribute('aria-pressed') !== String(pinned)) {
@@ -189,6 +194,10 @@ function renderSidebar(sidebar) {
   const open = sidebar.open === true;
   if (document.body.dataset.sidebarOpen !== String(open)) {
     document.body.dataset.sidebarOpen = String(open);
+  }
+  const compact = sidebar.compact === true;
+  if (document.body.dataset.compact !== String(compact)) {
+    document.body.dataset.compact = String(compact);
   }
 
   // Full screen: the strip is a panel drawn over the page rather than a column

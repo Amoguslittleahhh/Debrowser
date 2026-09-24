@@ -1204,6 +1204,52 @@ body[data-sidebar="true"][data-sidebar-open="true"] .pin {
 }
 
 /*
+ * Collapsed, the chrome is the whole window under the page (window.js,
+ * chromeCompact). What shows is the band across the top and the left edge:
+ * the band carries a toolbar - back, forward, reload, the address bar, the
+ * menu - so the window never loses its controls, and the edge keeps the
+ * gradient that says the strip is there. The rest is under the page.
+ */
+body[data-sidebar="true"][data-compact="true"] {
+  background: var(--bg);
+}
+body[data-sidebar="true"][data-compact="true"]::before {
+  content: '';
+  position: fixed;
+  left: 0;
+  top: 40px;
+  bottom: 0;
+  width: 10px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 30%, var(--strip)), var(--strip));
+}
+body[data-sidebar="true"][data-sidebar-open="false"][data-compact="true"] .toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 0 8px;
+  padding-left: calc(env(titlebar-area-x, 0px) + 8px);
+  padding-right: max(
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px),
+    var(--caption-right, 0px)
+  );
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: none;
+}
+body[data-sidebar="true"][data-compact="true"] .omnibox {
+  order: 2;
+  flex: 1 1 auto;
+  max-width: 760px;
+  height: 28px;
+}
+body[data-sidebar="true"][data-compact="true"] .meter { display: none; }
+
+/*
  * The pin, at the foot of the strip.
  *
  * Bottom left, where it was asked for, and drawn only in sidebar mode - across
