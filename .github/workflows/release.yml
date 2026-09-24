@@ -193,6 +193,7 @@ jobs:
 
       - name: Incognito leak test
         if: matrix.os != 'macos-latest'
+        timeout-minutes: 10
         run: npm run test:incognito
 
       # The kill switch, where the operating system has one. Linux: the private
@@ -203,10 +204,12 @@ jobs:
       # runner makes first - has to be refused by Windows.
       - name: Incognito kill switch (Linux)
         if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 10
         run: npm run test:incognito -- --kill-switch
 
       - name: Incognito kill switch (Windows)
         if: matrix.os == 'windows-latest'
+        timeout-minutes: 10
         run: npm run test:incognito -- --windows-firewall
 
       # Advisory for the same reason the macOS smoke run is, and the first
@@ -215,6 +218,7 @@ jobs:
       - name: Incognito leak test (advisory on macOS)
         if: matrix.os == 'macos-latest'
         continue-on-error: true
+        timeout-minutes: 10
         run: npm run test:incognito
 
       # Advisory on macOS, blocking everywhere else.

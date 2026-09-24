@@ -289,7 +289,36 @@ const SCHEMA = {
   // The strip of saved sites under the toolbar. On by default, because a
   // bookmark you cannot see is a bookmark you will not use - and it costs the
   // content area 34px only while it is showing.
-  showBookmarksBar: { def: true, ok: (v) => typeof v === 'boolean' }
+  showBookmarksBar: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /* --- Private windows --------------------------------------------- */
+  // Set here, in the ordinary browser, and read by the private window, which
+  // never writes a preference itself. See src/main/incognito/.
+
+  // Which of V8's compilers run. `balanced` drops only the optimising tiers,
+  // which is where most V8 exploits land; `maximum` is the interpreter alone,
+  // as GrapheneOS's browser does. Takes effect when a private window opens.
+  incognitoJsLevel: { def: 'balanced', ok: (v) => ['maximum', 'balanced', 'full'].includes(v) },
+
+  // How Tor connects: through built-in bridges, through your own, or plain.
+  incognitoBridges: { def: 'auto', ok: (v) => ['auto', 'custom', 'none'].includes(v) },
+  incognitoBridgeLines: { def: '', ok: (v) => typeof v === 'string' && v.length <= 20_000 },
+
+  // Keep Tor's entry guard and its copy of the network between sessions,
+  // encrypted with the OS keystore. On: the same guard every time, as Tor is
+  // designed to use, and a connection in seconds. Off: nothing about Tor is
+  // left on this computer, at the cost of a new guard and a slower start.
+  incognitoKeepTorState: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // Go to a site's onion address whenever it advertises one.
+  incognitoPreferOnion: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // Load a decoy page alongside every real one, to blur what traffic analysis
+  // can learn from timing and size. Costs about double the bandwidth.
+  incognitoCamouflage: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // Close every private window after this many minutes with no input. 0 is never.
+  incognitoIdleWipeMinutes: { def: 0, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 240 }
 
   // Still nothing here for the resource profile: it decides Chromium switches
   // applied before the app starts, so it cannot take effect without a restart.

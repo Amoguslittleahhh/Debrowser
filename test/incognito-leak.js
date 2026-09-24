@@ -135,6 +135,14 @@ function readNetLog(file, proxyPort) {
   const offenders = [];
   const background = new Set();
   const urls = new Map();
+  // UDP is judged by what was sent, not by `connect()`. Connecting a UDP
+  // socket transmits nothing - it asks the routing table - and Chromium does
+  // exactly that to see whether IPv6 works at all (a "connect" to Google's
+  // public DNS on 2001:4860:4860::8888, measured on the Linux CI runner and
+  // absent here, where there is no IPv6 to ask about). A datagram that leaves
+  // is `UDP_BYTES_SENT`, and that is the leak.
+  const udpTarget = new Map();
+  const udpProbes = new Set();
   let proxied = 0;
   for (const e of log.events) {
     const p = e.params || {};
@@ -158,7 +166,11 @@ function readNetLog(file, proxyPort) {
       if (p.address === `127.0.0.1:${proxyPort}`) proxied++;
       else offenders.push(`tcp ${p.address}`);
     } else if (type === 'UDP_CONNECT' && p.address) {
-      offenders.push(`udp ${p.address}`);
+      udpTarget.set(e.source?.id, p.address);
+      udpProbes.add(p.address);
+    } else if (type === 'UDP_BYTES_SENT') {
+      offenders.push(`udp sent ${p.byte_count || '?'} bytes to ${udpTarget.get(e.source?.id) || p.address || 'unknown'}`);
+      udpProbes.delete(udpTarget.get(e.source?.id));
     } else if ((type === 'HOST_RESOLVER_DNS_TASK' || type === 'HOST_RESOLVER_SYSTEM_TASK') && e.phase === 1) {
       offenders.push(`dns sent (${source})`);
     } else if (type === 'HOST_RESOLVER_MANAGER_REQUEST' && p.host) {
@@ -168,7 +180,7 @@ function readNetLog(file, proxyPort) {
       else offenders.push(`local lookup for ${urls.get(e.source?.id) || host} (${source})`);
     }
   }
-  return { offenders, background: [...background], proxied };
+  return { offenders, background: [...background], udpProbes: [...udpProbes], proxied };
 }
 
 /* ------------------------------------------------------------------ */
@@ -329,12 +341,21 @@ async function main() {
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
+  // A deadline, so a browser that hangs fails the test with its last output
+  // instead of holding a CI runner until the job times out hours later - which
+  // is what the first macOS run did.
+  const deadlineMs = Number(value('idle-ms', '3000')) + 150_000;
+  const killer = setTimeout(() => {
+    out += `\n[harness] no result after ${Math.round(deadlineMs / 1000)}s; stopping the browser\n`;
+    child.kill('SIGKILL');
+  }, deadlineMs);
   const code = await new Promise((r) => child.on('exit', r));
+  clearTimeout(killer);
 
   const line = out.split('\n').find((l) => l.startsWith('__LEAK__'));
   const report = line ? JSON.parse(line.slice(8)) : null;
   check('the incognito run completed and reported', Boolean(report) && code === 0,
-    report ? `exit ${code}` : `exit ${code}; last output:\n${out.split('\n').slice(-15).join('\n')}`);
+    report ? `exit ${code}` : `exit ${code}; last output:\n${out.split('\n').slice(-40).join('\n')}`);
   if (!report) { canary.close(); stub.close(); await fixtures.close(); process.exit(1); }
 
   const s = report.steps;
@@ -368,9 +389,10 @@ async function main() {
     `candidates: ${JSON.stringify(s.webrtc)}`);
 
   const clean = readNetLog(path.join(netlogs, 'clean.json'), report.proxyPort);
-  check('Chromium\'s network log shows every socket going to the proxy, and no UDP',
+  check('Chromium\'s network log shows every socket going to the proxy, and no UDP sent',
     clean.offenders.length === 0 && clean.proxied > 0,
     `${clean.proxied} to the proxy${clean.offenders.length ? `; OFFENDERS: ${clean.offenders.slice(0, 8).join(', ')}` : ''}`);
+  if (clean.udpProbes.length) console.log(`  NOTE  UDP sockets connected but never sent (Chromium's IPv6 reachability probe): ${clean.udpProbes.join(', ')}`);
   if (clean.background.length) console.log(`  NOTE  Chromium's network-quality estimator probed, and the resolver rules refused it: ${clean.background.join(', ')}`);
 
   check('the STUN server heard nothing and nothing connected directly during normal browsing',

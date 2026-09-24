@@ -41,7 +41,9 @@ const path = require('path');
 const incognito = require('./incognito/mode');
 const { launchIncognito } = require('./incognito/launch');
 const { Tripwire } = require('./incognito/tripwire');
-const { Tor } = require('./incognito/tor');
+const { Tor, bundleDir: torBundleDir } = require('./incognito/tor');
+const bridges = require('./incognito/bridges');
+const torState = require('./incognito/torstate');
 const { startRelay } = require('./incognito/relay');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
@@ -289,7 +291,39 @@ if (!app.requestSingleInstanceLock()) {
           onIncognitoChange();
         }
       });
-      tor.start();
+      // Bridges as set in the ordinary browser's Settings. The Linux launcher
+      // is handed the same lines by the browser that starts it.
+      tor.extraConfig = () => bridges.torrcLines({
+        mode: earlyPrefs.get('incognitoBridges'),
+        custom: earlyPrefs.get('incognitoBridgeLines')
+      }, torBundleDir());
+      // After ready rather than now, because unsealing Tor's kept state needs
+      // the OS keystore, which on Linux is not reachable earlier. A Tor the
+      // launcher started had its state put in place before it ran.
+      app.whenReady().then(() => {
+        if (!tor.attached) {
+          if (earlyPrefs.get('incognitoKeepTorState')) {
+            torState.restore(incognitoCtx.normalUserData, path.join(tor.dir, 'data'), log);
+          } else {
+            torState.forget(incognitoCtx.normalUserData);
+          }
+        }
+        tor.start();
+      });
+
+      // Sealed again on the way out, once Tor has stopped and written its
+      // state - so the quit waits for it, briefly.
+      let sealed = false;
+      app.on('will-quit', (event) => {
+        // Only a Tor that connected has state worth keeping.
+        if (sealed || !earlyPrefs.get('incognitoKeepTorState') || !tor.everReady) return;
+        event.preventDefault();
+        sealed = true;
+        tor.stopAndWait(3000).then(() => {
+          torState.save(incognitoCtx.normalUserData, path.join(tor.dir, 'data'), log);
+          app.quit();
+        });
+      });
     }
   }
   main();
@@ -966,7 +1000,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'new-incognito-window':
         // From inside incognito this is simply another private tab.
         if (INCOGNITO) tabs.create({ url: newTabUrl(prefs) });
-        else launchIncognito(log);
+        else {
+          launchIncognito(log, bridges.torrcLines({
+            mode: prefs.get('incognitoBridges'),
+            custom: prefs.get('incognitoBridgeLines')
+          }, torBundleDir()), {
+            keepTorState: prefs.get('incognitoKeepTorState'),
+            userData: app.getPath('userData')
+          });
+        }
         break;
 
       case 'close-tab':

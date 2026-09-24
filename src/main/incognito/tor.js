@@ -122,6 +122,8 @@ class Tor {
     };
     this.stallTimer = null;
     this.stopping = false;
+    /** Whether this Tor ever finished connecting: only then is its state worth keeping. */
+    this.everReady = false;
   }
 
   /** `{available, reason}` - whether there is a Tor to start at all. */
@@ -162,7 +164,8 @@ class Tor {
    * whether it is still there.
    */
   follow() {
-    this.set({ state: 'starting', progress: 0, summary: 'Starting Tor', warning: null });
+    this.set({ state: 'starting', progress: 0, summary: 'Starting Tor', warning: null,
+               transport: this.plannedTransport() });
     const logFile = path.join(this.dir, 'tor.log');
     const tick = () => {
       try {
@@ -210,7 +213,8 @@ class Tor {
     if (process.platform === 'linux') env.LD_LIBRARY_PATH = dir;
     if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = dir;
 
-    this.set({ state: 'starting', progress: 0, tag: null, summary: 'Starting Tor', warning: null });
+    this.set({ state: 'starting', progress: 0, tag: null, summary: 'Starting Tor', warning: null,
+               transport: this.plannedTransport() });
     try {
       this.child = spawn(path.join(dir, exe('tor')), ['-f', torrc], {
         cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true
@@ -263,8 +267,10 @@ class Tor {
         warning: progress >= 100 ? null : this.status.warning
       });
       if (progress >= 100) {
+        this.everReady = true;
         clearTimeout(this.stallTimer);
         this.askVersionStatus();
+        this.learnTransport();
       } else {
         this.armStall();
       }
@@ -278,6 +284,40 @@ class Tor {
       if (/Could not bind to/.test(message)) this.set({ state: 'failed', warning: message });
     }
     this.log('tor', text);
+  }
+
+  /** The Bridge lines this Tor was configured with, read back from its torrc. */
+  bridgeLines() {
+    try {
+      return fs.readFileSync(path.join(this.dir, 'torrc'), 'utf8').split('\n').filter((l) => l.startsWith('Bridge '));
+    } catch {
+      return [];
+    }
+  }
+
+  /** What the connection goes through, as far as is known before it is up. */
+  plannedTransport() {
+    const used = [...new Set(this.bridgeLines().map((l) => l.split(/\s+/)[1]))];
+    return used.length ? used.join(' or ') : 'direct';
+  }
+
+  /**
+   * Which bridge actually carried the connection, once there is one: the first
+   * hop of a built circuit, matched against the configured bridge lines.
+   */
+  async learnTransport() {
+    const lines = this.bridgeLines();
+    if (!lines.length) { this.set({ transport: 'direct' }); return; }
+    try {
+      const [reply] = await this.control(['GETINFO circuit-status']);
+      for (const row of reply) {
+        const hop = /\bBUILT (\$[0-9A-F]{40}[~=][^,\s]*)/.exec(row);
+        const transport = hop && require('./bridges').transportFor(hop[1], lines);
+        if (transport) { this.set({ transport }); return; }
+      }
+    } catch (err) {
+      this.log('tor', `could not tell which bridge connected: ${err.message}`);
+    }
   }
 
   /** Report a bootstrap that has stopped moving, rather than spinning forever. */
@@ -384,6 +424,26 @@ class Tor {
     if (this.child) {
       try { this.child.kill(); } catch { /* already gone */ }
     }
+  }
+
+  /**
+   * Stop, and wait until Tor has actually gone - it writes its state on the
+   * way out, and that is what gets kept. Resolves at `ms` regardless.
+   */
+  stopAndWait(ms) {
+    const pid = this.attached ? this.attached.pid : this.child && this.child.pid;
+    this.stop();
+    if (!pid) return Promise.resolve();
+    const deadline = Date.now() + ms;
+    return new Promise((resolve) => {
+      const poll = () => {
+        let alive = true;
+        try { process.kill(pid, 0); } catch { alive = false; }
+        if (!alive || Date.now() > deadline) resolve();
+        else setTimeout(poll, 50);
+      };
+      poll();
+    });
   }
 
   /** Restart from nothing, e.g. after the user asks to try again. */

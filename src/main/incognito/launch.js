@@ -68,13 +68,18 @@ function command(torExtra = []) {
       // deletes it. Random, so two quick launches cannot read each other's.
       const template = path.join(root, `torrc-${crypto.randomBytes(8).toString('hex')}`);
       fs.writeFileSync(template, launcherTemplate(torExtra), { mode: 0o600 });
-      return [helper, [root, tor, template, '--', process.execPath, ...args]];
+      return [helper, [root, tor, template, '--', process.execPath, ...args], { root }];
     }
   }
   return [windowsIncognitoExe() || process.execPath, args];
 }
 
-function launchIncognito(log = () => {}, torExtra = []) {
+/**
+ * @param {Function} log
+ * @param {string[]} torExtra - bridge lines for the launcher's torrc
+ * @param {{keepTorState?: boolean, userData?: string}} [state]
+ */
+function launchIncognito(log = () => {}, torExtra = [], state = {}) {
   const env = { ...process.env };
   // Never inherited: it turns the binary into a plain Node interpreter.
   delete env.ELECTRON_RUN_AS_NODE;
@@ -83,9 +88,19 @@ function launchIncognito(log = () => {}, torExtra = []) {
   delete env.DEBROWSER_KILL_SWITCH;
   delete env.DEBROWSER_TOR_DIR;
   delete env.DEBROWSER_TOR_PID;
+  delete env.DEBROWSER_TOR_SEED;
 
   try {
-    const [program, args] = command(torExtra);
+    const [program, args, launcher] = command(torExtra);
+    // Under the launcher Tor starts before the private browser exists, so its
+    // kept state is unsealed here - this process has the keystore - into a
+    // private directory the launcher moves into place.
+    if (launcher && state.keepTorState) {
+      const seed = path.join(launcher.root, `seed-${crypto.randomBytes(8).toString('hex')}`);
+      fs.mkdirSync(seed, { mode: 0o700 });
+      if (require('./torstate').restore(state.userData, seed, log) > 0) env.DEBROWSER_TOR_SEED = seed;
+      else fs.rmSync(seed, { recursive: true, force: true });
+    }
     const child = spawn(program, args, { detached: true, stdio: 'ignore', env });
     child.on('error', (err) => log('incognito', `could not start: ${err.message}`));
     child.unref();

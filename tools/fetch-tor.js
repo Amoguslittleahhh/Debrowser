@@ -62,6 +62,14 @@ function tool(name) {
   return null;
 }
 
+/**
+ * Paths for gpg. On Windows it is Git's MSYS build, which reads a Windows path
+ * in GNUPGHOME as relative to the current directory - measured on the CI
+ * runner: "/d/a/Debrowser/Debrowser/C:\\Users\\...\\gnupg: directory does not
+ * exist". Forward slashes it reads correctly.
+ */
+const forGpg = (p) => (process.platform === 'win32' ? p.replace(/\\/g, '/') : p);
+
 function run(cmd, args, options = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...options });
   if (r.status !== 0) {
@@ -101,8 +109,8 @@ async function main() {
   const gpg = tool('gpg');
   const home = path.join(work, 'gnupg');
   fs.mkdirSync(home, { mode: 0o700 });
-  const env = { ...process.env, GNUPGHOME: home };
-  const shown = run(gpg, ['--batch', '--show-keys', '--with-colons', KEY_FILE], { env });
+  const env = { ...process.env, GNUPGHOME: forGpg(home) };
+  const shown = run(gpg, ['--batch', '--show-keys', '--with-colons', forGpg(KEY_FILE)], { env });
   const primaries = shown.split('\n').filter((l) => l.startsWith('pub:')).length;
   const firstFpr = (shown.split('\n').find((l) => l.startsWith('fpr:')) || '').split(':')[9];
   if (primaries !== 1 || firstFpr !== PIN.fingerprint) {
@@ -111,15 +119,20 @@ async function main() {
 
   // 2. The bundle is signed by it.
   const keyring = path.join(work, 'tor.gpg');
-  run(gpg, ['--batch', '--yes', '--dearmor', '-o', keyring, KEY_FILE], { env });
+  run(gpg, ['--batch', '--yes', '--dearmor', '-o', forGpg(keyring), forGpg(KEY_FILE)], { env });
   const gpgv = tool('gpgv');
-  run(gpgv, ['--keyring', keyring, `${tarball}.asc`, tarball], { env });
+  run(gpgv, ['--keyring', forGpg(keyring), forGpg(`${tarball}.asc`), forGpg(tarball)], { env });
   console.log(`signature good: ${name} (key ${PIN.fingerprint})`);
 
   // 3. Unpack, and keep what incognito uses.
   const unpacked = path.join(work, 'x');
   fs.mkdirSync(unpacked);
-  run('tar', ['-xzf', tarball, '-C', unpacked]);
+  // Windows' own tar, by path: under Git Bash, `tar` is MSYS GNU tar, which
+  // reads "C:\..." as a remote host called C.
+  const tar = process.platform === 'win32'
+    ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar';
+  run(tar, ['-xzf', tarball, '-C', unpacked]);
   const out = path.join(ROOT, 'vendor', 'tor', `${platform}-${arch}`);
   fs.rmSync(out, { recursive: true, force: true });
   copyTree(path.join(unpacked, 'tor'), out, (n) => /^conjure-client|^README/i.test(n));

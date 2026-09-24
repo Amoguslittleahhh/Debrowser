@@ -265,6 +265,22 @@ h2 {
   min-width: 172px;
 }
 
+/* Bridge lines: long, several of them, and pasted rather than typed. */
+textarea {
+  width: 320px;
+  min-height: 64px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font: var(--fs-small) / var(--lh-body) ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  outline: none;
+  resize: vertical;
+  user-select: text;
+}
+textarea:focus { border-color: var(--accent); box-shadow: var(--ring); }
+
 /* Beside the field, not under it. `.row-hint` is a block, which is right in the
    label column and wrong here. */
 .unit { font-size: var(--fs-small); color: var(--text-dim); }

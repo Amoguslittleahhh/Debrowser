@@ -873,3 +873,43 @@ budget and back off to one check every two seconds - a much slower tripwire
 than designed. Reading the tables once per check, then matching each process's
 socket inodes against them: 1.2 ms for all ten processes of a live private
 window, about 0.5% of a core at four checks a second.
+
+## Incognito, M4 — bridges, your own bridge, and Tor's kept state
+
+**The built-in bridges start, and race.** With `auto`, Tor was given all seven
+built-in obfs4 bridges and both Snowflake bridges at once. It tried every
+obfs4 address in parallel (all blocked by this container's network) while
+lyrebird's Snowflake client reached its broker and was handed peers - the
+broker is domain-fronted through a CDN, which is why it got through. The WebRTC
+data channel to those peers then never opened, because this container blocks
+UDP, so bootstrap did not complete. Nothing waited for one transport to time
+out before trying the next.
+
+**The bridge kit, run for real.** `tools/bridge-kit/setup-bridge.sh` was run on
+this container (Ubuntu 24.04, no systemd) and failed four times before it
+worked, each time for a reason a real server could also hit: a nickname one
+character over Tor's 19-character limit; an ORPort that tried IPv6 on an
+IPv4-only host; a client SOCKS port a bridge does not need, colliding with the
+previous run; and, without systemd's defaults, Tor keeping its files in
+`~/.tor`, where the script never found the bridge line. It also raced its own
+restart until it waited for the old Tor to let go of its ports. Then it
+printed a line - and Debrowser's own Tor, given that line in "my own bridges"
+mode, went `Connecting to pluggable transport` → `Handshake with a relay done`
+→ `Loading networkstatus consensus` through obfs4, stopping at 30% only because
+the bridge itself cannot reach the Tor network from here.
+
+**Kept state, sealed.** A stand-in keystore (this container has no keyring,
+and the real store rightly refuses to write without one) sealed 500 KB of
+state and consensus into 2.5 KB, mode 0600, with no plaintext visible;
+restoring put back only the kept files (not Tor's lock file); flipping one bit
+of the file made the restore refuse it and delete it rather than start Tor on
+tampered state.
+
+**CI found two Windows faults in the fetcher, and one false alarm.** Git's
+MSYS `gpg` read a Windows path in `GNUPGHOME` as relative to the working
+directory; under Git Bash, `tar` is MSYS tar, which reads `C:\...` as a remote
+host. And on the Linux runner the network log recorded a UDP `connect()` to
+`[2001:4860:4860::8888]:443` - Chromium asking the routing table whether IPv6
+works. A UDP connect sends nothing; the check now fails on bytes actually sent
+and reports the probe separately. It never appeared here because this
+container has no IPv6 to ask about.

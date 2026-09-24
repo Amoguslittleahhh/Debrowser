@@ -38,6 +38,9 @@ const STATE = {
   searchEngines: [{ id: 'google', name: 'Google' }, { id: 'ddg', name: 'DuckDuckGo' }],
   updates: { available: true, reason: null, state: 'ready', version: '1.5.0', progress: 100, error: null },
   prefs: {
+    incognitoBridges: 'custom', incognitoJsLevel: 'balanced', incognitoKeepTorState: true,
+    incognitoPreferOnion: false, incognitoCamouflage: false, incognitoIdleWipeMinutes: 0,
+    incognitoBridgeLines: 'obfs4 203.0.113.5:443 9A1B2C3D4E5F60718293A4B5C6D7E8F901234567 cert=kR3x4mHq9Wn2bV7cZ8yT1uP0sL5fG6hJ iat-mode=1',
     theme: 'dark', accent: '#2f857b', tabWidth: 'roomy', tabBarColor: 'default',
     windowOpacity: 1, tabBarPosition: 'top', backgroundMaterial: 'none',
     reduceMotion: false, showMemoryMeter: true, showTierDots: true,
@@ -160,6 +163,7 @@ const SHOTS = [
   // down. Worth its own shot because the rows there are built by hand rather
   // than from the settings descriptors, so nothing else photographs them.
   { name: 'settings-bookmarks', file: 'settings.html', w: 1280, h: 860, hash: 'bookmarks' },
+  { name: 'settings-private', file: 'settings.html', w: 1280, h: 860, hash: 'private' },
   // Startup, then the tab and window behaviours - the rows people come to
   // Settings to change most, and several of them selects of unequal width.
   { name: 'settings-browsing', file: 'settings.html', w: 1280, h: 860, hash: 'browsing' },

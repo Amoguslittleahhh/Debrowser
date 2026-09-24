@@ -30,8 +30,9 @@
  *
  *   1. Make <root>/s-<pid>/tor, where <pid> is this process's id - which is
  *      also the browser's, because the browser is exec'd in place. Write the
- *      torrc there, and start Tor from it, here, in the namespace that has
- *      the network.
+ *      torrc there, move in Tor's kept state if the browser unsealed one
+ *      (DEBROWSER_TOR_SEED), and start Tor from it, here, in the namespace
+ *      that has the network.
  *   2. unshare(CLONE_NEWUSER | CLONE_NEWNET) - no root needed - and map this
  *      user's uid and gid onto themselves. Onto themselves, not onto root:
  *      mapped to root, Electron refuses to run its sandbox, and the renderers
@@ -175,6 +176,19 @@ int main(int argc, char **argv) {
     if (write_torrc(template_path, dir, torrc) != 0) {
         fprintf(stderr, "netns-launch: cannot write %s\n", torrc);
         return 3;
+    }
+
+    /* Tor's kept state, unsealed by the browser that started us into a
+       private directory under the same root, is moved into place before Tor
+       starts - a rename, so it is never copied anywhere else. */
+    const char *seed = getenv("DEBROWSER_TOR_SEED");
+    if (seed && *seed) {
+        char data[4200];
+        snprintf(data, sizeof data, "%s/data", dir);
+        if (strncmp(seed, root, strlen(root)) == 0 && private_dir(seed) && rename(seed, data) != 0) {
+            fprintf(stderr, "netns-launch: could not use kept Tor state: %s\n", strerror(errno));
+        }
+        unsetenv("DEBROWSER_TOR_SEED");
     }
 
     uid_t uid = getuid();

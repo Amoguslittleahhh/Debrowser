@@ -45,6 +45,39 @@ const path = require('path');
 const crypto = require('crypto');
 const { app, safeStorage } = require('electron');
 
+/**
+ * Whether the OS keystore really encrypts, and why not when it does not.
+ *
+ * Shared by everything that seals a secret with it - saved credentials, and
+ * incognito's Tor state - so one rule decides what counts as protected.
+ * Must be asked after `app.whenReady()`: on Linux `safeStorage` talks to a
+ * secret service that is not up before then.
+ */
+function keystoreCapability() {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return {
+      available: false,
+      reason: process.platform === 'linux'
+        ? 'no OS keyring available - install gnome-keyring or another libsecret provider'
+        : 'the OS keystore is unavailable'
+    };
+  }
+  // Linux only: Electron falls back to a "basic text" backend that is
+  // obfuscation rather than encryption, and reports encryption as available
+  // while using it. Saving anything under that while telling the user it is
+  // protected by the OS would be the exact lie this refuses to tell.
+  if (process.platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function') {
+    const backend = safeStorage.getSelectedStorageBackend();
+    if (backend === 'basic_text' || backend === 'unknown') {
+      return {
+        available: false,
+        reason: `the available keyring (${backend}) does not really encrypt - install gnome-keyring or kwallet`
+      };
+    }
+  }
+  return { available: true, reason: null };
+}
+
 /** The two kinds, and the file each lives in. */
 const KINDS = {
   login: 'logins.dat',
@@ -125,28 +158,9 @@ class Credentials {
    */
   capability() {
     if (this.unavailable) return { available: false, reason: this.unavailable };
-
-    if (!safeStorage.isEncryptionAvailable()) {
-      this.unavailable = process.platform === 'linux'
-        ? 'no OS keyring available - install gnome-keyring or another libsecret provider'
-        : 'the OS keystore is unavailable';
-      return { available: false, reason: this.unavailable };
-    }
-
-    // Linux only: Electron falls back to a "basic text" backend that is
-    // obfuscation rather than encryption, and reports encryption as available
-    // while using it. Saving credentials under that while telling the user they
-    // are protected by the OS would be the exact lie this file refuses to tell.
-    if (process.platform === 'linux' && typeof safeStorage.getSelectedStorageBackend === 'function') {
-      const backend = safeStorage.getSelectedStorageBackend();
-      if (backend === 'basic_text' || backend === 'unknown') {
-        this.unavailable = `the available keyring (${backend}) does not really encrypt - ` +
-                           'install gnome-keyring or kwallet';
-        return { available: false, reason: this.unavailable };
-      }
-    }
-
-    return { available: true, reason: null };
+    const cap = keystoreCapability();
+    if (!cap.available) this.unavailable = cap.reason;
+    return cap;
   }
 
   /* ---------------------------------------------------------------- */
@@ -385,4 +399,4 @@ class Credentials {
   }
 }
 
-module.exports = { Credentials, originOf, validate, KINDS };
+module.exports = { Credentials, originOf, validate, KINDS, keystoreCapability };

@@ -284,6 +284,64 @@ const SECTIONS = {
     }
   ],
 
+  private: [
+    {
+      key: 'incognitoBridges',
+      label: 'Connect to Tor',
+      hint: 'Bridges hide from your ISP that you use Tor. A bridge of your own also hides it from lists of known bridges.',
+      type: 'select',
+      options: [
+        { value: 'auto', name: 'Through built-in bridges' },
+        { value: 'custom', name: 'Through my own bridges' },
+        { value: 'none', name: 'Directly - fastest, and your ISP can see Tor' }
+      ]
+    },
+    {
+      key: 'incognitoBridgeLines',
+      label: 'My bridges',
+      hint: 'One per line, as a bridge gives them - obfs4, webtunnel or snowflake. tools/bridge-kit sets up your own.',
+      type: 'textarea',
+      placeholder: 'obfs4 203.0.113.5:443 FINGERPRINT cert=… iat-mode=0'
+    },
+    {
+      key: 'incognitoJsLevel',
+      label: 'JavaScript security',
+      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land. Maximum runs the interpreter alone. From the next private window.',
+      type: 'select',
+      options: [
+        { value: 'balanced', name: 'Balanced' },
+        { value: 'maximum', name: 'Maximum - slowest' },
+        { value: 'full', name: 'Full speed' }
+      ]
+    },
+    {
+      key: 'incognitoKeepTorState',
+      label: 'Remember Tor between sessions',
+      hint: 'Keeps the same entry guard, as Tor is designed to, and connects in seconds - sealed with your system keystore. Off leaves no trace of Tor here, but picks a new guard every time.',
+      type: 'checkbox'
+    },
+    {
+      key: 'incognitoPreferOnion',
+      label: 'Use onion addresses when sites offer them',
+      type: 'checkbox'
+    },
+    {
+      key: 'incognitoCamouflage',
+      label: 'Traffic camouflage',
+      hint: 'Loads a decoy page beside each real one, so timing and size tell an observer less. About twice the data.',
+      type: 'checkbox'
+    },
+    {
+      key: 'incognitoIdleWipeMinutes',
+      label: 'Close private windows when idle',
+      hint: 'Minutes with no input. 0 never closes them.',
+      type: 'number',
+      min: 0,
+      max: 240,
+      unit: 'min'
+    }
+  ],
+
   credentials: [
     {
       key: 'requirePresence',
@@ -460,6 +518,19 @@ function buildControl(spec) {
     case 'text': {
       const input = document.createElement('input');
       input.type = 'text';
+      input.placeholder = spec.placeholder || '';
+      input.addEventListener('change', () => save(spec.key, input.value.trim()));
+      return {
+        node: input,
+        input,
+        write(value) { if (document.activeElement !== input) input.value = value || ''; }
+      };
+    }
+
+    case 'textarea': {
+      const input = document.createElement('textarea');
+      input.rows = 3;
+      input.spellcheck = false;
       input.placeholder = spec.placeholder || '';
       input.addEventListener('change', () => save(spec.key, input.value.trim()));
       return {
