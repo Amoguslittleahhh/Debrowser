@@ -23,6 +23,7 @@ const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload
 const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
 const pages = require('../pages');
 const errorPage = require('../error-page');
+const palette = require('../palette');
 const { INCOGNITO } = require('../incognito/mode');
 const fingerprint = require('../incognito/fingerprint');
 
@@ -37,8 +38,6 @@ const SETTINGS_ZOOM = 1.1;
 
 let nextTabId = 1;
 
-/** Matches the chrome's surface colour, so an unpainted view is not white. */
-const SURFACE_COLOUR = '#161614';
 
 /**
  * Thumbnails are shown behind a loading page for a few hundred milliseconds, so
@@ -346,11 +345,10 @@ class Tab {
       }
     });
 
-    // Avoid a white flash on restore. The webPreferences above do not do this -
-    // an earlier comment there claimed they did - because the flash comes from
-    // the view compositing its own default white before the page paints, and
-    // only the view's background colour governs that.
-    this.view.setBackgroundColor(SURFACE_COLOUR);
+    // What shows before the page paints, and wherever it paints nothing: the
+    // view's own background, which the webPreferences above do not govern -
+    // an earlier comment there claimed they did. See palette.surfaceFor.
+    this.view.setBackgroundColor(palette.surfaceFor(this.url));
 
     this.wc = this.view.webContents;
     // WebRTC gathers ICE candidates over UDP, which does not go through a SOCKS
@@ -432,8 +430,10 @@ class Tab {
     // the login page to disk - the exact thing the gate exists to prevent.
     // Assumed sensitive until a probe says otherwise, because the failure has
     // to be a missing thumbnail rather than a leaked one.
-    wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+    wc.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
       if (!isMainFrame || isInPlace) return;
+      // White behind a website, our surface behind our own pages.
+      try { this.view?.setBackgroundColor(palette.surfaceFor(url)); } catch { /* view going away */ }
       this.hasSensitiveFields = true;
       this.lastProbeAt = 0;
     });
@@ -921,7 +921,10 @@ class Tab {
       // reports both as unavailable - which is honest: it cannot navigate
       // anywhere until it is restored, and activating it is what restores it.
       canGoBack: this.isLive ? this.wc.navigationHistory.canGoBack() : false,
-      canGoForward: this.isLive ? this.wc.navigationHistory.canGoForward() : false
+      canGoForward: this.isLive ? this.wc.navigationHistory.canGoForward() : false,
+      // For the badge in the address bar, which shows when a site is not at
+      // the default size.
+      zoom: this.isLive ? Math.round(this.wc.getZoomFactor() * 100) : 100
     };
   }
 }

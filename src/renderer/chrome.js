@@ -34,6 +34,7 @@ const el = {
   url: document.getElementById('url'),
   scheme: document.getElementById('scheme'),
   site: document.getElementById('site'),
+  zoomBadge: document.getElementById('zoom-badge'),
   schemePaths: ['scheme-a', 'scheme-b', 'scheme-c'].map((id) => document.getElementById(id)),
   meter: document.getElementById('meter'),
   meterFill: document.getElementById('meter-fill'),
@@ -64,7 +65,7 @@ const el = {
 // would read as the address bar ignoring you rather than as a near miss.
 el.omnibox.addEventListener('mousedown', (event) => {
   if (event.target === el.url) return;      // let the caret land where it was aimed
-  if (el.site.contains(event.target)) return;   // the padlock is its own button
+  if (el.site.contains(event.target) || event.target === el.zoomBadge) return;   // buttons of their own
   event.preventDefault();                   // no focus flash on the pill itself
   el.url.focus();
   el.url.select();
@@ -955,6 +956,17 @@ function renderToolbar(state) {
   }
   if (active) lastActiveId = active.id;
 
+  // A website away from the default size says so, and one press puts it back.
+  // Not for our own pages: Settings opens a notch larger on purpose.
+  const usual = Math.round((Number(state.prefs?.defaultZoom) || 1) * 100);
+  const zoomed = active && /^https?:/.test(active.url) && active.zoom && active.zoom !== usual ? active.zoom : 0;
+  if (zoomed !== zoomShown) {
+    zoomShown = zoomed;
+    el.zoomBadge.hidden = !zoomed;
+    el.zoomBadge.textContent = zoomed ? `${zoomed}%` : '';
+    el.zoomBadge.setAttribute('aria-label', zoomed ? `Zoom ${zoomed}%, press to reset` : '');
+  }
+
   el.back.disabled = !active?.canGoBack;
   el.forward.disabled = !active?.canGoForward;
 
@@ -1042,6 +1054,10 @@ function setScheme(kind) {
   el.scheme.setAttribute('aria-label',
     kind === 'secure' ? 'Connection is encrypted' : 'Connection is not encrypted');
 }
+
+/** The zoom the badge shows, 0 when hidden. */
+let zoomShown = 0;
+el.zoomBadge.addEventListener('click', () => api.send('zoom', { direction: 'reset' }));
 
 /** The address the bar last displayed for a tab, padlock included. */
 let shownAddress = null;

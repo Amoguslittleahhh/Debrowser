@@ -108,11 +108,13 @@ const TABLE = [
 
   // Tools
   { command: 'print', mod: true, key: 'p' },
+  { command: 'save-page', mod: true, key: 's' },
   { command: 'view-source', mod: true, key: 'u' },
   { command: 'toggle-panel', mod: true, key: 'm' },
   { command: 'toggle-devtools', key: 'f12' },
   { command: 'toggle-devtools', mod: true, shift: true, key: 'i' },
-  { command: 'toggle-fullscreen', key: 'f11' }
+  { command: 'toggle-fullscreen', key: 'f11' },
+  { command: 'show-shortcuts', mod: true, key: '/' }
 ];
 
 // Every entry answers to a list of spellings, normalised once here rather than
@@ -184,9 +186,71 @@ function labelFor(entry) {
  * Takes the first entry for the command, which is why the table lists the
  * canonical spelling first - `Ctrl+R` before `F5`.
  */
-function accelFor(command) {
-  const entry = TABLE.find((row) => row.command === command);
+function accelFor(command, payload = null) {
+  const same = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
+  const entry = TABLE.find((row) => row.command === command && (!payload || same(row.payload, payload)));
   return entry ? labelFor(entry) : '';
 }
 
-module.exports = { match, accelFor, TABLE, IS_MAC };
+/**
+ * The keyboard shortcut sheet (Ctrl+/): the table above, as people think of
+ * it - by what they want to do rather than by key - and in words. Read from
+ * the table, so a binding changed there is a binding changed here.
+ *
+ * @param {{incognito?: boolean}} [options]
+ * @returns {Array<{title: string, rows: Array<{label: string, keys: string}>}>}
+ */
+function sheet({ incognito = false } = {}) {
+  const row = (label, command, payload) => ({ label, keys: accelFor(command, payload) });
+  const groups = [
+    { title: 'Tabs', rows: [
+      row('New tab', 'new-tab'),
+      row('Close tab', 'close-tab'),
+      row('Reopen closed tab', 'reopen-closed-tab'),
+      row('Next tab', 'cycle-tab', { delta: 1 }),
+      row('Previous tab', 'cycle-tab', { delta: -1 }),
+      { label: 'Go to tab 1 to 8', keys: `${accelFor('select-tab', { index: 0 }).slice(0, -1)}1–8` },
+      row('Go to last tab', 'select-tab', { index: -1 })
+    ] },
+    { title: 'Going places', rows: [
+      row('Address bar', 'focus-address'),
+      row('Back', 'back'),
+      row('Forward', 'forward'),
+      row('Reload', 'reload'),
+      row('Hard reload', 'reload-hard'),
+      row('Bookmarks', 'open-bookmarks'),
+      row('History', 'open-history'),
+      row('Downloads', 'open-downloads')
+    ] },
+    { title: 'This page', rows: [
+      row('Find', 'find-open'),
+      row('Zoom in', 'zoom', { direction: 'in' }),
+      row('Zoom out', 'zoom', { direction: 'out' }),
+      row('Actual size', 'zoom', { direction: 'reset' }),
+      row('Bookmark', 'bookmark-page'),
+      row('Save', 'save-page'),
+      row('Print', 'print'),
+      row('View source', 'view-source')
+    ] },
+    { title: 'Browser', rows: [
+      row('Settings', 'open-settings'),
+      row('Bookmarks bar', 'toggle-bookmarks-bar'),
+      row('Full screen', 'toggle-fullscreen'),
+      row('Task manager', 'toggle-panel'),
+      row('Developer tools', 'toggle-devtools'),
+      row('New incognito window', 'new-incognito-window'),
+      row('This list', 'show-shortcuts')
+    ] }
+  ];
+  if (incognito) {
+    groups.push({ title: 'Private window', rows: [
+      row('New circuit for this tab', 'new-circuit'),
+      row('New identity', 'new-identity'),
+      row('Close and erase now', 'panic')
+    ] });
+  }
+  for (const group of groups) group.rows = group.rows.filter((r) => r.keys);
+  return groups;
+}
+
+module.exports = { match, accelFor, sheet, TABLE, IS_MAC };

@@ -123,6 +123,8 @@ function buildModel(params = {}, state = {}) {
     sep(),
     { id: 'bookmark-page', label: state.bookmarked ? 'Remove bookmark' : 'Bookmark this page',
       icon: 'star', accel: shortcuts.accelFor('bookmark-page'), enabled: !state.internal },
+    { id: 'save-page', label: 'Save page as…', icon: 'download', accel: shortcuts.accelFor('save-page'),
+      enabled: !state.internal },
     { id: 'print', label: 'Print…', icon: 'print', accel: shortcuts.accelFor('print') },
     { id: 'view-source', label: 'View page source', icon: 'code',
       accel: shortcuts.accelFor('view-source'), enabled: !state.internal },

@@ -2452,6 +2452,90 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     for (const server of servers) server.close();
   }
 
+  // The zoom badge: shown in the address bar while a site is not at the
+  // default size, and one press puts it back. And Ctrl+/ lists the shortcuts.
+  {
+    const chrome = shell.chromeView.webContents;
+    const tab = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => tab.isLive && !tab.loading);
+    await tabs.activate(tab.id);
+    const badge = () => chrome.executeJavaScript(
+      `(() => { const b = document.getElementById('zoom-badge'); return b.hidden ? '' : b.textContent; })()`);
+    const before = await badge();
+    runCommand('zoom', { direction: 'in' });
+    let shown = '';
+    await waitFor(async () => (shown = await badge()) !== '', { timeoutMs: 3000 });
+    await chrome.executeJavaScript(`document.getElementById('zoom-badge').click()`);
+    const reset = await waitFor(async () => (await badge()) === '' &&
+      Math.abs(tab.wc.getZoomFactor() - (Number(prefs.get('defaultZoom')) || 1)) < 0.001, { timeoutMs: 3000 });
+    check('the address bar shows a zoomed site\'s size, and pressing it resets',
+      before === '' && /^\d+%$/.test(shown) && shown !== '100%' && reset,
+      `before "${before}", zoomed "${shown}", reset=${reset}`);
+
+    runCommand('show-shortcuts');
+    const opened = await waitFor(() => shell.sheetPage === 'shortcuts' && shell.sheetView &&
+      !shell.sheetView.webContents.isLoading(), { timeoutMs: 4000 });
+    let rows = 0;
+    if (opened) {
+      await waitFor(async () => (rows = await shell.sheetView.webContents.executeJavaScript(
+        'document.querySelectorAll(".keys-row").length').catch(() => 0)) > 0, { timeoutMs: 3000 });
+    }
+    shell.closeSheet();
+    check('Ctrl+/ lists the keyboard shortcuts', opened && rows >= 25, `${rows} rows`);
+    tabs.close(tab.id);
+  }
+
+  // Save page writes the page to the place chosen, with what it needs beside
+  // it. The save dialog is stood in for.
+  {
+    const { dialog } = require('electron');
+    const realSave = dialog.showSaveDialog;
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-save-'));
+    const target = path.join(dir, 'saved.html');
+    let suggested = '';
+    dialog.showSaveDialog = async (_win, options) => {
+      suggested = path.basename(options.defaultPath || '');
+      return { canceled: false, filePath: target };
+    };
+    const tab = tabs.create({ url: pageUrl('branded.html'), activate: true, realise: true });
+    await waitFor(() => tab.isLive && !tab.loading && tab.title === 'Branded');
+    runCommand('save-page');
+    const saved = await waitFor(() => fs.existsSync(target), { timeoutMs: 5000 });
+    const body = saved ? fs.readFileSync(target, 'utf8') : '';
+    dialog.showSaveDialog = realSave;
+    check('Save page writes the page where it was asked to, named after its title',
+      saved && /A page with a favicon of its own/.test(body) && suggested === 'Branded.html',
+      `suggested "${suggested}", saved=${saved}`);
+    tabs.close(tab.id);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // A page with unsaved work is asked about before it goes: "Leave this
+  // page?", by closing its tab. Stay keeps the tab; Leave closes it. The
+  // dialog is stood in for - a real one would wait for a person.
+  {
+    const { dialog } = require('electron');
+    const realAsk = dialog.showMessageBoxSync;
+    const answers = [];
+    let asked = 0;
+    dialog.showMessageBoxSync = (_win, options) => { asked += 1; answers.push(options.message); return answers.length === 1 ? 1 : 0; };
+    const tab = tabs.create({ url: pageUrl('form.html'), activate: true, realise: true });
+    await waitFor(() => tab.isLive && !tab.loading);
+    // With a user gesture, which Chromium requires before it will honour one.
+    await tab.wc.executeJavaScript(
+      'window.onbeforeunload = (e) => { e.preventDefault(); e.returnValue = ""; }; true', true);
+    runCommand('close-tab', { id: tab.id });
+    await sleep(900);
+    const stayed = tabs.all().includes(tab) && asked === 1;
+    runCommand('close-tab', { id: tab.id });
+    const left = await waitFor(() => !tabs.all().includes(tab), { timeoutMs: 3000 });
+    dialog.showMessageBoxSync = realAsk;
+    check('closing a page with unsaved work asks first: Stay keeps it, Leave closes it',
+      stayed && left && asked === 2 && answers[0] === 'Leave this page?',
+      `asked ${asked} times ("${answers[0]}"), stayed=${stayed}, left=${left}`);
+    if (tabs.all().includes(tab)) tabs.close(tab.id);
+  }
+
   // A page that fails to load says why, in words, and Try again recovers it
   // in place; a tab whose renderer crashes says so, and Reload brings it back.
   //
@@ -3204,10 +3288,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     let windowClosed = 0;
     shell.close = () => { windowClosed += 1; };
     prefs.set('lastTabCloses', 'new-tab');
+    // A live page gets to run its beforeunload before it goes, so closing one
+    // finishes a moment later rather than at once.
     for (const t of [...tabs.all()]) runCommand('close-tab', { id: t.id });
+    await waitFor(() => tabs.all().length === 1 && tabs.all()[0].internal, { timeoutMs: 5000 });
     const kept = tabs.all().length === 1 && windowClosed === 0;
     prefs.set('lastTabCloses', 'quit');
     runCommand('close-tab', { id: tabs.all()[0]?.id });
+    await waitFor(() => tabs.all().length === 0, { timeoutMs: 5000 });
     const quit = tabs.all().length === 0 && windowClosed === 1;
     shell.close = realClose;
     check('closing the last tab keeps a new tab, or closes the window, as asked',

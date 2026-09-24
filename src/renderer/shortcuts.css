@@ -1,0 +1,89 @@
+/*
+ * The keyboard shortcut sheet (Ctrl+/). Sits on menu.css for the sheet; it is
+ * centred rather than anchored, and wide enough for two columns of groups.
+ */
+
+.keys-card {
+  left: 50%;
+  top: 50%;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: var(--s4) var(--s5) var(--s5);
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  animation: keys-in 160ms var(--ease-out);
+}
+
+@keyframes keys-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)) scale(0.98); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.keys-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--s3);
+}
+
+.keys-head h2 {
+  margin: 0;
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-bold);
+}
+
+.keys-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: calc(-1 * var(--s2));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: default;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.keys-close:hover { background: var(--wash-soft); color: var(--text); }
+.keys-close:active { background: var(--wash); }
+.keys-close .x-icon { width: 14px; height: 14px; }
+
+.keys-groups {
+  columns: 2 240px;
+  column-gap: var(--s6);
+}
+
+.keys-group {
+  break-inside: avoid;
+  margin: 0 0 var(--s4);
+}
+
+.keys-group h3 {
+  margin: 0 0 var(--s1);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-bold);
+  color: var(--text-dim);
+}
+
+.keys-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  min-height: 26px;
+}
+
+.keys-row kbd {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-dim);
+  font: var(--fs-small)/1.5 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

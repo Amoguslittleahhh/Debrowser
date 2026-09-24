@@ -20,6 +20,8 @@
  * reads `explain` directly.
  */
 
+const palette = require('./palette');
+
 /** net::ERR_ codes, and how each reads to someone who is not a network engineer. */
 const OFFLINE = new Set([-106]);                                  // INTERNET_DISCONNECTED
 const NOT_FOUND = new Set([-105, -137]);                          // NAME_NOT_RESOLVED, NAME_RESOLUTION_FAILED
@@ -92,16 +94,6 @@ function explain(code, description, url) {
     detail: 'Try again. If it keeps happening, the site may be having trouble.', retryOnline: true };
 }
 
-/** The two palettes theme.css defines, spelled out: the error document cannot load our stylesheet. */
-const PALETTES = {
-  light: { bg: '#f3f1ec', text: '#201f1c', dim: '#6b6559', border: '#dcd7cc' },
-  dark: { bg: '#161614', text: '#eae7e0', dim: '#9b978e', border: '#33332e' }
-};
-
-/** Answers {light, accent} for the window the tab is in. Set by main.js. */
-let themeSource = () => ({ light: false, accent: '#2f857b' });
-function useTheme(source) { themeSource = source; }
-
 /** The page-side script. Serialised: it must not reference anything outside itself. */
 function draw(e) {
   /* global document, location, addEventListener */
@@ -147,16 +139,13 @@ function draw(e) {
  * entry for `url`. Resolves whether it was drawn.
  */
 async function show(wc, { code, description, url }) {
-  const { light, accent } = themeSource();
   const words = explain(code, description, url);
   const e = {
     ...words,
     url: String(url || ''),
     // The engine's name for it, small, for whoever wants to search for it.
     code: /^ERR_[A-Z_]+$/.test(String(description)) ? String(description) : '',
-    light: Boolean(light),
-    accent: /^#[0-9a-f]{6}$/i.test(accent) ? accent : '#2f857b',
-    p: light ? PALETTES.light : PALETTES.dark
+    ...palette.current()
   };
   // JSON, with `<` escaped: it is script source, and nothing in it is markup.
   const arg = JSON.stringify(e).replace(/</g, '\\u003c');
@@ -168,4 +157,4 @@ async function show(wc, { code, description, url }) {
   }
 }
 
-module.exports = { explain, show, useTheme, PALETTES };
+module.exports = { explain, show };

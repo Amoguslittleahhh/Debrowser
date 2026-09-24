@@ -50,7 +50,7 @@ const policy = require('./incognito/policy');
 const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
 const { suggest } = require('./suggest');
-const errorPage = require('./error-page');
+const palette = require('./palette');
 const { SitePermissions, PermissionAsks } = require('./site-permissions');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
@@ -622,6 +622,23 @@ function main() {
         bindPageShortcuts(tab);
         bindContextMenu(tab);
         bindFind(tab);
+        // A page objecting to being left - unsaved work, usually. Chrome's
+        // question in Chrome's words; Leave is the default, as there. Answered
+        // synchronously, because the event has to be.
+        tab.wc.on('will-prevent-unload', (event) => {
+          if (!shell || shell.window.isDestroyed()) return;
+          const leave = dialog.showMessageBoxSync(shell.window, {
+            type: 'question',
+            buttons: ['Leave', 'Stay'],
+            defaultId: 0,
+            cancelId: 1,
+            title: 'Leave this page?',
+            message: 'Leave this page?',
+            detail: 'Changes you made may not be saved.'
+          }) === 0;
+          if (leave) event.preventDefault();
+          else if (tab.closing) tab.closing.stayed();
+        });
         // A new page has asked nothing yet, whatever the last one asked.
         if (permissionAsks) tab.wc.on('did-navigate', () => permissionAsks.forget(tab));
         // A real page starting to load: the moment a decoy has to start too.
@@ -812,8 +829,9 @@ function main() {
       held: WARM
     });
     shell.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
-    // An error page takes the window's palette and accent, as our own pages do.
-    errorPage.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent') }));
+    // What the main process paints - an error page, the surface behind a tab -
+    // takes the window's palette and accent, as our own pages do.
+    palette.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent') }));
 
     shell.window.on('close', (event) => {
       if (shouldAskToClose()) {
@@ -1222,6 +1240,40 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     .then(publish)
     .catch((err) => log(`activate failed: ${err.message}`));
 
+  /**
+   * Close a tab once its page has agreed to go.
+   *
+   * The page runs its beforeunload; if it objects, `will-prevent-unload`
+   * asks the user, and "Stay" keeps the tab. A page that never answers - hung
+   * on a script - is closed anyway after a moment, since a close button that
+   * does nothing is worse than the work it might lose.
+   */
+  const closeAfterUnload = (tab) => {
+    if (tab.closing) return;
+    const wc = tab.wc;
+    let timer = null;
+    const finish = () => {
+      clearTimeout(timer);
+      if (!tab.closing) return;
+      tab.closing = null;
+      if (!tabs.all().includes(tab)) return;
+      tabs.close(tab.id);
+      if (tabs.all().length === 0) lastTabClosed();
+      publish();
+    };
+    tab.closing = {
+      // "Stay": the page keeps its tab.
+      stayed: () => {
+        clearTimeout(timer);
+        wc.removeListener('destroyed', finish);
+        tab.closing = null;
+      }
+    };
+    wc.once('destroyed', finish);
+    timer = setTimeout(finish, 1500);
+    wc.close({ waitForBeforeUnload: true });
+  };
+
   /** The strip just emptied: close the window, or keep it with a new tab. */
   const lastTabClosed = () => {
     if (prefs.get('lastTabCloses') === 'new-tab') tabs.create({ url: newTabUrl(prefs) });
@@ -1334,8 +1386,18 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         else startIncognito({ prefs, log });
         break;
 
-      case 'close-tab':
-        tabs.close(payload?.id ?? tabs.activeId);
+      case 'close-tab': {
+        // A page with work it has not saved gets its say first - its own
+        // beforeunload, which the browser asks about as "Leave this page?".
+        // Only a page that can answer: a frozen, discarded or crashed one
+        // would never reply, and our own pages have nothing to lose.
+        const tab = tabs.byId(payload?.id ?? tabs.activeId);
+        if (!tab) break;
+        if (tab.isLive && !tab.crashed && !tab.internal && !isStopped(tab.tier)) {
+          closeAfterUnload(tab);
+          break;
+        }
+        tabs.close(tab.id);
         // Closing the last tab closes the browser, the way every other browser
         // behaves. An empty window with a tab strip holding nothing is a state
         // with no way forward except opening a tab or closing the window, so
@@ -1350,6 +1412,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // becomes a fresh tab instead.
         if (tabs.all().length === 0) lastTabClosed();
         break;
+      }
 
       case 'activate-tab':
         goTo(payload?.id);
@@ -1621,6 +1684,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         shell.closeSheet();
         break;
 
+      // Ctrl+/ - every shortcut, in words, over the window.
+      case 'show-shortcuts':
+        shell.openSheet('shortcuts');
+        break;
+
       // The padlock, or a site asking for something: the site panel, hung
       // from the padlock. The chrome measures where that is.
       case 'open-site':
@@ -1698,7 +1766,31 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         } else {
           stepZoom(active, payload?.direction === 'out' ? -1 : +1, siteZoom);
         }
+        // The badge in the address bar follows at once, not at the next tick.
+        publish();
         break;
+
+      // The page and what it needs to show - images, styles - saved beside
+      // it, where the user chooses. Suggested under the page's title in the
+      // downloads folder, which is where they look for anything they kept.
+      case 'save-page': {
+        const tab = active;
+        if (!tab?.isLive || tab.internal) break;
+        const name = (tab.title || 'page').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ')
+          .trim().slice(0, 100) || 'page';
+        downloadDir(prefs)
+          .then((dir) => dialog.showSaveDialog(shell.window, {
+            title: 'Save page',
+            defaultPath: path.join(dir, `${name}.html`),
+            filters: [{ name: 'Web page', extensions: ['html', 'htm'] }]
+          }))
+          .then(({ canceled, filePath }) => {
+            if (canceled || !filePath || !tab.isLive) return null;
+            return tab.wc.savePage(filePath, 'HTMLComplete');
+          })
+          .catch((err) => log(`saving the page failed: ${err.message}`));
+        break;
+      }
 
       case 'print':
         // Chromium's own print dialog. It fails on a page that cannot be
@@ -1989,6 +2081,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
     if (!tab) return;
     stepZoom(tab, payload?.direction === 'out' ? -1 : +1, siteZoom);
+    publish();
   });
 
   return runCommand;
@@ -2084,6 +2177,8 @@ const CHROME_REQUESTS = new Set([
   'suggest',
   // The site panel: the active tab's connection, permissions and zoom.
   'site-info',
+  // The keyboard shortcut sheet: labels and keys, nothing of the user's.
+  'shortcut-list',
   // The downloads flyout is drawn in the sheet, which is one of the chrome's
   // own views. Downloads are not secrets - they are files the user asked for,
   // sitting in their own downloads directory - so this is a list the chrome may
@@ -2399,6 +2494,9 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
           zoomDefault: Math.round((Number(prefs.get('defaultZoom')) || 1) * 100)
         };
       }
+
+      case 'shortcut-list':
+        return { groups: shortcuts.sheet({ incognito: INCOGNITO }) };
 
       case 'list-bookmarks':
         return { items: bookmarks.all() };
@@ -2869,6 +2967,8 @@ function menuModel({ tabs, shell }) {
       kind: 'checkbox',
       checked: full
     },
+    { id: 'save-page', label: 'Save page as\u2026', accel: accel('save-page'), icon: 'download',
+      enabled: live && !tabs.activeTab()?.internal },
     { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print', enabled: live },
     { kind: 'separator' },
     {
@@ -2888,6 +2988,7 @@ function menuModel({ tabs, shell }) {
       checked: Boolean(live && active.devToolsOpen),
       enabled: live
     },
+    { id: 'show-shortcuts', label: 'Keyboard shortcuts', accel: accel('show-shortcuts'), icon: 'keyboard' },
     { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
     { kind: 'separator' },
     { kind: 'note', label: `Debrowser ${app.getVersion()}` }

@@ -607,6 +607,25 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
    it would leave nothing louder for something that actually is. */
 .scheme[data-kind="insecure"] { color: var(--warn); }
 
+/* The zoom badge: quiet, and only there when the page is not at its usual size. */
+.zoom-badge {
+  flex: none;
+  height: 22px;
+  margin: 0 -8px 0 var(--s2);
+  padding: 0 var(--s2);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--wash-soft);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.zoom-badge:hover { background: var(--wash); color: var(--text); }
+.zoom-badge:active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
 /* The pill draws the focus ring for this field - see `.omnibox:focus-within` -
    so the field must not draw a second one inside it. */
 #url:focus-visible { box-shadow: none; }

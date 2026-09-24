@@ -166,7 +166,9 @@ const SHEET_PAGES = {
   // The padlock's panel: the site's connection, its permissions, its zoom,
   // and "Clear data". Also where a site's request for the camera, microphone,
   // location or notifications is asked.
-  site: 'site.html'
+  site: 'site.html',
+  // Ctrl+/: every keyboard shortcut. Centred, like the update prompt.
+  shortcuts: 'shortcuts.html'
 };
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
