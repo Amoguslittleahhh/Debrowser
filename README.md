@@ -147,10 +147,11 @@ above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 `Alt+←` / `Alt+→` back and forward · `+L` address bar · `+F` find in page
 (`F3` next, `Shift+F3` previous) · `+D` bookmark · `+Shift+B` bookmarks bar ·
 `+Shift+O` bookmarks · `+H` history · `+J` downloads · `+M` task manager ·
-`+,` settings · `+P` print · `+U` page source · `+0` / `+−` / `+=` zoom ·
+`+,` settings · `+S` save page · `+P` print · `+U` page source · `+0` / `+−` / `+=` zoom ·
 `F11` full screen · `F12` or `Ctrl+Shift+I` developer tools ·
-`+Shift+N` private window. In a private window: `+Shift+L` new circuit for
-this tab · `+Shift+U` new identity · `+Shift+Delete` close and erase now
+`+Shift+N` private window · `+/` every shortcut, in a list. In a private
+window: `+Shift+L` new circuit for this tab · `+Shift+U` new identity ·
+`+Shift+Delete` close and erase now
 
 Every one of them works wherever the keyboard is — in a page, in the task
 manager, in a panel. There is one table, `src/main/shortcuts.js`, and it is

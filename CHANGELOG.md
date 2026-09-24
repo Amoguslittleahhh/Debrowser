@@ -30,6 +30,22 @@ It is not Tor Browser, and says that too. A site that tries hard can tell this b
 - **The collapsed side strip keeps a toolbar.** With tabs down the side and the strip slid away, the address bar, back and the menu used to go with it; they now stay across the top.
 - **A weekly check that the bundled Tor is current**, which opens an issue when it is not; the connection page also says when the Tor network considers this Tor obsolete.
 
+And for everyday browsing, the details that decide whether a browser feels finished:
+
+- **The address bar suggests as you type.** Pages open in another tab (picking one switches to it instead of loading the page twice), bookmarks, and history weighted by how often and how lately you went there, with the plain search always in the list. Words match in any order, anywhere in the title or address. Arrow keys walk the list, Esc puts back what you typed, and a middle click opens a row in a new tab.
+- **A page that cannot load says why, in plain words**: you are offline, the site cannot be found, it is taking too long, it refused, the connection dropped, its certificate is not valid. One button tries again, in place, and when the problem could be the network it tries again by itself as soon as you are back online. The address bar keeps the address that failed, and Back and Reload do what they should.
+- **A tab that crashes says so, with Reload**, and fades in the tab strip until it is reloaded.
+- **Drag tabs to reorder them**, across the top or down the side. The tab follows the pointer, the others slide aside, and Esc puts it back.
+- **Sites can ask for the camera, the microphone, your location or notifications**, and the answer is remembered for that site. They used to be refused silently, which quietly broke video calls, maps and chat apps. The question appears under the padlock; closing it refuses for now. Private windows still refuse all four without asking.
+- **The padlock opens a panel about the site**: whether the connection is secure, what it may use, its zoom, and Clear data for this site.
+- **Leave this page?** A page with unsaved work is asked about before it is left or its tab is closed.
+- **Save page** with Ctrl+S, or from the menus.
+- **The address bar shows a site's zoom** when it is not the default size, and pressing it resets.
+- **Ctrl+/ lists every keyboard shortcut**, also in the app menu.
+- **Pages without a background of their own are drawn on white**, as in every other browser. They used to come up black on near-black.
+- **Polish.** The window starts in your theme's colour instead of flashing dark; closed tabs fold away instead of vanishing; every button has a pressed state; the zoom steps and bookmark overflow are drawn icons rather than typed characters; the find bar and downloads button fade in; reduced motion stops the loading spinner instead of making it flicker; decorative gradients are gone; one dash style in the interface, and shorter copy in a few places that needed it.
+- **Fixed:** after typing a full address, or picking a suggestion that fills one in, the padlock was never drawn. And a reload left the page's address as the tab's title.
+
 ## 1.6.0
 
 The release where the browser stops losing your work. It had no session at all: close the window with twenty tabs open and every one of them was gone — which is the single thing that sends somebody back to the browser they came from, and it was worse here than elsewhere, because the whole design invites you to keep tabs rather than close them and then lost the lot on quit. They come back now, and they come back the cheap way: a row in the strip and a saved address with no renderer behind it, so reopening forty tabs costs about what one tab costs until you touch them.
