@@ -66,7 +66,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   // way the user does - through the policy's own switch, not a test backdoor.
   // `up.test` is left out on purpose: it is the one that must be upgraded.
   const policy = require('./incognito/policy');
-  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'up2', 'cam1', 'cam2', 'cam3', 'decoy']) policy.allowHttp(url(host, ''));
+  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'fp2', 'fpx', 'up2', 'ref', 'img.ref', 'other', 'cam1', 'cam2', 'cam3', 'decoy']) policy.allowHttp(url(host, ''));
   const loaded = [];
   const byHost = {};
   for (const host of ['t1', 't2']) {
@@ -172,18 +172,42 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     // HTTP, so it is absent here - the self-check reads it where it exists.
     return { ua: navigator.userAgent, brands: d ? d.brands.map((b) => b.brand + '/' + b.version).join(',') : null,
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: Intl.DateTimeFormat().resolvedOptions().locale,
-      langs: navigator.languages.join(','), cores: navigator.hardwareConcurrency };
+      langs: navigator.languages.join(','), cores: navigator.hardwareConcurrency,
+      sharedWorker: typeof SharedWorker !== 'undefined' };
+  })()`;
+  // A canvas and an offline-audio fingerprint, the way tracking scripts take
+  // them: the same drawing, hashed.
+  const PRINTS = `(async () => {
+    const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; };
+    const c = document.createElement('canvas'); c.width = 220; c.height = 40;
+    const x = c.getContext('2d'); x.fillStyle = '#f60'; x.fillRect(10, 5, 100, 30);
+    x.font = '16px sans-serif'; x.fillStyle = '#069'; x.fillText('Cwm fjordbank glyphs', 4, 24);
+    const ac = new OfflineAudioContext(1, 5000, 44100); const o = ac.createOscillator(); o.type = 'triangle';
+    o.frequency.value = 1000; const k = ac.createDynamicsCompressor(); o.connect(k); k.connect(ac.destination); o.start();
+    const buf = await ac.startRendering(); let sum = 0; for (const v of buf.getChannelData(0)) sum += Math.abs(v);
+    return { canvas: hash(c.toDataURL()), audio: sum.toFixed(12) };
   })()`;
   const surfaces = fpTab.isLive ? await within(fpTab.wc.executeJavaScript(`(async () => {
     const blob = (src) => URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
     const page = await ${READ};
     const dedicated = await new Promise((r) => { const w = new Worker(blob('(' + ${JSON.stringify(READ)} + ').then(postMessage)')); w.onmessage = (e) => r(e.data); });
-    const shared = await new Promise((r) => { const w = new SharedWorker(blob('onconnect = (e) => (' + ${JSON.stringify(READ)} + ').then((x) => e.ports[0].postMessage(x))')); w.port.onmessage = (e) => r(e.data); });
+    // A frame from another site, in a process of its own: covered like its page.
+    const f = document.createElement('iframe'); f.src = 'http://fpx.test:' + location.port + '/probe-frame.html';
+    document.body.appendChild(f);
+    const frame = await new Promise((r) => {
+      onmessage = (e) => r(e.data);
+      const t = setInterval(() => f.contentWindow && f.contentWindow.postMessage('go', '*'), 200);
+      setTimeout(() => { clearInterval(t); r(null); }, 6000);
+    });
     const headers = await fetch('/headers').then((res) => res.json());
-    return { page, dedicated, shared, headers,
+    return { page, dedicated, frame, headers, prints: [await ${PRINTS}, await ${PRINTS}],
       screen: screen.width + 'x' + screen.height, viewport: innerWidth + 'x' + innerHeight,
       webgl: Boolean(document.createElement('canvas').getContext('webgl')) };
   })()`), 10_000, null) : null;
+  // The same fingerprint from another tab must differ: it cannot link the two.
+  const fp2 = tabs.create({ url: url('fp2', 'idle.html') });
+  await waitFor(() => fp2.isLive && !fp2.loading && /idle/.test(fp2.url), 15_000);
+  const otherTabPrint = fp2.isLive ? await within(fp2.wc.executeJavaScript(PRINTS), 8000, null) : null;
   const audited = await waitFor(() => shell.incognito().fingerprint, 15_000);
   // Take the debugger away, the way the user's DevTools could: the overrides
   // must come back by themselves. Judged by the screen, the one override the
@@ -203,7 +227,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     expected: fp.expected(), surfaces,
     bounds: { width: bounds.width, height: bounds.height },
     audit: audited ? shell.incognito().fingerprint : null,
-    afterDetach, reattached: fpTab.isLive && fpTab.wc.debugger.isAttached()
+    afterDetach, reattached: fpTab.isLive && fpTab.wc.debugger.isAttached(), otherTabPrint
   });
 
   // Uploads. A photo carrying GPS coordinates, picked for a file input: the
@@ -309,6 +333,68 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     camo = { firedWhileOn, firedWhileOff: camouflage.fired - firedBefore - firedWhileOn };
   }
   step('camouflage', camo);
+
+  // Fonts: one installed here but not on the list must not be measurable.
+  // The harness names it; equal widths mean the page fell back.
+  const hiddenFont = argValue('leak-hidden-font');
+  let fonts = { skipped: 'no font to test with' };
+  if (hiddenFont && fpTab.isLive) {
+    fonts = await within(fpTab.wc.executeJavaScript(`(() => {
+      const width = (family) => { const c = document.createElement('canvas').getContext('2d');
+        c.font = '32px ' + family; return c.measureText('mmmmmmmmmmlli WWW 0123').width; };
+      // The allowed font must still measure differently, or the method proves nothing.
+      return { font: ${JSON.stringify(hiddenFont)}, withFont: width('"' + ${JSON.stringify(hiddenFont)} + '", monospace'),
+        fallback: width('monospace'), allowed: width('"DejaVu Serif", monospace'),
+        survey: Object.fromEntries(['OpenSymbol', 'Carlito', 'FreeSans', 'Unifont', 'Loma', 'Courier 10 Pitch'].map((f) => [f, width('"' + f + '", monospace')])) };
+    })()`), 5000, null);
+  }
+  step('fonts', { ...fonts, restricted: ctx.fonts });
+
+  // Referrers: kept within a site, gone between sites.
+  const refTab = tabs.create({ url: url('ref', 'idle.html') });
+  await waitFor(() => refTab.isLive && !refTab.loading && /idle/.test(refTab.url), 15_000);
+  const referrers = refTab.isLive ? await within(refTab.wc.executeJavaScript(`(async () => {
+    const told = (host) => fetch('http://' + host + ':' + location.port + '/headers').then((r) => r.json()).then((h) => h.referer || null);
+    return { sameSite: await told('img.ref.test'), crossSite: await told('other.test') };
+  })()`), 8000, null) : null;
+  step('referrers', referrers);
+
+  // Files dropped and pasted onto a page's own handlers: the photo with GPS
+  // must arrive without it, the pixels the same, and a fresh timestamp.
+  let dropped = null;
+  if (upTab2.isLive) {
+    const b64 = photo.toString('base64');
+    const got = await within(upTab2.wc.executeJavaScript(`(async () => {
+      const bytes = Uint8Array.from(atob(${JSON.stringify(b64)}), (c) => c.charCodeAt(0));
+      const make = () => { const dt = new DataTransfer(); dt.items.add(new File([bytes], 'holiday.jpg', { type: 'image/jpeg', lastModified: 1000 })); return dt; };
+      const receive = (type) => new Promise((resolve) => {
+        const zone = document.body;
+        const on = async (e) => {
+          const list = type === 'drop' ? e.dataTransfer.files : e.clipboardData.files;
+          const f = list[0];
+          const buf = new Uint8Array(await f.arrayBuffer());
+          let s = ''; for (const c of buf) s += String.fromCharCode(c);
+          zone.removeEventListener(type, on);
+          resolve({ gps: s.includes('GPS'), size: buf.length, lastModified: f.lastModified, b64: btoa(s) });
+        };
+        zone.addEventListener(type, on);
+        setTimeout(() => resolve(null), 5000);
+      });
+      const d = receive('drop');
+      document.body.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: make() }));
+      const p = receive('paste');
+      const drop = await d;
+      document.body.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: make() }));
+      return { drop, paste: await p };
+    })()`), 12_000, null);
+    const judge = (r) => r && {
+      gps: r.gps, freshTimestamp: r.lastModified > 1000,
+      samePixels: nativeImage.createFromBuffer(Buffer.from(r.b64, 'base64')).toBitmap()
+        .equals(nativeImage.createFromBuffer(photo).toBitmap())
+    };
+    dropped = got ? { drop: judge(got.drop), paste: judge(got.paste) } : null;
+  }
+  step('dropped', dropped);
 
   // An external protocol starts nothing.
   const deniedBefore = tabs.deniedPermissions.length;

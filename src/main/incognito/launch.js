@@ -89,8 +89,15 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
   delete env.DEBROWSER_TOR_DIR;
   delete env.DEBROWSER_TOR_PID;
   delete env.DEBROWSER_TOR_SEED;
+  delete env.FONTCONFIG_FILE;
 
   try {
+    // Fonts, on Linux: the private browser's font configuration has to be in
+    // its environment before it starts, not set by it afterwards - Chromium
+    // forks the processes pages run in before any of its own code runs, and
+    // they keep the environment they were born with. Measured: set from
+    // inside, two fonts were hidden and four stayed readable. See fonts.js.
+    if (state.userData) require('./fonts').restrict(state.userData, env);
     const [program, args, launcher] = command(torExtra);
     // Under the launcher Tor starts before the private browser exists, so its
     // kept state is unsealed here - this process has the keystore - into a

@@ -111,6 +111,29 @@ class CdpSession {
     }
   }
 
+  /**
+   * A command for a child session - a frame or a worker the page's session
+   * auto-attached to - rather than for the page. Same ceiling, same null on
+   * failure.
+   */
+  async sendTo(sessionId, method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    if (!this.attached || this.wc.isDestroyed()) return null;
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+      if (typeof timer.unref === 'function') timer.unref();
+    });
+    try {
+      const result = await Promise.race([this.wc.debugger.sendCommand(method, params, sessionId), timeout]);
+      return result === TIMED_OUT ? null : result;
+    } catch (err) {
+      this.log(`cdp ${method} (child) failed: ${err.message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Enable a CDP domain once per session. */
   async enable(domain) {
     if (this.enabledDomains.has(domain)) return true;

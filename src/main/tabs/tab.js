@@ -335,7 +335,10 @@ class Tab {
         spellcheck: !INCOGNITO,
         // WebGL hands a page the graphics card's name and quirks; a private
         // window gives it none. See incognito/fingerprint.js for WebGPU.
-        webgl: !INCOGNITO
+        webgl: !INCOGNITO,
+        // Tells the page preload it is in a private window: see the end of
+        // probe-preload.js, where dropped and pasted files are cleaned.
+        additionalArguments: INCOGNITO ? ['--debrowser-private'] : []
         // No `zoomFactor` here: Chromium records it against the site the page
         // loads, so a default applied this way pinned every site. The zoom is
         // set per document instead, below - see zoom.js.

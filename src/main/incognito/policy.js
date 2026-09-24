@@ -152,8 +152,51 @@ function looksBlocked(status, text) {
   return BLOCK_STATUSES.has(status) && BLOCK_MARKERS.test(String(text || ''));
 }
 
+/**
+ * The site a host belongs to - its registrable domain - closely enough to
+ * decide what counts as crossing sites: the last two labels, or three under
+ * the common two-level country suffixes (example.co.uk). Erring towards
+ * "same site" only ever keeps a Referer that Chromium would send anyway.
+ */
+const SECOND_LEVEL = new Set(['co', 'com', 'net', 'org', 'gov', 'ac', 'edu', 'ne', 'or', 'go']);
+function siteOf(hostname) {
+  const labels = String(hostname || '').toLowerCase().replace(/\.$/, '').split('.');
+  if (net.isIP(hostname) || labels.length <= 2) return labels.join('.');
+  const n = labels[labels.length - 1].length === 2 && SECOND_LEVEL.has(labels[labels.length - 2]) ? 3 : 2;
+  return labels.slice(-n).join('.');
+}
+
+/**
+ * Request headers that would tell a site something it has no need to know.
+ *
+ *   - A Referer from another site says where you came from; Chromium already
+ *     cuts it to the origin, and a private window drops it altogether. Kept
+ *     within a site, where hotlink protection depends on it.
+ *   - A service worker's script request: service workers are removed from
+ *     private pages (scrub.js), and one that got as far as fetching its script
+ *     anyway is refused here, a second wall.
+ *
+ * Exported for the test suite.
+ */
+function headersFor({ url, requestHeaders }) {
+  const headers = { ...requestHeaders };
+  const key = (name) => Object.keys(headers).find((k) => k.toLowerCase() === name);
+  const sw = key('service-worker');
+  if (sw && headers[sw] === 'script') return { cancel: true };
+  const ref = key('referer');
+  if (ref) {
+    try {
+      if (siteOf(new URL(headers[ref]).hostname) !== siteOf(new URL(url).hostname)) delete headers[ref];
+    } catch {
+      delete headers[ref];
+    }
+  }
+  return { requestHeaders: headers };
+}
+
 function install(ses) {
   ses.webRequest.onBeforeRequest((details, callback) => callback(judge(details)));
+  ses.webRequest.onBeforeSendHeaders((details, callback) => callback(headersFor(details)));
   ses.webRequest.onHeadersReceived((details, callback) => {
     if (details.resourceType === 'mainFrame') {
       const onion = onionFrom(details.url, details.responseHeaders);
@@ -167,6 +210,7 @@ function install(ses) {
 
 module.exports = {
   isLocalHost, judge, upgradeFailed, allowHttp, install, onionFrom, looksBlocked, BLOCK_STATUSES, isOnion,
+  siteOf, headersFor,
   onionFor: (wcId) => offered.get(wcId) || null,
   statusFor: (wcId) => statuses.get(wcId) ?? null,
   /** A tab's renderer is gone; what was recorded for it goes too. */

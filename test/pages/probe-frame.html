@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>probe frame</title>
+<!-- A cross-site frame answering what it can read, for the fingerprint check. -->
+<script>
+onmessage = () => parent.postMessage({
+  tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  cores: navigator.hardwareConcurrency,
+  sharedWorker: typeof SharedWorker !== 'undefined'
+}, '*');
+</script>

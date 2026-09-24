@@ -713,6 +713,18 @@ function main() {
       };
       require('./incognito/fingerprint').onCovered(
         (tab) => require('./incognito/sanitise').interceptUploads(tab, uploads, pick, log));
+      // Files dropped or pasted into a page, from the page preload: images
+      // come back without their metadata. Bytes in, bytes out; no paths.
+      ipcMain.handle('debrowser:clean-files', (_event, files) => {
+        if (!Array.isArray(files) || files.length > 100) return null;
+        const { stripImage } = require('./incognito/sanitise');
+        return files.map((f) => {
+          const bytes = Buffer.from(f && f.bytes ? f.bytes : []);
+          const result = stripImage(bytes);
+          if (result && result.removed.length) log('sanitise', `${String(f.name).slice(0, 80)}: removed ${result.removed.join(', ')}`);
+          return { bytes: result ? result.data : bytes };
+        });
+      });
     }
     if (circuits) icons.useSession(circuits.iconSession());
 
@@ -803,6 +815,7 @@ function main() {
         fingerprint: fingerprintAudit,
         // setContentProtection does nothing on Linux; see window.js.
         contentProtection: process.platform !== 'linux',
+        fonts: incognitoCtx.fonts,
         ...activeTabPrivacy()
       });
       onIncognitoChange = publish;
@@ -1964,6 +1977,9 @@ const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-histo
  * pages, so without this it would inherit Settings' surface, credentials
  * included. A page that lists files has no business reading a password store.
  */
+/** Files a private window opens in a tab of its own rather than another program. */
+const OPENS_IN_BROWSER = /\.(pdf|png|jpe?g|gif|webp|avif|bmp|txt|md|json|csv|mp3|m4a|ogg|oga|opus|wav|flac|mp4|webm|ogv)$/i;
+
 const DOWNLOAD_REQUESTS = new Set([
   'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download', 'safe-copy']);
 
@@ -2130,6 +2146,31 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       case 'open-download': {
         const file = downloads && downloads.pathOf(String(payload?.id ?? ''));
         if (!file) return { ok: false };
+        if (INCOGNITO) {
+          // Another program is outside the private window: if it goes online -
+          // a document fetching its template or a remote image, a viewer
+          // checking for updates - it goes directly, not through Tor, and
+          // whoever it reaches sees this computer's address. So what the
+          // browser can show itself opens in a private tab, and anything else
+          // is opened only after saying that.
+          if (OPENS_IN_BROWSER.test(file)) {
+            tabs.create({ url: require('url').pathToFileURL(file).href });
+            return { ok: true, inBrowser: true };
+          }
+          const { response } = await dialog.showMessageBox(shell.window, {
+            type: 'warning',
+            buttons: ['Cancel', 'Show in folder', 'Open anyway'],
+            defaultId: 0,
+            cancelId: 0,
+            title: 'Open outside the private window?',
+            message: `${path.basename(file)} would open in another program.`,
+            detail: 'That program is not part of the private window. If it goes online - to fetch a template, an ' +
+              'image or a font, or to check for updates - it does so directly, without Tor, and whoever it ' +
+              'reaches sees your real address. Opening the file can be enough.'
+          });
+          if (response === 1) electronShell.showItemInFolder(file);
+          if (response !== 2) return { ok: false, reason: 'not opened' };
+        }
         const problem = await electronShell.openPath(file);
         return { ok: problem === '', reason: problem || null };
       }

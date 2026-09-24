@@ -103,6 +103,19 @@ function selfSignedServer() {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, server })));
 }
 
+/**
+ * A font installed on this machine that a private window must not show pages:
+ * any family not on the allowed list. Linux only - elsewhere fonts are not
+ * restricted, and the connection page says so.
+ */
+function hiddenFont() {
+  if (process.platform !== 'linux') return null;
+  const { ALLOWED } = require('../src/main/incognito/fonts');
+  const r = require('child_process').spawnSync('fc-list', [':scalable=true:lang=en', 'family'], { encoding: 'utf8' });
+  const families = (r.stdout || '').split('\n').map((l) => l.split(',')[0].trim()).filter(Boolean);
+  return families.find((f) => !ALLOWED.includes(f) && /^[\w ]+$/.test(f)) || null;
+}
+
 function canaryAddress() {
   if (process.env.LEAK_IN_NAMESPACE) return NS_CANARY_IP;
   const nic = Object.values(os.networkInterfaces()).flat()
@@ -307,6 +320,10 @@ async function main() {
   };
   for (const key of Object.keys(env)) if (/_proxy$/i.test(key)) delete env[key];
   delete env.ELECTRON_RUN_AS_NODE;
+  // As launch.js does for the real thing: the font list is in place before the
+  // private browser starts. Not in the normal profile here - that is checked
+  // to be byte-for-byte unchanged.
+  require('../src/main/incognito/fonts').restrict(path.join(home, 'fonts'), env);
 
   const electron = require('electron');           // the binary's path, from Node
   const browserArgs = [ROOT, '--incognito', '--smoke-test', '--disable-gpu',
@@ -318,7 +335,8 @@ async function main() {
     `--leak-idle-ms=${value('idle-ms', '3000')}`,
     // Decoys for the camouflage check: the fixture, never a real site.
     `--leak-decoys=http://decoy.test:${fixtures.port}/idle.html`,
-    `--leak-tls-port=${tls.port || 0}`];
+    `--leak-tls-port=${tls.port || 0}`,
+    `--leak-hidden-font=${hiddenFont() || ''}`];
   // The kill-switch run ends through the panic key rather than a normal quit,
   // so both ways out are covered and the panic key is timed.
   if (killSwitch) browserArgs.push('--leak-panic');
@@ -467,12 +485,14 @@ async function main() {
   // Fingerprint: every surface says the same thing, and what it should.
   const f = s.fingerprint;
   const want = f.expected;
-  const surfaceOk = (r, langs) => r && r.ua === want.userAgent && r.tz === want.timezone && r.locale === want.locale &&
-    r.langs === langs && r.cores === want.cores && (r.brands === null || r.brands.includes(`Chromium/${want.major}`));
+  const surfaceOk = (r) => r && r.ua === want.userAgent && r.tz === want.timezone && r.locale === want.locale &&
+    r.langs === want.languages && r.cores === want.cores && r.sharedWorker === false &&
+    (r.brands === null || r.brands.includes(`Chromium/${want.major}`));
   const fs3 = f.surfaces || {};
-  const badSurfaces = ['page', 'dedicated', 'shared']
-    .filter((k) => !surfaceOk(fs3[k], k === 'shared' ? want.sharedWorkerLanguages : want.languages));
-  check('a site reads the same user agent, time zone, language and core count from the page and both kinds of worker',
+  const badSurfaces = ['page', 'dedicated'].filter((k) => !surfaceOk(fs3[k]));
+  const fr = fs3.frame;
+  if (!(fr && fr.tz === want.timezone && fr.cores === want.cores && fr.sharedWorker === false)) badSurfaces.push('cross-site frame');
+  check('a site reads the same user agent, time zone, language and core count from the page, a worker and a cross-site frame',
     Boolean(f.surfaces) && badSurfaces.length === 0,
     badSurfaces.length ? `differs in ${badSurfaces.join(', ')}: ${JSON.stringify(badSurfaces.map((k) => fs3[k]))}` : `${want.userAgent}, ${want.timezone}, ${want.languages}, ${want.cores} cores`);
   const h = (fs3.headers || {});
@@ -484,6 +504,12 @@ async function main() {
   check('the page is letterboxed, and the screen it reports is its own size',
     f.bounds.width % 200 === 0 && f.bounds.height % 100 === 0 && fs3.screen === fs3.viewport && fs3.webgl === false,
     `page ${f.bounds.width}x${f.bounds.height}, screen ${fs3.screen}, viewport ${fs3.viewport}, WebGL ${fs3.webgl}`);
+  const [p1, p2] = fs3.prints || [];
+  const other = f.otherTabPrint;
+  check('canvas and audio fingerprints stay the same within a tab and differ between tabs',
+    Boolean(p1 && p2 && other) && p1.canvas === p2.canvas && p1.audio === p2.audio &&
+      p1.canvas !== other.canvas && p1.audio !== other.audio,
+    JSON.stringify({ tab: p1, again: p2, otherTab: other }));
   check('the startup self-check ran and found nothing',
     Boolean(f.audit) && !f.audit.error && f.audit.checked > 0 && f.audit.problems.length === 0,
     JSON.stringify(f.audit));
@@ -504,6 +530,24 @@ async function main() {
     !sc.error && sc.pages === 2 && had.js && had.form && had.uri && had.author &&
       !has.js && !has.form && !has.uri && !has.author,
     sc.error || `${sc.pages} pages in ${sc.ms} ms; original ${JSON.stringify(had)}, copy ${JSON.stringify(has)}`);
+
+  const fo = s.fonts || {};
+  if (process.platform === 'linux' && fo.font) {
+    check('fonts installed on this computer but not on the list are invisible to pages',
+      fo.restricted && fo.restricted.available && fo.withFont === fo.fallback && fo.allowed !== fo.fallback &&
+        Object.values(fo.survey || {}).every((w) => w === fo.fallback),
+      `${fo.font}: ${fo.withFont} vs fallback ${fo.fallback} (an allowed font: ${fo.allowed}) ${JSON.stringify(fo.survey || {})}`);
+  } else {
+    console.log(`  NOTE  fonts not checked: ${fo.skipped || (fo.restricted && fo.restricted.reason) || 'not Linux'}`);
+  }
+
+  const refs = s.referrers || {};
+  check('a Referer is kept within a site and dropped between sites',
+    /^http:\/\/ref\.test/.test(String(refs.sameSite)) && refs.crossSite === null, JSON.stringify(refs));
+  const dr = s.dropped || {};
+  const cleanArrival = (r) => r && r.gps === false && r.samePixels === true && r.freshTimestamp === true;
+  check('a photo dropped or pasted onto a page arrives without its GPS data or its timestamp',
+    cleanArrival(dr.drop) && cleanArrival(dr.paste), JSON.stringify(dr));
 
   const cert = s.badCertificate || {};
   check('a site with a certificate nobody vouches for is refused, with no way past it',

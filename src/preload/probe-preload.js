@@ -21,7 +21,8 @@
  *    from renderer CPU and from the page's own script/layout timings, and the
  *    two signals are fused there. See governor/boost.js.
  *  - It must never interfere with the page: all listeners are passive, and
- *    nothing on `window` or the DOM is modified.
+ *    nothing on `window` or the DOM is modified. The one exception is at the
+ *    end of the file: private windows only, files dropped or pasted in.
  */
 
 const { ipcRenderer, contextBridge } = require('electron');
@@ -505,3 +506,80 @@ ipcRenderer.on('debrowser:payment-fill', (_event, record) => {
 });
 
 contextBridge.exposeInMainWorld('__debrowser', Object.freeze({ version: 1 }));
+
+/* ------------------------------------------------------------------ */
+/* Private windows: files dropped or pasted into a page                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The one place this file does interfere with the page, and only in a private
+ * window: a file the page would receive by drag and drop or by paste does not
+ * pass through the file picker, where uploads are cleaned (see
+ * incognito/sanitise.js), so it is caught here instead. The original event is
+ * stopped before any of the page's listeners see it - this listener is on the
+ * window, in the capture phase, added before any page script ran - and the
+ * same event is sent again with clean files: images without their Exif, GPS,
+ * XMP or comments, and every file with its timestamp reset, because when a
+ * photo was taken or a document last edited is metadata too.
+ *
+ * If cleaning fails the drop is dropped. A file that reached the page with
+ * its metadata would be the failure this exists to prevent.
+ */
+if (process.argv.includes('--debrowser-private')) {
+  /* global DataTransfer, File, DragEvent, ClipboardEvent -- page-side constructors */
+  const IMAGE = /\.(jpe?g|png|webp)$/i;
+  const ours = new WeakSet();
+
+  const cleanFiles = async (list) => {
+    const files = [...list];
+    const images = files.map((f, i) => (IMAGE.test(f.name) || /^image\/(jpeg|png|webp)$/.test(f.type) ? i : -1))
+      .filter((i) => i >= 0);
+    let cleaned = [];
+    if (images.length) {
+      const payload = await Promise.all(images.map(async (i) => ({
+        name: files[i].name, type: files[i].type, bytes: new Uint8Array(await files[i].arrayBuffer())
+      })));
+      cleaned = await ipcRenderer.invoke('debrowser:clean-files', payload);
+      if (!Array.isArray(cleaned) || cleaned.length !== images.length) throw new Error('not cleaned');
+    }
+    const now = Date.now();
+    const out = new DataTransfer();
+    files.forEach((f, i) => {
+      const k = images.indexOf(i);
+      const body = k >= 0 ? cleaned[k].bytes : f;
+      out.items.add(new File([body], f.name, { type: f.type, lastModified: now }));
+    });
+    return out;
+  };
+
+  const intercept = (type, filesOf, remake) => {
+    window.addEventListener(type, (event) => {
+      if (ours.has(event)) return;
+      const list = filesOf(event);
+      if (!list || !list.length) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const target = event.target;
+      cleanFiles(list).then((clean) => {
+        if (type === 'drop' && target instanceof HTMLInputElement && target.type === 'file') {
+          target.files = clean.files;
+          target.dispatchEvent(new Event('input', { bubbles: true }));
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return;
+        }
+        const again = remake(event, clean);
+        ours.add(again);
+        target.dispatchEvent(again);
+      }).catch(() => { /* not cleaned: not delivered */ });
+    }, true);
+  };
+
+  intercept('drop', (e) => e.dataTransfer && e.dataTransfer.files, (e, dt) => new DragEvent('drop', {
+    bubbles: true, cancelable: true, composed: true, dataTransfer: dt,
+    clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
+    ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey
+  }));
+  intercept('paste', (e) => e.clipboardData && e.clipboardData.files, (e, dt) => new ClipboardEvent('paste', {
+    bubbles: true, cancelable: true, composed: true, clipboardData: dt
+  }));
+}

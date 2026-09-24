@@ -39,6 +39,8 @@
  * OS this is, so what matters is that every private window on one OS says the
  * same - and the Accept-Language header is set to match.
  */
+const scrub = require('./scrub');
+
 const PROFILE = Object.freeze({
   timezone: 'UTC',
   locale: 'en-US',
@@ -97,6 +99,37 @@ function onCovered(fn) {
 
 /** Tabs whose overrides are owed on every re-attach, and the screen each reports. */
 const screens = new WeakMap();
+/** Each tab's canvas and audio seed. See scrub.js. */
+const seeds = new WeakMap();
+const seedOf = (wc) => {
+  if (!seeds.has(wc)) seeds.set(wc, scrub.newSeed());
+  return seeds.get(wc);
+};
+
+/**
+ * The client hints, read once from the engine itself and then fixed where
+ * they describe this computer rather than the browser: the OS version, the
+ * CPU architecture, the model. Brands and versions are the engine's own, so
+ * they agree with the user agent string. Null until the first private tab has
+ * read them (see shield).
+ */
+let metadata = null;
+const NAV_PLATFORM = { win32: 'Win32', darwin: 'MacIntel' }[process.platform] || 'Linux x86_64';
+function fixedMetadata(real) {
+  const [platform, platformVersion] = { win32: ['Windows', '15.0.0'], darwin: ['macOS', '15.0.0'] }[process.platform] ||
+    ['Linux', ''];
+  return {
+    brands: real.brands,
+    fullVersionList: real.fullVersionList,
+    platform,
+    platformVersion,
+    architecture: 'x86',
+    model: '',
+    mobile: false,
+    bitness: '64',
+    wow64: false
+  };
+}
 const watched = new WeakSet();
 const released = new WeakSet();
 
@@ -108,15 +141,75 @@ const released = new WeakSet();
 async function apply(tab) {
   const cdp = tab.cdp;
   if (!cdp || !tab.wc || tab.wc.isDestroyed()) return false;
+  watchChildren(tab);
   const screen = screens.get(tab.wc) || { width: 0, height: 0 };
+  // The page domain first: the scrub script is registered through it.
+  if (!(await cdp.enable('Page'))) return false;
   const results = await Promise.all([
-    cdp.send('Emulation.setTimezoneOverride', { timezoneId: PROFILE.timezone }),
-    cdp.send('Emulation.setLocaleOverride', { locale: PROFILE.locale }),
-    cdp.send('Emulation.setHardwareConcurrencyOverride', { hardwareConcurrency: PROFILE.cores }),
+    ...emulation(cdp.send.bind(cdp)),
     screenOverride(cdp, screen),
+    cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: scrub.sourceFor(seedOf(tab.wc), PROFILE.cores) }),
     ...coverHooks.map((fn) => Promise.resolve(fn(tab)).then((ok) => (ok === false ? null : true), () => null))
   ]);
+  // Last: from here every new frame and worker is held until it is covered.
+  results.push(await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }));
   return results.every((r) => r !== null);
+}
+
+/** The overrides a page or a frame gets, through `send`. */
+function emulation(send) {
+  return [
+    send('Emulation.setTimezoneOverride', { timezoneId: PROFILE.timezone }),
+    send('Emulation.setLocaleOverride', { locale: PROFILE.locale }),
+    send('Emulation.setHardwareConcurrencyOverride', { hardwareConcurrency: PROFILE.cores }),
+    send('Emulation.setEmulatedMedia', { features: scrub.MEDIA_FEATURES }),
+    metadata
+      ? send('Emulation.setUserAgentOverride', {
+        userAgent: userAgent(), acceptLanguage: PROFILE.languages, platform: NAV_PLATFORM, userAgentMetadata: metadata
+      })
+      : Promise.resolve({})
+  ];
+}
+
+/**
+ * Frames in other processes and workers arrive paused (waitForDebuggerOnStart)
+ * and are covered before they run: the scrub script, and for a frame the same
+ * overrides as its page. Resumed only when all of that took. One that could
+ * not be covered stays paused - a frame that never loads, a worker that never
+ * starts - rather than running uncovered.
+ */
+function watchChildren(tab) {
+  const wc = tab.wc;
+  if (watchedChildren.has(wc)) return;
+  watchedChildren.add(wc);
+  wc.debugger.on('message', (_event, method, params) => {
+    if (method !== 'Target.attachedToTarget') return;
+    coverChild(tab, params).catch(() => {});
+  });
+}
+const watchedChildren = new WeakSet();
+
+async function coverChild(tab, { sessionId, targetInfo }) {
+  const cdp = tab.cdp;
+  if (!cdp || !tab.wc || tab.wc.isDestroyed()) return;
+  const send = (method, params) => cdp.sendTo(sessionId, method, params);
+  const source = scrub.sourceFor(seedOf(tab.wc), PROFILE.cores);
+  let ok;
+  if (targetInfo.type === 'iframe' || targetInfo.type === 'page') {
+    const enabled = await send('Page.enable');
+    const results = await Promise.all([
+      send('Page.addScriptToEvaluateOnNewDocument', { source }),
+      ...emulation(send)
+    ]);
+    ok = enabled !== null && results.every((r) => r !== null);
+  } else {
+    const res = await send('Runtime.evaluate', { expression: source });
+    ok = res !== null && !res.exceptionDetails;
+  }
+  // Its own children - a worker's worker, a frame's frame - the same way.
+  await send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+  if (ok) await send('Runtime.runIfWaitingForDebugger');
+  else tab.log?.(`fingerprint: a ${targetInfo.type} could not be covered and was left paused`);
 }
 
 /**
@@ -151,8 +244,17 @@ function block(tab, why) {
  */
 async function shield(tab, load) {
   const wc = tab.wc;
-  await wc.loadURL('about:blank').catch(() => {});
-  if (!(await apply(tab))) {
+  if (!metadata) {
+    // The first private tab reads the engine's own client hints, once, from a
+    // page of ours - a secure context, which about:blank is not.
+    await wc.loadURL(require('../pages').BLANK_URL).catch(() => {});
+    const real = await wc.executeJavaScript(
+      "navigator.userAgentData ? navigator.userAgentData.getHighEntropyValues(['fullVersionList']) : null").catch(() => null);
+    if (real && real.brands) metadata = fixedMetadata(real);
+  } else {
+    await wc.loadURL('about:blank').catch(() => {});
+  }
+  if (!metadata || !(await apply(tab))) {
     block(tab, 'Its protection against being recognised could not be switched on, so it did not load the page.');
     return false;
   }
@@ -220,13 +322,9 @@ function expected() {
     timezone: PROFILE.timezone,
     locale: PROFILE.locale,
     languages: PROFILE.languages,
-    // A shared worker reports only the app's locale, not the language list:
-    // Electron's, not Chrome's, behaviour - measured, and not changeable (the
-    // DevTools protocol's override wipes the client-hint brands and still
-    // misses the dedicated worker). The same in every private window, so it
-    // tells a site nothing about which one.
-    sharedWorkerLanguages: PROFILE.locale,
-    cores: PROFILE.cores
+    cores: PROFILE.cores,
+    memory: 8,
+    platformVersion: { win32: '15.0.0', darwin: '15.0.0' }[process.platform] || ''
   };
 }
 

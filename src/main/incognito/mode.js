@@ -359,6 +359,9 @@ function prepare(app) {
   process.env.TZ = 'UTC';
   // The same for the language every kind of worker reports. See fingerprint.js.
   require('./fingerprint').prepareEnvironment();
+  // Only a fixed few fonts, where the OS allows choosing (Linux) - set up by
+  // whoever started this process; see fonts.js for why it cannot be done here.
+  const fontLimit = require('./fonts').status();
   require('./fingerprint').prepareApp(app);
 
   // The proxy is Tor, on a port picked here: it has to be on the command line
@@ -381,7 +384,9 @@ function prepare(app) {
     poolPorts,
     proxyPort: port,
     proxyRules: `socks5://127.0.0.1:${port}`,
-    jsLevel: readJsLevel(normalUserData)
+    jsLevel: readJsLevel(normalUserData),
+    /** Whether installed fonts are hidden from pages; see fonts.js. */
+    fonts: fontLimit
   };
 }
 

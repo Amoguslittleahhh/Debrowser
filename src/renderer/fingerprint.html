@@ -22,17 +22,16 @@
         <strong id="headline">Checking…</strong>
       </div>
       <p class="detail" id="detail" style="margin-top: var(--s3)">
-        Everything below was read the way a site would read it - from this page, from a
-        worker it starts, and from a shared worker - and compared with what a private
-        window is meant to say. Nothing here is sent anywhere.
+        Everything below was read the way a site would read it - from this page and from
+        a worker it starts - and compared with what a private window is meant to say.
+        Nothing here is sent anywhere.
       </p>
     </section>
     <section class="facts">
       <table id="results" aria-live="polite"></table>
       <p class="note" id="limits">
-        Not covered here: service workers, which only a web page can start - the leak test
-        checks those. Installed fonts, canvas and audio output are not normalised and are
-        not claimed to be.
+        Shared and service workers do not exist in a private window. Canvas and audio
+        output carry a small per-tab variation, so they cannot link one visit to another.
       </p>
     </section>
   </main>

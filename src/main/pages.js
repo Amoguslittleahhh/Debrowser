@@ -52,7 +52,11 @@ const PAGES = {
   // Incognito only: a page asked for plain HTTP and HTTPS was not available.
   insecure: 'insecure.html',
   // Incognito only: the fingerprint self-check - what sites can read.
-  fingerprint: 'fingerprint.html'
+  fingerprint: 'fingerprint.html',
+  // Incognito only: the empty page a private tab starts on, while its
+  // protections go on. Ours rather than about:blank because it is a secure
+  // context, where the engine's real client-hint brands can be read.
+  blank: 'blank.html'
 };
 
 /** Where a new tab goes when the user has not chosen a homepage. */
@@ -63,6 +67,7 @@ const DOWNLOADS_URL = `${SCHEME}://downloads`;
 const TOR_URL = `${SCHEME}://tor`;
 const INSECURE_URL = `${SCHEME}://insecure`;
 const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
+const BLANK_URL = `${SCHEME}://blank`;
 
 /**
  * Must run before `app.whenReady()`.
@@ -230,5 +235,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, TOR_URL,
-  INSECURE_URL, FINGERPRINT_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
+  INSECURE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

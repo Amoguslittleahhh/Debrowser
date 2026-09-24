@@ -74,8 +74,9 @@ function start() {
       // What the browser told the site about itself, for the fingerprint check.
       if (req.url === '/headers') {
         const told = Object.fromEntries(Object.entries(req.headers)
-          .filter(([k]) => /^(user-agent|accept-language|sec-ch-ua.*)$/.test(k)));
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          .filter(([k]) => /^(user-agent|accept-language|sec-ch-ua.*|referer)$/.test(k)));
+        // Readable from any fixture site, so a page can ask what another site was told.
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
         res.end(JSON.stringify(told));
         return;
       }

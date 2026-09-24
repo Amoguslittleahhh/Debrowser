@@ -71,6 +71,12 @@ function render(incognito) {
                       (tor.state === 'bootstrapping' && tor.warning));
 
   renderFingerprint(incognito.fingerprint);
+  const fonts = document.getElementById('fonts');
+  const f = incognito.fonts || {};
+  fonts.className = f.available ? 'yes' : 'no';
+  fonts.textContent = f.available
+    ? `Hidden: pages see only ${f.families.length} common fonts`
+    : `Visible: ${f.reason || 'not controllable here'}`;
   const capture = document.getElementById('capture');
   if (incognito.contentProtection === false) {
     capture.className = 'no';

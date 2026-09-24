@@ -1,6 +1,6 @@
 'use strict';
 
-/* global self, Worker, SharedWorker, Blob -- this page starts workers; `self` is what exists in both */
+/* global self, Worker, Blob -- this page starts a worker; `self` is what exists in both */
 
 /**
  * The private window's self-check: every surface the fingerprint layer claims
@@ -18,7 +18,7 @@ const api = window.debrowser;
 /** Read inside a page or a worker. Kept self-contained: it is serialised. */
 async function readSurfaces() {
   const d = self.navigator.userAgentData || null;
-  const hi = d ? await d.getHighEntropyValues(['fullVersionList']).catch(() => null) : null;
+  const hi = d ? await d.getHighEntropyValues(['fullVersionList', 'platformVersion', 'architecture', 'model']).catch(() => null) : null;
   const out = {
     userAgent: navigator.userAgent,
     brands: d ? d.brands.map((b) => `${b.brand}/${b.version}`) : [],
@@ -28,12 +28,14 @@ async function readSurfaces() {
     locale: Intl.DateTimeFormat().resolvedOptions().locale,
     languages: [...(navigator.languages || [])].join(','),
     cores: navigator.hardwareConcurrency,
-    gpu: 'gpu' in navigator
+    memory: navigator.deviceMemory,
+    platformVersion: hi ? hi.platformVersion : null,
+    architecture: hi ? hi.architecture : null,
+    // Each of these should not exist at all in a private window.
+    present: ['gpu', 'getBattery', 'connection', 'keyboard', 'serviceWorker', 'usb', 'hid', 'serial', 'bluetooth']
+      .filter((p) => p in navigator).join(', ') || 'none',
+    sharedWorker: typeof self.SharedWorker !== 'undefined'
   };
-  if (out.gpu) {
-    const adapter = await navigator.gpu.requestAdapter().catch(() => null);
-    out.adapter = adapter ? (adapter.info && (adapter.info.vendor || adapter.info.description)) || 'an adapter' : null;
-  }
   return out;
 }
 
@@ -43,20 +45,21 @@ function inDedicatedWorker() {
   return withTimeout(new Promise((resolve) => { w.onmessage = (e) => resolve(e.data); }));
 }
 
-function inSharedWorker() {
-  const src = `onconnect = (e) => { const port = e.ports[0]; (${readSurfaces})().then((r) => port.postMessage(r)); };`;
-  const w = new SharedWorker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
-  return withTimeout(new Promise((resolve) => { w.port.onmessage = (e) => resolve(e.data); }));
-}
 
 const withTimeout = (p, ms = 4000) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
 
-function pageOnly() {
+async function pageOnly() {
   const canvas = document.createElement('canvas');
+  const devices = navigator.mediaDevices ? await navigator.mediaDevices.enumerateDevices().catch(() => []) : [];
   return {
     screen: `${window.screen.width}×${window.screen.height}`,
     viewport: `${window.innerWidth}×${window.innerHeight}`,
-    webgl: Boolean(canvas.getContext('webgl') || canvas.getContext('webgl2'))
+    webgl: Boolean(canvas.getContext('webgl') || canvas.getContext('webgl2')),
+    gamepads: navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean).length : 0,
+    devices: devices.length,
+    voices: window.speechSynthesis ? window.speechSynthesis.getVoices().length : 0,
+    dark: window.matchMedia('(prefers-color-scheme: dark)').matches,
+    reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches
   };
 }
 
@@ -73,12 +76,23 @@ function compare(expected, surfaces, page) {
     add(surface, 'Time zone', expected.timezone, r.timezone);
     add(surface, 'UTC offset', 0, r.offset);
     add(surface, 'Locale', expected.locale, r.locale);
-    add(surface, 'Languages', surface === 'shared worker' ? expected.sharedWorkerLanguages : expected.languages, r.languages);
+    add(surface, 'Languages', expected.languages, r.languages);
     add(surface, 'CPU cores', expected.cores, r.cores);
-    add(surface, 'Graphics adapter (WebGPU)', 'none', r.adapter ? r.adapter : 'none');
+    add(surface, 'Memory', expected.memory, r.memory);
+    add(surface, 'Hardware and settings APIs present', 'none', r.present);
+    add(surface, 'Shared workers', false, r.sharedWorker);
+    if (r.platformVersion !== null) {
+      add(surface, 'OS version (client hints)', expected.platformVersion, r.platformVersion);
+      add(surface, 'CPU architecture (client hints)', 'x86', r.architecture);
+    }
   }
   add('page', 'Screen equals the page', page.viewport, page.screen);
   add('page', 'WebGL', false, page.webgl);
+  add('page', 'Gamepads', 0, page.gamepads);
+  add('page', 'Media devices', 0, page.devices);
+  add('page', 'Speech voices', 0, page.voices);
+  add('page', 'Dark mode', false, page.dark);
+  add('page', 'Reduced motion', false, page.reducedMotion);
   return checks;
 }
 
@@ -119,10 +133,9 @@ async function expectedValues() {
   }
   const surfaces = {
     page: await readSurfaces(),
-    'dedicated worker': await inDedicatedWorker().catch(() => null),
-    'shared worker': await inSharedWorker().catch(() => null)
+    'dedicated worker': await inDedicatedWorker().catch(() => null)
   };
-  const checks = compare(expected, surfaces, pageOnly());
+  const checks = compare(expected, surfaces, await pageOnly());
   render(checks);
   window.__audit = { checks, problems: checks.filter((c) => !c.ok) };
 })();
