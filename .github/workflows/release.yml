@@ -281,6 +281,27 @@ jobs:
         if: ${{ !(matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true') }}
         run: npx electron-builder ${{ matrix.platform }} --publish never
 
+      # The fuses (electron-builder.yml), read back from what was actually
+      # packaged - and the one that matters most tried for real: with
+      # RunAsNode off, ELECTRON_RUN_AS_NODE=1 starts the browser instead of
+      # running the script, so the marker must never appear. Linux only: the
+      # fuse wire is the same on every platform, and this runner has the
+      # unpacked build to hand.
+      - name: Check the packaged fuses
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 3
+        run: |
+          npx electron-fuses read --app dist/linux-unpacked/debrowser | tee fuses.txt
+          for want in "RunAsNode is Disabled" "EnableNodeOptionsEnvironmentVariable is Disabled" \
+                      "EnableNodeCliInspectArguments is Disabled" "EnableEmbeddedAsarIntegrityValidation is Enabled" \
+                      "OnlyLoadAppFromAsar is Enabled"; do
+            grep -q "$want" fuses.txt || { echo "fuse not set: $want"; exit 1; }
+          done
+          (ELECTRON_RUN_AS_NODE=1 timeout 15 xvfb-run -a dist/linux-unpacked/debrowser --no-sandbox \
+            -e "console.log('RAN' + ' AS NODE')" > ran.txt 2>&1 || true)
+          if grep -q "RAN AS NODE" ran.txt; then echo "ELECTRON_RUN_AS_NODE still runs Node"; exit 1; fi
+          echo "ELECTRON_RUN_AS_NODE=1 ran no Node code"
+
       # Azure Trusted Signing. Windows only, and only when its secrets exist.
       # The endpoint/account/profile are not secret, but they are deployment
       # detail rather than source, so they are variables rather than literals.

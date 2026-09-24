@@ -148,7 +148,9 @@ above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 (`F3` next, `Shift+F3` previous) · `+D` bookmark · `+Shift+B` bookmarks bar ·
 `+Shift+O` bookmarks · `+H` history · `+J` downloads · `+M` task manager ·
 `+,` settings · `+P` print · `+U` page source · `+0` / `+−` / `+=` zoom ·
-`F11` full screen · `F12` or `Ctrl+Shift+I` developer tools
+`F11` full screen · `F12` or `Ctrl+Shift+I` developer tools ·
+`+Shift+N` private window. In a private window: `+Shift+L` new circuit for
+this tab · `+Shift+U` new identity · `+Shift+Delete` close and erase now
 
 Every one of them works wherever the keyboard is — in a page, in the task
 manager, in a panel. There is one table, `src/main/shortcuts.js`, and it is
@@ -310,6 +312,42 @@ per-renderer floor is not movable — so what moved the number was discarding mo
 of them, once discarding stopped being something you could see.
 
 ---
+
+## Private windows
+
+Ctrl+Shift+N opens a private window that your router and your ISP cannot
+read: every request goes through a bundled Tor, reached through bridges so
+that by default they cannot tell from the traffic that it is Tor either. They
+still see that you are online, when, and how much - nothing can hide that.
+
+- **The operating system keeps it off the network.** On Linux the private
+  window runs in a network namespace with nothing but loopback, and Tor
+  outside it; on Windows a firewall rule blocks the private copy of the
+  browser from everything but Tor. A request that ignored every setting would
+  have nowhere to go. macOS has no such control without root, and says so: a
+  tripwire that watches every socket and closes the window is what it has.
+- **A Tor circuit per tab**, a new one on request (Ctrl+Shift+L), and new
+  identity (Ctrl+Shift+U). A site that blocks one exit is retried from others
+  before you are told it refuses Tor.
+- **One fingerprint for every private window**: the same user agent (with no
+  Electron or Debrowser in it), UTC, en-US, four cores, a letterboxed screen,
+  no WebGL - checked by the window itself at start
+  (`debrowser://fingerprint`).
+- **HTTPS or an explanation**, no local-network addresses, certificate errors
+  fatal, and JavaScript without its optimising compilers by default.
+- **Nothing kept**: the profile is a temp directory deleted on exit.
+  Ctrl+Shift+Delete deletes it immediately, Tor with it.
+- **Files cleaned both ways**: photos lose their GPS and camera data before a
+  page receives them, and a downloaded PDF can be saved as a flat copy with no
+  scripts, forms or links.
+- **Your own bridge**: `tools/bridge-kit/` turns a cheap server into an
+  unlisted bridge, the one thing that also hides Tor from an ISP matching
+  addresses against published bridge lists.
+
+What it is not: Tor Browser. Sites can tell this browser apart from others
+more easily, and a program running as you on this computer can read what the
+window holds. When someone's safety depends on it, use Tor Browser or Tails.
+The threat model is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#private-windows).
 
 ## Measured results
 
@@ -527,6 +565,19 @@ tried, measured and removed — live on the `claude/research-build` branch.
 ---
 
 ## Limits worth knowing
+
+- **Private windows are not Tor Browser.** They hide what you do from your
+  network, but a site that tries hard can tell this browser from Tor
+  Browser's crowd: client-hint brands say Chromium, installed fonts and canvas
+  output are not normalised, and a service worker can read the real core
+  count. Every private window on one OS looks the same, which is what the
+  fingerprint layer is for; it is not the same as looking like everyone.
+- **Traffic timing can still hint at a site.** Camouflage (opt-in) makes that
+  harder, not impossible, at about twice the data.
+- **A file dragged onto a page is not cleaned.** Upload cleaning works on the
+  file picker; drag and drop does not pass through it.
+- **Linux cannot block screenshots of a private window**; Windows and macOS
+  can, and do.
 
 - Restoring a discarded tab replays navigation history, scroll offset and
   unsubmitted form input. It does **not** restore in-page JavaScript state — a

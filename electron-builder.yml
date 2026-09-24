@@ -12,6 +12,32 @@ directories:
   output: dist
   buildResources: build
 
+## Electron's fuses: switches burned into the packaged binary.
+##
+## Each one closes a door through which any program running as the user could
+## take over this browser - and read everything a private window holds:
+##
+##   runAsNode                  ELECTRON_RUN_AS_NODE=1 would turn our own signed
+##                              binary into a general Node interpreter.
+##   enableNodeOptions...       NODE_OPTIONS could preload code into the main
+##                              process.
+##   enableNodeCliInspect...    --inspect would attach a debugger to it.
+##   embeddedAsarIntegrity...   The app archive is checked against a hash in the
+##   onlyLoadAppFromAsar        binary, and nothing outside it is loaded, so the
+##                              code cannot be swapped on disk (Windows, macOS).
+##
+## Nothing here needs any of them: the helpers are separate binaries, and no
+## code starts this one as Node (tools/ scripts run the system's Node). Dev and
+## test runs are unpackaged, so fuses do not apply to them. The release
+## workflow reads the fuses back from the packaged Linux build and checks that
+## ELECTRON_RUN_AS_NODE really does nothing.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+
 ## What goes in the archive.
 ##
 ## `src` is the whole application. `docs/`, `bench/` and `legacy/` are absent:
