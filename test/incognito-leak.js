@@ -77,6 +77,32 @@ const { socksPoolOnPorts } = require('./socks-stub');
 const { POOL_SIZE } = require('../src/main/incognito/mode');
 
 /** Where a "direct" connection would go: somewhere that is not loopback. */
+/**
+ * An HTTPS server on a certificate made for this run, signed by nobody.
+ * Made with openssl rather than committed, so no private key - however
+ * harmless - sits in the repository. Resolves `{port: 0, reason}` when
+ * openssl is missing, which the check then reports as a failure.
+ */
+function selfSignedServer() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'debrowser-tls-'));
+  const key = path.join(dir, 'tls.key');
+  const cert = path.join(dir, 'tls.pem');
+  const made = require('child_process').spawnSync('openssl',
+    ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
+     '-days', '2', '-subj', '/CN=tls.test'], { encoding: 'utf8' });
+  if (made.status !== 0 || !fs.existsSync(cert)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return Promise.resolve({ port: 0, reason: (made.error && made.error.message) || made.stderr || 'openssl failed' });
+  }
+  const credentials = { key: fs.readFileSync(key), cert: fs.readFileSync(cert) };
+  fs.rmSync(dir, { recursive: true, force: true });
+  const server = require('https').createServer(credentials, (req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<!doctype html><title>intercepted</title><p>An exit relay could read and change this page.');
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, server })));
+}
+
 function canaryAddress() {
   if (process.env.LEAK_IN_NAMESPACE) return NS_CANARY_IP;
   const nic = Object.values(os.networkInterfaces()).flat()
@@ -227,7 +253,11 @@ async function main() {
     `${killSwitch ? ', started through the kill switch' : ''}\n`);
 
   const fixtures = await require('../src/main/fixture-server').start();
-  const stub = await socksPoolOnPorts(POOL_SIZE, fixtures.port);
+  // An HTTPS site with a certificate nobody vouches for - what an exit relay
+  // intercepting the connection would present. Its page must never show.
+  const tls = await selfSignedServer();
+  const route = (host) => (host.startsWith('tls.') && tls.port ? tls.port : fixtures.port);
+  const stub = await socksPoolOnPorts(POOL_SIZE, route);
   const ip = canaryAddress();
   if (!ip) {
     check('a canary address exists to leak to', false, 'no non-loopback IPv4 address on this machine');
@@ -287,7 +317,8 @@ async function main() {
     `--leak-netlog-dir=${netlogs}`,
     `--leak-idle-ms=${value('idle-ms', '3000')}`,
     // Decoys for the camouflage check: the fixture, never a real site.
-    `--leak-decoys=http://decoy.test:${fixtures.port}/idle.html`];
+    `--leak-decoys=http://decoy.test:${fixtures.port}/idle.html`,
+    `--leak-tls-port=${tls.port || 0}`];
   // The kill-switch run ends through the panic key rather than a normal quit,
   // so both ways out are covered and the panic key is timed.
   if (killSwitch) browserArgs.push('--leak-panic');
@@ -339,6 +370,7 @@ async function main() {
     const template = path.join(privateRoot, 'torrc-test');
     fs.writeFileSync(template, require('../src/main/incognito/tor').launcherTemplate(), { mode: 0o600 });
     env.FAKE_TOR_FIXTURE_PORT = String(fixtures.port);
+    if (tls.port) env.FAKE_TOR_TLS_PORT = String(tls.port);
     env.FAKE_TOR_NAMES = namesFile;
     const args = browserArgs.filter((a) => !a.startsWith('--incognito-proxy-port='));
     launch = [helper, [privateRoot, path.join(__dirname, 'fake-tor.js'), template, '--', electron, ...args]];
@@ -472,6 +504,11 @@ async function main() {
     !sc.error && sc.pages === 2 && had.js && had.form && had.uri && had.author &&
       !has.js && !has.form && !has.uri && !has.author,
     sc.error || `${sc.pages} pages in ${sc.ms} ms; original ${JSON.stringify(had)}, copy ${JSON.stringify(has)}`);
+
+  const cert = s.badCertificate || {};
+  check('a site with a certificate nobody vouches for is refused, with no way past it',
+    tls.port > 0 && cert.shown === false && /CERT/.test(String(cert.error)) && cert.proceedOffered === false,
+    tls.port ? JSON.stringify(cert) : `no test certificate: ${tls.reason}`);
 
   const camo = s.camouflage || {};
   const decoySlots = slotsOf('decoy');

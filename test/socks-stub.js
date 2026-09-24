@@ -12,7 +12,8 @@
 const net = require('net');
 
 /**
- * @param {number} fixturePort
+ * @param {number|((host: string) => number)} fixturePort - or a function that
+ *   picks the port per host name (the HTTPS fixture lives on its own)
  * @param {{port?: number, path?: string}} [where] - default: a free loopback port
  * @param {(host: string) => void} [onName]
  */
@@ -48,7 +49,8 @@ function socksStub(fixturePort, where = { port: 0 }, onName = () => {}) {
         client.end(Buffer.from([5, 4, 0, 1, 0, 0, 0, 0, 0, 0]));   // host unreachable
         return;
       }
-      const upstream = net.connect(fixturePort, '127.0.0.1', () => {
+      const target = typeof fixturePort === 'function' ? fixturePort(host) : fixturePort;
+      const upstream = net.connect(target, '127.0.0.1', () => {
         client.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
         if (rest.length) upstream.write(rest);
         client.pipe(upstream);

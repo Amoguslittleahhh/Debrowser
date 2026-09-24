@@ -266,6 +266,16 @@ if (!app.requestSingleInstanceLock()) {
       incognitoSessions.add(ses);
       incognito.configureSession(ses, incognitoCtx);
     });
+    // A certificate that does not check out is fatal, with no way past it. An
+    // exit relay is exactly where someone would sit to intercept a connection,
+    // and "proceed anyway" is the button that makes that work. Electron already
+    // refuses when nothing answers this event; it is answered here so the rule
+    // is written down, and cannot be undone by some later handler that allows.
+    app.on('certificate-error', (event, _wc, url, error, _cert, callback) => {
+      event.preventDefault();
+      console.error(`[debrowser] refused ${url}: ${error}`);
+      callback(false);
+    });
     // `exit` rather than `will-quit`: it also runs when something calls
     // `app.exit()` or `process.exit()`, which skip the quit events entirely.
     process.on('exit', () => incognito.wipe(incognitoCtx));
@@ -2503,7 +2513,18 @@ function hashOf(url) {
  */
 async function downloadDir(prefs) {
   const chosen = prefs?.get('downloadDir');
-  let base = app.getPath('downloads');
+  // Windows can fail to name the Downloads folder at all - "Failed to get
+  // 'downloads' path" - when it has been deleted or redirected somewhere that
+  // is gone; the leak test found it with a fresh profile. A browser that then
+  // cannot download anything is worse than one that makes the folder, which
+  // is what Chrome does too.
+  let base;
+  try {
+    base = app.getPath('downloads');
+  } catch {
+    base = path.join(app.getPath('home'), 'Downloads');
+    await fs.promises.mkdir(base, { recursive: true }).catch(() => {});
+  }
   // Asynchronously: a sleeping drive or a stalled network mount can hold a
   // stat for seconds, and a synchronous one would hold the whole browser.
   if (chosen && !OFFLINE_MODE) {

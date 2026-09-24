@@ -399,6 +399,8 @@ function switches(ctx) {
     ['host-resolver-rules', RESOLVER_RULES],
     ['disable-quic'],
     ['force-webrtc-ip-handling-policy', 'disable_non_proxied_udp'],
+    // Chromium's own floor today; said here so a future default cannot lower it.
+    ['ssl-version-min', 'tls1.2'],
     ...require('./fingerprint').switches()
   ];
 }

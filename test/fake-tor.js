@@ -28,7 +28,10 @@ const cookie = value('CookieAuthFile');
 const owner = Number(value('__OwningControllerProcess'));
 fs.writeFileSync(cookie, Buffer.alloc(32, 7), { mode: 0o600 });
 
-socksPool(sockets.length, Number(process.env.FAKE_TOR_FIXTURE_PORT), (slot) => ({ path: sockets[slot] })).then((pool) => {
+const fixturePort = Number(process.env.FAKE_TOR_FIXTURE_PORT);
+const tlsPort = Number(process.env.FAKE_TOR_TLS_PORT) || fixturePort;
+const route = (host) => (host.startsWith('tls.') ? tlsPort : fixturePort);
+socksPool(sockets.length, route, (slot) => ({ path: sockets[slot] })).then((pool) => {
   // Appended as they arrive, so the harness can read them after the browser has gone.
   const flush = () => {
     if (!process.env.FAKE_TOR_NAMES || !pool.seen.length) return;

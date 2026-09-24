@@ -267,6 +267,28 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   }
   step('safeCopy', safeCopy);
 
+  // A certificate nobody vouches for: the page must not show, and nothing on
+  // the screen may offer to show it anyway.
+  const tlsPort = Number(argValue('leak-tls-port'));
+  let badCertificate = { error: 'no HTTPS fixture' };
+  if (tlsPort) {
+    const tlsTab = tabs.create({ url: 'about:blank' });
+    await waitFor(() => tlsTab.isLive && !tlsTab.loading, 10_000);
+    let failure = null;
+    tlsTab.wc.once('did-fail-load', (_e, code, description) => { failure = `${description} (${code})`; });
+    tlsTab.wc.loadURL(`https://tls.test:${tlsPort}/`).catch(() => {});
+    await waitFor(() => failure !== null, 10_000);
+    await sleep(500);
+    const seen = await within(tlsTab.wc.executeJavaScript(
+      '({ title: document.title, text: document.body ? document.body.innerText : "" })'), 4000, { title: '', text: '' });
+    badCertificate = {
+      error: failure,
+      shown: seen.title === 'intercepted' || /exit relay could read/.test(seen.text),
+      proceedOffered: /proceed|continue anyway|accept the risk/i.test(seen.text)
+    };
+  }
+  step('badCertificate', badCertificate);
+
   // Camouflage: with it on, each real page load brings one decoy load, on a
   // circuit that page is not using; with it off, none. The harness reads
   // which ports the pages and the decoys arrived on.
