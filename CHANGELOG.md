@@ -21,6 +21,13 @@ It is not Tor Browser, and says that too. A site that tries hard can tell this b
 - **Traffic camouflage, opt-in.** A decoy page from a list of popular sites loads beside each real one, on another circuit, so the size and timing of your traffic say less. About twice the data, and it lowers the odds rather than removing them.
 - **Private windows cannot be screen-captured** on Windows and macOS: screenshots, recordings and a screen shared in a meeting show them blank. Linux has no such control.
 - **The packaged browser can no longer be turned against itself.** Electron's fuses now disable running it as a plain Node interpreter, `NODE_OPTIONS` and `--inspect`, and check the app archive's integrity, so a program running as you cannot use Debrowser's own binary to read what it holds. This applies to ordinary windows too. The release build checks it.
+- **Nothing about your computer for a site to read.** The graphics card, memory, battery, network speed, keyboard layout, installed voices, gamepads, media devices and the dark-mode setting are removed or fixed in private windows - in the page, every frame and every worker, before any of the site's code runs. Canvas and audio output vary per tab, so they cannot link one visit to another. On Linux, pages see only a fixed set of common fonts. Client hints describe the browser, not the machine.
+- **Referrers stay within a site.** A private window no longer tells the next site where you came from.
+- **Dropped and pasted files are cleaned too**, like picked ones: no GPS, no camera details, and a fresh timestamp on every file.
+- **Downloads open inside the private window** where the browser can show them - PDFs, images, text, audio, video. Anything else opens in another program only after a warning, because that program is outside Tor.
+- **Keep a private window ready**, opt-in: Tor connects in the background when Debrowser starts, so Ctrl+Shift+N opens at once.
+- **Proven on the real Tor network**: a workflow bootstraps the bundled Tor directly, through the built-in bridges, and through a bridge the bridge kit makes, and each time check.torproject.org has to confirm the request came over Tor. Its first run found that a bridge behind NAT served its clients nothing; the kit now tells Tor its public address and waits until the bridge is ready before printing the line.
+- **The collapsed side strip keeps a toolbar.** With tabs down the side and the strip slid away, the address bar, back and the menu used to go with it; they now stay across the top.
 - **A weekly check that the bundled Tor is current**, which opens an issue when it is not; the connection page also says when the Tor network considers this Tor obsolete.
 
 ## 1.6.0

@@ -1097,3 +1097,52 @@ And one difference that is not a failure: Windows builds `navigator.languages`
 from `--lang` alone (`en-US`), where Linux and macOS take it from the locale
 variables (`en-US,en`). Each OS is uniform with itself, and the user agent
 already names the OS.
+
+## Private windows, held to "nothing online": what else a page could read
+
+**The rule.** Anything that can reach the internet must carry nothing about
+the user or the computer; what stays on the device is out of scope.
+
+**Running first, everywhere.** `Page.addScriptToEvaluateOnNewDocument` put a
+script in the page and a cross-site frame in its own process;
+`Target.setAutoAttach` with `waitForDebuggerOnStart` held a dedicated worker
+until `Runtime.evaluate` had run the same script in it. A shared worker never
+reached the debugger - it reported `deviceMemory` 16 while the page said 8 -
+so shared and service workers are removed rather than scrubbed.
+
+**Client hints.** `about:blank` is not a secure context, so it cannot read
+`navigator.userAgentData`; a private tab's first page is an internal one that
+is, and the engine's own brands are read there once and repeated in the
+override, with the OS version, architecture and model fixed.
+
+**Canvas and audio.** The same drawing hashed the same twice in one tab and
+differently in another; with the scrub switched off, all three hashes matched.
+
+**Fonts, on Linux.** The fontconfig manual's `<rejectfont><glob>*</glob>`
+rejected nothing, and `/*` rejected the allowed families too; rejecting by
+pattern (scalable true, scalable false) and accepting by family left exactly
+the allowed set. And the variable has to be in the environment the browser
+starts with: set from inside, two fonts were hidden and four still measured
+differently from the fallback, because the processes pages run in are forked
+before any of the browser's code runs. Set by the launcher, all six were
+hidden and an allowed font still measured differently - so the method can
+see a font when there is one.
+
+**Drops, pastes, Referers.** With the private flag withheld from tabs, a photo
+dropped or pasted onto a page arrived with its GPS and original timestamp;
+with it, without either and with the same pixels. With the header rule off,
+another site received the referring page; with it, nothing - while a
+subdomain of the same site still did.
+
+**The in-memory cache.** An in-memory partition kept about 48 MB of 150 MB of
+1 MB responses; `--disk-cache-size` at 5 MB and at 64 MB changed nothing. It is
+not configurable from here, and already close to the 64 MB planned.
+
+**The real network (CI).** The bundled Tor bootstrapped and
+check.torproject.org reported `IsTor` directly and through the built-in
+bridges. Through a bridge the kit made on the runner, the client shook hands
+and then waited at 25% for five minutes: the bridge, behind NAT, logged
+"Unable to find IPv4 address" and served no directory. The kit now sets the
+address explicitly.
+
+Leak test 38/38 (40/40 with the Linux kill switch); smoke suite 148/148.

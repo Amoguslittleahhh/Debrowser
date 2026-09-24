@@ -337,9 +337,15 @@ still see that you are online, when, and how much - nothing can hide that.
   fatal, and JavaScript without its optimising compilers by default.
 - **Nothing kept**: the profile is a temp directory deleted on exit.
   Ctrl+Shift+Delete deletes it immediately, Tor with it.
+- **Nothing about this computer**: no graphics card, memory, battery, network
+  speed, keyboard layout, voices, gamepads or dark-mode setting for a page to
+  read; canvas and audio output vary per tab; on Linux, pages see only a fixed
+  set of common fonts. Referrers are not sent between sites.
 - **Files cleaned both ways**: photos lose their GPS and camera data before a
-  page receives them, and a downloaded PDF can be saved as a flat copy with no
-  scripts, forms or links.
+  page receives them - picked, dropped or pasted - and a downloaded PDF can be
+  saved as a flat copy with no scripts, forms or links. Downloads open inside
+  the private window where the browser can show them, and anything else only
+  after a warning that another program is outside Tor.
 - **Your own bridge**: `tools/bridge-kit/` turns a cheap server into an
   unlisted bridge, the one thing that also hides Tor from an ISP matching
   addresses against published bridge lists.
@@ -566,16 +572,14 @@ tried, measured and removed — live on the `claude/research-build` branch.
 
 ## Limits worth knowing
 
-- **Private windows are not Tor Browser.** They hide what you do from your
-  network, but a site that tries hard can tell this browser from Tor
-  Browser's crowd: client-hint brands say Chromium, installed fonts and canvas
-  output are not normalised, and a service worker can read the real core
-  count. Every private window on one OS looks the same, which is what the
-  fingerprint layer is for; it is not the same as looking like everyone.
+- **Private windows are not Tor Browser.** Nothing about your computer is
+  readable from a page - hardware, settings, installed fonts (on Linux),
+  canvas and audio output - and every private window on one OS looks the same.
+  But a site can still tell this is a Chromium-based browser and not Tor
+  Browser's crowd, and on Windows and macOS the installed fonts remain
+  readable: neither system lets an application choose which fonts it sees.
 - **Traffic timing can still hint at a site.** Camouflage (opt-in) makes that
   harder, not impossible, at about twice the data.
-- **A file dragged onto a page is not cleaned.** Upload cleaning works on the
-  file picker; drag and drop does not pass through it.
 - **Linux cannot block screenshots of a private window**; Windows and macOS
   can, and do.
 

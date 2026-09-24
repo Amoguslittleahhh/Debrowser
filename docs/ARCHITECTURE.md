@@ -326,10 +326,14 @@ habit of enforcing a rule in more than one place and checking that it holds.
 | A malicious exit relay | Nothing it can change or read unnoticed on HTTPS; plain HTTP only when you allowed it for that site | HTTPS-only, with an explanation page; certificate errors are fatal |
 | Someone at this computer afterwards | Nothing from the window: no history, cookies, cache or crash dumps. Tor's guard, sealed by the OS keystore, unless you turn that off. Files you chose to download. | A per-run profile in a private temp directory, deleted on exit and swept after a crash |
 
-Out of reach, and said so on the connection page: malware running as you can
-read the process (only the OS can prevent that); anything you sign in to
-knows who you are; traffic timing can still hint at a site - camouflage
-lowers the odds, not to zero. Where someone's safety depends on it, the answer
+The rule the design is held to: nothing that can reach the internet may carry
+anything about you or this computer; what stays on the device is out of
+scope. Against that, what remains is said on the connection page: anything you
+sign in to knows who you are; traffic timing can still hint at a site -
+camouflage lowers the odds, not to zero; and on Windows and macOS, where no
+application can choose which fonts it sees, the installed fonts stay readable.
+Malware running as you can read the process, which is local and only the OS
+could prevent. Where someone's safety depends on it, the answer
 is Tor Browser or Tails.
 
 ### How the pieces fit
@@ -369,8 +373,13 @@ kinds of window then share no memory. `src/main/incognito/` holds it:
 - `fingerprint.js` - the user agent, time zone, language, cores and screen
   every private window reports, applied through the DevTools protocol before a
   tab loads anything, and the self-check that reads them back.
-- `sanitise.js` - image metadata stripped from uploads; flat, picture-only
-  safe copies of PDFs.
+- `scrub.js` - what a page could read about the computer itself: removed,
+  fixed or blurred by a script run in the page, every frame and every worker
+  before their own code, with each worker held paused until it is covered.
+- `fonts.js` - on Linux, a fontconfig file admitting only common families, put
+  in the private browser's environment by whoever starts it.
+- `sanitise.js` - image metadata stripped from uploads, whether picked,
+  dropped or pasted; flat, picture-only safe copies of PDFs.
 - `camouflage.js` - the opt-in decoy loads.
 
 ### Enforced twice, and checked
