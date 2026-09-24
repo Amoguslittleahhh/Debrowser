@@ -41,6 +41,8 @@ const el = {
   reloadIcon: document.getElementById('reload-icon'),
   progress: document.getElementById('progress'),
   star: document.getElementById('star'),
+  privatePill: document.getElementById('private'),
+  privateText: document.getElementById('private-text'),
   bookmarks: document.getElementById('bookmarks'),
   downloads: document.getElementById('downloads'),
   downloadsRing: document.getElementById('downloads-ring'),
@@ -91,6 +93,11 @@ async function refreshStar(url) {
 }
 
 function setStar(on) {
+  // A private window cannot save bookmarks - see renderPrivate.
+  if (document.body.classList.contains('incognito')) {
+    el.star.title = 'Bookmarks cannot be saved from a private window';
+    return;
+  }
   if (on === starred) return;
   starred = on;
   el.star.classList.toggle('on', Boolean(on));
@@ -1103,6 +1110,34 @@ api.onMessage((message) => {
   }
 });
 
+/**
+ * A private window says so, and says whether its connection is up.
+ *
+ * The star is dimmed rather than removed: it is where people look to bookmark,
+ * and finding it gone would read as a bug. Its tooltip says why it does nothing.
+ */
+const PRIVATE_LABELS = {
+  ready: 'Private',
+  bootstrapping: 'Private · connecting',
+  starting: 'Private · connecting',
+  failed: 'Private · offline',
+  stopped: 'Private · offline'
+};
+function renderPrivate(incognito) {
+  document.body.classList.toggle('incognito', Boolean(incognito));
+  el.privatePill.hidden = !incognito;
+  if (!incognito) return;
+  const tor = incognito.tor || {};
+  el.privatePill.dataset.state = tor.state || 'starting';
+  el.privateText.textContent = PRIVATE_LABELS[tor.state] || 'Private';
+  el.privatePill.title = tor.state === 'ready'
+    ? 'Private window - every page goes through Tor. Click for details.'
+    : `Private window - ${tor.summary || 'connecting to Tor'} (${tor.progress || 0}%). Nothing loads until it is connected.`;
+  el.star.title = 'Bookmarks cannot be saved from a private window';
+}
+
+el.privatePill.addEventListener('click', () => api.send('navigate', { url: 'debrowser://tor' }));
+
 api.onState((state) => {
   applyThemePrefs(state.prefs);
   applyChromePrefs(state.prefs);
@@ -1123,6 +1158,7 @@ api.onState((state) => {
   // down the side: the window has already given its 34px back to the page, and
   // a bar drawn into space nobody reserved would sit over the top of it.
   renderDownloadsButton(state.downloads);
+  renderPrivate(state.incognito);
   renderSidebar(state.sidebar);
   document.body.classList.toggle('with-bookmarks', state.bookmarksBar !== false);
   if (state.bookmarksBar !== false) refreshBookmarks(state.bookmarksRevision);

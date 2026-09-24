@@ -21,6 +21,8 @@
     "dist:mac": "npm run build:memprobe && electron-builder --mac",
     "dist:linux": "npm run build:memtrim && electron-builder --linux",
     "build:memprobe": "node tools/build-helper.js mem-probe",
+    "build:netwatch": "node tools/build-helper.js net-watch",
+    "test:incognito": "node test/incognito-leak.js",
     "dist:intune": "npm run build:memprobe && npm run build:memtrim && node tools/build-intune.js",
     "lint": "eslint src tools bench"
   },

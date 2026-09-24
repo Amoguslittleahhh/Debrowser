@@ -36,8 +36,15 @@ const SPECULATION_TTL_MS = 10_000;
  * the same string to pages.serve, and a second literal that drifted from this
  * one would silently reintroduce internal pages failing inside tabs while
  * working everywhere else.
+ *
+ * Incognito's has no `persist:` prefix, which is what keeps it in memory: a
+ * persistent partition writes its cache, cookies and storage under the
+ * profile, and the leak test found exactly that - a disk cache of every page
+ * visited, sitting in the private profile until it was wiped.
  */
-const BROWSING_PARTITION = 'persist:debrowser';
+const BROWSING_PARTITION = require('../incognito/mode').INCOGNITO
+  ? 'debrowser-incognito'
+  : 'persist:debrowser';
 
 class TabManager {
   /**
@@ -103,11 +110,21 @@ class TabManager {
   }
 
   configureSession() {
+    /** The last few refusals, newest last - so a test can see one happened. */
+    this.deniedPermissions = [];
     this.session.setPermissionRequestHandler((_wc, permission, callback) => {
       // Grant only what a page needs to function without user-visible prompts
-      // this prototype has no UI for; everything sensitive is denied.
+      // this prototype has no UI for; everything sensitive is denied. That
+      // includes `openExternal`: a `mailto:` or `zoommtg:` link would start
+      // another program, which in a private window means a connection that
+      // does not go through Tor.
       const allowed = new Set(['fullscreen', 'clipboard-sanitized-write']);
-      callback(allowed.has(permission));
+      const ok = allowed.has(permission);
+      if (!ok) {
+        this.deniedPermissions.push(permission);
+        if (this.deniedPermissions.length > 20) this.deniedPermissions.shift();
+      }
+      callback(ok);
     });
   }
 

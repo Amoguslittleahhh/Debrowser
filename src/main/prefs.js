@@ -308,9 +308,16 @@ const SEARCH_ENGINES = {
 };
 
 class Prefs {
-  constructor(log = () => {}) {
+  /**
+   * @param {Function} log
+   * @param {object} [options]
+   * @param {string} [options.file]      - another profile's file, for incognito
+   * @param {boolean} [options.readOnly] - changes last for this process only
+   */
+  constructor(log = () => {}, { file = null, readOnly = false } = {}) {
     this.log = log;
-    this.file = path.join(app.getPath('userData'), 'preferences.json');
+    this.file = file || path.join(app.getPath('userData'), 'preferences.json');
+    this.readOnly = readOnly;
     this.values = this.load();
   }
 
@@ -394,6 +401,9 @@ class Prefs {
 
   /** Write atomically: a crash mid-write must not leave a truncated file. */
   save() {
+    // Incognito reads the normal profile's settings and must never write to
+    // it: a setting changed there lasts until the window closes.
+    if (this.readOnly) return;
     const tmp = `${this.file}.tmp`;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });

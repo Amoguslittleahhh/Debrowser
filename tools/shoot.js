@@ -173,7 +173,14 @@ const SHOTS = [
   { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
   // The same sheet holding the tab strip's menu, which is the other thing it
   // draws and has its own set of icons to get wrong.
-  { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' }
+  { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' },
+  // Incognito's first page, part-way through connecting - and after it has
+  // given up, which is the state that has to explain itself.
+  { name: 'tor', file: 'tor.html', w: 1280, h: 820,
+    incognito: { tor: { state: 'bootstrapping', progress: 45, summary: 'Loading relay descriptors', transport: 'obfs4' } } },
+  { name: 'tor-failed', file: 'tor.html', w: 1280, h: 820,
+    incognito: { tor: { state: 'failed', progress: 10, summary: 'Connected to a relay',
+                        warning: 'No progress for 45 seconds at 10% - the network may be blocking Tor' } } }
 ];
 
 
@@ -197,6 +204,8 @@ app.whenReady().then(async () => {
     // Before the window, because the answers are serialised into its preload
     // arguments - set after it, and the page has already been given the old set.
     if (shot.answers) ANSWERS['context-model'] = ANSWERS[shot.answers];
+
+    STATE.incognito = shot.incognito || null;
 
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';

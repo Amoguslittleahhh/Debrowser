@@ -11,3 +11,8 @@ dist/
 # Compiled helpers - build output, not source. tools/*.c is the source.
 tools/mem-probe
 tools/mem-probe.exe
+tools/net-watch
+tools/net-watch.exe
+
+# Tor, fetched and verified by tools/fetch-tor.js - never committed.
+vendor/

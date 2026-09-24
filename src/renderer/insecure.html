@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Not private</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="tor.css">
+</head>
+<body>
+  <header>
+    <h1>This site is not available privately</h1>
+  </header>
+  <main>
+    <section class="status" data-state="failed">
+      <div class="line">
+        <span class="dot" aria-hidden="true"></span>
+        <strong id="host">This site</strong>
+      </div>
+      <p class="detail" style="margin-top: var(--s3)">
+        It does not offer a secure (HTTPS) connection. Over Tor, the last relay on
+        the way - the exit - can read a plain HTTP page and change it, including
+        anything you type into it. Your ISP still cannot see it; the exit can.
+      </p>
+      <div class="actions">
+        <button class="ghost-btn" id="back">Go back</button>
+        <button class="ghost-btn danger" id="go">Continue over plain HTTP</button>
+      </div>
+    </section>
+    <p class="note">Choosing to continue allows plain HTTP for this site only, and only until this window closes.</p>
+  </main>
+  <script src="theme.js"></script>
+  <script src="insecure.js"></script>
+</body>
+</html>

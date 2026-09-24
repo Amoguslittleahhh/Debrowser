@@ -21,7 +21,7 @@ const fs = require('fs');
 const dir = __dirname;
 const NAME = process.argv[2];
 if (!NAME || !/^[a-z-]+$/.test(NAME)) {
-  console.error('usage: node tools/build-helper.js <mem-probe|mem-trim>');
+  console.error('usage: node tools/build-helper.js <mem-probe|mem-trim|net-watch>');
   process.exit(2);
 }
 const src = path.join(dir, `${NAME}.c`);
@@ -40,15 +40,18 @@ function have(cmd) {
 let ok = false;
 
 if (process.platform === 'win32') {
-  // psapi is where QueryWorkingSet lives. MSVC first, because that is what the
-  // release runner has; MinGW second, so a developer machine with it works too.
+  // MSVC first, because that is what the release runner has; MinGW second, so
+  // a developer machine with it works too.
+  // What each helper links against. psapi is where QueryWorkingSet lives;
+  // net-watch reads the connection table from the IP helper API.
+  const LIBS = { 'net-watch': ['iphlpapi', 'ws2_32'] }[NAME] || ['psapi'];
   if (have('cl')) {
-    ok = run('cl', ['/nologo', '/O2', '/W3', src, '/link', 'psapi.lib', `/OUT:${out}`]);
+    ok = run('cl', ['/nologo', '/O2', '/W3', src, '/link', ...LIBS.map((l) => `${l}.lib`), `/OUT:${out}`]);
     for (const junk of [`${NAME}.obj`]) {
       try { fs.unlinkSync(path.join(process.cwd(), junk)); } catch { /* nothing to clean */ }
     }
   } else if (have('gcc')) {
-    ok = run('gcc', ['-O2', '-Wall', src, '-o', out, '-lpsapi']);
+    ok = run('gcc', ['-O2', '-Wall', src, '-o', out, ...LIBS.map((l) => `-l${l}`)]);
   } else {
     console.error(`build ${NAME}: no compiler found. Open a Visual Studio developer prompt, ` +
                   'or run this from a job that has run ilammy/msvc-dev-cmd.');

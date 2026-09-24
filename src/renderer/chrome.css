@@ -609,6 +609,35 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
 }
 
 .meter:hover { background: var(--wash); color: var(--text); }
+
+/* Private windows: the pill, and a tint on the toolbar so the window is
+   recognisable at a glance from across the room, not only up close. */
+.private-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 11px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--private) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--private) 14%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: default;
+}
+.private-pill:hover { background: color-mix(in srgb, var(--private) 22%, transparent); }
+.private-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--warn);
+}
+.private-pill[data-state="ready"] .private-dot { background: var(--ok); }
+.private-pill[data-state="failed"] .private-dot,
+.private-pill[data-state="stopped"] .private-dot { background: var(--crit); }
+body.incognito { --private: #8a6bd1; }
+body.incognito .toolbar { background: color-mix(in srgb, var(--private) 7%, transparent); }
+body.incognito .star { opacity: 0.35; }
 body[data-meter="off"] .meter { display: none; }
 body[data-dots="off"] .tier { display: none; }
 

@@ -46,6 +46,17 @@
 
 const { net } = require('electron');
 
+/**
+ * Where icon fetches go out from. The default session in the normal browser;
+ * in incognito, the in-memory browsing partition, so an icon is neither sent
+ * outside the private session's routing nor cached on disk by the default
+ * session, which is the one Chromium keeps a profile directory for.
+ */
+let fetcher = (url, init) => net.fetch(url, init);
+function useSession(ses) {
+  fetcher = (url, init) => ses.fetch(url, init);
+}
+
 /** Longest an icon fetch may take before the row falls back to its letter. */
 const TIMEOUT_MS = 6000;
 
@@ -143,7 +154,7 @@ async function serve(request, log = () => {}) {
   }
 
   try {
-    const res = await net.fetch(target, {
+    const res = await fetcher(target, {
       // No cookies, no identity. The whole point of routing through here.
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
@@ -171,4 +182,4 @@ async function serve(request, log = () => {}) {
   }
 }
 
-module.exports = { remember, rememberAll, allowed, serve, MAX_REMEMBERED };
+module.exports = { remember, rememberAll, allowed, serve, useSession, MAX_REMEMBERED };

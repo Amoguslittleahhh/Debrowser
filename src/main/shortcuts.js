@@ -48,6 +48,7 @@ const SHIFT_LABEL = IS_MAC ? '⇧' : 'Shift';
 const TABLE = [
   // Tabs
   { command: 'new-tab', mod: true, key: 't' },
+  { command: 'new-incognito-window', mod: true, shift: true, key: 'n' },
   { command: 'close-tab', mod: true, key: 'w' },
   { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
   { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'tab' },

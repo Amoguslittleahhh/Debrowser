@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;">
+  <title>Private connection</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="tor.css">
+</head>
+<body>
+  <header>
+    <h1>Private connection</h1>
+  </header>
+
+  <main>
+    <section class="status" id="status" aria-live="polite">
+      <div class="line">
+        <span class="dot" id="dot" aria-hidden="true"></span>
+        <strong id="headline">Connecting to Tor</strong>
+        <span class="pct" id="pct"></span>
+      </div>
+      <div class="meter" aria-hidden="true"><span id="bar"></span></div>
+      <p class="detail" id="detail"></p>
+      <p class="problem" id="problem" hidden></p>
+      <div class="actions">
+        <button class="ghost-btn" id="retry" hidden>Try again</button>
+      </div>
+    </section>
+
+    <section class="facts">
+      <h2>What this window hides, and from whom</h2>
+      <table>
+        <tbody>
+          <tr><th>Which sites you visit</th><td class="yes">Hidden from your ISP and router</td></tr>
+          <tr><th>What you do on them</th><td class="yes">Hidden from your ISP and router</td></tr>
+          <tr><th>That you use Tor</th><td class="part" id="tor-visible">Hidden by bridges from protocol inspection; a bridge of your own also hides it from lists of known bridges</td></tr>
+          <tr><th>That you are online, and how much</th><td class="no">Visible. Nothing can hide this.</td></tr>
+          <tr><th>Your address, from websites</th><td class="yes">Hidden: sites see a Tor exit</td></tr>
+          <tr><th>Anything you sign in to</th><td class="no">Identifies you to that site</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Nothing from this window is written to disk: no history, no cookies kept, no thumbnails, no crash dumps. Everything connects through Tor or not at all - if Tor stops, pages stop loading rather than connecting directly.</p>
+      <p class="note">When your safety depends on it, use Tor Browser or Tails. Websites can still tell this browser apart more easily than Tor Browser, and a program running as you on this computer can read what this window holds.</p>
+    </section>
+
+    <section class="normal" id="normal" hidden>
+      <p class="note">This is the ordinary browser. Private windows open with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>.</p>
+    </section>
+  </main>
+
+  <script src="theme.js"></script>
+  <script src="tor.js"></script>
+</body>
+</html>

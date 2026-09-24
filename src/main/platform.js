@@ -779,7 +779,7 @@ function systemInfo() {
  * burning CPU. We want Chromium's own throttling fully switched *on*, and then
  * we go further than it does.
  */
-function chromiumSwitches(cfg) {
+function chromiumSwitches(cfg, incognito = null) {
   const switches = [];
   const features = [];
   const disabledFeatures = [];
@@ -857,7 +857,16 @@ function chromiumSwitches(cfg) {
   //                           web for an hour. Worth re-measuring against a
   //                           long session before anyone concludes the idea is
   //                           dead - but not worth shipping on a hunch.
-  if (cfg.optimizeForSize) switches.push(['js-flags', '--optimize-for-size']);
+  // One `--js-flags`, whatever goes into it: Chromium keeps the last value of a
+  // repeated switch, so incognito's compiler flags appended separately would
+  // have silently replaced this one, or been replaced by it.
+  const jsFlags = cfg.optimizeForSize ? ['--optimize-for-size'] : [];
+  if (incognito) {
+    const mode = require('./incognito/mode');
+    jsFlags.push(...(mode.JS_LEVELS[incognito.jsLevel] || []));
+    switches.push(...mode.switches(incognito));
+  }
+  if (jsFlags.length) switches.push(['js-flags', jsFlags.join(' ')]);
 
   // --- Per-platform ------------------------------------------------------
 
@@ -908,5 +917,6 @@ module.exports = {
   recommendedBudgetMB,
   recommendedLiveTabs,
   systemInfo,
-  chromiumSwitches
+  chromiumSwitches,
+  helperPath
 };

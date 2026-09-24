@@ -207,6 +207,8 @@ class BrowserShell {
     this.bookmarks = null;
     /** @type {import('./downloads').DownloadManager|null} */
     this.downloads = null;
+    /** Incognito only: what the window says about the private connection. */
+    this.incognito = null;
     this.log = log;
     this.onCommand = onCommand;
     /**
@@ -1482,6 +1484,8 @@ class BrowserShell {
       this.layout();
     }
     full.sidebar = this.sidebarState();
+    // Null in the ordinary browser, which is how every view tells the two apart.
+    full.incognito = this.incognito ? this.incognito() : null;
     send(this.chromeView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
     // And the sheet, while one is up. The menu takes its preferences off the

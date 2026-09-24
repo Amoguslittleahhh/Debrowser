@@ -11,7 +11,7 @@
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session, Menu, dialog, clipboard, screen,
+const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow,
         shell: electronShell } = require('electron');
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
@@ -38,8 +38,35 @@ const contextMenu = require('./context-menu');
 
 const fs = require('fs');
 const path = require('path');
+const incognito = require('./incognito/mode');
+const { launchIncognito } = require('./incognito/launch');
+const { Tripwire } = require('./incognito/tripwire');
+const { Tor } = require('./incognito/tor');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
+
+/*
+ * Incognito decides where the profile lives, so it runs before anything reads
+ * `userData`. A profile directory that is not provably ours alone is a refusal
+ * to start, never a repair: see incognito/mode.js.
+ */
+let incognitoCtx = null;
+if (incognito.INCOGNITO) {
+  try {
+    incognitoCtx = incognito.prepare(app);
+  } catch (err) {
+    console.error(`[debrowser] incognito cannot start: ${err.message}`);
+    process.exit(78);
+  }
+}
+const INCOGNITO = Boolean(incognitoCtx);
+
+/** Incognito only: the Tor process every request goes through. */
+let tor = null;
+/** Every session this incognito process has made, so a port change reaches all of them. */
+const incognitoSessions = new Set();
+/** Set by main() once there is a window to tell. */
+let onIncognitoChange = () => {};
 const OFFLINE_MODE = SMOKE_TEST || process.argv.includes('--bench-test');
 
 // Tests and benchmarks must not depend on the network: they assert on memory
@@ -84,6 +111,26 @@ cfg.pinned = {
 
 cfg.memoryBudgetMB = cfg.pinned.memoryBudgetMB ? cfg.memoryBudgetMB : cfg.autoBudgetMB;
 cfg.maxLiveTabs = cfg.autoLiveTabs;
+
+// Incognito keeps nothing on disk and shares nothing between sites.
+//
+// Hibernation hands page memory to the OS compressor, which on most machines
+// can in turn write it to a swap file or pagefile - so the one tier that could
+// put a page's contents on a disk is off. One renderer per site is off because
+// incognito spends memory on isolation rather than saving it by sharing.
+//
+// And discarding is pushed back. A discarded private tab comes back by
+// reloading through Tor - seconds rather than milliseconds, and a second visit
+// the site can see - so incognito keeps more tabs alive and waits three times
+// as long before taking one, and relies on freezing, which costs nothing to
+// undo, in the meantime.
+if (INCOGNITO) {
+  cfg.hibernate.enabled = false;
+  cfg.processPerSite = false;
+  cfg.discardAfterMs *= 3;
+  cfg.autoLiveTabs = Math.round(cfg.autoLiveTabs * 1.5);
+  if (!cfg.pinned.maxLiveTabs) cfg.maxLiveTabs = cfg.autoLiveTabs;
+}
 
 // Benchmark switch: lets the per-tab memory flag be measured rather than
 // assumed. Not something a user needs to touch.
@@ -146,12 +193,14 @@ function log(...args) {
 // Tests and benchmarks give each tab its own site so the process model behaves
 // as it would for real browsing, rather than collapsing a pile of same-site
 // file:// URLs into one renderer. That needs `*.test` to resolve locally.
-if (SMOKE_TEST || (argv.includes('--bench-test') && argv.includes('--distinct-origins'))) {
+// Not in incognito, whose resolver refuses every name: its tests reach the
+// fixtures through a stand-in for Tor, the same way a real page would.
+if (!INCOGNITO && (SMOKE_TEST || (argv.includes('--bench-test') && argv.includes('--distinct-origins')))) {
   const { HOST_RESOLVER_RULES } = require('./fixture-server');
   app.commandLine.appendSwitch('host-resolver-rules', HOST_RESOLVER_RULES);
 }
 
-for (const [name, value] of platform.chromiumSwitches(cfg)) {
+for (const [name, value] of platform.chromiumSwitches(cfg, incognitoCtx)) {
   if (value === undefined) app.commandLine.appendSwitch(name);
   else app.commandLine.appendSwitch(name, value);
 }
@@ -160,7 +209,12 @@ for (const [name, value] of platform.chromiumSwitches(cfg)) {
 // reads it once, at launch - so the preferences file is read here rather than
 // in whenReady. `app.getPath('userData')` is available this early; nothing else
 // about the app has to be.
-const earlyPrefs = new Prefs(log);
+// Incognito reads the normal profile's settings - theme, search engine, its own
+// security level - and never writes them: a setting changed in incognito lasts
+// until the window closes. Its own profile directory is empty by design.
+const earlyPrefs = INCOGNITO
+  ? new Prefs(log, { file: path.join(incognitoCtx.normalUserData, 'preferences.json'), readOnly: true })
+  : new Prefs(log);
 if (earlyPrefs.get('hardwareAcceleration') === false) {
   app.disableHardwareAcceleration();
   log('config', 'hardware acceleration disabled by preference');
@@ -172,9 +226,50 @@ if (earlyPrefs.get('hardwareAcceleration') === false) {
 pages.registerScheme();
 
 // One instance owns the profile directory; a second launch focuses the first.
+// Incognito has a profile directory of its own, so it has a lock of its own,
+// and a second incognito launch lands in the first incognito process.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  if (INCOGNITO) {
+    // Holding the lock is what makes this safe: whatever is left in the profile
+    // belongs to an incognito process that is no longer running.
+    incognito.sweep(incognitoCtx.root);
+    app.on('session-created', (ses) => {
+      incognitoSessions.add(ses);
+      incognito.configureSession(ses, incognitoCtx);
+    });
+    // `exit` rather than `will-quit`: it also runs when something calls
+    // `app.exit()` or `process.exit()`, which skip the quit events entirely.
+    process.on('exit', () => incognito.wipe(incognitoCtx));
+    incognito.startReaper(incognitoCtx,
+      platform.helperPath(process.platform === 'win32' ? 'net-watch.exe' : 'net-watch'), log);
+
+    // Tor starts now rather than when the window is up: bootstrapping takes
+    // seconds, and every one of them is spent before a page can load. The
+    // leak test brings its own stand-in on a port it chose, so no Tor then.
+    if (!incognitoCtx.externalProxy) {
+      let moves = 0;
+      tor = new Tor({
+        ctx: incognitoCtx,
+        log,
+        onStatus: (status) => {
+          // Another program had the port. Pick again and restart; the
+          // command-line proxy keeps the old port, where nothing listens now,
+          // so anything that only it reaches fails closed.
+          if (status.state === 'failed' && /Could not bind/.test(status.warning || '') && moves < 3) {
+            moves++;
+            incognito.movePort(incognitoCtx, incognitoSessions);
+            log('tor', `port taken; moving to ${incognitoCtx.proxyPort}`);
+            tor.restart();
+            return;
+          }
+          onIncognitoChange();
+        }
+      });
+      tor.start();
+    }
+  }
   main();
 }
 
@@ -204,6 +299,28 @@ function main() {
   let downloads = null;
   /** @type {History|null} */
   let history = null;
+  /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
+  let tripwire = null;
+  /** Set by the incognito test suite, which has to watch a trip rather than be closed by one. */
+  let onTripForTest = null;
+
+  /**
+   * A connection went somewhere other than the proxy. Close everything first
+   * and explain second: a private window that stays open while a dialog waits
+   * for a click is a window that can keep making that connection.
+   */
+  const onEgressTrip = (violations) => {
+    console.error(`[debrowser] TRIPWIRE: connection outside the proxy: ${violations.join(' ')}`);
+    if (onTripForTest) { onTripForTest(violations); return; }
+    for (const win of BaseWindow.getAllWindows()) {
+      try { win.destroy(); } catch { /* already gone */ }
+    }
+    dialog.showErrorBox('Incognito was closed',
+      'A connection that did not go through the private network was detected, ' +
+      'so the window was closed before anything more could be sent.\n\n' +
+      violations.slice(0, 4).join('\n'));
+    app.exit(70);
+  };
 
   /** The command dispatcher, once `wireCommands` has built it. */
   let runCommand = () => {};
@@ -413,6 +530,12 @@ function main() {
     // have - so it was a row of screen spent on a menu that leads nowhere. Every
     // shortcut worth having is bound in the chrome renderer.
     Menu.setApplicationMenu(null);
+    // `session-created` covers every session made from here on; the default one
+    // may already exist, so it is configured by hand as well.
+    if (INCOGNITO) {
+      incognito.configureSession(session.defaultSession, incognitoCtx);
+      icons.useSession(session.fromPartition(BROWSING_PARTITION));
+    }
     // Both the default session (chrome, panel) and the browsing partition that
     // tabs run in, which has a protocol registry of its own.
     pages.serve(log, [BROWSING_PARTITION]);
@@ -440,7 +563,9 @@ function main() {
       onUncover: () => { if (shell) shell.hidePlaceholder(); },
       // A speculative page load must never be the reason a frame is dropped,
       // and must never add to memory the governor is already trying to reclaim.
-      canSpeculate: () => Boolean(governor) && governor.allowsSpeculation(),
+      // Never in incognito: loading a page because the pointer rested on its
+      // tab tells that site what you were about to do.
+      canSpeculate: () => !INCOGNITO && Boolean(governor) && governor.allowsSpeculation(),
       applyZoom: (wc) => siteZoom.apply(wc)
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
@@ -449,7 +574,7 @@ function main() {
 
     // A submitted sign-in becomes a question, never a save. The origin comes
     // from the tab, not from the page that sent the message.
-    ipcHub.wireCredentialOffer((tab, offer) => {
+    if (!INCOGNITO) ipcHub.wireCredentialOffer((tab, offer) => {
       offerToSaveCredential({ tab, offer, credentials, shell, log }).catch(
         (err) => log(`credential offer failed: ${err.message}`));
     });
@@ -481,6 +606,27 @@ function main() {
       }
     });
 
+    if (INCOGNITO) {
+      // What the window shows about the private connection, on every broadcast.
+      shell.incognito = () => ({
+        tor: tor ? { ...tor.status } : { state: 'ready', progress: 100, summary: 'External proxy (test)', transport: 'direct' },
+        tripwire: tripwire ? tripwire.status() : null
+      });
+      onIncognitoChange = publish;
+
+      tripwire = new Tripwire({
+        app,
+        log,
+        // The proxy and Tor's control port, and nothing else. Loopback on any
+        // other port is a violation too: see net-watch.c for the measurement
+        // that made "any loopback" the wrong rule.
+        allowedPorts: () => [incognitoCtx.proxyPort, tor && tor.controlPort].filter(Boolean),
+        onTrip: onEgressTrip
+      });
+      tripwire.capability().then((caps) => log('tripwire', JSON.stringify(caps)));
+      tripwire.start();
+    }
+
     // `--no-governor` runs the browser with every tab left fully resident, as
     // a baseline to measure the governor against. It is a benchmarking switch,
     // not a supported way to use the browser.
@@ -506,11 +652,15 @@ function main() {
       preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
       hasLiveInternal: () => tabs.all().some((t) => t.internal && t.isLive),
       busy: () => Boolean(governor && governor.boost.quiesceRequested),
-      enabled: !OFFLINE_MODE,
+      enabled: !OFFLINE_MODE && !INCOGNITO,
       log
     });
 
-    bookmarks = new Bookmarks(log);
+    // Incognito reads the normal profile's bookmarks - they are how people get
+    // to the sites they use - and cannot change them: a bookmark saved from a
+    // private window would be a record of it in the ordinary profile.
+    bookmarks = INCOGNITO ? new Bookmarks(log, incognitoCtx.normalUserData) : new Bookmarks(log);
+    if (INCOGNITO) bookmarks.readOnly = true;
     // So the state broadcast can carry the revision the bookmarks bar watches.
     shell.bookmarks = bookmarks;
     // Read live rather than captured, so switching recording off in the history
@@ -520,7 +670,7 @@ function main() {
     // directory and visit two dozen fixture pages per run, and writing them
     // into the user's own history would be this browser filling their records
     // with its own test suite.
-    history = new History(log, { enabled: () => !OFFLINE_MODE && prefs.get('saveHistory') });
+    history = new History(log, { enabled: () => !OFFLINE_MODE && !INCOGNITO && prefs.get('saveHistory') });
     // The stored icon addresses came from this same signal in earlier sessions,
     // so they are exactly as trusted as the ones this session will report - and
     // without seeding them, every row from before today would fall back to its
@@ -540,7 +690,9 @@ function main() {
     // downloads of the same file would race for the same name on disk.
     downloads = new DownloadManager({
       dir: () => downloadDir(prefs),
-      connections: () => prefs.get('downloadConnections'),
+      // One connection over Tor: several would share a circuit and gain nothing
+      // but load on the exit relay.
+      connections: () => (INCOGNITO ? 1 : prefs.get('downloadConnections')),
       // The system's own save dialog, when Settings asks for one. Never under a
       // test, where nobody is there to answer it.
       saveAs: (defaultPath) => {
@@ -583,7 +735,7 @@ function main() {
      * Never under a test or a benchmark, which must start from a known state
      * rather than from whatever the machine's last real run left behind.
      */
-    sessionStore = OFFLINE_MODE ? null : new Session(log);
+    sessionStore = OFFLINE_MODE || INCOGNITO ? null : new Session(log);
     const saved = sessionStore && prefs.get('restoreSession') !== false
       ? sessionStore.load()
       : { tabs: [], activeIndex: 0 };
@@ -597,6 +749,10 @@ function main() {
       const active = tabs.all()[saved.activeIndex] || tabs.all()[0];
       if (active) tabs.activate(active.id).catch((err) => log(`restore failed: ${err.message}`));
       log('session', `restored ${saved.tabs.length} tab(s)`);
+    } else if (INCOGNITO && tor && tor.status.state !== 'ready') {
+      // Nothing can load until Tor is connected, so the first page is the one
+      // that says how far along it is. It moves on to a new tab by itself.
+      tabs.create({ url: `${pages.TOR_URL}?then=newtab` });
     } else {
       tabs.create({ url: newTabUrl(prefs) });
     }
@@ -605,7 +761,7 @@ function main() {
     // Updates last, and never under a test or a benchmark: both assert on
     // measured memory and CPU, and a background download competing with them
     // would make the numbers depend on whether a release happened to be out.
-    if (!OFFLINE_MODE) {
+    if (!OFFLINE_MODE && !INCOGNITO) {
       updater = new Updater({
         // Read live rather than captured, so turning it off in Settings takes
         // effect at the next check instead of at the next launch.
@@ -620,7 +776,15 @@ function main() {
       shell.updater = updater;
     }
 
-    if (SMOKE_TEST) {
+    if (SMOKE_TEST && INCOGNITO) {
+      require('./smoke-incognito').run({
+        app, tabs, shell, downloads, tripwire, ctx: incognitoCtx, log,
+        setTripHook: (fn) => { onTripForTest = fn; }
+      }).then((code) => app.exit(code), (err) => {
+        console.error('[smoke-incognito] failed:', err.stack || err.message);
+        app.exit(1);
+      });
+    } else if (SMOKE_TEST) {
       runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context });
     } else if (argv.includes('--bench-test')) {
       const { runBench } = require('./bench');
@@ -644,6 +808,9 @@ function main() {
   });
 
   app.on('second-instance', () => {
+    // A second Ctrl+Shift+N reaches the incognito process that is already
+    // running, and means what it says: another private tab.
+    if (INCOGNITO && tabs) tabs.create({ url: pages.NEW_TAB_URL });
     if (shell && !shell.window.isDestroyed()) {
       if (shell.window.isMinimized()) shell.window.restore();
       shell.window.focus();
@@ -677,6 +844,8 @@ function main() {
     // it, and it holds an open stdin on a pipe that outlives us.
     platform.stopTrimHelper();
     platform.stopMeasureHelper();
+    if (tripwire) tripwire.dispose();
+    if (tor) tor.stop();
     // Synchronous on purpose: quit does not wait for promises, and leaving
     // page screenshots on disk is the one cleanup that must not be best effort.
     sweepThumbnailsSync();
@@ -747,11 +916,34 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   };
 
   const runCommand = (command, payload, sender = null) => {
+    if (INCOGNITO && INCOGNITO_REFUSED.has(command)) return undefined;
     const active = tabs.activeTab();
 
     switch (command) {
       case 'new-tab':
         tabs.create({ url: payload?.url || newTabUrl(prefs) });
+        break;
+
+      case 'tor-retry':
+        if (tor) tor.restart();
+        break;
+
+      // The one way to load a page over plain HTTP in a private window: the
+      // explanation page's own button, for that host, until the window closes.
+      // Only that page may send it - anything else asking is refused.
+      case 'allow-http': {
+        if (!INCOGNITO || !sender || pages.pageName(sender.getURL()) !== 'insecure') break;
+        const url = String(payload?.url || '');
+        if (!require('./incognito/policy').allowHttp(url)) break;
+        const tab = tabs.all().find((t) => t.isLive && t.wc === sender) || active;
+        if (tab && tab.isLive) tab.wc.loadURL(url).catch(() => {});
+        break;
+      }
+
+      case 'new-incognito-window':
+        // From inside incognito this is simply another private tab.
+        if (INCOGNITO) tabs.create({ url: newTabUrl(prefs) });
+        else launchIncognito(log);
         break;
 
       case 'close-tab':
@@ -1435,6 +1627,25 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
  * can read on disk - and the star in the toolbar has to be able to ask whether
  * the page in front of it is already saved.
  */
+/**
+ * What a private window does not offer at all.
+ *
+ * Everything here either writes to a profile - a password, a payment card, a
+ * bookmark, a history entry - or reaches outside the private connection on its
+ * own: the update check, the Windows Hello probe, loading a tab because the
+ * pointer rested on it. Refused at the dispatcher, so a keyboard shortcut, a
+ * menu item and a page's request all meet the same wall. A command that is not
+ * there cannot be abused, whatever the sender.
+ */
+const INCOGNITO_REFUSED = new Set([
+  'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment',
+  'list-history', 'delete-history', 'clear-history', 'forget-site',
+  'toggle-bookmark', 'remove-bookmark', 'bookmark-page', 'bookmark-profiles',
+  'import-from-profile', 'import-bookmark-file',
+  'check-for-updates', 'update-restart', 'presence-capability',
+  'prefetch-tab', 'prefetch-new-tab'
+]);
+
 const CHROME_REQUESTS = new Set([
   'list-bookmarks', 'toggle-bookmark', 'remove-bookmark',
   // The address bar asking how the address it is being given ends. It returns
@@ -1511,6 +1722,18 @@ const PAGE_POLICY = new Map([
   ['downloads', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab']),
     requests: DOWNLOAD_REQUESTS
+  }],
+  // Incognito's connection page: try again, and nothing else. It moves on to a
+  // new tab by navigating itself, which needs no command.
+  ['tor', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'tor-retry']),
+    requests: new Set()
+  }],
+  // The plain-HTTP explanation: go back, or continue to that one host - and
+  // `allow-http` is also checked against the sender where it is handled.
+  ['insecure', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'allow-http', 'back']),
+    requests: new Set()
   }]
 ]);
 
@@ -1526,6 +1749,7 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
     // Stricter than the command channel: only Settings may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
     if (!pageMay(sender, 'requests', command)) return null;
+    if (INCOGNITO && INCOGNITO_REFUSED.has(command)) return null;
 
     switch (command) {
       // Preferences ride along because the menu view is created on open and
@@ -2086,6 +2310,11 @@ function menuModel({ tabs, shell }) {
   // different. What is in each group is ours.
   return [
     { id: 'new-tab', label: 'New tab', accel: accel('new-tab'), icon: 'plus' },
+    // Not offered from inside incognito: a second one is just another tab there.
+    ...(INCOGNITO ? [] : [{
+      id: 'new-incognito-window', label: 'New incognito window',
+      accel: accel('new-incognito-window'), icon: 'shield'
+    }]),
     { kind: 'separator' },
     { id: 'open-history', label: 'History', accel: accel('open-history'), icon: 'clock' },
     { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },

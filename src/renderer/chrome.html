@@ -92,6 +92,16 @@
       <span class="downloads-ring" id="downloads-ring" aria-hidden="true"></span>
     </button>
 
+    <!--
+      Private windows only: which kind of window this is, and whether its
+      connection is up. Words, not just a colour, because "is this the private
+      window?" is a question people get wrong when the only answer is a tint.
+    -->
+    <button class="private-pill" id="private" hidden title="Private connection" aria-label="Private connection">
+      <span class="private-dot" aria-hidden="true"></span>
+      <span class="private-text" id="private-text">Private</span>
+    </button>
+
     <button class="meter" id="meter" title="Resource governor — click for the task manager">
       <span class="meter-bar"><span class="meter-fill" id="meter-fill"></span></span>
       <span class="meter-text" id="meter-text">—</span>

@@ -733,3 +733,111 @@ not share one either, by default. The *timing* claim holds exactly (79.3ms cold,
 pays for once — the zygote fork path, scheme and partition setup, V8's code
 cache — not process reuse. The comment has been corrected, because a wrong
 mechanism invites the wrong fix next time.
+
+## Incognito, M0 — the facts the design rests on
+
+Checked before any incognito code was written, because each one could have
+changed the design.
+
+**V8's compiler tiers, per security level.** `%GetOptimizationStatus` on a hot
+function after 200,000 calls, Electron 44 (V8 15.2):
+
+```
+level      flags                                                   status   what ran
+full       (none)                                                  0x29     TurboFan
+balanced   --no-turbofan --no-turbolev --no-maglev --liftoff-only  0x4003   Sparkplug, never-optimise
+maximum    --jitless                                               0x1043   interpreter, lite mode
+```
+
+Turbolev is in the list because this V8 has it as an alternative top tier: a
+flag set that named only TurboFan would leave an optimising compiler reachable
+the day it becomes the default. `--liftoff-only` rather than
+`--no-wasm-tier-up` because it says exactly what is meant: WebAssembly on its
+baseline compiler, nothing else. `--always-sparkplug` made no difference to
+this function's final state (it was already baseline); whether it helps
+start-up is left to the level benchmark.
+
+**`.onion` through SOCKS5.** A stub SOCKS5 server recorded the request for
+`duckduckgogg42….onion` as a domain name (ATYP 3). Chromium does not refuse
+onion names when a SOCKS5 proxy is set; Tor resolves them.
+
+**A new session phones home on its own.** The first request a fresh session
+made - before any page asked for anything - was to `redirector.gvt1.com`:
+the spellchecker fetching its dictionary. `setSpellCheckerEnabled(false)`
+alone did not stop it; `setSpellCheckerLanguages([])` did.
+
+**The environment's proxy leaks into "direct" contexts.** In this container a
+session with no proxy of its own sent its requests to `127.0.0.1:40085`, the
+container's own outbound proxy, taken from `HTTPS_PROXY`. So "any loopback
+connection is fine" is the wrong rule for a leak detector: it would pass
+traffic to a proxy that is not Tor. Incognito removes the proxy variables from
+its environment, and both the tripwire and the network-log check allow exactly
+one port.
+
+**CDP overrides reach workers.** `Emulation.setTimezoneOverride`,
+`setLocaleOverride` and `setHardwareConcurrencyOverride` all exist, and a
+dedicated worker reported UTC, 4 cores and `en-US` alongside its page, with the
+process's own timezone still Asia/Tokyo. The debugger has to attach after the
+first navigation: attached to a fresh view, the target is swapped out
+underneath it ("target closed while handling command").
+
+**A picked upload can be replaced.** `Page.setInterceptFileChooserDialog`
+plus `DOM.setFileInputFiles` delivered a different file to an
+`<input type=file>` than the one a dialog would have picked. Electron has no
+API of its own for this; CDP does, which is what the upload sanitiser uses.
+
+**Chromium's sandbox works inside our namespace.** As a non-root user, under
+`unshare --user --net --map-current-user`, a sandboxed renderer ran in a
+nested PID namespace with seccomp mode 2. Mapping to root instead makes
+Electron refuse to start without `--no-sandbox`, so the kill switch maps the
+user's own uid.
+
+**The Tor bundle.** 15.0.23's Expert Bundle verified against the Tor Browser
+Developers key `EF6E 286D DA85 EA2A 4BA7 DE68 4E2C 6E87 9329 8290`, confirmed
+against support.torproject.org. It carries `tor`, `lyrebird 0.8.1` (meek_lite,
+obfs2, obfs3, obfs4, scramblesuit, webtunnel, snowflake) and `conjure-client`.
+Built-in bridge lines: obfs4 ×7, snowflake ×2, meek ×1 - **no built-in
+WebTunnel**, so WebTunnel is reached only through a bridge of your own. Size on
+disk: tor and its libraries 10.5 MB, lyrebird 17.6 MB, conjure-client 12.8 MB
+(not shipped), geoip data 25 MB (not shipped: a client does not need it).
+
+**Tor cannot run in this container.** Bootstrap stops at 5% ("connecting to a
+relay"): the network policy allows only HTTPS through an intercepting proxy.
+Real Tor is proven by CI and on real machines, not here.
+
+## Incognito, M1 — the leak test, and what it found on its first runs
+
+`test/incognito-leak.js` runs an incognito process against a SOCKS5 stand-in
+for Tor that records every name it is asked for, inside a network namespace
+with no route anywhere, while Chromium logs every request's routing decision.
+Its first runs failed, and every failure was real:
+
+1. **The spellchecker** asked the proxy for `redirector.gvt1.com` (see above).
+2. **The tripwire checked nothing.** It reported "0 trips" over **0 checks**:
+   the request/reply correlation keyed replies by id and requests by verb, so
+   every check timed out waiting for an answer it had in hand. The test now
+   requires checks to have happened.
+3. **The browsing partition was persistent** (`persist:debrowser`), so
+   incognito was writing a disk cache of every page it visited - into the
+   private profile, deleted on exit, but written. Incognito now uses an
+   in-memory partition.
+4. **Chromium writes after the process stops running JavaScript.** `Local
+   State`, `Network Persistent State`, session storage and a `Crashpad`
+   database were all left behind after a clean exit, because they are written
+   after Node's `exit` handler. A native reaper (`net-watch --reap`) now waits
+   for the process to end and deletes its session directory.
+
+**The test was then shown to fail against a naive design.** With the proxy
+applied only to the browsing partition - the obvious first implementation -
+three separate checks failed: the stand-in never saw the favicon route's
+host, and Chromium's log recorded `DIRECT` routing for the favicon and
+touch-icon requests made from the default session. An earlier version of the
+test *passed* that design: it keyed the favicon check on a host the page itself
+had already requested, and it treated lookups refused by the resolver rules as
+harmless - when a request that resolves locally at all is one that was going
+direct. Both were tightened before trusting the result.
+
+Final state, inside the namespace and without it: **13/13**. Both canaries -
+a direct Chromium fetch to a non-proxy loopback port, and a direct socket from
+the main process to a LAN address - are caught every run; the tripwire also
+caught Chromium's own network-service socket for the first one.

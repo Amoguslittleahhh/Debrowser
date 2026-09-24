@@ -1,0 +1,48 @@
+/*
+ * The private-connection page. Header, notes and buttons come from
+ * settings.css; this is the status block and the table.
+ */
+
+main { max-width: 720px; }
+
+.status {
+  padding: var(--s4) var(--s5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  margin-bottom: var(--s5);
+}
+
+.status .line { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-lead); }
+.status .pct { margin-left: auto; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
+}
+.status[data-state="ready"] .dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.status[data-state="failed"] .dot { background: var(--crit); box-shadow: 0 0 0 3px color-mix(in srgb, var(--crit) 22%, transparent); }
+
+.meter { height: 4px; margin: var(--s3) 0 var(--s2); border-radius: var(--radius-pill); background: var(--bg-input); overflow: hidden; }
+.meter span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 240ms ease-out; }
+.status[data-state="failed"] .meter span { background: var(--crit); }
+
+.detail { margin: 0; color: var(--text-dim); font-size: var(--fs-small); min-height: 1.4em; }
+.problem { margin: var(--s2) 0 0; color: var(--crit); font-size: var(--fs-small); }
+.actions { margin-top: var(--s3); display: flex; gap: var(--s2); }
+.actions:empty, .actions:has(> [hidden]:only-child) { display: none; }
+
+.facts h2 { font-size: var(--fs-body); font-weight: var(--fw-bold); margin: 0 0 var(--s3); }
+.facts table { width: 100%; border-collapse: collapse; margin-bottom: var(--s4); }
+.facts th, .facts td { text-align: left; padding: 9px 0; border-bottom: 1px solid var(--border-soft); vertical-align: top; font-size: var(--fs-small); line-height: var(--lh-body); }
+.facts th { font-weight: var(--fw-regular); color: var(--text); width: 42%; padding-right: var(--s3); }
+.facts td.yes { color: var(--ok); }
+.facts td.part { color: var(--warn); }
+.facts td.no { color: var(--text-dim); }
+
+kbd {
+  font: inherit; font-size: var(--fs-small);
+  padding: 1px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}

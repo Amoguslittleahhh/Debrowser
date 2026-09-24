@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>webrtc</title>
+<p>Gathers ICE candidates, for the incognito leak test.</p>
+<script>
+  // Every candidate WebRTC is willing to offer. In incognito there should be
+  // none that name this machine: host candidates carry local addresses and
+  // srflx ones come back from a STUN server over UDP, which never goes
+  // through the SOCKS proxy.
+  window.__candidates = new Promise(async (resolve) => {
+    const stun = new URLSearchParams(location.search).get('stun');
+    const found = [];
+    try {
+      const pc = new RTCPeerConnection({ iceServers: stun ? [{ urls: `stun:${stun}` }] : [] });
+      pc.createDataChannel('probe');
+      pc.onicecandidate = (e) => {
+        if (e.candidate) found.push(e.candidate.type || e.candidate.candidate);
+        else resolve(found);
+      };
+      await pc.setLocalDescription(await pc.createOffer());
+    } catch (err) {
+      found.push(`error:${err.name}`);
+      resolve(found);
+    }
+    setTimeout(() => resolve(found), 4000);
+  });
+</script>

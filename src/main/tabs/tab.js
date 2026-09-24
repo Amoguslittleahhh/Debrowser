@@ -22,6 +22,7 @@ const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload
 // must never get it. Which one a tab loads is decided by `internal` below.
 const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
 const pages = require('../pages');
+const { INCOGNITO } = require('../incognito/mode');
 
 /**
  * How much larger Settings opens than the rest of the browser.
@@ -327,7 +328,10 @@ class Tab {
         // Chromium's own background throttling stays on; the governor layers
         // its harder tiers on top rather than replacing it.
         backgroundThrottling: true,
-        transparent: false
+        transparent: false,
+        // A new spellchecker fetches its dictionary on its own; in incognito
+        // that is a request no page asked for.
+        spellcheck: !INCOGNITO
         // No `zoomFactor` here: Chromium records it against the site the page
         // loads, so a default applied this way pinned every site. The zoom is
         // set per document instead, below - see zoom.js.
@@ -341,6 +345,10 @@ class Tab {
     this.view.setBackgroundColor(SURFACE_COLOUR);
 
     this.wc = this.view.webContents;
+    // WebRTC gathers ICE candidates over UDP, which does not go through a SOCKS
+    // proxy - so it would reveal this machine's addresses to any page that asks.
+    // Set per view as well as by the command-line switch in incognito.
+    if (INCOGNITO) this.wc.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
     this.cdp = new CdpSession(this.wc, this.log);
     this.crashed = false;
 
@@ -470,6 +478,16 @@ class Tab {
       if (!isMainFrame || errorCode === -3) return;
       // Never render an error page for a failed error page.
       if (String(validatedURL).startsWith('data:')) return;
+      // Incognito upgraded this from plain HTTP and the secure version is not
+      // there. Say so, and let the user decide, rather than fail blankly or
+      // quietly fall back to a page an exit relay can read.
+      if (INCOGNITO) {
+        const plain = require('../incognito/policy').upgradeFailed(validatedURL, errorCode);
+        if (plain) {
+          this.wc.loadURL(`${pages.INSECURE_URL}?url=${encodeURIComponent(plain)}`).catch(() => {});
+          return;
+        }
+      }
       this.showError(validatedURL, errorDescription || `error ${errorCode}`);
     });
 
@@ -709,6 +727,8 @@ class Tab {
    * replaces.
    */
   async captureThumbnail() {
+    // Incognito writes nothing to disk, and a thumbnail is a picture of a page.
+    if (INCOGNITO) return null;
     if (!this.isLive || !this.visible) return null;
 
     if (this.hasSensitiveFields) {

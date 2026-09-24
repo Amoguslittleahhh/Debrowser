@@ -45,7 +45,12 @@ const PAGES = {
   newtab: 'newtab.html',
   settings: 'settings.html',
   history: 'history.html',
-  downloads: 'downloads.html'
+  downloads: 'downloads.html',
+  // Incognito only: connecting to Tor, and what the connection does and does
+  // not hide. Served to the normal browser too, where it has nothing to say.
+  tor: 'tor.html',
+  // Incognito only: a page asked for plain HTTP and HTTPS was not available.
+  insecure: 'insecure.html'
 };
 
 /** Where a new tab goes when the user has not chosen a homepage. */
@@ -53,6 +58,8 @@ const NEW_TAB_URL = `${SCHEME}://newtab`;
 const SETTINGS_URL = `${SCHEME}://settings`;
 const HISTORY_URL = `${SCHEME}://history`;
 const DOWNLOADS_URL = `${SCHEME}://downloads`;
+const TOR_URL = `${SCHEME}://tor`;
+const INSECURE_URL = `${SCHEME}://insecure`;
 
 /**
  * Must run before `app.whenReady()`.
@@ -195,11 +202,13 @@ function titleFor(url) {
     case 'newtab': return 'New tab';
     case 'history': return 'History';
     case 'downloads': return 'Downloads';
+    case 'tor': return 'Private connection';
+    case 'insecure': return 'Not private';
     default: return 'Debrowser';
   }
 }
 
 module.exports = {
-  SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL,
-  registerScheme, serve, isInternal, pageName, titleFor
+  SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, TOR_URL,
+  INSECURE_URL, registerScheme, serve, isInternal, pageName, titleFor
 };

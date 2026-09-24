@@ -135,6 +135,26 @@ jobs:
         if: matrix.os != 'ubuntu-latest'
         run: npm run build:memprobe
 
+      # Incognito's tripwire and reaper, on every platform: the three socket
+      # backends differ completely, and this step is the only place the Windows
+      # and macOS ones are ever compiled.
+      - name: Build the incognito tripwire
+        run: npm run build:netwatch
+
+      # Tor for private windows. Downloaded from the Tor Project and checked
+      # against its signing key, pinned by fingerprint in tools/tor.json; a
+      # bundle that does not verify fails the build rather than shipping.
+      # macOS builds both architectures from one runner, so it fetches both.
+      - name: Fetch and verify Tor
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            node tools/fetch-tor.js --arch=x64
+            node tools/fetch-tor.js --arch=arm64
+          else
+            node tools/fetch-tor.js
+          fi
+
       # Cheap, and it catches the one class of fault this project has shipped
       # twice: a name used in a scope that does not have it. Under 'use strict'
       # that is a ReferenceError on whatever path touches it - so `node --check`
@@ -155,6 +175,27 @@ jobs:
       - name: Smoke test
         if: matrix.os == 'windows-latest'
         run: npm run smoke
+
+      # Incognito's leak test: every request through a stand-in for Tor that
+      # records what it is asked for, Chromium's own log of how each request
+      # was routed, and two deliberate leaks that both detectors must catch.
+      # On Linux it runs inside a network namespace with no route anywhere,
+      # which Ubuntu's AppArmor refuses to unprivileged users by default.
+      - name: Allow unprivileged network namespaces
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Incognito leak test
+        if: matrix.os != 'macos-latest'
+        run: npm run test:incognito
+
+      # Advisory for the same reason the macOS smoke run is, and the first
+      # place its socket backend ever runs - so a failure here is read, not
+      # ignored.
+      - name: Incognito leak test (advisory on macOS)
+        if: matrix.os == 'macos-latest'
+        continue-on-error: true
+        run: npm run test:incognito
 
       # Advisory on macOS, blocking everywhere else.
       #

@@ -156,6 +156,8 @@ class Bookmarks {
   }
 
   save() {
+    // Incognito reads the normal profile's bookmarks and never writes them.
+    if (this.readOnly) return;
     const tmp = `${this.file}.tmp`;
     const body = JSON.stringify({ version: 1, items: this.items }, null, 2);
     try {

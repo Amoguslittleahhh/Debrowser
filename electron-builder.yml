@@ -99,6 +99,15 @@ win:
         # Linux half, which needs a `setcap`.
         - mem-trim.exe
         - mem-trim.c
+        # Incognito's egress tripwire and the reaper that deletes its profile
+        # after exit. Every platform ships it: on macOS it is the only runtime
+        # check that nothing went around the proxy.
+        - net-watch.exe
+        - net-watch.c
+    # Tor for private windows, fetched and signature-checked by
+    # tools/fetch-tor.js before packaging. Per platform and architecture.
+    - from: vendor/tor/${platform}-${arch}
+      to: tor
 
   ## Signing.
   ##
@@ -170,6 +179,10 @@ mac:
       filter:
         - mem-probe
         - mem-probe.c
+        - net-watch
+        - net-watch.c
+    - from: vendor/tor/${platform}-${arch}
+      to: tor
 
 dmg:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
@@ -205,7 +218,11 @@ linux:
       filter:
         - mem-trim
         - mem-trim.c
+        - net-watch
+        - net-watch.c
         - ksm-launch.c
+    - from: vendor/tor/${platform}-${arch}
+      to: tor
   target:
     - target: AppImage
       arch: [x64]

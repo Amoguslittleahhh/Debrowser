@@ -35,6 +35,9 @@ window.addEventListener('wheel', (event) => {
 /** Commands the UI is allowed to issue. */
 const COMMANDS = new Set([
   'new-tab',
+  'new-incognito-window',
+  'tor-retry',
+  'allow-http',
   'close-tab',
   'activate-tab',
   'navigate',
