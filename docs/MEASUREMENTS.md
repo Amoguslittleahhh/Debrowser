@@ -1067,3 +1067,33 @@ nobody sees, in a partition whose storage is cleared before each load.
 downloads folder.
 
 Leak test: 32/32; with the Linux kill switch, 34/34.
+
+## Incognito, M8 — the fuses, certificate errors, and two Windows findings
+
+**The fuses, on a real package.** A local `electron-builder --linux dir` build
+read back RunAsNode, NODE_OPTIONS and `--inspect` disabled and the archive
+integrity check and asar-only loading enabled. With `ELECTRON_RUN_AS_NODE=1`
+the packaged binary ignored the variable and started the browser; the
+unfused development binary, given the same command, printed from the script.
+The packaged smoke suite passed 148/148 with every fuse set. The release
+workflow repeats both checks on every Linux build.
+
+**Certificate errors.** The leak test serves an HTTPS page on a certificate
+made for the run and signed by nobody. The private window refused it
+(`ERR_CERT_AUTHORITY_INVALID`) and showed nothing offering to continue. With
+the handler deliberately flipped to allow, the same check failed and the page
+showed - so the check can fail.
+
+**Windows, from CI.** Two failures that the Linux runs could not show:
+
+- The credential store created its key in the private profile when a page
+  load asked it for saved logins - only where an OS keystore exists, which on
+  Windows is always. The store is now absent from private windows entirely.
+- `app.getPath('downloads')` threw "Failed to get 'downloads' path" when the
+  known Downloads folder did not exist, and every download failed with it. It
+  now falls back to `<home>/Downloads`, created if need be.
+
+And one difference that is not a failure: Windows builds `navigator.languages`
+from `--lang` alone (`en-US`), where Linux and macOS take it from the locale
+variables (`en-US,en`). Each OS is uniform with itself, and the user agent
+already names the OS.
