@@ -60,6 +60,18 @@ PT_BIN="$(command -v "$PT")"
 # The ORPort only has to be reachable by Tor itself; it is not what clients use.
 OR_PORT=9001
 
+# This server's public address, found before Tor is configured rather than
+# after: a server behind NAT - a home server, a cloud VM with a private
+# interface - has no public address on any interface, and a relay that cannot
+# work out its own address does not act as a directory for its clients, who
+# then connect, shake hands, and wait forever for the network's consensus.
+# Measured on a CI runner, stuck at 25% for five minutes. Said explicitly here.
+ADDR="$(curl -4 -s --max-time 10 https://icanhazip.com || hostname -I | awk '{print $1}')"
+if [ -z "$ADDR" ]; then
+  echo "Could not find this server's public IPv4 address." >&2
+  exit 1
+fi
+
 echo "== Writing /etc/tor/torrc"
 cat > /etc/tor/torrc <<TORRC
 # Written by Debrowser's setup-bridge.sh. A private obfs4 bridge.
@@ -67,6 +79,11 @@ BridgeRelay 1
 # IPv4 only: plenty of small servers have no IPv6, and an ORPort that tries to
 # listen on both fails outright there. Clients reach the bridge on obfs4 anyway.
 ORPort ${OR_PORT} IPv4Only
+Address ${ADDR}
+# Unpublished, so there is no reachability test worth waiting for: behind a
+# firewall that only lets the obfs4 port in, it would fail and hold the
+# bridge back for nothing.
+AssumeReachable 1
 # A bridge is not a client: no SOCKS port.
 SocksPort 0
 # Said outright: the package's service sets this for Tor, but run without
@@ -100,6 +117,10 @@ if command -v ufw >/dev/null && ufw status | grep -q active; then
 fi
 
 echo "== Restarting Tor"
+# Only what Tor says from here counts: the package starts a client on install,
+# which may already have logged its own "Bootstrapped 100%".
+SINCE="$(date '+%Y-%m-%d %H:%M:%S')"
+rm -f /var/lib/tor/notices.log
 if [ -d /run/systemd/system ]; then
   systemctl enable --now tor >/dev/null 2>&1 || true
   systemctl restart tor
@@ -123,7 +144,20 @@ if [ ! -s "$LINE_FILE" ]; then
   exit 1
 fi
 
-ADDR="$(curl -4 -s --max-time 10 https://icanhazip.com || hostname -I | awk '{print $1}')"
+# And ready to serve before the line is handed out: a client that arrives
+# before the bridge has the network's consensus itself has nothing to be given.
+echo "== Waiting for the bridge to join the Tor network"
+READY=0
+for _ in $(seq 1 180); do
+  if { journalctl -u 'tor*' --since "$SINCE" --no-pager 2>/dev/null; cat /var/lib/tor/notices.log 2>/dev/null; } \
+       | grep -q 'Bootstrapped 100%'; then READY=1; break; fi
+  sleep 1
+done
+if [ "$READY" != 1 ]; then
+  echo "The bridge has not finished joining the Tor network after three minutes." >&2
+  echo "The line below will work once it has. Check: journalctl -u tor" >&2
+fi
+
 FPR="$(awk '{print $2}' /var/lib/tor/fingerprint)"
 CERT="$(grep -o 'cert=[^ ]*' "$LINE_FILE")"
 LINE="obfs4 ${ADDR}:${PORT} ${FPR} ${CERT} iat-mode=${IAT}"

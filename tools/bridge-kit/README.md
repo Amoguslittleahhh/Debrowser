@@ -54,3 +54,12 @@ limit, an IPv6 listener on an IPv4-only host, a leftover client SOCKS port, and
 Tor's files landing under `~/.tor` without systemd's defaults. Debrowser's own
 Tor then completed the obfs4 handshake with the bridge it produced and began
 loading the network directory through it.
+
+It is also run on every change by `.github/workflows/real-tor.yml`, on a
+GitHub runner with systemd, and Debrowser's Tor has to reach the Tor network
+through the bridge it makes. The first such run found a fifth problem: a
+server behind NAT has no public address on any interface, and a bridge that
+cannot work out its own address does not serve the network directory to its
+clients - who connect, shake hands, and wait. The script now finds the public
+address first and gives it to Tor, and waits for the bridge to join the
+network before printing its line.
