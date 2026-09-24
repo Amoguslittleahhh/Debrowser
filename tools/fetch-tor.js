@@ -63,13 +63,14 @@ function tool(name) {
 }
 
 /**
- * Paths for gpg. On Windows it is Git's MSYS build, which reads a Windows path
- * in GNUPGHOME as relative to the current directory - measured on the CI
- * runner: "/d/a/Debrowser/Debrowser/C:\\Users\\...\\gnupg: directory does not
- * exist". Forward slashes it reads correctly.
+ * gpg is given only paths relative to the work directory it runs in. On
+ * Windows it is Git's MSYS build, which reads a Windows path in GNUPGHOME as
+ * relative to the current directory - with backslashes and, measured on the
+ * next CI run, with forward slashes too: "/d/a/Debrowser/Debrowser/C:/Users/
+ * .../gnupg: directory does not exist". A relative path means the same thing
+ * to MSYS gpg and to a native one. The keyring is spelled with "./" because
+ * gpgv looks a bare name up in GNUPGHOME instead.
  */
-const forGpg = (p) => (process.platform === 'win32' ? p.replace(/\\/g, '/') : p);
-
 function run(cmd, args, options = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...options });
   if (r.status !== 0) {
@@ -107,10 +108,10 @@ async function main() {
 
   // 1. The committed key is the pinned key, and only that key.
   const gpg = tool('gpg');
-  const home = path.join(work, 'gnupg');
-  fs.mkdirSync(home, { mode: 0o700 });
-  const env = { ...process.env, GNUPGHOME: forGpg(home) };
-  const shown = run(gpg, ['--batch', '--show-keys', '--with-colons', forGpg(KEY_FILE)], { env });
+  fs.mkdirSync(path.join(work, 'gnupg'), { mode: 0o700 });
+  fs.copyFileSync(KEY_FILE, path.join(work, 'key.asc'));
+  const inWork = { cwd: work, env: { ...process.env, GNUPGHOME: 'gnupg' } };
+  const shown = run(gpg, ['--batch', '--show-keys', '--with-colons', 'key.asc'], inWork);
   const primaries = shown.split('\n').filter((l) => l.startsWith('pub:')).length;
   const firstFpr = (shown.split('\n').find((l) => l.startsWith('fpr:')) || '').split(':')[9];
   if (primaries !== 1 || firstFpr !== PIN.fingerprint) {
@@ -118,10 +119,9 @@ async function main() {
   }
 
   // 2. The bundle is signed by it.
-  const keyring = path.join(work, 'tor.gpg');
-  run(gpg, ['--batch', '--yes', '--dearmor', '-o', forGpg(keyring), forGpg(KEY_FILE)], { env });
+  run(gpg, ['--batch', '--yes', '--dearmor', '-o', 'tor.gpg', 'key.asc'], inWork);
   const gpgv = tool('gpgv');
-  run(gpgv, ['--keyring', forGpg(keyring), forGpg(`${tarball}.asc`), forGpg(tarball)], { env });
+  run(gpgv, ['--keyring', './tor.gpg', `${name}.asc`, name], inWork);
   console.log(`signature good: ${name} (key ${PIN.fingerprint})`);
 
   // 3. Unpack, and keep what incognito uses.
