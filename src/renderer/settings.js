@@ -293,13 +293,13 @@ const SECTIONS = {
       options: [
         { value: 'auto', name: 'Through built-in bridges' },
         { value: 'custom', name: 'Through my own bridges' },
-        { value: 'none', name: 'Directly - fastest, and your ISP can see Tor' }
+        { value: 'none', name: 'Directly – fastest, and your ISP can see Tor' }
       ]
     },
     {
       key: 'incognitoBridgeLines',
       label: 'My bridges',
-      hint: 'One per line, as a bridge gives them - obfs4, webtunnel or snowflake. tools/bridge-kit sets up your own.',
+      hint: 'One per line, as a bridge gives them – obfs4, webtunnel or snowflake. tools/bridge-kit sets up your own.',
       type: 'textarea',
       placeholder: 'obfs4 203.0.113.5:443 FINGERPRINT cert=… iat-mode=0'
     },
@@ -309,18 +309,18 @@ const SECTIONS = {
       // The costs are measured, by bench/js-levels: everyday page work (DOM,
       // JSON) runs the same at every level; heavy number-crunching and
       // WebAssembly are where the optimising compilers earn their keep.
-      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land: everyday pages run as fast, heavy computation about half as fast. Maximum runs the interpreter alone. From the next private window.',
+      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land: everyday pages run as fast, heavy computation about half as fast. Maximum runs the interpreter alone. Applies to new private windows.',
       type: 'select',
       options: [
-        { value: 'balanced', name: 'Balanced - heavy scripts ~2× slower' },
-        { value: 'maximum', name: 'Maximum - no WebAssembly, text search ~4× slower' },
+        { value: 'balanced', name: 'Balanced – heavy scripts ~2× slower' },
+        { value: 'maximum', name: 'Maximum – no WebAssembly, text search ~4× slower' },
         { value: 'full', name: 'Full speed' }
       ]
     },
     {
       key: 'incognitoKeepTorState',
       label: 'Remember Tor between sessions',
-      hint: 'Keeps the same entry guard, as Tor is designed to, and connects in seconds - sealed with your system keystore. Off leaves no trace of Tor here, but picks a new guard every time.',
+      hint: 'Keeps the same entry guard, as Tor is designed to, and connects in seconds – sealed with your system keystore. Off leaves no trace of Tor here, but picks a new guard every time.',
       type: 'checkbox'
     },
     {
@@ -331,7 +331,7 @@ const SECTIONS = {
     {
       key: 'incognitoCamouflage',
       label: 'Traffic camouflage',
-      hint: 'Loads a decoy page from a built-in list of popular sites beside each real one, on another circuit, so timing and size tell an observer less. About twice the data; the decoy sites see visits you did not make. From the next private window.',
+      hint: 'Loads a decoy page from a built-in list of popular sites beside each real one, on another circuit, so timing and size tell an observer less. About twice the data; the decoy sites see visits you did not make. Applies to new private windows.',
       type: 'checkbox'
     },
     {
@@ -763,7 +763,7 @@ function renderUpdateState(u) {
     case 'checking':    el.textContent = 'Checking for a new version…'; break;
     case 'available':   el.textContent =
       `${u.version} is available. Turn on automatic updates to download it.`; break;
-    case 'downloading': el.textContent = `Downloading ${u.version} — ${u.progress}%.`; break;
+    case 'downloading': el.textContent = `Downloading ${u.version} – ${u.progress}%.`; break;
     case 'ready':       el.textContent = `${u.version} is downloaded and installs when you restart.`; break;
     case 'error':       el.textContent = `Last check failed: ${u.error}`; break;
     case 'idle':        el.textContent = 'Up to date.'; break;
@@ -860,7 +860,7 @@ async function renderPresence() {
   control.input.disabled = false;
   if (hint && cap.experimental) {
     hint.textContent = `Uses ${cap.mechanism}. This has never been run against real ` +
-      'hardware, so try it before relying on it — if the prompt does not appear, the ' +
+      'hardware, so try it before relying on it – if the prompt does not appear, the ' +
       'check refuses rather than letting the secret through.';
   } else if (hint) {
     hint.textContent = `Uses ${cap.mechanism}, before a saved password or card is shown or filled.`;
@@ -930,7 +930,7 @@ function credentialRow(kind, id, title, subtitle) {
     // literal word "undefined" where the password goes, with the button flipped
     // to Hide. A refusal has to look like a refusal.
     if (secret.denied) {
-      hint.textContent = 'Not shown — the identity check was not completed.';
+      hint.textContent = 'Not shown – the identity check was not completed.';
       return;
     }
     hint.textContent = kind === 'login' ? secret.password : secret.number;
@@ -1390,7 +1390,7 @@ function bookmarkRow(item) {
   label.textContent = item.title;
   const hint = document.createElement('span');
   hint.className = 'row-hint';
-  hint.textContent = item.folder ? `${item.folder} — ${item.url}` : item.url;
+  hint.textContent = item.folder ? `${item.folder} – ${item.url}` : item.url;
   text.append(label, hint);
 
   const control = document.createElement('div');

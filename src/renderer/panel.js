@@ -114,8 +114,8 @@ function render(state) {
     : state.accounting === 'probe'
     ? (state.probeMechanism === 'proc_pid_rusage'
         ? 'Physical footprint, the figure macOS charges each process and shows in ' +
-          'Activity Monitor. It excludes clean file-backed pages - one copy of ' +
-          'Chromium in every renderer - which is where the over-counting came from. ' +
+          'Activity Monitor. It excludes clean file-backed pages – one copy of ' +
+          'Chromium in every renderer – which is where the over-counting came from. ' +
           'It does not divide shared dirty pages, so it is not proportional set size.'
         : 'Proportional set size, computed by walking each process\'s working set ' +
           'and dividing every shared page by the number of processes sharing it. ' +
@@ -125,8 +125,8 @@ function render(state) {
     ? 'Proportional set size: pages shared between processes are counted once, ' +
       'split across the processes sharing them. This is real physical memory.'
     : 'Summed working set. This platform offers no cheap proportional measure, ' +
-      'so pages shared between processes - chiefly one copy of Chromium in each ' +
-      'of them - are counted once per process. Measured at about 2x the ' +
+      'so pages shared between processes – chiefly one copy of Chromium in each ' +
+      'of them – are counted once per process. Measured at about 2x the ' +
       'proportional figure, rising with process count. The browser is holding ' +
       'meaningfully less than this number says.' + coverageNote(state);
   // One word, because the tile is a third of a 360px panel and the label is
@@ -195,7 +195,7 @@ function render(state) {
   if (detail && !proportional) {
     el.pressure.textContent +=
       ` Memory is counted as summed working set on this platform, which counts ` +
-      `each shared page once per process - about 2x high, and more with more ` +
+      `each shared page once per process – about 2x high, and more with more ` +
       `processes open. The real footprint is lower; the budget is compared ` +
       `against the same inflated figure, so it reclaims earlier rather than later.`;
   }
@@ -203,7 +203,7 @@ function render(state) {
   const merging = state.pageMerging;
   if (detail && merging && merging.active) {
     el.pressure.textContent += ` Page merging is active (KSM): ~${merging.profitMB} MB saved system-wide. ` +
-      'Deduplication is a known timing side channel - see the README.';
+      'Deduplication is a known timing side channel – see the README.';
   }
 
   const s = state.stats;

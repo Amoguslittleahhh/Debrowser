@@ -46,6 +46,7 @@ h1 {
   cursor: default;
 }
 .close:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.close:active { background: color-mix(in srgb, var(--text) 16%, transparent); }
 .close svg {
   width: var(--icon); height: var(--icon);
   fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linecap: round;
@@ -91,6 +92,7 @@ h1 {
 }
 
 .rail-item:hover { background: var(--wash-soft); color: var(--text); }
+.rail-item:active { background: var(--wash); }
 
 /*
  * Where you are, marked down the leading edge rather than by a filled pill.
@@ -374,6 +376,7 @@ input[type="checkbox"] {
 .swatch[aria-pressed="true"] { border-color: var(--text); }
 .swatch { transition: transform var(--fast) var(--ease), border-color var(--fast) var(--ease); }
 .swatch:hover { transform: scale(1.12); }
+.swatch:active { transform: scale(1.02); }
 
 /* The "follow the accent" swatch says so by showing the accent itself, with a
    ring that marks it as a rule rather than a colour. */
@@ -402,6 +405,7 @@ input[type="range"] {
 }
 .ghost-btn:hover { background: var(--wash-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .ghost-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
+.ghost-btn:active:not(:disabled) { background: var(--wash); }
 
 /* A revealed secret is selectable - the point of showing one is usually to
    copy it - and wraps rather than stretching the row off the page. */

@@ -162,7 +162,7 @@ body[data-platform="linux"] { --caption-right: 146px; }
   flex: 1 1 240px;
   height: 34px;
   padding: 0 8px 0 11px;
-  border-radius: 9px 9px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
   background: transparent;
   border: none;
   color: var(--text-dim);
@@ -178,6 +178,10 @@ body[data-platform="linux"] { --caption-right: 146px; }
   transition: background-color var(--slow) var(--ease), color var(--slow) var(--ease);
   animation: tab-in var(--slow) var(--ease-out);
 }
+/* Folding away (see closeTabElement): nothing inside may hold it open, and
+   nothing on it can be pressed any more. */
+.tab.closing { overflow: hidden; pointer-events: none; }
+
 /* On quickly, off slowly: a sweep across the strip leaves a short trail
    rather than strobing each tab it crosses. */
 .tab:hover { transition-duration: var(--instant); }
@@ -385,10 +389,10 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
  */
 .tab.dragging { z-index: 2; }
 body.tab-dragging .tab:not(.dragging) {
-  transition: transform 160ms var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+  transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
 }
 .tab.settling {
-  transition: transform 180ms var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+  transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
 }
 
 /* A crashed page: the tab fades until it is reloaded. */
@@ -455,7 +459,7 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
   background: transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   line-height: 1;
   cursor: default;
 }
@@ -706,7 +710,6 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
   cursor: pointer;
 }
 .onion-btn:hover { background: color-mix(in srgb, var(--private) 18%, transparent); }
-body.incognito { --private: #8a6bd1; }
 body.incognito .toolbar { background: color-mix(in srgb, var(--private) 7%, transparent); }
 body.incognito .star { opacity: 0.35; }
 body[data-meter="off"] .meter { display: none; }
@@ -764,10 +767,8 @@ body[data-dots="off"] .tier { display: none; }
   right: 0;
   bottom: -1px;
   height: 2px;
-  /* Brighter at the leading edge, so the line has a direction. One gradient on
-     one 2px element; it is painted once and then only transformed. */
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--accent) 55%, transparent), var(--accent));
+  /* One flat colour: the line's movement is what says it is going somewhere. */
+  background: var(--accent);
   transform: scaleX(0);
   transform-origin: left center;
   opacity: 0;
@@ -998,10 +999,7 @@ body[data-layout="left"] .tab.active::before {
   border-radius: 0 2px 2px 0;
 }
 
-body[data-layout="left"] .tab.active {
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--accent) 18%, var(--bg-input)), var(--bg-input) 60%);
-}
+body[data-layout="left"] .tab.active { background: var(--bg-input); }
 
 /* ---------------------------------------------------------------- */
 /* Bookmark star                                                     */
@@ -1216,14 +1214,12 @@ body .bookmark-chip.has-icon {
  * where they met about a third of the way down. Photographed off the
  * recording: `#161614` above the seam, `#2a4030` below it, at the same x.
  *
- * Painting the body means the whole ten pixels are one gradient whatever the
+ * Painting the body means the whole ten pixels are one colour whatever the
  * column happens to contain, so there is nothing to line up and nothing to
  * come apart.
  */
 body[data-sidebar="true"][data-sidebar-open="false"] {
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--accent) 30%, var(--strip)),
-    var(--strip));
+  background: color-mix(in srgb, var(--accent) 18%, var(--strip));
 }
 
 body[data-sidebar="true"][data-sidebar-open="false"] .tabstrip { background: none; }
@@ -1366,6 +1362,12 @@ body[data-layout="left"] .pin { display: grid; }
  * room from the page rather than borrowing it - the bookmarks bar - so the find
  * bar is one too, and the window adds its 38px to the chrome while it is up.
  */
+/* The find bar and the downloads button fade in rather than appearing in one
+   frame. An animation plays again every time `hidden` comes off. */
+.findbar,
+.icon-btn.downloads { animation: appear var(--fast) var(--ease-out); }
+@keyframes appear { from { opacity: 0; } }
+
 .findbar {
   display: flex;
   align-items: center;
@@ -1474,7 +1476,7 @@ body[data-layout="left"] #find-close { order: 3; }
 body[data-floating="true"] {
   justify-content: flex-start;
   padding-bottom: 8px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   /* An edge, because the panel is now over a page rather than against the
      window's own border, and without one a dark strip on a dark site has no
      boundary at all. */
@@ -1514,8 +1516,15 @@ body[data-floating="true"] .toolbar {
   min-width: 24px;
   padding: 0 6px;
   color: var(--text-dim);
-  font-size: 15px;
-  line-height: 1;
+}
+.bookmark-more svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .bookmark-more:hover { color: var(--text); }
 

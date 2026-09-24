@@ -167,6 +167,7 @@ body.still .tile { animation: none; }
   border-color: var(--border-soft);
   transition-duration: var(--instant);
 }
+.tile-open:active { background: var(--wash); }
 
 /* A press that moves is the cheapest way to make a tile feel like a button
    rather than a picture of one. */

@@ -412,7 +412,16 @@ function renderBookmarks(items) {
   more.hidden = true;
   more.title = 'More bookmarks';
   more.setAttribute('aria-label', more.title);
-  more.textContent = '\u00bb';
+  // A drawn double chevron, where a typed » used to sit off-centre.
+  const chevrons = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  chevrons.setAttribute('viewBox', '0 0 16 16');
+  chevrons.setAttribute('aria-hidden', 'true');
+  for (const d of ['M4 4.5L7.5 8 4 11.5', 'M8.5 4.5L12 8l-3.5 3.5']) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    chevrons.append(path);
+  }
+  more.append(chevrons);
   more.addEventListener('click', () => {
     const box = more.getBoundingClientRect();
     api.send('bookmarks-overflow', {
@@ -532,7 +541,7 @@ function renderTabs(tabs) {
   const live = new Set(tabs.map((tab) => tab.id));
   for (const [id, node] of tabEls) {
     if (!live.has(id)) {
-      node.root.remove();
+      closeTabElement(node.root);
       tabEls.delete(id);
     }
   }
@@ -546,7 +555,14 @@ function renderTabs(tabs) {
       tabs.findIndex((tab) => tab.id === heldOrder.id) === heldOrder.index)) heldOrder = null;
   const keepOrder = Boolean(heldOrder || tabDrag?.active);
 
-  tabs.forEach((tab, index) => {
+  // Keep DOM order in sync with tab order without touching untouched nodes.
+  // A cursor walks the strip, stepping over tabs still collapsing on their
+  // way out: they hold their place until they are gone.
+  let cursor = el.tabs.firstElementChild;
+  const skipClosing = () => {
+    while (cursor && cursor.classList.contains('closing')) cursor = cursor.nextElementSibling;
+  };
+  tabs.forEach((tab) => {
     let node = tabEls.get(tab.id);
 
     if (!node) {
@@ -554,14 +570,38 @@ function renderTabs(tabs) {
       tabEls.set(tab.id, node);
     }
 
-    // Keep DOM order in sync with tab order without touching untouched nodes.
-    const current = el.tabs.children[index];
-    if (current !== node.root && (!keepOrder || !node.root.isConnected)) {
-      el.tabs.insertBefore(node.root, current || null);
+    skipClosing();
+    if (cursor === node.root) {
+      cursor = cursor.nextElementSibling;
+    } else if (!keepOrder || !node.root.isConnected) {
+      el.tabs.insertBefore(node.root, cursor);
     }
 
     updateTabElement(node, tab);
   });
+}
+
+/**
+ * A closed tab folds away rather than vanishing: its width (its height, down
+ * the side) and its opacity go to nothing, so the tabs beside it slide over
+ * instead of jumping. Straight out with reduced motion.
+ */
+function closeTabElement(root) {
+  if (root.classList.contains('closing')) return;
+  root.classList.add('closing');
+  const still = document.body.classList.contains('calm') ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (still || !root.isConnected) { root.remove(); return; }
+  const vertical = document.body.dataset.layout === 'left';
+  const size = vertical ? root.offsetHeight : root.offsetWidth;
+  const frames = vertical
+    ? [{ height: `${size}px`, minHeight: `${size}px`, opacity: 1 },
+       { height: '0px', minHeight: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 }]
+    : [{ flexBasis: `${size}px`, minWidth: `${size}px`, maxWidth: `${size}px`, opacity: 1 },
+       { flexBasis: '0px', minWidth: '0px', maxWidth: '0px', paddingLeft: '0px', paddingRight: '0px', opacity: 0 }];
+  const fold = root.animate(frames, { duration: 150, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+  fold.onfinish = () => root.remove();
+  fold.oncancel = () => root.remove();
 }
 
 /*
@@ -743,7 +783,7 @@ function armTabDrag(event, id, root) {
 
 function beginTabDrag() {
   const d = tabDrag;
-  const nodes = [...el.tabs.children];
+  const nodes = [...el.tabs.children].filter((n) => !n.classList.contains('closing'));
   d.from = nodes.indexOf(d.root);
   if (d.from === -1 || nodes.length < 2) { tabDrag = null; return false; }
   const edge = (r) => (d.vertical ? [r.top, r.bottom] : [r.left, r.right]);
@@ -931,12 +971,12 @@ function updateTabElement(node, tab) {
 
 function tierLabel(tab) {
   switch (tab.tier) {
-    case 'active': return tab.boosted ? 'Active - boosted for animation' : 'Active';
-    case 'warm': return `Background - ${tab.rssMB}MB`;
-    case 'cold': return `Idle, may be discarded to save memory - ${tab.rssMB}MB`;
-    case 'frozen': return `Frozen - no CPU, ${tab.rssMB}MB retained`;
-    case 'hibernated': return 'Hibernated - memory compressed, opens instantly';
-    case 'discarded': return 'Discarded - reloads when opened';
+    case 'active': return tab.boosted ? 'Active – boosted for animation' : 'Active';
+    case 'warm': return `Background – ${tab.rssMB}MB`;
+    case 'cold': return `Idle, may be discarded to save memory – ${tab.rssMB}MB`;
+    case 'frozen': return `Frozen – no CPU, ${tab.rssMB}MB retained`;
+    case 'hibernated': return 'Hibernated – memory compressed, opens instantly';
+    case 'discarded': return 'Discarded – reloads when opened';
     default: return tab.tier;
   }
 }
@@ -1088,7 +1128,7 @@ function renderMeter(state) {
     `${state.totalMB} MB of ${state.budgetMB} MB budget\n` +
     `${state.liveTabs} tabs holding a renderer ` +
     `(${state.rendererCount} process(es)), ${state.tabs.length} tab(s) open\n` +
-    `Pressure: ${state.pressure} - click for the task manager`;
+    `Pressure: ${state.pressure} – click for the task manager`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1391,8 +1431,8 @@ function renderPrivate(incognito) {
   el.privatePill.dataset.state = tor.state || 'starting';
   el.privateText.textContent = PRIVATE_LABELS[tor.state] || 'Private';
   el.privatePill.title = tor.state === 'ready'
-    ? 'Private window - every page goes through Tor. Click for details.'
-    : `Private window - ${tor.summary || 'connecting to Tor'} (${tor.progress || 0}%). Nothing loads until it is connected.`;
+    ? 'Private window – every page goes through Tor. Click for details.'
+    : `Private window – ${tor.summary || 'connecting to Tor'} (${tor.progress || 0}%). Nothing loads until it is connected.`;
   el.star.title = 'Bookmarks cannot be saved from a private window';
   el.onion.hidden = !incognito.onion;
   el.slowJs.hidden = !incognito.slowJs;

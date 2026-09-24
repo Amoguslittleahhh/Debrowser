@@ -109,7 +109,7 @@ function render(checks) {
   for (const c of [...bad, ...checks.filter((x) => x.ok)]) {
     const tr = table.insertRow();
     const th = document.createElement('th');
-    th.textContent = `${c.name} - ${c.surface}`;
+    th.textContent = `${c.name} – ${c.surface}`;
     tr.appendChild(th);
     const td = tr.insertCell();
     td.className = c.ok ? 'yes' : 'part';

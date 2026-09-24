@@ -15,6 +15,7 @@
  */
 
 const path = require('path');
+const { PALETTES } = require('./palette');
 const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
         shell } = require('electron');
 const { INCOGNITO } = require('./incognito/mode');
@@ -244,7 +245,9 @@ class BrowserShell {
       minWidth: 620,
       minHeight: 420,
       title: 'Debrowser',
-      backgroundColor: '#161614',
+      // The theme's own surface from the first frame. A fixed dark one flashed
+      // on every launch in the light theme.
+      backgroundColor: this.surface(),
       show: false,
 
       // The tab strip *is* the title bar, as in every modern browser. A
@@ -261,7 +264,7 @@ class BrowserShell {
         ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 13 } }
         : {
             titleBarStyle: 'hidden',
-            titleBarOverlay: { color: '#161614', symbolColor: '#9b978e', height: 40 }
+            titleBarOverlay: { color: this.surface(), symbolColor: this.symbolColour(), height: 40 }
           })
     });
 
@@ -904,7 +907,7 @@ class BrowserShell {
           additionalArguments: preloadArgs(this.prefs)
         }
       });
-      view.setBackgroundColor(this.lightTheme() ? '#f3f1ec' : '#161614');
+      view.setBackgroundColor(this.surface());
       view.webContents.loadFile(path.join(RENDERER_DIR, 'crashed.html')).catch(() => {});
       setRadius(view, this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0);
       // Above the tabs, below the chrome, as the restore placeholder is.
@@ -1170,7 +1173,7 @@ class BrowserShell {
     // this is what shows in the gap around the content card and behind an
     // unpainted view, and a dark window under a paper-white UI is a black frame
     // around the page.
-    const sheer = translucent ? '#00000000' : (this.lightTheme() ? '#f3f1ec' : '#161614');
+    const sheer = translucent ? '#00000000' : this.surface();
     try {
       this.window.setBackgroundColor(sheer);
       this.chromeView.setBackgroundColor(sheer);
@@ -1238,7 +1241,7 @@ class BrowserShell {
   stripColour() {
     const choice = this.prefs ? this.prefs.get('tabBarColor') : 'default';
     if (choice === 'mirror') return this.prefs.get('accent');
-    if (choice === 'default') return this.lightTheme() ? '#f3f1ec' : '#161614';
+    if (choice === 'default') return this.surface();
     return choice;
   }
 
@@ -1251,6 +1254,11 @@ class BrowserShell {
     if (choice === 'light') return true;
     if (choice === 'dark') return false;
     return !nativeTheme.shouldUseDarkColors;
+  }
+
+  /** The theme's surface colour - what the window shows where nothing is drawn. */
+  surface() {
+    return (this.lightTheme() ? PALETTES.light : PALETTES.dark).bg;
   }
 
   /** The window buttons' own colour, which has to read against the strip. */

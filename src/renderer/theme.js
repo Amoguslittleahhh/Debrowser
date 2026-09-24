@@ -95,9 +95,9 @@ function describeDownload(item, { brief = false } = {}) {
   const over = brief ? '' : ` over ${item.segments} connection${item.segments === 1 ? '' : 's'}`;
   switch (item.state) {
     case 'done':
-      return brief ? null : `Finished — ${formatBytes(item.received)}${over}`;
+      return brief ? null : `Finished – ${formatBytes(item.received)}${over}`;
     case 'failed':
-      return item.error ? `Failed — ${item.error}` : 'Failed';
+      return item.error ? `Failed – ${item.error}` : 'Failed';
     case 'cancelled':
       return 'Cancelled';
     default: {

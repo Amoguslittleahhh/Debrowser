@@ -37,6 +37,7 @@
   transition: background-color var(--fast) var(--ease);
 }
 .download:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.download:active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 
 .download-text { flex: 1; min-width: 0; }
 

@@ -2411,8 +2411,8 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
             cancelId: 0,
             title: 'Open outside the private window?',
             message: `${path.basename(file)} would open in another program.`,
-            detail: 'That program is not part of the private window. If it goes online - to fetch a template, an ' +
-              'image or a font, or to check for updates - it does so directly, without Tor, and whoever it ' +
+            detail: 'That program is not part of the private window. If it goes online – to fetch a template, an ' +
+              'image or a font, or to check for updates – it does so directly, without Tor, and whoever it ' +
               'reaches sees your real address. Opening the file can be enough.'
           });
           if (response === 1) electronShell.showItemInFolder(file);

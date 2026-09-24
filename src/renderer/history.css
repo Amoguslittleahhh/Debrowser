@@ -77,6 +77,7 @@
   transition: background-color var(--fast) var(--ease);
 }
 .visit:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.visit:active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 /* The row carries the focus mark, because the button inside it is the row's
    whole width and an outer ring on a full-width child would be drawn half
    under the row beside it. The button's own ring is suppressed for that
@@ -94,7 +95,7 @@
   min-width: 0;
   padding: 8px 0 8px 10px;
   border: none;
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -180,7 +181,7 @@
   box-sizing: content-box;
   background-clip: content-box;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
   font-size: 15px;
@@ -190,3 +191,4 @@
 }
 .visit:hover .forget { opacity: 1; }
 .forget:hover { background-color: var(--border); color: var(--text); }
+.forget:active { transform: var(--press); }

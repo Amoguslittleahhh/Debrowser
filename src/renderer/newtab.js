@@ -122,6 +122,9 @@ api.onState((state) => {
   applyThemePrefs(state.prefs);
   if (typeof state.totalMB !== 'number') return;
   const open = state.tabs ? state.tabs.length : 0;
-  const per = open ? (state.totalMB / open).toFixed(1) : '—';
-  stat.textContent = `${state.totalMB} MB across ${open} tab${open === 1 ? '' : 's'} — ${per} MB each`;
+  const size = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
+  // "each" only when there is more than one to divide by.
+  stat.textContent = !open ? ''
+    : open === 1 ? `${size(state.totalMB)} in 1 tab`
+    : `${size(state.totalMB)} in ${open} tabs, about ${size(state.totalMB / open)} each`;
 });

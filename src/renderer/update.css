@@ -87,6 +87,7 @@
   color: #fff;
 }
 .btn.primary:hover { background: color-mix(in srgb, #fff 12%, var(--accent)); }
+.btn.primary:active { background: color-mix(in srgb, #000 8%, var(--accent)); }
 
 .btn.ghost {
   background: transparent;
@@ -94,3 +95,4 @@
   color: var(--text);
 }
 .btn.ghost:hover { background: var(--wash-soft); }
+.btn.ghost:active { background: var(--wash); }

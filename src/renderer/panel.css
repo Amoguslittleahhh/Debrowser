@@ -38,11 +38,12 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
   color: var(--text-dim);
   font-size: 17px;
   cursor: default;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   width: 24px;
   height: 24px;
 }
 .ghost:hover { background: var(--border); color: var(--text); }
+.ghost:active { transform: var(--press); }
 .ghost .x-icon { width: 14px; height: 14px; }
 
 .summary {
@@ -97,7 +98,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 .pressure {
   margin: 0 14px 10px;
   padding: 6px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -120,7 +121,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .row:hover { background: var(--bg-raised); }
 
@@ -141,7 +142,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   padding: 2px 7px;
   font: inherit;
   font-size: var(--fs-micro);
@@ -150,6 +151,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 }
 .row:hover .row-action { opacity: 1; }
 .row-action:hover { color: var(--text); border-color: var(--text-dim); }
+.row-action:active { transform: var(--press); }
 .row-action:disabled { opacity: 0 !important; }
 
 footer {

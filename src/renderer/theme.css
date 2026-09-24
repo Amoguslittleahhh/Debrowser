@@ -159,6 +159,9 @@
   --ok: #6f9f6a;
   --warn: #c9953f;
   --crit: #c05c4e;
+  /* A private window's own colour, and nothing else's: the pill, the onion
+     button, the tint on its toolbar. */
+  --private: #8a6bd1;
 
   /*
    * The site chip's colour, as saturation and lightness rather than as a
@@ -450,16 +453,21 @@ body .chip.has-icon {
   --press: scale(0.96);
 }
 
-/* Two ways to ask for stillness, and both are honoured everywhere. */
+/* Two ways to ask for stillness, and both are honoured everywhere. Played
+   once, too: an endless animation cut to a hundredth of a millisecond does
+   not stop, it lands on a random frame every frame - a spinner that
+   flickers instead of turning. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
 
 body.calm *, body.calm *::before, body.calm *::after {
   animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
 }
 

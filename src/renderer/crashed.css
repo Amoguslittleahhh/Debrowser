@@ -8,7 +8,7 @@ main {
   max-width: 30rem;
   margin: 22vh auto 0;
   padding: 0 var(--s6);
-  animation: arrive 180ms var(--ease-out);
+  animation: arrive var(--slow) var(--ease-out);
 }
 
 h1 {

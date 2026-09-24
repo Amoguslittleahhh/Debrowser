@@ -141,7 +141,9 @@ function zoomRow(item) {
   const out = document.createElement('button');
   out.className = 'step';
   out.type = 'button';
-  out.textContent = '−';
+  // Drawn, not typed: a text minus and plus sit wherever the face puts
+  // them, and never on the same line as each other.
+  out.append(menuIcon('minus'));
   out.dataset.zoom = 'out';
   out.setAttribute('aria-label', 'Zoom out');
   out.disabled = item.enabled === false;
@@ -154,7 +156,7 @@ function zoomRow(item) {
   const into = document.createElement('button');
   into.className = 'step';
   into.type = 'button';
-  into.textContent = '+';
+  into.append(menuIcon('plus'));
   into.dataset.zoom = 'in';
   into.setAttribute('aria-label', 'Zoom in');
   into.disabled = item.enabled === false;

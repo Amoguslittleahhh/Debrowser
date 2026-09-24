@@ -39,6 +39,7 @@
   cursor: default;
 }
 .flyout-all:hover { background: var(--wash-soft); }
+.flyout-all:active { background: var(--wash); }
 
 .flyout-list {
   max-height: 380px;
@@ -154,6 +155,7 @@
   cursor: default;
 }
 .dl-action:hover { background: var(--wash); color: var(--text); }
+.dl-action:active { background: color-mix(in srgb, var(--text) 16%, transparent); }
 
 /* The site's mark is the shared `.chip` component in theme.css. The one thing
    this row needs on top of it is a hair of top margin: the mark sits beside two

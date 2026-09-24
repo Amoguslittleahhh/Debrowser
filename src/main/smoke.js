@@ -2338,9 +2338,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(400);
     const from = tabs.all().indexOf(a);
     const rect = await chrome.executeJavaScript(`(() => {
-      const first = document.getElementById('tabs').children[0];
+      const strip = document.querySelectorAll('#tabs > .tab:not(.closing)');
+      const first = strip[0];
       first.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      const r = document.getElementById('tabs').children[${from}].getBoundingClientRect();
+      const r = strip[${from}].getBoundingClientRect();
       return { x: r.left, y: r.top, w: r.width, h: r.height,
                vertical: document.body.dataset.layout === 'left' };
     })()`);
@@ -2359,7 +2360,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const moved = await waitFor(() => tabs.all().indexOf(a) === from + 1, { timeoutMs: 3000 });
     await sleep(500);
     const stripOrder = await chrome.executeJavaScript(
-      `[...document.getElementById('tabs').children].map((n) => n.dataset.id).join(',')`);
+      `[...document.querySelectorAll('#tabs > .tab:not(.closing)')].map((n) => n.dataset.id).join(',')`);
     check('dragging a tab along the strip moves it there',
       moved && tabs.all().indexOf(b) === from && stripOrder === tabs.all().map((t) => t.id).join(','),
       `index ${from} -> ${tabs.all().indexOf(a)}, neighbour at ${tabs.all().indexOf(b)}, ` +
@@ -2580,8 +2581,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const notice = shell.crashView.webContents;
       // Its script has to be there to hear the click: `isLoading` is false
       // before the load has even started.
-      await waitFor(() => notice.executeJavaScript('document.readyState === "complete"').catch(() => false),
-        { timeoutMs: 3000 });
+      // Each probe bounded: a script sent before the page exists can wait for
+      // ever, and would hold the whole suite with it.
+      await waitFor(() => Promise.race([
+        notice.executeJavaScript('document.readyState === "complete"').catch(() => false),
+        sleep(300).then(() => false)
+      ]), { timeoutMs: 3000 });
       await notice.executeJavaScript('document.getElementById("reload").click()').catch(() => {});
       revived = await waitFor(() => !tab.crashed && !shell.crashView && !tab.loading &&
         tab.title === 'Back up', { timeoutMs: 5000 });
