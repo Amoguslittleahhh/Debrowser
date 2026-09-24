@@ -285,6 +285,7 @@ class BrowserShell {
     this.sheetView = null;
     /** The address bar's suggestion list; see showSuggestions. */
     this.suggestView = null;
+    this.crashView = null;
     this.suggestOpen = false;
     this.suggestSelected = -1;
     /** Which page the open sheet is showing, or null. */
@@ -857,6 +858,55 @@ class BrowserShell {
   }
 
   /* ---------------------------------------------------------------- */
+  /* A crashed tab                                                     */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Cover the content area with "This tab stopped working" while the active
+   * tab's renderer is dead, or take it away.
+   *
+   * A view of the window's rather than a page in the tab: a crashed renderer
+   * cannot be drawn into, and loading anything in its place would add a
+   * history entry and change what the address bar says. Reload from here, the
+   * toolbar or the keyboard brings the page back in the same entry.
+   *
+   * Created when needed and destroyed after, like the menu: crashes are rare,
+   * and a renderer held for one would be a cost paid every day for nothing.
+   */
+  showCrashed(on) {
+    if (this.window.isDestroyed()) return;
+    if (!on) {
+      const view = this.crashView;
+      if (!view) return;
+      this.crashView = null;
+      try {
+        this.window.contentView.removeChildView(view);
+        view.webContents.close();
+      } catch { /* already gone */ }
+      return;
+    }
+    if (!this.crashView) {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          additionalArguments: preloadArgs(this.prefs)
+        }
+      });
+      view.setBackgroundColor(this.lightTheme() ? '#f3f1ec' : '#161614');
+      view.webContents.loadFile(path.join(RENDERER_DIR, 'crashed.html')).catch(() => {});
+      setRadius(view, this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0);
+      // Above the tabs, below the chrome, as the restore placeholder is.
+      const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
+      this.window.contentView.addChildView(view, chromeIndex === -1 || this.chromeBehind ? undefined : chromeIndex);
+      this.crashView = view;
+    }
+    this.crashView.setBounds(this.contentBounds());
+  }
+
+  /* ---------------------------------------------------------------- */
   /* Developer tools                                                   */
   /* ---------------------------------------------------------------- */
 
@@ -1060,6 +1110,12 @@ class BrowserShell {
     // the one the user is most likely to change while looking at the thing it
     // moves. `redockDevTools` is a no-op unless the mode actually changed.
     this.redockDevTools();
+
+    // The two views that are not sent the state broadcast take the new palette
+    // here, so a theme changed while one exists does not leave it in the old one.
+    const prefs = this.prefs.all();
+    send(this.suggestView, 'debrowser:state', { prefs });
+    send(this.crashView, 'debrowser:state', { prefs });
 
     // Pinned at 1, and set rather than skipped.
     //
@@ -1603,6 +1659,8 @@ class BrowserShell {
         height: Math.max(0, height - top)
       });
     }
+
+    if (this.crashView) this.crashView.setBounds(this.contentBounds());
   }
 
   /* ---------------------------------------------------------------- */
@@ -1616,7 +1674,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.panelView, this.sheetView, this.suggestView]) {
+    for (const view of [this.chromeView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }
@@ -1652,6 +1710,7 @@ class BrowserShell {
       this.layout();
     }
     full.sidebar = this.sidebarState();
+    this.showCrashed(Boolean(this.tabs.activeTab()?.crashed));
     // Null in the ordinary browser, which is how every view tells the two apart.
     full.incognito = this.incognito ? this.incognito() : null;
     send(this.chromeView, 'debrowser:state', full);

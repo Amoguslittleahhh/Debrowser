@@ -1,0 +1,48 @@
+/*
+ * "This tab stopped working". Matches the failed-load page drawn by
+ * src/main/error-page.js, which cannot load this stylesheet and spells the
+ * same values out: change one, change both.
+ */
+
+main {
+  max-width: 30rem;
+  margin: 22vh auto 0;
+  padding: 0 var(--s6);
+  animation: arrive 180ms var(--ease-out);
+}
+
+h1 {
+  margin: 0 0 var(--s2);
+  font-size: var(--fs-title);
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.actions {
+  margin-top: var(--s5);
+  display: flex;
+  gap: var(--s3);
+}
+
+.primary {
+  height: 32px;
+  padding: 0 var(--s4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  cursor: default;
+  transition: filter var(--fast) var(--ease-out);
+}
+.primary:hover { filter: brightness(1.1); }
+.primary:active { filter: brightness(0.94); }
+
+@keyframes arrive {
+  from { opacity: 0; transform: translateY(4px); }
+}

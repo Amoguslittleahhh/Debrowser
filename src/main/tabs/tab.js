@@ -22,6 +22,7 @@ const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload
 // must never get it. Which one a tab loads is decided by `internal` below.
 const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
 const pages = require('../pages');
+const errorPage = require('../error-page');
 const { INCOGNITO } = require('../incognito/mode');
 const fingerprint = require('../incognito/fingerprint');
 
@@ -436,8 +437,23 @@ class Tab {
       this.hasSensitiveFields = true;
       this.lastProbeAt = 0;
     });
-    wc.on('did-start-loading', () => { this.loading = true; this.emit('updated'); });
-    wc.on('did-stop-loading', () => { this.loading = false; this.emit('updated'); });
+    wc.on('did-start-loading', () => {
+      this.loading = true;
+      // A crashed renderer that is loading again has been brought back, by a
+      // reload or anything else - whether or not the page then loads.
+      this.crashed = false;
+      this.emit('updated');
+    });
+    wc.on('did-stop-loading', () => {
+      this.loading = false;
+      // A reload keeps the entry's title, so Chromium never reports it again,
+      // and the reset at commit (below) would leave the address standing in
+      // for it. Taken back here - unless what the engine has is itself only
+      // the address, which is what it answers for a page with no <title>.
+      const title = wc.getTitle();
+      if (this.title === this.url && title && title !== this.url && !this.url.endsWith(title)) this.title = title;
+      this.emit('updated');
+    });
 
     wc.on('did-navigate', (_e, url) => {
       this.url = url;
@@ -505,8 +521,6 @@ class Tab {
       // iframe is not. `ERR_ABORTED` means a navigation was superseded by
       // another one, which is normal and must not replace the page.
       if (!isMainFrame || errorCode === -3) return;
-      // Never render an error page for a failed error page.
-      if (String(validatedURL).startsWith('data:')) return;
       // Incognito upgraded this from plain HTTP and the secure version is not
       // there. Say so, and let the user decide, rather than fail blankly or
       // quietly fall back to a page an exit relay can read.
@@ -517,7 +531,10 @@ class Tab {
           return;
         }
       }
-      this.showError(validatedURL, errorDescription || `error ${errorCode}`);
+      // The error entry sits at the address that failed, and no `did-navigate`
+      // reports it: without this the bar keeps the previous page's address.
+      this.url = validatedURL;
+      this.showError(validatedURL, errorCode, errorDescription);
     });
 
     wc.on('render-process-gone', (_e, details) => {
@@ -581,52 +598,12 @@ class Tab {
   }
 
   /**
-   * Render a failed navigation in the tab itself.
-   *
-   * Loaded as a data URL so it needs no network, no file access and no
-   * privileges: the error page is just a document, and gets no more trust than
-   * any other. The failing URL is inserted as text content by script rather
-   * than interpolated into the markup, so a hostile URL cannot inject into it.
+   * Say, in the tab, why the page did not load. See error-page.js: drawn into
+   * the error entry Chromium committed at the failed address, so the address
+   * bar, Reload and Back all keep meaning what they did.
    */
-  showError(url, description) {
-    this.title = 'Problem loading page';
-    // `</script>` escaped, because JSON.stringify does not do it: a URL
-    // containing that sequence closes the element early and the rest is parsed
-    // as markup. The comment above used to claim this was impossible.
-    const payload = JSON.stringify({ url: String(url || ''), description: String(description || '') })
-      .replace(/</g, '\\u003c');
-    const html = `<!doctype html><meta charset="utf-8">
-<title>Problem loading page</title>
-<style>
-  :root { color-scheme: dark light; }
-  body { margin: 0; display: grid; place-items: center; min-height: 100vh;
-         background: #161614; color: #eae7e0;
-         /* The same stack theme.css defines, spelled out rather than linked:
-            this page is a data: URL with no origin and no stylesheet to load,
-            and an error page set in a different face from the browser around it
-            is the kind of seam that makes the error look like a crash. */
-         font: 14px/1.5 Aptos, Calibri, Carlito, "Segoe UI Variable Text",
-               "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
-  @media (prefers-color-scheme: light) { body { background: #f3f1ec; color: #201f1c; } }
-  main { max-width: 27rem; padding: 1.5rem; text-align: center; }
-  h1 { font-size: 1.1rem; margin: 0 0 .5rem; }
-  p { margin: .35rem 0; color: #9b978e; }
-  code { word-break: break-all; font-size: .85em; }
-</style>
-<main>
-  <h1>This page could not be loaded</h1>
-  <p id="d"></p>
-  <p><code id="u"></code></p>
-</main>
-<script>
-  var e = ${payload};
-  document.getElementById('d').textContent = e.description;
-  document.getElementById('u').textContent = e.url;
-</script>`;
-
-    this.wc.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-      .catch(() => { /* nothing further we can do */ });
-    this.emit('updated');
+  showError(url, code, description) {
+    errorPage.show(this.wc, { url, code, description }).then(() => this.emit('updated'));
   }
 
   /**

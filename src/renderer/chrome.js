@@ -769,6 +769,12 @@ function updateTabElement(node, tab) {
     node.root.dataset.loading = tab.loading ? 'on' : 'off';
     prev.loading = tab.loading;
   }
+
+  // A tab whose page crashed fades, so it can be found without opening each.
+  if (prev.crashed !== tab.crashed) {
+    node.root.dataset.crashed = tab.crashed ? 'on' : 'off';
+    prev.crashed = tab.crashed;
+  }
 }
 
 function tierLabel(tab) {

@@ -2324,6 +2324,65 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     bookmarks.remove('https://gitlab.test/saved-page');
   }
 
+  // A page that fails to load says why, in words, and Try again recovers it
+  // in place; a tab whose renderer crashes says so, and Reload brings it back.
+  //
+  // In place is the part that goes wrong. The old error page was a data: URL:
+  // the address bar showed the encoded page, and each retry added a history
+  // entry. Asserted: the tab keeps the failed address, the page names the
+  // site, and after a retry against a server that has since come up, the
+  // history is the same length it was.
+  {
+    const http = require('http');
+    const net = require('net');
+    const port = await new Promise((resolve) => {
+      const probe = net.createServer().listen(0, '127.0.0.1', () => {
+        const p = probe.address().port;
+        probe.close(() => resolve(p));
+      });
+    });
+    const failing = `http://127.0.0.1:${port}/`;
+    const tab = tabs.create({ url: failing, activate: true, realise: true });
+    const drawn = await waitFor(async () => tab.isLive && !tab.loading &&
+      await tab.wc.executeJavaScript('document.querySelector("h1")?.textContent || ""').catch(() => '') !== '');
+    const heading = drawn ? await tab.wc.executeJavaScript('document.querySelector("h1").textContent') : '';
+    const entries = tab.isLive ? tab.wc.navigationHistory.length() : -1;
+    check('a failed load says why in words, and keeps the address that failed',
+      drawn && heading === '127.0.0.1 refused to connect' && tab.url === failing,
+      `heading "${heading}", tab url ${tab.url}`);
+
+    const server = http.createServer((_q, res) => res.end('<title>Back up</title>ok'));
+    await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+    await tab.wc.executeJavaScript('document.querySelector("button").click()').catch(() => {});
+    const recovered = await waitFor(() => tab.title === 'Back up', { timeoutMs: 5000 });
+    check('Try again loads the page in place, without adding history',
+      recovered && tab.wc.navigationHistory.length() === entries,
+      `title "${tab.title}", history ${entries} -> ${tab.isLive ? tab.wc.navigationHistory.length() : -1}`);
+
+    // Crashed, then brought back from the notice's own button - which goes
+    // through the chrome's bridge and the command gate like a click would.
+    tab.wc.forcefullyCrashRenderer();
+    const noticed = await waitFor(() => tab.crashed && Boolean(shell.crashView), { timeoutMs: 5000 });
+    let revived = false;
+    if (noticed) {
+      const notice = shell.crashView.webContents;
+      // Its script has to be there to hear the click: `isLoading` is false
+      // before the load has even started.
+      await waitFor(() => notice.executeJavaScript('document.readyState === "complete"').catch(() => false),
+        { timeoutMs: 3000 });
+      await notice.executeJavaScript('document.getElementById("reload").click()').catch(() => {});
+      revived = await waitFor(() => !tab.crashed && !shell.crashView && !tab.loading &&
+        tab.title === 'Back up', { timeoutMs: 5000 });
+    }
+    check('a crashed tab says so, and Reload brings it back',
+      noticed && revived, `noticed=${noticed}, revived=${revived} ` +
+      `(crashed=${tab.crashed}, notice=${Boolean(shell.crashView)}, loading=${tab.loading}, title "${tab.title}", ` +
+      `active=${tabs.activeTab() === tab})`);
+
+    tabs.close(tab.id);
+    server.close();
+  }
+
   // The tabs you had open come back, and a hand-edited session file cannot make
   // the browser open anything it likes on launch.
   //

@@ -377,6 +377,10 @@ body[data-tabs="compact"] .tab {
    tab is busy" because it is a ring where an icon usually is. */
 body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
 
+/* A crashed page: the tab fades until it is reloaded. */
+.tab[data-crashed="on"] .tab-icon,
+.tab[data-crashed="on"] .tab-title { opacity: 0.5; }
+
 /*
  * Tier badge. The whole point of this browser is that it is constantly moving
  * tabs between resource states, so it says so rather than doing it invisibly:

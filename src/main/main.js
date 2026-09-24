@@ -50,6 +50,7 @@ const policy = require('./incognito/policy');
 const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
 const { suggest } = require('./suggest');
+const errorPage = require('./error-page');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -788,6 +789,8 @@ function main() {
         : null,
       held: WARM
     });
+    // An error page takes the window's palette and accent, as our own pages do.
+    errorPage.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent') }));
 
     shell.window.on('close', (event) => {
       if (shouldAskToClose()) {
