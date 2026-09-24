@@ -477,4 +477,4 @@ class Tor {
   }
 }
 
-module.exports = { Tor, bundleDir, launcherTemplate, exe };
+module.exports = { Tor, bundleDir, baseConfig, launcherTemplate, exe };

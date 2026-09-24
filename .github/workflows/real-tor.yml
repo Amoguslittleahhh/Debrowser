@@ -1,0 +1,57 @@
+# The bundled Tor on the real Tor network - what the leak test's stand-in for
+# Tor cannot show, and what the container this project is built in cannot
+# reach. On demand, and weekly: bridges get blocked and networks change.
+#
+#   1. plain Tor, and the built-in bridges the browser races by default,
+#      each until check.torproject.org says the request came over Tor;
+#   2. tools/bridge-kit/setup-bridge.sh, run for real on this runner;
+#   3. Debrowser's Tor through the bridge it just made. The runner cannot be
+#      reached from outside, so the line is pointed at 127.0.0.1 - everything
+#      else about it is exactly what the kit printed.
+name: Real Tor
+
+on:
+  workflow_dispatch:
+  # And whenever what it tests changes, on a working branch.
+  push:
+    branches: ['claude/**']
+    paths:
+      - 'test/real-tor.js'
+      - 'tools/bridge-kit/**'
+      - 'tools/tor.json'
+      - 'tools/fetch-tor.js'
+      - 'src/main/incognito/tor.js'
+      - 'src/main/incognito/bridges.js'
+      - '.github/workflows/real-tor.yml'
+  schedule:
+    - cron: '43 5 * * 3'        # Wednesdays, 05:43 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  real-tor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch and verify Tor
+        run: node tools/fetch-tor.js
+      - name: Plain Tor, and the built-in bridges
+        timeout-minutes: 14
+        run: node test/real-tor.js --direct --bridges
+      - name: Make a bridge with the bridge kit
+        timeout-minutes: 8
+        run: sudo bash tools/bridge-kit/setup-bridge.sh --port 8443 | tee kit.txt
+      - name: Connect through that bridge
+        timeout-minutes: 10
+        run: |
+          line=$(grep -E '^  obfs4 ' kit.txt | sed -E 's/^  //; s/^obfs4 [0-9.]+:/obfs4 127.0.0.1:/')
+          echo "bridge line (address replaced): $(echo "$line" | cut -c1-60)…"
+          node test/real-tor.js --bridge-line "$line"
+      - name: The bridge's own log, if that failed
+        if: failure()
+        run: sudo journalctl -u 'tor*' --no-pager -n 80 || sudo tail -n 80 /var/lib/tor/notices.log || true

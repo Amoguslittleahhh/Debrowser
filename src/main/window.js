@@ -201,8 +201,13 @@ class BrowserShell {
    * @param {object} deps - { tabManager, log, onCommand }
    */
   constructor({ tabManager, prefs = null, updater = null, log = () => {}, onCommand = () => {},
-                bindShortcuts = () => {}, bounds = null }) {
+                bindShortcuts = () => {}, bounds = null, held = false }) {
     this.tabs = tabManager;
+    /**
+     * Built but not shown until release(): a private window kept ready in the
+     * background (main.js, WARM) waits here, Tor connecting behind it.
+     */
+    this.held = held;
     this.prefs = prefs;
     this.updater = updater;
     /** @type {import('./bookmarks').Bookmarks|null} */
@@ -385,12 +390,20 @@ class BrowserShell {
 
   /** Show the window, maximised the first time if that is how it was left. */
   reveal() {
-    if (this.window.isDestroyed()) return;
+    if (this.window.isDestroyed() || this.held) return;
     if (this.startMaximized) {
       this.startMaximized = false;
       this.window.maximize();
     }
     this.window.show();
+  }
+
+  /** Show a window that was being held back. */
+  release() {
+    if (!this.held) return;
+    this.held = false;
+    this.reveal();
+    if (!this.window.isDestroyed()) this.window.focus();
   }
 
   createChrome() {

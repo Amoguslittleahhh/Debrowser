@@ -51,11 +51,11 @@ function windowsIncognitoExe() {
  * The command that starts the private browser: [program, args].
  * @param {string[]} [torExtra] - extra torrc lines (bridges), for the Linux launcher
  */
-function command(torExtra = []) {
+function command(torExtra = [], extraArgs = []) {
   const args = [];
   // A development run is `electron <app dir>`; an installed build is the app.
   if (!app.isPackaged) args.push(app.getAppPath());
-  args.push('--incognito');
+  args.push('--incognito', ...extraArgs);
   for (const flag of INHERITED) if (process.argv.includes(flag)) args.push(flag);
 
   if (process.platform === 'linux') {
@@ -77,7 +77,7 @@ function command(torExtra = []) {
 /**
  * @param {Function} log
  * @param {string[]} torExtra - bridge lines for the launcher's torrc
- * @param {{keepTorState?: boolean, userData?: string}} [state]
+ * @param {{keepTorState?: boolean, userData?: string, warm?: boolean, onExit?: Function}} [state]
  */
 function launchIncognito(log = () => {}, torExtra = [], state = {}) {
   const env = { ...process.env };
@@ -98,7 +98,10 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
     // they keep the environment they were born with. Measured: set from
     // inside, two fonts were hidden and four stayed readable. See fonts.js.
     if (state.userData) require('./fonts').restrict(state.userData, env);
-    const [program, args, launcher] = command(torExtra);
+    // Warm: connect Tor now, show nothing until the user asks for the window,
+    // and go if this browser goes first. See main.js, WARM.
+    const extra = state.warm ? ['--warm', `--warm-parent=${process.pid}`] : [];
+    const [program, args, launcher] = command(torExtra, extra);
     // Under the launcher Tor starts before the private browser exists, so its
     // kept state is unsealed here - this process has the keystore - into a
     // private directory the launcher moves into place.
@@ -110,6 +113,7 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
     }
     const child = spawn(program, args, { detached: true, stdio: 'ignore', env });
     child.on('error', (err) => log('incognito', `could not start: ${err.message}`));
+    if (state.onExit) child.on('exit', state.onExit);
     child.unref();
     return true;
   } catch (err) {

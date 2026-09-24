@@ -56,6 +56,15 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
 
   await netLog.startLogging(path.join(dir, 'clean.json'), { captureMode: 'default' });
 
+  // Kept ready (the harness starts it that way): built, hidden, and shown by
+  // the next Ctrl+Shift+N - which reaches this process as a second instance.
+  if (process.argv.includes('--warm')) {
+    const before = { held: shell.held, visible: shell.window.isVisible() };
+    app.emit('second-instance');
+    await sleep(500);
+    step('warm', { before, after: { held: shell.held, visible: shell.window.isVisible() } });
+  }
+
   step('tripwire', await tripwire.capability());
   step('killSwitch', ctx.killSwitch);
 

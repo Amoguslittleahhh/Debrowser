@@ -335,6 +335,12 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'incognitoKeepWarm',
+      label: 'Keep a private window ready',
+      hint: 'Connects to Tor in the background when Debrowser starts, so Ctrl+Shift+N opens at once. Costs about 300 MB of memory while it waits, and your network sees a Tor connection whenever Debrowser is open.',
+      type: 'checkbox'
+    },
+    {
       key: 'incognitoIdleWipeMinutes',
       label: 'Close private windows when idle',
       hint: 'Minutes with no input anywhere on this computer. Then everything in them is erased at once, as Ctrl+Shift+Delete does. 0 never closes them.',

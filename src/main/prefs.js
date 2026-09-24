@@ -318,7 +318,8 @@ const SCHEMA = {
   incognitoCamouflage: { def: false, ok: (v) => typeof v === 'boolean' },
 
   // Close every private window after this many minutes with no input. 0 is never.
-  incognitoIdleWipeMinutes: { def: 0, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 240 }
+  incognitoIdleWipeMinutes: { def: 0, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 240 },
+  incognitoKeepWarm: { def: false, ok: (v) => typeof v === 'boolean' }
 
   // Still nothing here for the resource profile: it decides Chromium switches
   // applied before the app starts, so it cannot take effect without a restart.

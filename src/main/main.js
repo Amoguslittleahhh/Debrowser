@@ -67,6 +67,12 @@ if (incognito.INCOGNITO) {
   }
 }
 const INCOGNITO = Boolean(incognitoCtx);
+/**
+ * A private window kept ready (Settings: "Keep a private window ready"):
+ * started with the ordinary browser, Tor connecting, the window built but not
+ * shown until Ctrl+Shift+N reaches it. It holds no browsing, only Tor.
+ */
+const WARM = INCOGNITO && process.argv.includes('--warm');
 
 /** Incognito only: the Tor process every request goes through. */
 let tor = null;
@@ -778,7 +784,8 @@ function main() {
       // Never under a test or a benchmark, which assert on the default size.
       bounds: !OFFLINE_MODE && prefs.get('rememberWindowBounds')
         ? fitToDisplay(loadWindowState())
-        : null
+        : null,
+      held: WARM
     });
 
     shell.window.on('close', (event) => {
@@ -837,6 +844,19 @@ function main() {
         setInterval(() => {
           if (powerMonitor.getSystemIdleTime() >= idleMinutes * 60) panic(`idle for ${idleMinutes} minutes`);
         }, 15_000).unref();
+      }
+
+      // A window kept ready belongs to the browser that started it: if that
+      // browser goes while the window was never shown, this goes too. ESRCH
+      // only - a signal refused is a process that exists.
+      if (WARM) {
+        const parent = Number(argValue('warm-parent'));
+        if (parent) {
+          setInterval(() => {
+            if (!shell || !shell.held) return;
+            try { process.kill(parent, 0); } catch (err) { if (err.code === 'ESRCH') app.quit(); }
+          }, 5000).unref();
+        }
       }
 
       tripwire.capability().then((caps) => log('tripwire', JSON.stringify(caps)));
@@ -1034,6 +1054,11 @@ function main() {
   });
 
   app.on('second-instance', () => {
+    // A window kept ready is shown, with the tab it already has.
+    if (shell && shell.held) {
+      shell.release();
+      return;
+    }
     // A second Ctrl+Shift+N reaches the incognito process that is already
     // running, and means what it says: another private tab.
     if (INCOGNITO && tabs) tabs.create({ url: pages.NEW_TAB_URL });
@@ -1044,6 +1069,16 @@ function main() {
   });
 
   app.on('window-all-closed', () => app.quit());
+  app.on('will-quit', () => { quittingForGood = true; });
+
+  // Keep a private window ready, if asked: after the ordinary window exists,
+  // so its start is not slowed by Tor's.
+  // Inside whenReady: `prefs` is assigned by the ready handler registered above,
+  // which runs first.
+  app.whenReady().then(() => {
+    if (INCOGNITO || OFFLINE_MODE || !prefs || !prefs.get('incognitoKeepWarm')) return;
+    setTimeout(() => startIncognito({ prefs, log, warm: true }), 2000);
+  });
 
   app.on('before-quit', (event) => {
     // A quit from the OS arrives here before the window hears of it, and what
@@ -1127,6 +1162,28 @@ function main() {
  * while it has focus. Both must mean the same thing by 'new-tab', so there is
  * one switch and two ways in rather than a second copy for shortcuts.
  */
+/**
+ * Start the private browser - or, with `warm`, one that connects Tor and keeps
+ * its window back until Ctrl+Shift+N reaches it. A kept-ready one that ends,
+ * because it was shown and then closed, is replaced by a new one while the
+ * setting is on and this browser is not quitting.
+ */
+let quittingForGood = false;
+function startIncognito({ prefs, log, warm = false }) {
+  return launchIncognito(log, bridges.torrcLines({
+    mode: prefs.get('incognitoBridges'),
+    custom: prefs.get('incognitoBridgeLines')
+  }, torBundleDir()), {
+    keepTorState: prefs.get('incognitoKeepTorState'),
+    userData: app.getPath('userData'),
+    warm,
+    onExit: warm ? () => {
+      if (quittingForGood || !prefs.get('incognitoKeepWarm')) return;
+      setTimeout(() => startIncognito({ prefs, log, warm: true }), 3000).unref();
+    } : null
+  });
+}
+
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
@@ -1216,15 +1273,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'new-incognito-window':
         // From inside incognito this is simply another private tab.
         if (INCOGNITO) tabs.create({ url: newTabUrl(prefs) });
-        else {
-          launchIncognito(log, bridges.torrcLines({
-            mode: prefs.get('incognitoBridges'),
-            custom: prefs.get('incognitoBridgeLines')
-          }, torBundleDir()), {
-            keepTorState: prefs.get('incognitoKeepTorState'),
-            userData: app.getPath('userData')
-          });
-        }
+        else startIncognito({ prefs, log });
         break;
 
       case 'close-tab':

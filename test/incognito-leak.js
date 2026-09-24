@@ -336,7 +336,9 @@ async function main() {
     // Decoys for the camouflage check: the fixture, never a real site.
     `--leak-decoys=http://decoy.test:${fixtures.port}/idle.html`,
     `--leak-tls-port=${tls.port || 0}`,
-    `--leak-hidden-font=${hiddenFont() || ''}`];
+    `--leak-hidden-font=${hiddenFont() || ''}`,
+    // Started the way "Keep a private window ready" starts it.
+    '--warm', `--warm-parent=${process.pid}`];
   // The kill-switch run ends through the panic key rather than a normal quit,
   // so both ways out are covered and the panic key is timed.
   if (killSwitch) browserArgs.push('--leak-panic');
@@ -540,6 +542,11 @@ async function main() {
   } else {
     console.log(`  NOTE  fonts not checked: ${fo.skipped || (fo.restricted && fo.restricted.reason) || 'not Linux'}`);
   }
+
+  const warm = s.warm || {};
+  check('a private window kept ready stays hidden until asked for, then shows',
+    warm.before && warm.before.held === true && warm.before.visible === false &&
+      warm.after.held === false && warm.after.visible === true, JSON.stringify(warm));
 
   const refs = s.referrers || {};
   check('a Referer is kept within a site and dropped between sites',
