@@ -20,6 +20,7 @@ const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB } = require('./prefs');
 const { Updater } = require('./updater');
+const { SiteZoom } = require('./zoom');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -425,6 +426,7 @@ function main() {
     log('system', JSON.stringify(platform.systemInfo()));
     log('config', `profile=${cfg.profile} budget=${cfg.memoryBudgetMB}MB`);
 
+    const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'));
     tabs = new TabManager({
       cfg,
       onEvent: onTabEvent,
@@ -439,7 +441,7 @@ function main() {
       // A speculative page load must never be the reason a frame is dropped,
       // and must never add to memory the governor is already trying to reclaim.
       canSpeculate: () => Boolean(governor) && governor.allowsSpeculation(),
-      defaultZoom: () => prefs.get('defaultZoom')
+      applyZoom: (wc) => siteZoom.apply(wc)
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
 
@@ -527,7 +529,7 @@ function main() {
 
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
-      bookmarks, closedTabs, context, find, quitState
+      bookmarks, closedTabs, context, find, quitState, siteZoom
     });
 
     // Downloads are taken over from Chromium rather than added beside it.
@@ -732,7 +734,7 @@ function main() {
  */
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
-                       find = null, quitState = null }) {
+                       find = null, quitState = null, siteZoom = new SiteZoom(() => 1) }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -1073,11 +1075,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'zoom':
         if (payload?.direction === 'reset') {
-          // Back to the chosen default rather than 100%, or reset would undo
-          // the setting on every page it is pressed on.
-          if (active?.isLive) active.wc.setZoomFactor(prefs.get('defaultZoom') || 1);
+          // Forgets the site's own zoom, so it follows the default again -
+          // including a default changed later.
+          if (active?.isLive) siteZoom.reset(active.wc);
         } else {
-          stepZoom(active, payload?.direction === 'out' ? -1 : +1);
+          stepZoom(active, payload?.direction === 'out' ? -1 : +1, siteZoom);
         }
         break;
 
@@ -1096,6 +1098,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!prefs.set(payload?.key, payload?.value)) break;
         applyPrefs(cfg, prefs, log);
         shell.applyWindowPrefs();
+        // Open pages follow a new default at once, bar the sites zoomed by hand.
+        if (payload.key === 'defaultZoom') {
+          for (const tab of tabs.all()) if (tab.isLive) siteZoom.apply(tab.wc);
+        }
         // The governor reads cfg on its next tick, so a budget or cap change
         // takes effect there. Everything else is the UI's to apply, and it gets
         // it from the state snapshot publish() is about to send.
@@ -1339,7 +1345,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   };
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
-    if (!senderMayCommand(tabs, shell, event.sender, command)) return;
+    if (!pageMay(senderPage(tabs, shell, event.sender), 'commands', command)) return;
     runCommand(command, payload ?? null, event.sender);
   });
 
@@ -1359,7 +1365,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   ipcMain.on('debrowser:zoom-gesture', (event, payload) => {
     const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
     if (!tab) return;
-    stepZoom(tab, payload?.direction === 'out' ? -1 : +1);
+    stepZoom(tab, payload?.direction === 'out' ? -1 : +1, siteZoom);
   });
 
   return runCommand;
@@ -1407,20 +1413,6 @@ function senderPage(tabs, shell, sender) {
  * Ctrl+wheel handler.
  */
 const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
-// A Map, not an object: the key is a hostname a page chose, and `constructor`
-// must not find anything.
-const PAGE_COMMANDS = new Map([
-  ['newtab', new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab'])],
-  ['history', new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'close-tab'])],
-  ['downloads', new Set([...PAGE_COMMON_COMMANDS, 'close-tab'])]
-]);
-
-/** Commands are open to the chrome and Settings, and to our other pages by list. */
-function senderMayCommand(tabs, shell, sender, command) {
-  const page = senderPage(tabs, shell, sender);
-  if (page === 'chrome' || page === 'settings') return true;
-  return Boolean(PAGE_COMMANDS.get(page)?.has(command));
-}
 
 /**
  * Questions the chrome asks and gets one answer to.
@@ -1496,18 +1488,44 @@ const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-histo
 const DOWNLOAD_REQUESTS = new Set([
   'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download']);
 
+/**
+ * Who may send what, on both channels, in one table.
+ *
+ * Commands are open to the chrome and Settings, and to our other pages by list;
+ * requests are stricter, since only Settings may touch credentials. Adding a
+ * page is one row here. A Map, not an object: the key comes from a page's own
+ * URL, and `constructor` must not find anything.
+ */
+const ANY = '*';
+const PAGE_POLICY = new Map([
+  ['chrome', { commands: ANY, requests: CHROME_REQUESTS }],
+  ['settings', { commands: ANY, requests: ANY }],
+  ['newtab', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab']),
+    requests: NEWTAB_REQUESTS
+  }],
+  ['history', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'close-tab']),
+    requests: HISTORY_REQUESTS
+  }],
+  ['downloads', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab']),
+    requests: DOWNLOAD_REQUESTS
+  }]
+]);
+
+/** Whether a page - a `senderPage` answer - may send `name` on `channel`. */
+function pageMay(page, channel, name) {
+  const allowed = PAGE_POLICY.get(page)?.[channel];
+  return allowed === ANY || Boolean(allowed?.has(name));
+}
+
 function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log,
                        context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only Settings may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
-    const allowed =
-      sender === 'settings' ||
-      (sender === 'chrome' && CHROME_REQUESTS.has(command)) ||
-      (sender === 'history' && HISTORY_REQUESTS.has(command)) ||
-      (sender === 'downloads' && DOWNLOAD_REQUESTS.has(command)) ||
-      (sender === 'newtab' && NEWTAB_REQUESTS.has(command));
-    if (!allowed) return null;
+    if (!pageMay(sender, 'requests', command)) return null;
 
     switch (command) {
       // Preferences ride along because the menu view is created on open and
@@ -2025,7 +2043,7 @@ function newTabUrl(prefs) {
 /* ------------------------------------------------------------------ */
 
 
-function stepZoom(tab, direction) {
+function stepZoom(tab, direction, siteZoom) {
   if (!tab?.isLive) return;
   const current = tab.wc.getZoomFactor();
   // Nearest step to where we are, then move one along. Reading the factor back
@@ -2035,7 +2053,7 @@ function stepZoom(tab, direction) {
     (best, f) => (Math.abs(f - current) < Math.abs(best - current) ? f : best), 1);
   const index = ZOOM_STEPS.indexOf(nearest) + direction;
   if (index < 0 || index >= ZOOM_STEPS.length) return;
-  tab.wc.setZoomFactor(ZOOM_STEPS[index]);
+  siteZoom.choose(tab.wc, ZOOM_STEPS[index]);
 }
 
 /**

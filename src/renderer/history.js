@@ -235,18 +235,11 @@ el.recording.addEventListener('change', async () => {
   if (!res || !res.ok) el.recording.checked = !el.recording.checked;
 });
 
+// Escape clears the search first, and closes the page only when there is
+// nothing to clear. See `clearOnEscape` in theme.js.
+clearOnEscape(el.query);
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    // Escape clears the search first and closes the page only when there is
-    // nothing to clear - the same order every search field in a browser uses.
-    // Through an `input` event, so the search reloads and the page stops
-    // reporting a half-typed query that is no longer there.
-    if (el.query.value) {
-      el.query.value = '';
-      el.query.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    else api.send('close-tab');
-  }
+  if (event.key === 'Escape' && !event.defaultPrevented) api.send('close-tab');
 });
 
 api.onState((state) => applyThemePrefs(state.prefs));

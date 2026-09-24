@@ -830,7 +830,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   shell.publish(governor.snapshot());
   await sleep(200);
   const sawState = await settingsTab.wc.executeJavaScript(
-    'document.querySelectorAll("#appearance .row").length').catch(() => 0);
+    'document.querySelectorAll("[data-rows=appearance] .row").length').catch(() => 0);
   check('the browser\'s own pages are sent browser state',
     sawState > 0, `${sawState} setting rows built from a published snapshot`);
 
@@ -2956,6 +2956,21 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('pages open at the default zoom, and reset goes back to it',
       Math.abs(startZoom - 1.25) < 0.001 && Math.abs(resetZoom - 1.25) < 0.001,
       `opened at ${startZoom}x, reset to ${resetZoom}x`);
+
+    // Changing the default reaches sites already visited under the old one -
+    // Chromium had recorded 1.25 against this one - but not a site the user
+    // zoomed by hand.
+    const handZoomed = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => handZoomed.isLive && !handZoomed.loading, { timeoutMs: 10_000 });
+    runCommand('zoom', { direction: 'in' });
+    runCommand('set-pref', { key: 'defaultZoom', value: 1 });
+    const followed = zoomed.wc.getZoomFactor();
+    const spared = handZoomed.wc.getZoomFactor();
+    check('a new default zoom reaches visited sites, and spares ones zoomed by hand',
+      Math.abs(followed - 1) < 0.001 && Math.abs(spared - 1.5) < 0.001,
+      `visited site ${followed}x, hand-zoomed site ${spared}x`);
+    runCommand('zoom', { direction: 'reset' });
+    tabs.close(handZoomed.id);
     tabs.close(zoomed.id);
 
     // Closing the last tab: a fresh one, or the window. The window's close is

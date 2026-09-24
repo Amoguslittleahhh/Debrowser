@@ -81,14 +81,16 @@ class Tab {
    * @param {Electron.Session} options.session
    * @param {string} options.url
    * @param {(tab: Tab, event: string, payload?: any) => void} options.onEvent
+   * @param {(wc: Electron.WebContents) => void} options.applyZoom - sets a new
+   *   document's zoom; see zoom.js
    * @param {(...args:any[]) => void} options.log
    */
-  constructor({ session, url = 'about:blank', onEvent = () => {}, defaultZoom = () => 1,
+  constructor({ session, url = 'about:blank', onEvent = () => {}, applyZoom = () => {},
                 log = () => {} }) {
     this.id = nextTabId++;
     this.session = session;
     this.onEvent = onEvent;
-    this.defaultZoom = defaultZoom;
+    this.applyZoom = applyZoom;
     this.log = log;
     /** Set by the manager once the tab has left the strip for good. */
     this.closed = false;
@@ -314,7 +316,6 @@ class Tab {
    */
   realise() {
     if (this.isLive) return;
-    const zoom = Number(this.defaultZoom()) || 1;
 
     this.view = new WebContentsView({
       webPreferences: {
@@ -326,12 +327,10 @@ class Tab {
         // Chromium's own background throttling stays on; the governor layers
         // its harder tiers on top rather than replacing it.
         backgroundThrottling: true,
-        transparent: false,
-        // Chromium's default for any site the user has not zoomed themselves;
-        // a per-site zoom they chose still wins. Read per realisation, so a
-        // changed setting reaches the next renderer built. Omitted at 100%,
-        // which leaves Chromium's own behaviour exactly as it was.
-        ...(zoom !== 1 ? { zoomFactor: zoom } : {})
+        transparent: false
+        // No `zoomFactor` here: Chromium records it against the site the page
+        // loads, so a default applied this way pinned every site. The zoom is
+        // set per document instead, below - see zoom.js.
       }
     });
 
@@ -405,6 +404,8 @@ class Tab {
 
     wc.on('did-navigate', (_e, url) => {
       this.url = url;
+      // At commit, before the new document paints.
+      try { this.applyZoom(wc); } catch { /* the view is going away */ }
       /*
        * A new document does not inherit the last one's name or its icon.
        *

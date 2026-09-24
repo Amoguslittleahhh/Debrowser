@@ -171,7 +171,7 @@ const SECTIONS = {
     {
       key: 'defaultZoom',
       label: 'Page zoom',
-      hint: 'Where new pages start, and where resetting zoom returns to.',
+      hint: 'Every site you have not zoomed yourself. Reset returns a site to it.',
       type: 'select',
       numeric: true,
       options: [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
@@ -354,7 +354,10 @@ let built = false;
 
 function buildAll() {
   for (const [sectionId, rows] of Object.entries(SECTIONS)) {
-    const host = document.getElementById(sectionId);
+    // By attribute, not id. An id named like the section is what a
+    // `settings#browsing` link scrolls to by itself, and it landed on these
+    // rows with the section's heading above the top of the page.
+    const host = document.querySelector(`[data-rows="${sectionId}"]`);
     for (const row of rows) host.append(buildRow(row));
   }
   built = true;
@@ -1078,15 +1081,9 @@ function reapplyFilter() {
   const search = document.getElementById('q');
   if (search) {
     search.addEventListener('input', () => filterSettings(search.value));
-    // Escape clears the field first and closes the page only when there is
-    // nothing to clear - the same order every search field in this browser
-    // uses, and the reason the page's own Escape handler is not enough.
-    search.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape' || !search.value) return;
-      event.stopPropagation();
-      search.value = '';
-      filterSettings('');
-    });
+    // Escape clears the field first; the page's own Escape closes it only
+    // when there is nothing to clear. See `clearOnEscape` in theme.js.
+    clearOnEscape(search);
   }
 }
 
@@ -1182,24 +1179,6 @@ function updateDownloadRow(node, item) {
     node.running = running;
     node.button.className = running ? 'ghost-btn danger' : 'ghost-btn';
     node.button.textContent = running ? 'Cancel' : 'Clear';
-  }
-}
-
-function describeDownload(item) {
-  const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
-  switch (item.state) {
-    case 'done':
-      return `Finished — ${mb(item.received)} over ${item.segments} connection${item.segments === 1 ? '' : 's'}`;
-    case 'failed':
-      return item.error ? `Failed — ${item.error}` : 'Failed';
-    case 'cancelled':
-      return 'Cancelled';
-    default: {
-      const rate = item.bytesPerSecond ? `, ${mb(item.bytesPerSecond)}/s` : '';
-      return item.total
-        ? `${mb(item.received)} of ${mb(item.total)} over ${item.segments} connection${item.segments === 1 ? '' : 's'}${rate}`
-        : `${mb(item.received)}${rate}`;
-    }
   }
 }
 

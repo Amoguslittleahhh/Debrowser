@@ -54,6 +54,63 @@ window.addEventListener('keydown', (event) => {
 }, true);
 
 /**
+ * Escape on a search field clears it before it does anything else.
+ *
+ * The order every search box in a browser uses: the first Escape empties the
+ * field, and only an Escape on an empty one reaches the page's own handler -
+ * which closes it. Marked handled with `preventDefault`, which those handlers
+ * check. Cleared through an `input` event, so the page re-runs its search and
+ * stops reporting a half-typed query that is no longer there.
+ */
+/* eslint-disable-next-line no-unused-vars -- read by history.js, downloads.js, settings.js */
+function clearOnEscape(field) {
+  field.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !field.value) return;
+    event.preventDefault();
+    field.value = '';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** A byte count as the downloads UI shows it: KB, MB with one place, GB with two. */
+function formatBytes(n) {
+  const bytes = Number(n) || 0;
+  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(2)} GB`;
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * The line under a download's filename, in one wording for every view.
+ *
+ * What the browser is doing, how far through, and over how many connections -
+ * that last because a download split across several is otherwise invisible.
+ * Three views each carried a copy, and a fix made to one ("Failed — undefined")
+ * had to be made three times. `brief` is the flyout's shorter line: no
+ * connection count, and nothing for a finished file, whose row offers
+ * "Open file" instead.
+ */
+/* eslint-disable-next-line no-unused-vars -- read by downloads.js, flyout.js, settings.js */
+function describeDownload(item, { brief = false } = {}) {
+  const over = brief ? '' : ` over ${item.segments} connection${item.segments === 1 ? '' : 's'}`;
+  switch (item.state) {
+    case 'done':
+      return brief ? null : `Finished — ${formatBytes(item.received)}${over}`;
+    case 'failed':
+      return item.error ? `Failed — ${item.error}` : 'Failed';
+    case 'cancelled':
+      return 'Cancelled';
+    default: {
+      const rate = item.bytesPerSecond
+        ? `${brief ? ' · ' : ', '}${formatBytes(item.bytesPerSecond)}/s` : '';
+      return item.total
+        ? `${formatBytes(item.received)} of ${formatBytes(item.total)}${over}${rate}`
+        : `${formatBytes(item.received)}${rate}`;
+    }
+  }
+}
+
+/**
  * A stable colour for a site, from its hostname.
  *
  * Used where a page has no favicon to show: the tab strip while one loads or

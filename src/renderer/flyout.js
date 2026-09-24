@@ -51,29 +51,6 @@ const RUNNING = new Set(['running', 'starting']);
 
 /* ------------------------------------------------------------------ */
 
-function mb(n) {
-  const bytes = Number(n) || 0;
-  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(2)} GB`;
-  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
-  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
-}
-
-function describe(item) {
-  switch (item.state) {
-    case 'done': return null;               // the row offers "Open file" instead
-    case 'failed': return item.error ? `Failed — ${item.error}` : 'Failed';
-    case 'cancelled': return 'Cancelled';
-    default: {
-      const rate = item.bytesPerSecond ? ` · ${mb(item.bytesPerSecond)}/s` : '';
-      return item.total
-        ? `${mb(item.received)} of ${mb(item.total)}${rate}`
-        : `${mb(item.received)}${rate}`;
-    }
-  }
-}
-
-/* ------------------------------------------------------------------ */
-
 function createRow(item) {
   const root = document.createElement('div');
   root.className = 'dl';
@@ -148,7 +125,8 @@ function updateRow(node, item) {
     prev.label = label;
   }
 
-  const status = describe(item);
+  // Brief: a finished row offers "Open file" instead of a line of figures.
+  const status = describeDownload(item, { brief: true });
   if (prev.status !== status) {
     node.status.textContent = status || '';
     node.status.hidden = !status;

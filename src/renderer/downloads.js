@@ -40,39 +40,6 @@ const RUNNING = new Set(['running', 'starting']);
 
 /* ------------------------------------------------------------------ */
 
-function mb(n) {
-  const bytes = Number(n) || 0;
-  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(2)} GB`;
-  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
-  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
-}
-
-/**
- * The line under the filename.
- *
- * Deliberately the same wording Settings used, because it was right: what the
- * browser is doing, how far through, and over how many connections - that last
- * one because this browser splits a download across several and the number is
- * the only visible evidence of it.
- */
-function describe(item) {
-  const conns = `${item.segments} connection${item.segments === 1 ? '' : 's'}`;
-  switch (item.state) {
-    case 'done':
-      return `Finished — ${mb(item.received)} over ${conns}`;
-    case 'failed':
-      return item.error ? `Failed — ${item.error}` : 'Failed';
-    case 'cancelled':
-      return 'Cancelled';
-    default: {
-      const rate = item.bytesPerSecond ? `, ${mb(item.bytesPerSecond)}/s` : '';
-      return item.total
-        ? `${mb(item.received)} of ${mb(item.total)} over ${conns}${rate}`
-        : `${mb(item.received)}${rate}`;
-    }
-  }
-}
-
 /** Fraction complete, or null where the server never said how big the file is. */
 function fraction(item) {
   if (!item.total || item.total <= 0) return null;
@@ -158,7 +125,7 @@ function updateRow(node, item) {
     prev.label = label;
   }
 
-  const status = describe(item);
+  const status = describeDownload(item);
   if (prev.status !== status) {
     node.status.textContent = status;
     prev.status = status;
@@ -262,18 +229,11 @@ el.clear.addEventListener('click', async () => {
 
 el.close.addEventListener('click', () => api.send('close-tab'));
 
+// Escape clears the search first, and closes the page only when there is
+// nothing to clear. See `clearOnEscape` in theme.js.
+clearOnEscape(el.query);
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    // Escape clears the search first and closes the page only when there is
-    // nothing to clear - the order every search field in a browser uses.
-    // Through an `input` event, so the search reloads and the page stops
-    // reporting a half-typed query that is no longer there.
-    if (el.query.value) {
-      el.query.value = '';
-      el.query.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    else api.send('close-tab');
-  }
+  if (event.key === 'Escape' && !event.defaultPrevented) api.send('close-tab');
 });
 
 api.onState((state) => applyThemePrefs(state.prefs));
