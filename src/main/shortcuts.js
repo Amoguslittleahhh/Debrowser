@@ -52,6 +52,8 @@ const TABLE = [
   // Private windows only; the same keys Tor Browser uses.
   { command: 'new-circuit', mod: true, shift: true, key: 'l' },
   { command: 'new-identity', mod: true, shift: true, key: 'u' },
+  // The panic key: the private window, Tor and every file gone at once.
+  { command: 'panic', mod: true, shift: true, key: 'delete' },
   { command: 'close-tab', mod: true, key: 'w' },
   { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
   { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'tab' },

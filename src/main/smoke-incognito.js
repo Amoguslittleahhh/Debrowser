@@ -66,7 +66,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   // way the user does - through the policy's own switch, not a test backdoor.
   // `up.test` is left out on purpose: it is the one that must be upgraded.
   const policy = require('./incognito/policy');
-  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp']) policy.allowHttp(url(host, ''));
+  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'up2']) policy.allowHttp(url(host, ''));
   const loaded = [];
   const byHost = {};
   for (const host of ['t1', 't2']) {
@@ -108,7 +108,9 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   }, 15_000);
   // Newest first.
   const last = downloads.list ? downloads.list()[0] : null;
-  step('download', { finished, state: last?.state || null });
+  // Where it went: the private downloads folder, not the ordinary one.
+  const item = downloads.items ? [...downloads.items.values()].pop() : null;
+  step('download', { finished, state: last?.state || null, folder: item && item.file ? path.basename(path.dirname(item.file)) : null });
 
   // WebRTC, pointed at a STUN server. Nothing may be gathered that names this
   // machine, and nothing may reach the STUN server at all.
@@ -201,6 +203,40 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
     afterDetach, reattached: fpTab.isLive && fpTab.wc.debugger.isAttached()
   });
 
+  // Uploads. A photo carrying GPS coordinates, picked for a file input: the
+  // page must receive it without them, and with exactly the same pixels.
+  const { nativeImage } = require('electron');
+  const sanitise = require('./incognito/sanitise');
+  const px = Buffer.alloc(64 * 48 * 4);
+  for (let i = 0; i < px.length; i += 4) { px[i] = i & 255; px[i + 1] = (i >> 8) & 255; px[i + 2] = 128; px[i + 3] = 255; }
+  const jpeg = nativeImage.createFromBitmap(px, { width: 64, height: 48 }).toJPEG(90);
+  const exifBody = Buffer.from('Exif\0\0MM\0*GPSLatitude 35.6895N GPSLongitude 139.6917E', 'latin1');
+  const app1 = Buffer.alloc(4);
+  app1[0] = 0xff; app1[1] = 0xe1; app1.writeUInt16BE(exifBody.length + 2, 2);
+  const photo = Buffer.concat([jpeg.subarray(0, 2), app1, exifBody, jpeg.subarray(2)]);
+  const photoPath = path.join(dir, 'holiday.jpg');
+  require('fs').writeFileSync(photoPath, photo);
+  process.env.DEBROWSER_TEST_UPLOAD = photoPath;
+  const upTab2 = tabs.create({ url: url('up2', 'upload.html') });
+  await waitFor(() => upTab2.isLive && !upTab2.loading && /upload/.test(upTab2.url), 15_000);
+  let upload = null;
+  if (upTab2.isLive) {
+    // A click the page could not have made itself: file inputs need a gesture.
+    await upTab2.wc.executeJavaScript("document.getElementById('f').click()", true).catch(() => {});
+    await waitFor(() => upTab2.wc.executeJavaScript('Boolean(window.__upload)').catch(() => false), 8000);
+    upload = await upTab2.wc.executeJavaScript('window.__upload').catch(() => null);
+  }
+  delete process.env.DEBROWSER_TEST_UPLOAD;
+  const received = upload && upload.base64 ? Buffer.from(upload.base64, 'base64') : null;
+  step('upload', {
+    name: upload && upload.name,
+    sentHadGps: photo.includes('GPS'),
+    receivedHasGps: upload ? upload.gps : null,
+    samePixels: received ? nativeImage.createFromBuffer(received).toBitmap()
+      .equals(nativeImage.createFromBuffer(photo).toBitmap()) : false,
+    exactlyTheCleanCopy: received ? received.equals(sanitise.stripImage(photo).data) : false
+  });
+
   // An external protocol starts nothing.
   const deniedBefore = tabs.deniedPermissions.length;
   const extTab = tabs.create({ url: url('t2', 'idle.html') });
@@ -269,6 +305,13 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, runCommand
   await netLog.stopLogging();
 
   process.stdout.write(`\n__LEAK__${JSON.stringify(report)}\n`);
+  // The panic key, when asked: the harness times how long the process, Tor
+  // and the private profile take to be gone after this line.
+  if (process.argv.includes('--leak-panic')) {
+    process.stdout.write(`__PANIC__${Date.now()}\n`);
+    runCommand('panic');
+    return new Promise(() => {});
+  }
   if (shell) shell.window.destroy();
   return 0;
 }

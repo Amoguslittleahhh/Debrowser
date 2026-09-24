@@ -31,7 +31,20 @@
  */
 
 /** The values every private window reports. */
-const PROFILE = Object.freeze({ timezone: 'UTC', locale: 'en-US', languages: 'en-US,en', cores: 4 });
+/**
+ * `languages` differs by OS because the mechanism does, and cannot be made
+ * the same: Linux and macOS build the list from the locale variables, which
+ * give Chrome's own `en-US,en`; Windows takes it from `--lang` alone, which
+ * gives `en-US` (measured on the CI runner). The user agent already says which
+ * OS this is, so what matters is that every private window on one OS says the
+ * same - and the Accept-Language header is set to match.
+ */
+const PROFILE = Object.freeze({
+  timezone: 'UTC',
+  locale: 'en-US',
+  languages: process.platform === 'win32' ? 'en-US' : 'en-US,en',
+  cores: 4
+});
 
 /** Letterbox steps: the page is sized down to a multiple of these. */
 const STEP_W = 200;
@@ -72,6 +85,16 @@ function configureSession(ses) {
   ses.setUserAgent(userAgent(), PROFILE.languages);
 }
 
+/**
+ * Other protections that ride on the same debugger session - the upload
+ * sanitiser's file-picker interception - and so have to be put back with the
+ * overrides whenever it is replaced. Each resolves false when it could not be.
+ */
+const coverHooks = [];
+function onCovered(fn) {
+  coverHooks.push(fn);
+}
+
 /** Tabs whose overrides are owed on every re-attach, and the screen each reports. */
 const screens = new WeakMap();
 const watched = new WeakSet();
@@ -90,7 +113,8 @@ async function apply(tab) {
     cdp.send('Emulation.setTimezoneOverride', { timezoneId: PROFILE.timezone }),
     cdp.send('Emulation.setLocaleOverride', { locale: PROFILE.locale }),
     cdp.send('Emulation.setHardwareConcurrencyOverride', { hardwareConcurrency: PROFILE.cores }),
-    screenOverride(cdp, screen)
+    screenOverride(cdp, screen),
+    ...coverHooks.map((fn) => Promise.resolve(fn(tab)).then((ok) => (ok === false ? null : true), () => null))
   ]);
   return results.every((r) => r !== null);
 }
@@ -239,5 +263,5 @@ async function audit(ses, pageUrl, log = () => {}) {
 
 module.exports = {
   PROFILE, STEP_W, STEP_H, userAgent, letterbox, prepareApp, prepareEnvironment, configureSession,
-  apply, shield, block, release, setScreen, switches, expected, audit
+  apply, shield, block, release, setScreen, switches, expected, audit, onCovered
 };

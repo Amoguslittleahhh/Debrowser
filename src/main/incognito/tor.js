@@ -429,6 +429,16 @@ class Tor {
     }
   }
 
+  /** The panic key: no goodbye, no state written. */
+  kill() {
+    this.stopping = true;
+    clearTimeout(this.stallTimer);
+    const pid = this.attached ? this.attached.pid : this.child && this.child.pid;
+    if (pid) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+  }
+
   /**
    * Stop, and wait until Tor has actually gone - it writes its state on the
    * way out, and that is what gets kept. Resolves at `ms` regardless.

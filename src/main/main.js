@@ -11,7 +11,7 @@
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow,
+const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, powerMonitor,
         shell: electronShell } = require('electron');
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
@@ -73,6 +73,22 @@ let tor = null;
 const incognitoSessions = new Set();
 /** Set by main() once there is a window to tell. */
 let onIncognitoChange = () => {};
+
+/**
+ * Incognito's panic: Tor killed, every window destroyed, the process gone -
+ * without the goodbyes a normal quit makes (no Tor state sealed, no windows
+ * asked). The exit handler deletes this run's files and the reaper takes what
+ * the OS was still holding. From the panic key, and from the idle timer.
+ */
+function panic(reason) {
+  if (!INCOGNITO) return;
+  console.error(`[debrowser] private window closed at once: ${reason}`);
+  if (tor) tor.kill();
+  for (const win of BaseWindow.getAllWindows()) {
+    try { win.destroy(); } catch { /* already gone */ }
+  }
+  app.exit(0);
+}
 const OFFLINE_MODE = SMOKE_TEST || process.argv.includes('--bench-test');
 
 // Tests and benchmarks must not depend on the network: they assert on memory
@@ -655,6 +671,22 @@ function main() {
     const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'));
     // Incognito: a Tor circuit and a partition per tab. See incognito/circuits.js.
     circuits = INCOGNITO ? new Circuits(incognitoCtx) : null;
+    // Incognito: every file picked for upload is handed to the page with its
+    // image metadata - GPS, camera, owner - removed. See incognito/sanitise.js.
+    if (INCOGNITO) {
+      const uploads = path.join(incognitoCtx.sessionDir, 'uploads');
+      const pick = async ({ multiple }) => {
+        // The leak test picks its fixture the way the user would pick a file.
+        const planned = SMOKE_TEST && process.env.DEBROWSER_TEST_UPLOAD;
+        if (planned) return [planned];
+        const res = await dialog.showOpenDialog(shell.window, {
+          properties: ['openFile', ...(multiple ? ['multiSelections'] : [])]
+        });
+        return res.canceled ? [] : res.filePaths;
+      };
+      require('./incognito/fingerprint').onCovered(
+        (tab) => require('./incognito/sanitise').interceptUploads(tab, uploads, pick, log));
+    }
     if (circuits) icons.useSession(circuits.iconSession());
 
     tabs = new TabManager({
@@ -757,6 +789,16 @@ function main() {
         allowedPorts: () => [...incognitoCtx.poolPorts, tor && tor.controlPort].filter(Boolean),
         onTrip: onEgressTrip
       });
+      // Away for longer than the user allowed: the same as the panic key. The
+      // system's idle time, not this window's - a private window left open on
+      // an unattended computer is the case this is for.
+      const idleMinutes = prefs.get('incognitoIdleWipeMinutes');
+      if (idleMinutes > 0) {
+        setInterval(() => {
+          if (powerMonitor.getSystemIdleTime() >= idleMinutes * 60) panic(`idle for ${idleMinutes} minutes`);
+        }, 15_000).unref();
+      }
+
       tripwire.capability().then((caps) => log('tripwire', JSON.stringify(caps)));
       tripwire.start();
 
@@ -1087,6 +1129,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // cookies, storage and cache cleared, every connection dropped, and Tor
       // told to build new circuits for everything after. One fresh tab is
       // opened first, because closing the last tab closes the window.
+      case 'panic':
+        panic('panic key');
+        break;
+
       case 'dismiss-slow-js':
         if (slowJs) slowJs.dismiss();
         break;
@@ -2423,13 +2469,25 @@ function hashOf(url) {
  */
 async function downloadDir(prefs) {
   const chosen = prefs?.get('downloadDir');
+  let base = app.getPath('downloads');
   // Asynchronously: a sleeping drive or a stalled network mount can hold a
   // stat for seconds, and a synchronous one would hold the whole browser.
   if (chosen && !OFFLINE_MODE) {
     const stat = await fs.promises.stat(chosen).catch(() => null);
-    if (stat && stat.isDirectory()) return chosen;
+    if (stat && stat.isDirectory()) base = chosen;
   }
-  return app.getPath('downloads');
+  if (!INCOGNITO) return base;
+  // A private window's files go in a folder of their own: kept apart from
+  // everything else downloaded, so they are easy to find and to delete in one
+  // go, and readable by nobody else on the machine. A download is the one
+  // thing a private window writes on purpose, so it is the user's to keep.
+  const own = path.join(base, 'Private downloads');
+  try {
+    await fs.promises.mkdir(own, { recursive: true, mode: 0o700 });
+    return own;
+  } catch {
+    return base;
+  }
 }
 
 /**
@@ -2518,7 +2576,8 @@ function menuModel({ tabs, shell }) {
     // Not offered from inside incognito: a second one is just another tab there.
     ...(INCOGNITO ? [
       { id: 'new-circuit', label: 'New circuit for this tab', accel: accel('new-circuit'), icon: 'reload' },
-      { id: 'new-identity', label: 'New identity', accel: accel('new-identity'), icon: 'shield' }
+      { id: 'new-identity', label: 'New identity', accel: accel('new-identity'), icon: 'shield' },
+      { id: 'panic', label: 'Close and erase now', accel: accel('panic'), icon: 'close' }
     ] : [{
       id: 'new-incognito-window', label: 'New incognito window',
       accel: accel('new-incognito-window'), icon: 'shield'

@@ -41,6 +41,7 @@ const COMMANDS = new Set([
   'new-circuit',
   'open-onion',
   'dismiss-slow-js',
+  'panic',
   'fingerprint-expected',
   'new-identity',
   'close-tab',

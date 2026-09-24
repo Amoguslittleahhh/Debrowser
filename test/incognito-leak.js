@@ -286,6 +286,9 @@ async function main() {
     `--leak-stun=${ip}:${canary.udpPort}`,
     `--leak-netlog-dir=${netlogs}`,
     `--leak-idle-ms=${value('idle-ms', '3000')}`];
+  // The kill-switch run ends through the panic key rather than a normal quit,
+  // so both ways out are covered and the panic key is timed.
+  if (killSwitch) browserArgs.push('--leak-panic');
   // Root - a container, or the namespace's mapped root - cannot run the sandbox.
   if (typeof process.getuid === 'function' && process.getuid() === 0) browserArgs.push('--no-sandbox');
 
@@ -354,6 +357,7 @@ async function main() {
     child.kill('SIGKILL');
   }, deadlineMs);
   const code = await new Promise((r) => child.on('exit', r));
+  const exitedAt = Date.now();
   clearTimeout(killer);
 
   const line = out.split('\n').find((l) => l.startsWith('__LEAK__'));
@@ -390,7 +394,8 @@ async function main() {
     `asked for ${names.join(', ')}${foreign.length ? ` — unexpected: ${foreign.join(', ')}` : ''}`);
   check('the favicon route goes through the proxy', asked.some((h) => h.startsWith('icon.test')),
     `route answered ${s.favicon}`);
-  check('a download goes through the proxy', asked.some((h) => h.startsWith('dl.test')) && s.download.finished,
+  check('a download goes through the proxy, into the private downloads folder',
+    asked.some((h) => h.startsWith('dl.test')) && s.download.finished && s.download.folder === 'Private downloads',
     JSON.stringify(s.download));
 
   check('a page cannot reach this machine or its network', Array.isArray(s.localNetwork) &&
@@ -438,7 +443,8 @@ async function main() {
     badSurfaces.length ? `differs in ${badSurfaces.join(', ')}: ${JSON.stringify(badSurfaces.map((k) => fs3[k]))}` : `${want.userAgent}, ${want.timezone}, ${want.languages}, ${want.cores} cores`);
   const h = (fs3.headers || {});
   check('the request headers say the same, with no Electron or Debrowser token',
-    h['user-agent'] === want.userAgent && /^en-US,en;q=0\.9$/.test(h['accept-language'] || '') &&
+    h['user-agent'] === want.userAgent &&
+      h['accept-language'] === (want.languages === 'en-US' ? 'en-US' : 'en-US,en;q=0.9') &&
       !/Electron|Debrowser/i.test(JSON.stringify(h)),
     JSON.stringify(h));
   check('the page is letterboxed, and the screen it reports is its own size',
@@ -450,6 +456,12 @@ async function main() {
   check('taking the debugger away does not take the overrides with it',
     f.reattached === true && f.afterDetach && f.afterDetach.screen === f.afterDetach.viewport,
     `reattached ${f.reattached}; after: ${JSON.stringify(f.afterDetach)}`);
+
+  const u = s.upload || {};
+  check('a photo picked for upload reaches the page without its GPS data, pixels unchanged',
+    u.sentHadGps === true && u.receivedHasGps === false && u.samePixels === true && u.exactlyTheCleanCopy === true &&
+      u.name === 'holiday.jpg',
+    JSON.stringify(u));
 
   // Onion-Location: honoured from HTTPS pages only, and only for onion addresses.
   const policy = require('../src/main/incognito/policy');
@@ -510,6 +522,20 @@ async function main() {
   // Amnesia.
   // The reaper deletes it after the process has fully ended, so give it a moment.
   for (let i = 0; i < 30 && fs.existsSync(privateRoot); i++) await new Promise((r) => setTimeout(r, 100));
+  const panicLine = /__PANIC__(\d+)/.exec(out);
+  if (panicLine) {
+    // Measured from the panic to the profile being gone - the reaper waits for
+    // the process to end, so this covers both.
+    const panickedAt = Number(panicLine[1]);
+    const goneAt = fs.existsSync(privateRoot) ? null : Date.now();
+    const survivors = process.platform === 'linux'
+      ? require('child_process').spawnSync('pgrep', ['-f', privateRoot], { encoding: 'utf8' }).stdout.trim()
+      : '';
+    check('the panic key: the browser and Tor gone at once, the private profile within a second or so',
+      exitedAt - panickedAt < 1000 && goneAt !== null && goneAt - panickedAt < 2000 && survivors === '',
+      `process gone after ${exitedAt - panickedAt} ms, profile ${goneAt ? `after ${goneAt - panickedAt} ms` : 'still there'}` +
+        (survivors ? `; still running: ${survivors.split('\n').length} process(es)` : ''));
+  }
   check('the private profile is gone after exit', !fs.existsSync(privateRoot),
     fs.existsSync(privateRoot) ? `left: ${fs.readdirSync(privateRoot).join(', ')}` : privateRoot);
   const normalAfter = treeHash(normalProfile);

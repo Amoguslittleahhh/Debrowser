@@ -524,6 +524,15 @@ static int reap(unsigned long pid, const char *dir) {
         remove_tree(dir);
         if (GetFileAttributesA(dir) == INVALID_FILE_ATTRIBUTES) break;
     }
+    /* The profile root too, if this run was the last thing in it - as on
+       Linux. RemoveDirectory refuses a directory that is not empty, which is
+       the check. */
+    char parent[MAX_PATH * 2];
+    snprintf(parent, sizeof parent, "%s", dir);
+    char *cut = strrchr(parent, '\\');
+    char *slash = strrchr(parent, '/');
+    if (!cut || (slash && slash > cut)) cut = slash;
+    if (cut) { *cut = '\0'; RemoveDirectoryA(parent); }
     return 0;
 }
 #else
