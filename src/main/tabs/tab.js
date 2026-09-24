@@ -38,6 +38,21 @@ const SETTINGS_ZOOM = 1.1;
 
 let nextTabId = 1;
 
+/**
+ * Failures that mean "this site does not do https here": a TLS handshake that
+ * could not happen, or nothing listening on 443. Not certificate errors - a
+ * site that answers https with a bad certificate is exactly what must not be
+ * quietly retried in the clear.
+ */
+const HTTPS_ONLY_FAILURES = new Set([
+  -107, // SSL_PROTOCOL_ERROR
+  -113, // SSL_VERSION_OR_CIPHER_MISMATCH
+  -102, // CONNECTION_REFUSED
+  -100, // CONNECTION_CLOSED
+  -101, // CONNECTION_RESET
+  -118  // CONNECTION_TIMED_OUT
+]);
+
 
 /**
  * Thumbnails are shown behind a loading page for a few hundred milliseconds, so
@@ -313,11 +328,32 @@ class Tab {
   /* ---------------------------------------------------------------- */
 
   /**
+   * Load `url` in a new renderer built for it.
+   *
+   * For a tab whose renderer was made for one of our pages - every tab starts
+   * on the new tab page - and is now asked for a website. The preload is fixed
+   * when a renderer is built, so loading the site into the same one left the
+   * page bridge in it: `window.debrowser` visible to the site (its commands
+   * refused, since privilege is decided from the live URL, but there), and
+   * the page probe that makes Ctrl+wheel zoom work missing. The new tab page
+   * has no history worth keeping, so nothing is lost by starting clean.
+   */
+  rebuildFor(url) {
+    this.emit('rebuild');
+    this.teardownView();
+    this.suspendedState = null;
+    this.url = url;
+    this.internal = pages.isInternal(url);
+    this.realise();
+  }
+
+  /**
    * Create the renderer for this tab. Called on first open and again on every
    * restore-from-discard.
    */
   realise() {
     if (this.isLive) return;
+    this.realisedInternal = this.internal;
 
     this.view = new WebContentsView({
       webPreferences: {
@@ -446,6 +482,11 @@ class Tab {
     });
     wc.on('did-stop-loading', () => {
       this.loading = false;
+      // What is actually showing. A navigation that was stopped, or refused by
+      // the page's "Leave this page?", never commits - and the address it was
+      // going to stayed in the bar, where the star and the site panel acted on
+      // a page that was not there.
+      this.reconcileUrl();
       // A reload keeps the entry's title, so Chromium never reports it again,
       // and the reset at commit (below) would leave the address standing in
       // for it. Taken back here - unless what the engine has is itself only
@@ -457,6 +498,8 @@ class Tab {
 
     wc.on('did-navigate', (_e, url) => {
       this.url = url;
+      this.httpFallback = null;
+      this.failed = false;
       // At commit, before the new document paints.
       try { this.applyZoom(wc); } catch { /* the view is going away */ }
       /*
@@ -511,8 +554,12 @@ class Tab {
 
     // Audible tabs are protected from freezing and discarding: silencing a
     // user's music to save memory is never the right call.
-    wc.on('audio-state-changed', (_e, state) => {
-      this.audible = typeof state === 'object' ? state.audible : state;
+    // Asked of the webContents rather than read off the event: the event's
+    // shape changed under us (Electron 44 passes only the event, with
+    // `audible` on it), and reading the old second argument left every tab
+    // silent - no speaker mark, and a playing tab left open to discarding.
+    wc.on('audio-state-changed', () => {
+      this.audible = !wc.isDestroyed() && wc.isCurrentlyAudible();
       this.emit('updated');
     });
 
@@ -530,6 +577,15 @@ class Tab {
           this.wc.loadURL(`${pages.INSECURE_URL}?url=${encodeURIComponent(plain)}`).catch(() => {});
           return;
         }
+      }
+      // An https address the browser guessed, on a site that has none: the
+      // same address over http, once, instead of an error page.
+      const guessed = this.httpFallback;
+      this.httpFallback = null;
+      if (guessed && HTTPS_ONLY_FAILURES.has(errorCode) &&
+          String(validatedURL).replace(/\/$/, '') === guessed.replace(/\/$/, '')) {
+        this.wc.loadURL(guessed.replace(/^https:/, 'http:')).catch(() => {});
+        return;
       }
       // The error entry sits at the address that failed, and no `did-navigate`
       // reports it: without this the bar keeps the previous page's address.
@@ -602,7 +658,20 @@ class Tab {
    * the error entry Chromium committed at the failed address, so the address
    * bar, Reload and Back all keep meaning what they did.
    */
+  /** Bring `url` back to the committed address, if a navigation left it elsewhere. */
+  reconcileUrl() {
+    if (!this.isLive) return;
+    const committed = this.wc.getURL();
+    if (committed && committed !== this.url) {
+      this.url = committed;
+      this.emit('updated');
+    }
+  }
+
   showError(url, code, description) {
+    this.failed = true;
+    // The last page's icon is not this one's.
+    this.favicon = null;
     errorPage.show(this.wc, { url, code, description }).then(() => this.emit('updated'));
   }
 
@@ -908,6 +977,8 @@ class Tab {
       muted: this.muted,
       loading: this.loading,
       crashed: this.crashed,
+      // The page did not load: no padlock, whatever the scheme says.
+      failed: Boolean(this.failed),
       pinned: this.pinned,
       boosted: this.boosted,
       demand: this.demand,

@@ -114,6 +114,9 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
     const child = spawn(program, args, { detached: true, stdio: 'ignore', env });
     child.on('error', (err) => log('incognito', `could not start: ${err.message}`));
     if (state.onExit) child.on('exit', state.onExit);
+    // A private browser that ends with an error never showed anything - its
+    // output goes nowhere - so the one that asked for it has to say so.
+    if (state.onFail) child.on('exit', (code) => { if (code) state.onFail(code); });
     child.unref();
     return true;
   } catch (err) {

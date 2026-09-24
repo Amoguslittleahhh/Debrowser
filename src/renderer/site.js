@@ -70,7 +70,9 @@ function showAsk(info) {
   el.ask.hidden = false;
   el.allow.addEventListener('click', () => api.send('permission-answer', { allow: true }));
   el.block.addEventListener('click', () => api.send('permission-answer', { allow: false }));
-  return el.allow;
+  // The panel itself takes focus, not Allow: a site can ask on its own, and a
+  // stray Enter or Space must not be the thing that grants it the camera.
+  return el.sheet;
 }
 
 function showInfo(info) {
@@ -109,9 +111,19 @@ function showInfo(info) {
   });
 
   el.clear.hidden = info.incognito;
+  // Two presses, as History's "Clear all" is: clearing signs you out of the
+  // site, and there is no undo.
+  let armed = false;
   el.clear.addEventListener('click', () => {
+    if (!armed) {
+      armed = true;
+      el.clear.textContent = 'Sign out and clear?';
+      el.clear.classList.add('danger');
+      return;
+    }
     api.send('site-clear-data');
     el.clear.textContent = 'Cleared';
+    el.clear.classList.remove('danger');
     el.clear.disabled = true;
     setTimeout(close, 700);
   });
@@ -133,9 +145,6 @@ async function load() {
   const info = await api.request('site-info');
   if (!info || (!info.website && !info.ask)) { close(); return; }
   const focus = info.ask ? showAsk(info) : showInfo(info);
-  // The answer can arrive before the view has been given its size, and a
-  // panel placed in a 0x0 window is clamped into its corner.
-  if (!window.innerHeight) await new Promise((resolve) => window.addEventListener('resize', resolve, { once: true }));
   anchorSheet(el.sheet, anchor, 8, 'left');
   focus.focus();
 }

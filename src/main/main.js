@@ -615,8 +615,12 @@ function main() {
 
   const onTabEvent = (tab, event, payload) => {
     switch (event) {
+      case 'rebuild':
+        if (shell) shell.detachTab(tab);
+        break;
       case 'realised':
         if (shell) shell.attachTab(tab);
+        if (shell && tab.visible && tabs.activeTab() === tab) tab.wc.focus();
         // Per realisation, not per tab: a discarded tab comes back with a new
         // renderer, and the listener died with the old one.
         bindPageShortcuts(tab);
@@ -637,7 +641,11 @@ function main() {
             detail: 'Changes you made may not be saved.'
           }) === 0;
           if (leave) event.preventDefault();
-          else if (tab.closing) tab.closing.stayed();
+          else {
+            if (tab.closing) tab.closing.stayed();
+            // Staying means the page in front is still this one.
+            tab.reconcileUrl();
+          }
         });
         // A new page has asked nothing yet, whatever the last one asked.
         if (permissionAsks) tab.wc.on('did-navigate', () => permissionAsks.forget(tab));
@@ -656,9 +664,20 @@ function main() {
         break;
       case 'activated':
         if (shell) shell.attachTab(tab);
+        // The keyboard follows the tab: switching with Ctrl+Tab left no view
+        // focused, and the next key went nowhere. A tab still being rebuilt
+        // takes it when its page exists ('realised' below).
+        if (shell && tab.isLive) tab.wc.focus();
         // A search belongs to the page it was run on. Carrying the bar over to
         // another tab would show a match count for a page nobody is looking at.
         if (shell && shell.findOpen) { find.query = ''; shell.setFindOpen(false); }
+        // And its highlights go with it. Closing the bar on a tab switch left
+        // every match lit on the page behind, with no bar left to clear them.
+        if (find && find.tabId && find.tabId !== tab.id) {
+          const searched = tabs.byId(find.tabId);
+          if (searched?.isLive) searched.wc.stopFindInPage('clearSelection');
+          find.tabId = null;
+        }
         // A question the page asked while it was in the background.
         if (permissionAsks && permissionAsks.has(tab) && shell) shell.toChrome('site-ask');
         break;
@@ -1227,7 +1246,21 @@ function startIncognito({ prefs, log, warm = false }) {
     onExit: warm ? () => {
       if (quittingForGood || !prefs.get('incognitoKeepWarm')) return;
       setTimeout(() => startIncognito({ prefs, log, warm: true }), 3000).unref();
-    } : null
+    } : null,
+    // Asked for and gone with an error: without this, Ctrl+Shift+N did
+    // nothing at all that anyone could see.
+    onFail: warm ? null : (code) => {
+      log('incognito', `private window exited with code ${code}`);
+      if (quittingForGood) return;
+      const parent = BaseWindow.getAllWindows().find((w) => !w.isDestroyed());
+      dialog.showMessageBox(parent, {
+        type: 'warning',
+        buttons: ['OK'],
+        title: 'Private window',
+        message: 'The private window couldn’t open.',
+        detail: 'It stopped before its window appeared. Try again in a moment.'
+      }).catch(() => {});
+    }
   });
 }
 
@@ -1448,6 +1481,20 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!tab) break;
         if (!tab.isLive) tab.realise();
         tab.url = target;
+        // https was a guess - the user typed no scheme - so a site that turns
+        // out not to speak it is tried again over http rather than left as an
+        // error page. Never in a private window, which has its own rule: the
+        // plain version is only loaded after the user is told what it costs.
+        const typed = String(payload?.url || '').trim();
+        tab.httpFallback = !INCOGNITO && target.startsWith('https://') && !/^[a-z][a-z0-9+.-]*:/i.test(typed)
+          ? target : null;
+        // A renderer built for one of our pages never carries a website.
+        if (tab.realisedInternal) {
+          const fallback = tab.httpFallback;
+          tab.rebuildFor(target);
+          tab.httpFallback = fallback;
+          break;
+        }
         tab.wc.loadURL(target).catch((err) => log(`navigate failed: ${err.message}`));
         break;
       }
@@ -1558,6 +1605,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const query = String(payload?.query ?? '');
         if (find) find.query = query;
         if (!active?.isLive) break;
+        if (find) find.tabId = active.id;
         if (!query) {
           active.wc.stopFindInPage('clearSelection');
           shell.toChrome('find-result', { matches: 0, active: 0 });
@@ -1584,8 +1632,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // each branch. Pressing F3 with nothing to step through is what the key
         // is for before a search exists: it opens the bar and puts the keyboard
         // in it, exactly as Ctrl+F does.
-        shell.setFindOpen(true);
+        // Opened only if it is not up: asking an open bar to open again selects
+        // its text, and Enter or F3 then made the next letter typed replace
+        // the whole query instead of refining it.
+        if (!shell.findOpen) shell.setFindOpen(true);
         if (!query || !active?.isLive) { shell.focusChrome(); break; }
+        if (find) find.tabId = active.id;
         active.wc.findInPage(query, { findNext: true, forward: command === 'find-next' });
         break;
       }
@@ -1664,12 +1716,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // only the chrome knows where its button ended up after the toolbar
         // laid out. Falling back to the top right, under the toolbar, puts the
         // panel where that button is rather than in the corner of the window.
+        // So those ask the chrome, which measures its button and sends this
+        // again with the anchor.
         const right = Number(payload?.right);
-        const anchored = Number.isFinite(right) && right > 0
-          ? payload
-          : { x: 0, y: shell.toolbarAnchor() - 8,
-              right: shell.window.getContentBounds().width - 12 };
-        shell.openSheet('downloads', anchored);
+        if (!(Number.isFinite(right) && right > 0)) { shell.toChrome('open-downloads'); break; }
+        shell.openSheet('downloads', payload);
         break;
       }
 
@@ -1870,7 +1921,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
             {
               id: 'pin-tab',
               label: tab.pinned ? 'Unpin' : 'Pin',
-              icon: 'star',
+              icon: 'pin',
               payload: { id }
             },
             {
@@ -1989,7 +2040,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'pin-tab': {
         const tab = tabs.byId(payload?.id);
-        if (tab) tab.pinned = !tab.pinned;
+        if (tab) tabs.setPinned(tab.id, !tab.pinned);
         break;
       }
 
@@ -2485,7 +2536,9 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
         if (ask) permissionAsks.markShown(active);
         return {
           host,
-          secure: /^https:/i.test(active.url),
+          // Not on a page that failed: an https address whose handshake never
+          // completed is not a secure connection.
+          secure: /^https:/i.test(active.url) && !active.failed,
           website: Boolean(origin),
           incognito: INCOGNITO,
           ask,
@@ -2570,7 +2623,10 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       // renderer: the page never gets a file path, and the dialog is the only
       // thing that decides which file is opened.
       case 'import-bookmark-file': {
-        const picked = dialog.showOpenDialogSync({
+        // Not the synchronous picker: it held the whole browser - every tab,
+        // the chrome - until it closed, and without a parent it could open
+        // behind the window it was freezing.
+        const { canceled, filePaths: picked } = await dialog.showOpenDialog(shell.window, {
           title: 'Import bookmarks',
           properties: ['openFile'],
           filters: [
@@ -2578,7 +2634,7 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
             { name: 'All files', extensions: ['*'] }
           ]
         });
-        if (!picked || !picked.length) return { ok: false, cancelled: true };
+        if (canceled || !picked || !picked.length) return { ok: false, cancelled: true };
         let text;
         try {
           text = require('fs').readFileSync(picked[0], 'utf8');
@@ -3131,9 +3187,17 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
   if (/^(about|data|blob|file):/i.test(text)) return text;
 
+  // A machine on this network - an IP address, `localhost`, a `.local` name,
+  // or any name given with a port - is reached over plain HTTP, as every
+  // browser does: a router or a development server rarely has a
+  // certificate, and guessing https for it only produced an error page.
+  const host = text.split(/[/?#]/)[0];
+  const local = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host) || /^\[[0-9a-f:.]+\](:\d+)?$/i.test(host) ||
+    /^localhost(:\d+)?$/i.test(host) || /\.(local|lan|internal|home\.arpa)(:\d+)?$/i.test(host) ||
+    /^[a-z0-9-]+:\d+$/i.test(host);
+  if (local) return `http://${text}`;
   const looksLikeHost = /^[^\s/?#]+\.[^\s/?#]{2,}([/?#]|$)/.test(text);
   if (looksLikeHost) return `https://${text}`;
-  if (text === 'localhost' || text.startsWith('localhost:')) return `http://${text}`;
 
   return searchTemplate.replace('%s', encodeURIComponent(text));
 }

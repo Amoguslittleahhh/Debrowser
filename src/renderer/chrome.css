@@ -395,6 +395,24 @@ body.tab-dragging .tab:not(.dragging) {
   transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
 }
 
+/*
+ * A pinned tab: its site's icon and nothing else, at the start of the strip,
+ * as in every browser. Down the side there is room for its title, so it keeps
+ * the row and only loses the close button - a pinned tab is one you meant to
+ * keep.
+ */
+body:not([data-layout="left"]) .tab.pinned {
+  flex: 0 0 40px;
+  min-width: 40px;
+  max-width: 40px;
+  contain-intrinsic-inline-size: 40px;
+  padding: 0;
+  justify-content: center;
+}
+body:not([data-layout="left"]) .tab.pinned .tab-title,
+body:not([data-layout="left"]) .tab.pinned .tier,
+.tab.pinned .tab-close { display: none; }
+
 /* A crashed page: the tab fades until it is reloaded. */
 .tab[data-crashed="on"] .tab-icon,
 .tab[data-crashed="on"] .tab-title { opacity: 0.5; }

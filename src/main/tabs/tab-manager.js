@@ -503,12 +503,26 @@ class TabManager {
   move(id, index) {
     const from = this.tabs.findIndex((tab) => tab.id === id);
     if (from === -1 || !Number.isInteger(index)) return false;
-    const to = Math.max(0, Math.min(index, this.tabs.length - 1));
+    // Pinned tabs are a group at the start of the strip, and each kind stays
+    // on its own side of the line.
+    const pinnedOthers = this.tabs.filter((t) => t.pinned && t.id !== id).length;
+    const lo = this.tabs[from].pinned ? 0 : pinnedOthers;
+    const hi = this.tabs[from].pinned ? pinnedOthers : this.tabs.length - 1;
+    const to = Math.max(lo, Math.min(index, hi));
     if (to === from) return false;
     const [tab] = this.tabs.splice(from, 1);
     this.tabs.splice(to, 0, tab);
     this.onEvent(tab, 'moved');
     return true;
+  }
+
+  /** Pin or unpin a tab, moving it to the edge of the pinned group. */
+  setPinned(id, pinned) {
+    const tab = this.byId(id);
+    if (!tab) return;
+    tab.pinned = Boolean(pinned);
+    const edge = this.tabs.filter((t) => t.pinned && t !== tab).length;
+    if (!this.move(id, edge)) this.onEvent(tab, 'updated');
   }
 
   /** Every live renderer, deduplicated by process. */

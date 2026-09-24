@@ -311,6 +311,8 @@ function openDownloads() {
     return;
   }
   const rect = el.downloads.getBoundingClientRect();
+  // Nothing on screen to hang from - full screen hides the toolbar.
+  if (!rect.width) { api.send('open-downloads-page'); return; }
   api.send('open-downloads', {
     x: Math.round(rect.left),
     y: Math.round(rect.bottom),
@@ -740,7 +742,13 @@ function createTabElement(id) {
   // `activate-tab` before `close-tab` ever ran. On a discarded tab that rebuilt
   // the renderer and started a page load purely so it could be torn down a
   // moment later, which is the exact opposite of what this browser is for.
-  close.addEventListener('mousedown', (event) => event.stopPropagation());
+  // Middle-click still closes: the button stops only the press that would
+  // activate the tab, and on a narrow active tab the button is all there is
+  // to middle-click.
+  close.addEventListener('mousedown', (event) => {
+    if (event.button === 1) return;
+    event.stopPropagation();
+  });
   close.addEventListener('click', (event) => {
     event.stopPropagation();
     // `detail` is 0 for a keyboard press, which has no pointer to keep in place.
@@ -799,6 +807,14 @@ function beginTabDrag() {
   d.min = d.slots[0][0] - a;
   d.max = d.slots[d.slots.length - 1][1] - b;
   d.to = d.from;
+  // A pinned tab moves among the pinned, any other among the rest, as the
+  // browser will insist on anyway.
+  const pinned = nodes.filter((n) => n.classList.contains('pinned')).length;
+  const isPinned = d.root.classList.contains('pinned');
+  d.lo = isPinned ? 0 : pinned;
+  d.hi = isPinned ? pinned - 1 : nodes.length - 1;
+  d.min = d.slots[d.lo][0] - a;
+  d.max = d.slots[d.hi][1] - b;
   d.active = true;
   try { d.root.setPointerCapture(d.pointer); } catch { /* the pointer is already gone */ }
   d.root.classList.add('dragging');
@@ -814,11 +830,14 @@ function moveTabDrag(delta) {
   const [a, b] = d.slots[d.from];
   const centre = (a + b) / 2 + offset;
   let to = d.from;
-  for (let i = d.from + 1; i < d.slots.length; i++) {
-    if (centre > (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
+  // At or past a slot's middle takes the slot. Strictly past never reached the
+  // end slots: the offset is clamped so the dragged tab's middle can at most
+  // meet theirs, and a drag to either end stopped one short.
+  for (let i = d.from + 1; i <= d.hi; i++) {
+    if (centre >= (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
   }
-  for (let i = d.from - 1; i >= 0; i--) {
-    if (centre < (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
+  for (let i = d.from - 1; i >= d.lo; i--) {
+    if (centre <= (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
   }
   if (to === d.to) return;
   d.to = to;
@@ -936,6 +955,11 @@ function updateTabElement(node, tab) {
     if (tab.visible) node.root.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
+  if (prev.pinned !== tab.pinned) {
+    node.root.classList.toggle('pinned', Boolean(tab.pinned));
+    prev.pinned = tab.pinned;
+  }
+
   if (prev.boosted !== tab.boosted) {
     node.root.classList.toggle('boosted', tab.boosted);
     prev.boosted = tab.boosted;
@@ -984,15 +1008,16 @@ function tierLabel(tab) {
 function renderToolbar(state) {
   const active = state.tabs.find((tab) => tab.visible);
 
-  // Compared with what was last *shown*, not with the field: after typing a
-  // full address, or picking a suggestion that fills one in, the field
-  // already holds the new URL, and comparing against it skipped the padlock.
-  if (active && !urlFocused && (active.url !== shownAddress || el.url.value !== active.url)) {
-    // Only rewrite the address when the tab actually changed or navigated,
-    // never mid-edit.
-    if (active.id !== lastActiveId || document.activeElement !== el.url) {
-      setAddress(active.url);
-    }
+  // Rewritten when the page or the tab changed, or when the field holds
+  // nothing of the user's - never while they are in it. Compared with what
+  // was last *shown* rather than with the field: after typing a full address
+  // the field already holds the new URL, and comparing against it skipped the
+  // padlock. And not keyed to `activeElement`, which stays on the field after
+  // the chrome loses focus to the page - the bar stopped following navigation.
+  const failed = Boolean(active?.failed);
+  if (active && !urlFocused) {
+    const moved = active.id !== lastActiveId || active.url !== shownAddress || failed !== shownFailed;
+    if (moved || (!urlEdited && el.url.value !== addressText(active.url))) setAddress(active.url, failed);
   }
   if (active) lastActiveId = active.id;
 
@@ -1101,21 +1126,35 @@ el.zoomBadge.addEventListener('click', () => api.send('zoom', { direction: 'rese
 
 /** The address the bar last displayed for a tab, padlock included. */
 let shownAddress = null;
+let shownFailed = false;
 
-function setAddress(url) {
+/** What the field shows for an address: nothing at all for the new tab page. */
+function addressText(url) {
+  return /^debrowser:\/\/newtab\/?$/.test(url || '') ? '' : (url || '');
+}
+
+/**
+ * @param {string} url
+ * @param {boolean} failed - the page did not load. No padlock then: a lock
+ *   beside an https address that failed its handshake claimed a secure
+ *   connection that never happened.
+ */
+function setAddress(url, failed = false) {
   shownAddress = url;
+  shownFailed = failed;
+  urlEdited = false;
+  el.url.value = addressText(url);
   try {
     const parsed = new URL(url);
     // Nothing at all for the browser's own pages: they are not a connection,
     // and a padlock on Settings would be claiming something that has no
     // meaning there.
-    if (parsed.protocol === 'https:') setScheme('secure');
+    if (failed) setScheme(null);
+    else if (parsed.protocol === 'https:') setScheme('secure');
     else if (parsed.protocol === 'http:') setScheme('insecure');
     else setScheme(null);
-    el.url.value = url;
   } catch {
     setScheme(null);
-    el.url.value = url || '';
   }
 }
 
@@ -1224,6 +1263,11 @@ let completing = false;
  * in the field, and Escape or ArrowUp past the top has to put it back.
  */
 let typed = '';
+/** The field as inline completion left it, and the full address that completes to. */
+let completed = null;
+let completedUrl = null;
+/** The user has changed the field since the page's address was put in it. */
+let urlEdited = false;
 let suggestions = [];
 let selected = -1;
 let asked = 0;
@@ -1251,6 +1295,9 @@ el.url.addEventListener('beforeinput', (event) => {
 
 el.url.addEventListener('input', async () => {
   typed = el.url.value;
+  urlEdited = true;
+  completed = null;
+  completedUrl = null;
   selected = -1;
   if (!typed.trim()) { closeList(); return; }
 
@@ -1269,6 +1316,10 @@ el.url.addEventListener('input', async () => {
   // match - and the rest selected, so the next keystroke overwrites it.
   el.url.value = typed + stem.slice(typed.length);
   el.url.setSelectionRange(typed.length, el.url.value.length);
+  completed = el.url.value;
+  // Enter on a completion goes where the history row went - http included.
+  // The stem has no scheme, and guessing one sent http-only sites to https.
+  completedUrl = res.inlineUrl || null;
 });
 
 /** What the bar shows while a row is highlighted: that row's address, or the search. */
@@ -1282,24 +1333,32 @@ el.url.addEventListener('keydown', (event) => {
     selected = event.key === 'ArrowDown'
       ? (selected + 1 >= n ? -1 : selected + 1)
       : (selected - 1 < -1 ? n - 1 : selected - 1);
-    el.url.value = selected === -1 ? typed : shown(suggestions[selected]);
+    el.url.value = selected === -1 ? (completed || typed) : shown(suggestions[selected]);
     el.url.setSelectionRange(el.url.value.length, el.url.value.length);
     api.send('suggest-select', { index: selected });
   } else if (event.key === 'Enter') {
     if (listOpen && selected >= 0) {
       api.send('suggest-pick', { index: selected, newTab: event.altKey });
+    } else if (completed && completedUrl && el.url.value === completed) {
+      api.send('navigate', { url: completedUrl });
     } else {
       api.send('navigate', { url: el.url.value });
     }
+    urlEdited = false;
     closeList();
     el.url.blur();
   } else if (event.key === 'Escape') {
     event.preventDefault();
     // First Escape: take back the list, and anything a highlight put in the
-    // field. Second: leave the bar, as it always did.
+    // field. Second: put back the page's own address, selected, as every
+    // browser does. Third: leave the bar.
     if (listOpen) {
       if (el.url.value !== typed) el.url.value = typed;
       closeList();
+    } else if (urlEdited && shownAddress !== null) {
+      el.url.value = addressText(shownAddress);
+      urlEdited = false;
+      el.url.select();
     } else {
       el.url.blur();
     }
@@ -1374,6 +1433,9 @@ api.onMessage((message) => {
   switch (message.kind) {
     case 'site-ask':
       openSite();
+      break;
+    case 'open-downloads':
+      openDownloads();
       break;
     case 'suggest-done':
       closeList();

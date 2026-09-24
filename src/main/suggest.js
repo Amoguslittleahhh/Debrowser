@@ -113,10 +113,17 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
   // typed, the shorter address winning a tie - one word only, nothing else
   // would make sense to fill in.
   let inline = null;
+  let inlineUrl = null;
   if (!/\s/.test(typed)) {
     const hits = ranked.filter((c) => stem(c.url).toLowerCase().startsWith(lower));
     hits.sort((a, b) => b.score - a.score || stem(a.url).length - stem(b.url).length);
-    if (hits.length) inline = stem(hits[0].url);
+    if (hits.length) {
+      inlineUrl = hits[0].url;
+      // A site's front page completes as `github.com`, as its row reads, not
+      // `github.com/`; the full address is kept for Enter.
+      inline = stem(inlineUrl).replace(/^([^/]+)\/$/, '$1');
+      if (inline.length < typed.length) inline = stem(inlineUrl);
+    }
   }
 
   const rows = [];
@@ -126,13 +133,14 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
   // third - a list full of history must not bury the plain search.
   const matches = ranked.slice(0, MAX_ROWS);
   const searchRow = { kind: 'search', title: typed, engine };
-  const lead = inline ? matches.findIndex((c) => stem(c.url) === inline) : -1;
+  const lead = inlineUrl ? matches.findIndex((c) => c.url === inlineUrl) : -1;
   if (lead > 0) matches.unshift(matches.splice(lead, 1)[0]);
   const head = matches.slice(0, rows.length ? 1 : 2);
   rows.push(...head, searchRow, ...matches.slice(head.length));
   return {
     items: rows.slice(0, MAX_ROWS).map(({ score, ...row }) => row),
-    inline
+    inline,
+    inlineUrl
   };
 }
 

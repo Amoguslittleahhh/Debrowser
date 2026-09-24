@@ -2453,6 +2453,44 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     for (const server of servers) server.close();
   }
 
+  // From the hands-on audit: the fixes most likely to regress.
+  {
+    const { normaliseUrl } = require('./main');
+    const local = ['127.0.0.1:8080/x', '192.168.1.1', 'router:8080', 'nas.local', '[::1]:3000']
+      .map((t) => normaliseUrl(t, 'https://s/?q=%s'));
+    check('a typed address on this network is reached over http, not guessed as https',
+      local.every((u) => u.startsWith('http://')) && normaliseUrl('example.com', 'https://s/?q=%s') === 'https://example.com',
+      local.join(' '));
+
+    // A tab that started as the new tab page, sent to a website: the page
+    // bridge must not come along into the site's renderer.
+    const start = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
+    await waitFor(() => start.isLive && !start.loading);
+    runCommand('navigate', { url: pageUrl('idle.html') });
+    await waitFor(() => start.isLive && !start.loading && /idle\.html/.test(start.url), { timeoutMs: 5000 });
+    const bridge = start.isLive ? await start.wc.executeJavaScript('typeof window.debrowser').catch(() => '?') : '?';
+    check('a new tab sent to a website gets a website\'s renderer, without the page bridge',
+      bridge === 'undefined' && !start.realisedInternal, `window.debrowser is ${bridge}`);
+
+    // Pinning moves the tab to the front of the strip.
+    tabs.setPinned(start.id, true);
+    const pinnedFirst = tabs.all()[0] === start;
+    tabs.setPinned(start.id, false);
+    check('pinning a tab moves it to the start of the strip', pinnedFirst, `index ${tabs.all().indexOf(start)}`);
+
+    // Focus comes back to the page when a panel closes.
+    await tabs.activate(start.id);
+    shell.openSheet('shortcuts');
+    await waitFor(() => shell.sheetView && !shell.sheetView.webContents.isLoading(), { timeoutMs: 4000 });
+    await sleep(300);
+    shell.closeSheet();
+    await sleep(200);
+    const focused = require('electron').webContents.getFocusedWebContents();
+    check('closing a panel gives the keyboard back to the page',
+      focused && start.isLive && focused.id === start.wc.id, `focused ${focused ? focused.getURL().slice(0, 40) : 'nothing'}`);
+    tabs.close(start.id);
+  }
+
   // The zoom badge: shown in the address bar while a site is not at the
   // default size, and one press puts it back. And Ctrl+/ lists the shortcuts.
   {

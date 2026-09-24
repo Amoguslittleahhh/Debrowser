@@ -383,6 +383,13 @@ function applyThemePrefs(prefs) {
  */
 /* eslint-disable-next-line no-unused-vars -- read by menu.js, flyout.js, context.js */
 function anchorSheet(sheet, anchor, edge = 8, align = 'right') {
+  // A panel can be ready before its view has been given a size, and one
+  // placed in a 0x0 window is clamped into its top-left corner - where the
+  // downloads panel kept opening. Placed once the size exists.
+  if (!window.innerWidth || !window.innerHeight) {
+    window.addEventListener('resize', () => anchorSheet(sheet, anchor, edge, align), { once: true });
+    return;
+  }
   const width = sheet.offsetWidth;
   const height = sheet.offsetHeight;
   const right = anchor.right || anchor.x;

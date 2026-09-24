@@ -129,3 +129,4 @@ section { padding: var(--s3) var(--s4) var(--s3); }
 .link:hover { background: var(--wash-soft); }
 .link:active { background: var(--wash); }
 .link:disabled { color: var(--text-dim); background: transparent; }
+.link.danger { color: var(--crit); }

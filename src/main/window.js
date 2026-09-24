@@ -620,7 +620,7 @@ class BrowserShell {
     // swaps, which is what a toolbar full of panels should do.
     if (this.sheetView) {
       const same = this.sheetPage === page;
-      this.closeSheet();
+      this.closeSheet({ replacing: !same });
       if (same) return;
     }
 
@@ -737,7 +737,7 @@ class BrowserShell {
    *   a click on the backdrop - must *not* arm it, or a menu closed with
    *   Escape would make the button dead for the next quarter second.
    */
-  closeSheet({ blurred = false } = {}) {
+  closeSheet({ blurred = false, replacing = false } = {}) {
     if (!this.sheetView) return;
     const view = this.sheetView;
     const page = this.sheetPage;
@@ -759,6 +759,19 @@ class BrowserShell {
       this.window.contentView.removeChildView(view);
       view.webContents.close();
     } catch { /* already gone */ }
+    // The keyboard goes back to the page. Closing the view that held focus
+    // handed it to nobody, so the next keystrokes - after Cut in a context
+    // menu, or after choosing Full screen - went nowhere. Not when focus left
+    // for somewhere the user chose (a click elsewhere), and not when another
+    // panel is replacing this one.
+    if (!blurred && !replacing) this.focusPage();
+  }
+
+  /** Give the keyboard to the page in front. */
+  focusPage() {
+    const tab = this.tabs && this.tabs.activeTab();
+    const wc = tab && tab.isLive ? tab.wc : null;
+    if (wc && !wc.isDestroyed()) wc.focus();
   }
 
   layoutSheet() {
@@ -803,6 +816,11 @@ class BrowserShell {
       });
       try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
       view.setVisible(false);
+      // The list never keeps the keyboard. A new view can take focus as it is
+      // attached - which is how the first list of a session, or the first
+      // after the view was closed for being idle, pulled focus out of the
+      // address bar and swallowed the Enter that followed.
+      view.webContents.on('focus', () => this.focusChrome());
       this.suggestView = view;
       this.suggestReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
       view.webContents.loadFile(path.join(RENDERER_DIR, 'suggest.html')).catch(() => {});
@@ -909,6 +927,8 @@ class BrowserShell {
       });
       view.setBackgroundColor(this.surface());
       view.webContents.loadFile(path.join(RENDERER_DIR, 'crashed.html')).catch(() => {});
+      // Ctrl+R and F5 reload from here, as they would from the page it covers.
+      this.bindShortcuts(view.webContents);
       setRadius(view, this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0);
       // Above the tabs, below the chrome, as the restore placeholder is.
       const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
@@ -966,6 +986,9 @@ class BrowserShell {
     let view;
     try {
       view = new WebContentsView();
+      // The browser's keys work in the inspector too: F12 closes it again, as
+      // in Chrome, and Ctrl+T still opens a tab.
+      this.bindShortcuts(view.webContents);
       this.window.contentView.addChildView(view);
       tab.wc.setDevToolsWebContents(view.webContents);
       // Still 'detach', even though nothing detaches: it is what tells Chromium
