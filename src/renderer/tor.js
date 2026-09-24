@@ -21,6 +21,7 @@ const el = {
   detail: document.getElementById('detail'),
   problem: document.getElementById('problem'),
   retry: document.getElementById('retry'),
+  guard: document.getElementById('guard'),
   normal: document.getElementById('normal'),
   facts: document.querySelector('.facts')
 };
@@ -68,11 +69,35 @@ function render(incognito) {
   el.retry.hidden = !(tor.state === 'failed' || tor.state === 'stopped' ||
                       (tor.state === 'bootstrapping' && tor.warning));
 
+  renderGuard(incognito.killSwitch, incognito.tripwire);
+
   if (tor.state === 'ready' && moveOnWhenReady && !movedOn) {
     movedOn = true;
     // A beat on "Connected", so it is seen rather than flashed past.
     setTimeout(() => { location.replace('debrowser://newtab'); }, 600);
   }
+}
+
+/**
+ * What stands behind the proxy settings, said plainly: the operating system,
+ * or only the tripwire. The tripwire notices a stray connection and closes the
+ * window; the operating system prevents it in the first place.
+ */
+function renderGuard(killSwitch, tripwire) {
+  const strong = document.createElement('strong');
+  let rest;
+  if (killSwitch && killSwitch.available) {
+    el.guard.dataset.level = 'os';
+    strong.textContent = 'Leak protection: enforced by the operating system.';
+    rest = ` ${killSwitch.mechanism}. A connection that ignored the proxy would have nowhere to go.`;
+  } else {
+    el.guard.dataset.level = 'tripwire';
+    strong.textContent = 'Leak protection: tripwire only.';
+    const why = killSwitch && killSwitch.reason ? ` The operating system's wall is not available: ${killSwitch.reason}.` : '';
+    const sees = tripwire && tripwire.available === false ? ' The tripwire itself is not running.' : '';
+    rest = `${why} A stray connection is detected and the window closed, rather than prevented.${sees}`;
+  }
+  el.guard.replaceChildren(strong, document.createTextNode(rest));
 }
 
 el.retry.addEventListener('click', () => api.send('tor-retry'));

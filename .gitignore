@@ -13,6 +13,7 @@ tools/mem-probe
 tools/mem-probe.exe
 tools/net-watch
 tools/net-watch.exe
+tools/netns-launch
 
 # Tor, fetched and verified by tools/fetch-tor.js - never committed.
 vendor/

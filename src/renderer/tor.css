@@ -30,6 +30,10 @@ main { max-width: 720px; }
 
 .detail { margin: 0; color: var(--text-dim); font-size: var(--fs-small); min-height: 1.4em; }
 .problem { margin: var(--s2) 0 0; color: var(--crit); font-size: var(--fs-small); }
+.guard { margin: var(--s2) 0 0; font-size: var(--fs-small); color: var(--text-dim); }
+.guard strong { font-weight: var(--fw-bold); color: var(--text); }
+.guard[data-level="os"] strong { color: var(--ok); }
+.guard[data-level="tripwire"] strong { color: var(--warn); }
 .actions { margin-top: var(--s3); display: flex; gap: var(--s2); }
 .actions:empty, .actions:has(> [hidden]:only-child) { display: none; }
 

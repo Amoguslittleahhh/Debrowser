@@ -841,3 +841,35 @@ Final state, inside the namespace and without it: **13/13**. Both canaries -
 a direct Chromium fetch to a non-proxy loopback port, and a direct socket from
 the main process to a LAN address - are caught every run; the tripwire also
 caught Chromium's own network-service socket for the first one.
+
+## Incognito, M3 — the kill switch, and the tripwire's real cost
+
+**Linux: the wall holds.** Started through `tools/netns-launch`, the private
+browser runs in a network namespace containing only loopback, and Tor runs
+outside on Unix sockets. Under the leak test: every page, favicon and download
+arrived at the stand-in for Tor through the relay; a direct socket to the
+harness's address failed with `ENETUNREACH` inside the kernel; the canary
+listener received nothing at all (17/17). Chromium's sandbox keeps working
+inside the namespace as long as the user's own uid is mapped rather than root
+(see M0).
+
+**When the kernel says no.** With the user-namespace limit set to zero, the
+launcher reports `unavailable:unshare-No space left on device`, stops the Tor
+it had already started, and the browser runs its own Tor behind its settings
+and the tripwire - and says "tripwire only" on its connection page.
+
+**A launcher bug found by running it, not by the test.** The test's stand-in
+Tor was given an absolute path; handed a relative one, the launcher changed
+into Tor's directory for its libraries and then exec'd a path that no longer
+pointed anywhere, so Tor never started and the relay reported `ENOENT`. The
+launcher now resolves the path first and writes its own failure into the log
+the browser follows.
+
+**The tripwire's cost, measured.** It reads which sockets each browser
+process holds, four times a second, and has a budget of 1% of one core. The
+first version re-read all four of the namespace's socket tables once per
+process: 1.7 ms of CPU per check for four processes, enough to exceed the
+budget and back off to one check every two seconds - a much slower tripwire
+than designed. Reading the tables once per check, then matching each process's
+socket inodes against them: 1.2 ms for all ten processes of a live private
+window, about 0.5% of a core at four checks a second.

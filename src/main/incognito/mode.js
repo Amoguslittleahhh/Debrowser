@@ -72,6 +72,69 @@ const RESOLVER_RULES = 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1';
  */
 const BYPASS_RULES = '<-loopback>';
 
+/**
+ * Whether the operating system, not just this browser, keeps it off the
+ * network - in the shape every capability here uses.
+ *
+ * Linux: the launcher put this process in a network namespace with nowhere to
+ * go and says so in the environment; or tried and was refused, and says why.
+ * Windows: the installer's firewall rule covers a copy of the executable with
+ * its own name, and incognito runs as that copy. macOS: no per-app control
+ * exists without root or a signed network extension, so the tripwire is what
+ * there is.
+ */
+function killSwitch() {
+  const said = process.env.DEBROWSER_KILL_SWITCH || '';
+  if (said === 'namespace') {
+    return { available: true, mechanism: 'network namespace (loopback only)', reason: null };
+  }
+  if (said.startsWith('unavailable:')) {
+    const raw = said.slice('unavailable:'.length);
+    const reason = raw.startsWith('unshare-')
+      ? `this system does not allow programs to make their own network namespace (${raw.slice(8)})`
+      : raw;
+    return { available: false, mechanism: null, reason };
+  }
+  if (process.platform === 'win32') return windowsFirewall();
+  if (process.platform === 'darwin') {
+    return { available: false, mechanism: null, reason: 'macOS offers no per-app network control without root' };
+  }
+  return { available: false, mechanism: null, reason: 'not started through the kill-switch launcher' };
+}
+
+/**
+ * Whether the installer's firewall rule is there and covers this executable.
+ *
+ * Asked of Windows rather than assumed from the executable's name: the rule
+ * needed one UAC prompt at install, which can be refused, and a hard link
+ * without its rule is just a second name for an unprotected program.
+ */
+function windowsFirewall() {
+  const RULE = 'Debrowser private window';
+  if (!/incognito/i.test(path.basename(process.execPath))) {
+    return { available: false, mechanism: null, reason: 'not running as the firewalled executable (installed builds only)' };
+  }
+  // The firewall's own COM interface rather than `netsh`, whose output is
+  // translated: on a German Windows "Enabled" is "Aktiviert", and a check that
+  // parsed English labels would report every rule missing. Action 0 is block,
+  // direction 2 is outbound.
+  const { spawnSync } = require('child_process');
+  const script = '(New-Object -ComObject HNetCfg.FwPolicy2).Rules | ' +
+    `Where-Object { $_.Name -eq '${RULE}' } | ` +
+    'Select-Object Enabled, Action, Direction, ApplicationName | ConvertTo-Json -Compress';
+  const out = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf8', windowsHide: true, timeout: 8000 });
+  let rules = [];
+  try {
+    const parsed = JSON.parse(out.stdout || 'null');
+    rules = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+  } catch { /* no rule, or PowerShell unavailable: reported as missing */ }
+  const covers = rules.some((r) => r.Enabled === true && r.Action === 0 && r.Direction === 2 &&
+    String(r.ApplicationName || '').toLowerCase() === process.execPath.toLowerCase());
+  if (covers) return { available: true, mechanism: 'Windows Firewall rule for this executable', reason: null };
+  return { available: false, mechanism: null, reason: 'the firewall rule is missing - reinstall and accept the prompt' };
+}
+
 /** A port for Tor's SOCKS listener, away from the ranges other software favours. */
 function pickPort() {
   return 30000 + require('crypto').randomInt(0, 29000);
@@ -160,6 +223,9 @@ function sweep(root) {
   }
   for (const name of entries) {
     if (/^Singleton/.test(name) || name === 'lockfile') continue;
+    // This run's own directory. The Linux launcher makes it before the
+    // browser starts, so Tor can be running in it already.
+    if (name === `s-${process.pid}`) continue;
     try {
       fs.rmSync(path.join(root, name), { recursive: true, force: true });
     } catch { /* a file the OS still holds; the next start will get it */ }
@@ -256,6 +322,7 @@ function prepare(app) {
   return {
     root,
     sessionDir,
+    killSwitch: killSwitch(),
     normalUserData,
     /** A proxy supplied from outside (the leak test's stand-in), so no Tor is started. */
     externalProxy: external,
@@ -307,5 +374,5 @@ function configureSession(ses, ctx) {
 module.exports = {
   INCOGNITO, JS_LEVELS, DEFAULT_JS_LEVEL, RESOLVER_RULES, BYPASS_RULES,
   profileRoot, isPrivateDir, ensureRoot, sweep, wipe, startReaper, prepare, switches, configureSession,
-  movePort
+  movePort, pickPort, killSwitch
 };

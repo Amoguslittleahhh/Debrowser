@@ -143,6 +143,9 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false   # keep the user's session and settings
+  # Incognito's kill switch: a hard link the firewall rule can name, and the
+  # rule. See packaging/installer.nsh.
+  include: packaging/installer.nsh
 
 portable:
   artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
@@ -220,6 +223,8 @@ linux:
         - mem-trim.c
         - net-watch
         - net-watch.c
+        - netns-launch
+        - netns-launch.c
         - ksm-launch.c
     - from: vendor/tor/${platform}-${arch}
       to: tor
@@ -248,6 +253,9 @@ linux:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 deb:
+  # The default profile plus one entry for the private-window launcher, which
+  # needs to make a network namespace. See packaging/apparmor-profile.tpl.
+  appArmorProfile: packaging/apparmor-profile.tpl
   depends:
     - libgtk-3-0
     - libnotify4

@@ -42,6 +42,7 @@ const incognito = require('./incognito/mode');
 const { launchIncognito } = require('./incognito/launch');
 const { Tripwire } = require('./incognito/tripwire');
 const { Tor } = require('./incognito/tor');
+const { startRelay } = require('./incognito/relay');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -229,6 +230,10 @@ pages.registerScheme();
 // Incognito has a profile directory of its own, so it has a lock of its own,
 // and a second incognito launch lands in the first incognito process.
 if (!app.requestSingleInstanceLock()) {
+  // A private window is already open and gets a new tab instead. Anything the
+  // launcher made for this run - its directory, a Tor already starting - goes
+  // with this process: Tor exits on its own when its owning process does.
+  if (INCOGNITO) incognito.wipe(incognitoCtx);
   app.quit();
 } else {
   if (INCOGNITO) {
@@ -244,6 +249,23 @@ if (!app.requestSingleInstanceLock()) {
     process.on('exit', () => incognito.wipe(incognitoCtx));
     incognito.startReaper(incognitoCtx,
       platform.helperPath(process.platform === 'win32' ? 'net-watch.exe' : 'net-watch'), log);
+
+    // Inside the Linux kill switch, Tor is already running outside the
+    // namespace and the only way to it is its Unix socket. Chromium gets a
+    // loopback port that this process relays onto that socket; a port that is
+    // taken moves, the same way a Tor that cannot bind does.
+    if (incognitoCtx.killSwitch.available && process.env.DEBROWSER_TOR_DIR && !incognitoCtx.externalProxy) {
+      const socket = path.join(process.env.DEBROWSER_TOR_DIR, 'socks');
+      const listen = (tries) => startRelay(incognitoCtx.proxyPort, socket, log).catch((err) => {
+        if (err.code === 'EADDRINUSE' && tries > 0) {
+          incognito.movePort(incognitoCtx, incognitoSessions);
+          return listen(tries - 1);
+        }
+        log('relay', `could not listen: ${err.message}`);
+        return null;
+      });
+      listen(3);
+    }
 
     // Tor starts now rather than when the window is up: bootstrapping takes
     // seconds, and every one of them is spent before a page can load. The
@@ -610,6 +632,7 @@ function main() {
       // What the window shows about the private connection, on every broadcast.
       shell.incognito = () => ({
         tor: tor ? { ...tor.status } : { state: 'ready', progress: 100, summary: 'External proxy (test)', transport: 'direct' },
+        killSwitch: incognitoCtx.killSwitch,
         tripwire: tripwire ? tripwire.status() : null
       });
       onIncognitoChange = publish;

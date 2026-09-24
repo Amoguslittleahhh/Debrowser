@@ -54,6 +54,7 @@ async function run({ app, tabs, shell, downloads, tripwire, ctx, log, setTripHoo
   await netLog.startLogging(path.join(dir, 'clean.json'), { captureMode: 'default' });
 
   step('tripwire', await tripwire.capability());
+  step('killSwitch', ctx.killSwitch);
 
   // --- Ordinary browsing, every kind of request the browser makes ---------
   const url = (host, page) => `http://${host}.test:${fixturePort}/${page}`;
@@ -165,13 +166,22 @@ async function run({ app, tabs, shell, downloads, tripwire, ctx, log, setTripHoo
     .then((r) => r.status), 4000, 'no-response');
   step('canaryChromium', viaChromium);
 
+  // Under the Linux kill switch this connection cannot be made at all - the
+  // namespace has no route - and that failure is what the harness checks.
+  // Without it, the socket opens and the tripwire has to close the window.
   const tripsBefore = trips.length;
-  const socket = net.connect(Number(canaryPort), canaryHost);
-  socket.on('error', () => {});
+  const outcome = { connected: false, error: null };
+  // The harness may aim this one somewhere real (the Windows firewall test
+  // does, after showing an ordinary process can reach it).
+  const [nodeHost, nodePort] = String(argValue('leak-canary-node') || `${canaryHost}:${canaryPort}`).split(':');
+  const socket = net.connect(Number(nodePort), nodeHost);
+  socket.on('connect', () => { outcome.connected = true; });
+  socket.on('error', (err) => { outcome.error = err.code || err.message; });
   // A trip ends the watcher, so the clean run above had to happen first.
-  const caught = await waitFor(() => trips.length > tripsBefore, 3000, 50);
+  const caught = await waitFor(() => trips.length > tripsBefore || outcome.error, 3000, 50) &&
+    trips.length > tripsBefore;
   socket.destroy();
-  step('canaryNode', { caught, ms: caught ? trips[trips.length - 1].at : null, violations: trips.slice(-1)[0]?.violations || [] });
+  step('canaryNode', { caught, ...outcome, violations: trips.slice(-1)[0]?.violations || [] });
   await netLog.stopLogging();
 
   process.stdout.write(`\n__LEAK__${JSON.stringify(report)}\n`);

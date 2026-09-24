@@ -42,6 +42,48 @@ const exe = (name) => (process.platform === 'win32' ? `${name}.exe` : name);
 /** How long a bootstrap may sit at one percentage before it is reported as stuck. */
 const STALL_MS = 45_000;
 
+/**
+ * The torrc lines every Tor here runs with, whichever process starts it.
+ *
+ * `socks` and `control` are where it listens: TCP on loopback when this
+ * process starts Tor, Unix sockets in its directory when the Linux launcher
+ * does (the browser is then in a namespace that cannot reach a TCP port
+ * outside it). `owner` is the browser's pid: Tor exits when it does.
+ */
+function baseConfig({ dir, socks, control, controlFile = null, owner, extra = [] }) {
+  return [
+    `SocksPort ${socks}`,
+    // Loopback or a Unix socket, authenticated with a cookie only this user
+    // can read.
+    `ControlPort ${control}`,
+    ...(controlFile ? [`ControlPortWriteToFile ${controlFile}`] : []),
+    'CookieAuthentication 1',
+    `CookieAuthFile ${dir}/control-cookie`,
+    `DataDirectory ${dir}/data`,
+    `__OwningControllerProcess ${owner}`,
+    'ClientOnly 1',
+    'AvoidDiskWrites 1',
+    // The GeoIP databases are not shipped: a client does not need them, and
+    // they are 25 MB. Pointing at a file that does not exist is how Tor is
+    // told there is none.
+    `GeoIPFile ${dir}/no-geoip`,
+    `GeoIPv6File ${dir}/no-geoip6`,
+    'Log notice stdout',
+    ...extra
+  ];
+}
+
+/**
+ * The torrc for the Linux launcher, with its placeholders: "@DIR@" becomes the
+ * run's Tor directory and "@PID@" the browser's pid, both known only to the
+ * launcher at the moment it starts Tor.
+ */
+function launcherTemplate(extra = []) {
+  return `${baseConfig({
+    dir: '@DIR@', socks: 'unix:@DIR@/socks', control: 'unix:@DIR@/control', owner: '@PID@', extra
+  }).join('\n')}\n`;
+}
+
 class Tor {
   /**
    * @param {object} deps
@@ -56,6 +98,18 @@ class Tor {
     this.dir = path.join(ctx.sessionDir, 'tor');
     this.child = null;
     this.controlPort = null;
+    /**
+     * Set when the Linux launcher started Tor outside the namespace: its pid,
+     * and the file its log goes to. This process then follows Tor rather than
+     * owning it, and cannot restart it - a Tor started from inside the
+     * namespace would have no network at all.
+     */
+    this.attached = process.env.DEBROWSER_TOR_DIR && process.env.DEBROWSER_TOR_PID
+      ? { pid: Number(process.env.DEBROWSER_TOR_PID), dir: process.env.DEBROWSER_TOR_DIR }
+      : null;
+    if (this.attached) this.dir = this.attached.dir;
+    this.logOffset = 0;
+    this.followTimer = null;
     this.status = {
       state: 'idle',          // idle | starting | bootstrapping | ready | failed | stopped
       progress: 0,
@@ -91,31 +145,53 @@ class Tor {
 
   /** The torrc. Written, not passed as arguments, so it can be read back when something goes wrong. */
   config() {
-    const lines = [
-      `SocksPort 127.0.0.1:${this.ctx.proxyPort}`,
-      // The control port is on loopback and authenticated with a cookie only
-      // this user can read; its number is chosen by Tor and read back from a
-      // file, so nothing guesses at it.
-      'ControlPort auto',
-      `ControlPortWriteToFile ${path.join(this.dir, 'control-port')}`,
-      'CookieAuthentication 1',
-      `CookieAuthFile ${path.join(this.dir, 'control-cookie')}`,
-      `DataDirectory ${path.join(this.dir, 'data')}`,
-      `__OwningControllerProcess ${process.pid}`,
-      'ClientOnly 1',
-      'AvoidDiskWrites 1',
-      // The GeoIP databases are not shipped: a client does not need them, and
-      // they are 25 MB. Pointing at a file that does not exist is how Tor is
-      // told there is none.
-      `GeoIPFile ${path.join(this.dir, 'no-geoip')}`,
-      `GeoIPv6File ${path.join(this.dir, 'no-geoip6')}`,
-      'Log notice stdout',
-      ...(this.extraConfig ? this.extraConfig() : [])
-    ];
-    return `${lines.join('\n')}\n`;
+    return `${baseConfig({
+      dir: this.dir,
+      socks: `127.0.0.1:${this.ctx.proxyPort}`,
+      // Tor picks the control port and writes it to a file, so nothing
+      // guesses at it.
+      control: 'auto',
+      controlFile: path.join(this.dir, 'control-port'),
+      owner: process.pid,
+      extra: this.extraConfig ? this.extraConfig() : []
+    }).join('\n')}\n`;
+  }
+
+  /**
+   * Follow a Tor the launcher started: its log for progress, its pid for
+   * whether it is still there.
+   */
+  follow() {
+    this.set({ state: 'starting', progress: 0, summary: 'Starting Tor', warning: null });
+    const logFile = path.join(this.dir, 'tor.log');
+    const tick = () => {
+      try {
+        process.kill(this.attached.pid, 0);
+      } catch {
+        clearInterval(this.followTimer);
+        this.followTimer = null;
+        this.set({ state: this.stopping ? 'stopped' : 'failed', warning: this.status.warning || 'Tor exited' });
+        return;
+      }
+      let size = 0;
+      try { size = fs.statSync(logFile).size; } catch { return; }
+      if (size <= this.logOffset) return;
+      const fd = fs.openSync(logFile, 'r');
+      const chunk = Buffer.alloc(size - this.logOffset);
+      fs.readSync(fd, chunk, 0, chunk.length, this.logOffset);
+      fs.closeSync(fd);
+      this.logOffset = size;
+      for (const line of chunk.toString().split('\n')) this.line(line.trim());
+    };
+    this.followTimer = setInterval(tick, 250);
+    if (typeof this.followTimer.unref === 'function') this.followTimer.unref();
+    tick();
+    this.armStall();
+    return true;
   }
 
   start() {
+    if (this.attached) return this.follow();
     const cap = this.capability();
     if (!cap.available) {
       this.set({ state: 'failed', warning: cap.reason });
@@ -231,15 +307,19 @@ class Tor {
    * life of the session.
    */
   async control(commands) {
-    const portFile = path.join(this.dir, 'control-port');
-    const cookieFile = path.join(this.dir, 'control-cookie');
-    const port = /PORT=127\.0\.0\.1:(\d+)/.exec(fs.readFileSync(portFile, 'utf8'));
-    if (!port) throw new Error('Tor has not written its control port');
-    this.controlPort = Number(port[1]);
-    const cookie = fs.readFileSync(cookieFile).toString('hex');
+    const cookie = fs.readFileSync(path.join(this.dir, 'control-cookie')).toString('hex');
+    let where;
+    if (this.attached) {
+      where = { path: path.join(this.dir, 'control') };
+    } else {
+      const port = /PORT=127\.0\.0\.1:(\d+)/.exec(fs.readFileSync(path.join(this.dir, 'control-port'), 'utf8'));
+      if (!port) throw new Error('Tor has not written its control port');
+      this.controlPort = Number(port[1]);
+      where = { port: this.controlPort, host: '127.0.0.1' };
+    }
 
     return new Promise((resolve, reject) => {
-      const socket = net.connect(this.controlPort, '127.0.0.1');
+      const socket = net.connect(where);
       const replies = [];
       let buffer = '';
       let current = [];
@@ -297,6 +377,10 @@ class Tor {
   stop() {
     this.stopping = true;
     clearTimeout(this.stallTimer);
+    if (this.attached) {
+      try { process.kill(this.attached.pid); } catch { /* already gone */ }
+      return;
+    }
     if (this.child) {
       try { this.child.kill(); } catch { /* already gone */ }
     }
@@ -304,6 +388,15 @@ class Tor {
 
   /** Restart from nothing, e.g. after the user asks to try again. */
   restart() {
+    if (this.attached) {
+      // A Tor outside the namespace cannot be started again from inside it.
+      // Taking the network away and giving it back makes it start over.
+      this.set({ state: 'bootstrapping', warning: null });
+      this.control(['SETCONF DisableNetwork=1', 'SETCONF DisableNetwork=0'])
+        .catch((err) => this.set({ state: 'failed', warning: `Could not restart Tor: ${err.message}` }));
+      this.armStall();
+      return;
+    }
     this.stop();
     const again = () => this.start();
     if (this.child) this.child.once('exit', again);
@@ -311,4 +404,4 @@ class Tor {
   }
 }
 
-module.exports = { Tor, bundleDir };
+module.exports = { Tor, bundleDir, launcherTemplate, exe };

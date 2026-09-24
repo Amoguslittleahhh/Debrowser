@@ -141,6 +141,12 @@ jobs:
       - name: Build the incognito tripwire
         run: npm run build:netwatch
 
+      # Linux's kill switch: the launcher that puts the private browser in a
+      # network namespace with nowhere to go.
+      - name: Build the incognito kill switch
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run build:netns
+
       # Tor for private windows. Downloaded from the Tor Project and checked
       # against its signing key, pinned by fingerprint in tools/tor.json; a
       # bundle that does not verify fails the build rather than shipping.
@@ -188,6 +194,20 @@ jobs:
       - name: Incognito leak test
         if: matrix.os != 'macos-latest'
         run: npm run test:incognito
+
+      # The kill switch, where the operating system has one. Linux: the private
+      # browser started through tools/netns-launch, in a namespace with no
+      # route, and a direct connection has to fail at the kernel. Windows: the
+      # private browser run as a hard link that a firewall rule blocks, and a
+      # real connection to 1.1.1.1 - which an ordinary process on the same
+      # runner makes first - has to be refused by Windows.
+      - name: Incognito kill switch (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run test:incognito -- --kill-switch
+
+      - name: Incognito kill switch (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run test:incognito -- --windows-firewall
 
       # Advisory for the same reason the macOS smoke run is, and the first
       # place its socket backend ever runs - so a failure here is read, not

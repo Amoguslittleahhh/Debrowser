@@ -8,13 +8,29 @@
  * the new one loses the profile lock at once and the running one opens a tab
  * instead - so this does not need to know whether incognito is up.
  *
+ * It is started through the operating system's kill switch where there is one:
+ *
+ *   Linux    tools/netns-launch, which starts Tor outside and the browser
+ *            inside a network namespace with nowhere to go. If the kernel
+ *            refuses the namespace, the launcher says so and the browser runs
+ *            behind its own settings and the tripwire.
+ *   Windows  the installer's hard link, Debrowser-Incognito.exe, which a
+ *            firewall rule blocks from everything but loopback.
+ *   macOS    nothing to go through; the tripwire is what there is.
+ *
  * Detached and with no pipes: the two processes are independent. Closing the
  * normal browser must not take a private session with it, and a pipe back to a
  * parent that has exited is a write error waiting to happen in the child.
  */
 
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 const { app } = require('electron');
+const platform = require('../platform');
+const mode = require('./mode');
+const { bundleDir, launcherTemplate, exe } = require('./tor');
 
 /**
  * Switches the child inherits because this process could only start with them:
@@ -24,19 +40,53 @@ const { app } = require('electron');
  */
 const INHERITED = ['--no-sandbox', '--disable-gpu'];
 
-function launchIncognito(log = () => {}) {
+/** The Windows copy of this executable that the firewall rule names, if installed. */
+function windowsIncognitoExe() {
+  if (process.platform !== 'win32') return null;
+  const candidate = path.join(path.dirname(process.execPath), 'Debrowser-Incognito.exe');
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+/**
+ * The command that starts the private browser: [program, args].
+ * @param {string[]} [torExtra] - extra torrc lines (bridges), for the Linux launcher
+ */
+function command(torExtra = []) {
   const args = [];
   // A development run is `electron <app dir>`; an installed build is the app.
   if (!app.isPackaged) args.push(app.getAppPath());
   args.push('--incognito');
   for (const flag of INHERITED) if (process.argv.includes(flag)) args.push(flag);
 
+  if (process.platform === 'linux') {
+    const helper = platform.helperPath('netns-launch');
+    const tor = path.join(bundleDir(), exe('tor'));
+    if (fs.existsSync(helper) && fs.existsSync(tor)) {
+      const root = mode.profileRoot();
+      mode.ensureRoot(root);
+      // The launcher reads this, fills in the run's directory and pid, and
+      // deletes it. Random, so two quick launches cannot read each other's.
+      const template = path.join(root, `torrc-${crypto.randomBytes(8).toString('hex')}`);
+      fs.writeFileSync(template, launcherTemplate(torExtra), { mode: 0o600 });
+      return [helper, [root, tor, template, '--', process.execPath, ...args]];
+    }
+  }
+  return [windowsIncognitoExe() || process.execPath, args];
+}
+
+function launchIncognito(log = () => {}, torExtra = []) {
   const env = { ...process.env };
   // Never inherited: it turns the binary into a plain Node interpreter.
   delete env.ELECTRON_RUN_AS_NODE;
+  // Only the launcher may say what it did; a stale value from the normal
+  // browser's own environment must not claim a kill switch that is not there.
+  delete env.DEBROWSER_KILL_SWITCH;
+  delete env.DEBROWSER_TOR_DIR;
+  delete env.DEBROWSER_TOR_PID;
 
   try {
-    const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', env });
+    const [program, args] = command(torExtra);
+    const child = spawn(program, args, { detached: true, stdio: 'ignore', env });
     child.on('error', (err) => log('incognito', `could not start: ${err.message}`));
     child.unref();
     return true;
@@ -46,4 +96,4 @@ function launchIncognito(log = () => {}) {
   }
 }
 
-module.exports = { launchIncognito };
+module.exports = { launchIncognito, command };

@@ -177,10 +177,14 @@ const SHOTS = [
   // Incognito's first page, part-way through connecting - and after it has
   // given up, which is the state that has to explain itself.
   { name: 'tor', file: 'tor.html', w: 1280, h: 820,
-    incognito: { tor: { state: 'bootstrapping', progress: 45, summary: 'Loading relay descriptors', transport: 'obfs4' } } },
+    incognito: { tor: { state: 'bootstrapping', progress: 45, summary: 'Loading relay descriptors', transport: 'obfs4' },
+                 killSwitch: { available: true, mechanism: 'Network namespace (loopback only)' },
+                 tripwire: { available: true } } },
   { name: 'tor-failed', file: 'tor.html', w: 1280, h: 820,
     incognito: { tor: { state: 'failed', progress: 10, summary: 'Connected to a relay',
-                        warning: 'No progress for 45 seconds at 10% - the network may be blocking Tor' } } }
+                        warning: 'No progress for 45 seconds at 10% - the network may be blocking Tor' },
+                 killSwitch: { available: false, reason: 'macOS offers no per-app network control without root' },
+                 tripwire: { available: true } } }
 ];
 
 

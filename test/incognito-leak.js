@@ -73,59 +73,7 @@ function maybeEnterNamespace() {
   process.exit(inner.status ?? 1);
 }
 
-/* ------------------------------------------------------------------ */
-/* The stand-in for Tor                                                */
-/* ------------------------------------------------------------------ */
-
-/**
- * A SOCKS5 server that records every destination it is asked for and connects
- * the `*.test` ones to the fixture server. Anything else is refused - the test
- * never asks for anything else, so a name outside `.test` is itself a finding.
- */
-function socksStub(fixturePort) {
-  const seen = [];
-  const server = net.createServer((client) => {
-    client.on('error', () => {});
-    let buf = Buffer.alloc(0);
-    let stage = 'greet';
-    const onData = (chunk) => {
-      buf = Buffer.concat([buf, chunk]);
-      if (stage === 'greet') {
-        if (buf.length < 2 || buf.length < 2 + buf[1]) return;
-        buf = buf.subarray(2 + buf[1]);
-        client.write(Buffer.from([5, 0]));
-        stage = 'request';
-      }
-      if (stage !== 'request' || buf.length < 5) return;
-      const atyp = buf[3];
-      let host;
-      let len;
-      if (atyp === 1) { if (buf.length < 10) return; host = [...buf.subarray(4, 8)].join('.'); len = 10; }
-      else if (atyp === 3) { const n = buf[4]; if (buf.length < 7 + n) return; host = buf.subarray(5, 5 + n).toString(); len = 7 + n; }
-      else if (atyp === 4) { if (buf.length < 22) return; host = '[ipv6]'; len = 22; }
-      else { client.destroy(); return; }
-      const port = buf.readUInt16BE(len - 2);
-      const rest = buf.subarray(len);
-      stage = 'done';
-      client.removeListener('data', onData);
-      seen.push(`${host}:${port}`);
-      if (!/\.test$/.test(host)) {
-        client.end(Buffer.from([5, 4, 0, 1, 0, 0, 0, 0, 0, 0]));   // host unreachable
-        return;
-      }
-      const upstream = net.connect(fixturePort, '127.0.0.1', () => {
-        client.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
-        if (rest.length) upstream.write(rest);
-        client.pipe(upstream);
-        upstream.pipe(client);
-      });
-      upstream.on('error', () => client.destroy());
-    };
-    client.on('data', onData);
-  });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () =>
-    resolve({ port: server.address().port, seen, close: () => server.close() })));
-}
+const { socksStub } = require('./socks-stub');
 
 /** Where a "direct" connection would go: somewhere that is not loopback. */
 function canaryAddress() {
@@ -248,13 +196,19 @@ function treeHash(dir) {
 async function main() {
   maybeEnterNamespace();
   const inNamespace = Boolean(process.env.LEAK_IN_NAMESPACE);
+  const killSwitch = flag('kill-switch');
+  // Windows: run as a hard-linked copy that a firewall rule blocks, the way the
+  // installer sets it up, and show that the rule - not the browser - stops a
+  // real outbound connection. Needs an elevated shell (CI runners are).
+  const windowsFirewall = flag('windows-firewall') && process.platform === 'win32';
   const results = [];
   const check = (name, passed, detail = '') => {
     results.push({ name, passed });
     console.log(`  ${passed ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
   };
 
-  console.log(`\nIncognito leak test${inNamespace ? ' (inside a network namespace: loopback only)' : ''}\n`);
+  console.log(`\nIncognito leak test${inNamespace ? ' (inside a network namespace: loopback only)' : ''}` +
+    `${killSwitch ? ', started through the kill switch' : ''}\n`);
 
   const fixtures = await require('../src/main/fixture-server').start();
   const stub = await socksStub(fixtures.port);
@@ -319,8 +273,58 @@ async function main() {
   // Root - a container, or the namespace's mapped root - cannot run the sandbox.
   if (typeof process.getuid === 'function' && process.getuid() === 0) browserArgs.push('--no-sandbox');
 
+  // Under the kill switch the browser is started the way the product starts
+  // it: through tools/netns-launch, with "Tor" - a stand-in on a Unix socket -
+  // outside and the browser in a namespace of its own. No proxy port is
+  // given: the browser relays to Tor's socket itself.
+  let launch = [electron, browserArgs];
+  let firewallCleanup = () => {};
+  if (windowsFirewall) {
+    const RULE = 'Debrowser private window';
+    const target = '1.1.1.1:80';
+    // Control: an ordinary process can reach the target, so a failure below
+    // is the rule's doing and not a runner with no network.
+    const control = await new Promise((resolve) => {
+      const s = net.connect(80, '1.1.1.1');
+      s.setTimeout(5000, () => { s.destroy(); resolve('timeout'); });
+      s.on('connect', () => { s.destroy(); resolve('connected'); });
+      s.on('error', (e) => resolve(e.code || e.message));
+    });
+    check('control: an ordinary process can reach the internet', control === 'connected', `${target}: ${control}`);
+    const copy = path.join(path.dirname(electron), 'Debrowser-Incognito.exe');
+    try { fs.unlinkSync(copy); } catch { /* not there */ }
+    fs.linkSync(electron, copy);
+    spawnSync('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${RULE}`]);
+    const added = spawnSync('netsh', ['advfirewall', 'firewall', 'add', 'rule', `name=${RULE}`, 'dir=out',
+      'action=block', `program=${copy}`,
+      'remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff',
+      'profile=any', 'enable=yes'], { encoding: 'utf8' });
+    check('the firewall rule can be installed here', added.status === 0, (added.stdout || added.stderr || '').trim());
+    firewallCleanup = () => {
+      spawnSync('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name=${RULE}`]);
+      try { fs.unlinkSync(copy); } catch { /* in use or gone */ }
+    };
+    browserArgs.push(`--leak-canary-node=${target}`);
+    launch = [copy, browserArgs];
+  }
+  const namesFile = path.join(scratch, 'names.txt');
+  if (killSwitch) {
+    const helper = path.join(ROOT, 'tools', 'netns-launch');
+    if (!fs.existsSync(helper)) {
+      check('the kill-switch launcher is built', false, 'npm run build:netns');
+      process.exit(1);
+    }
+    fs.mkdirSync(privateRoot, { mode: 0o700 });
+    const template = path.join(privateRoot, 'torrc-test');
+    fs.writeFileSync(template, require('../src/main/incognito/tor').launcherTemplate(), { mode: 0o600 });
+    env.FAKE_TOR_FIXTURE_PORT = String(fixtures.port);
+    env.FAKE_TOR_NAMES = namesFile;
+    const args = browserArgs.filter((a) => !a.startsWith('--incognito-proxy-port='));
+    launch = [helper, [privateRoot, path.join(__dirname, 'fake-tor.js'), template, '--', electron, ...args]];
+  }
+
   const headless = process.platform === 'linux' && !process.env.DISPLAY;
-  const [cmd, argv] = headless ? ['xvfb-run', ['-a', electron, ...browserArgs]] : [electron, browserArgs];
+  const [cmd, argv] = headless ? ['xvfb-run', ['-a', launch[0], ...launch[1]]] : launch;
   const child = spawn(cmd, argv, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
@@ -339,14 +343,17 @@ async function main() {
     s.tripwire.mechanism || s.tripwire.reason);
 
   // What the stand-in for Tor was asked for: only fixture names, and all of them.
-  const names = [...new Set(stub.seen.map((h) => h.replace(/:\d+$/, '')))];
+  const asked = killSwitch
+    ? (fs.existsSync(namesFile) ? fs.readFileSync(namesFile, 'utf8').split('\n').filter(Boolean) : [])
+    : stub.seen;
+  const names = [...new Set(asked.map((h) => h.replace(/:\d+$/, '')))];
   const foreign = names.filter((n) => !n.endsWith('.test'));
   check('every request reached the proxy by name, and only test names were asked for',
     ['t1.test', 'dl.test', 'icon.test', 'rtc.test', 'up.test'].every((n) => names.includes(n)) && foreign.length === 0,
     `asked for ${names.join(', ')}${foreign.length ? ` — unexpected: ${foreign.join(', ')}` : ''}`);
-  check('the favicon route goes through the proxy', stub.seen.some((h) => h.startsWith('icon.test')),
+  check('the favicon route goes through the proxy', asked.some((h) => h.startsWith('icon.test')),
     `route answered ${s.favicon}`);
-  check('a download goes through the proxy', stub.seen.some((h) => h.startsWith('dl.test')) && s.download.finished,
+  check('a download goes through the proxy', asked.some((h) => h.startsWith('dl.test')) && s.download.finished,
     JSON.stringify(s.download));
 
   check('a page cannot reach this machine or its network', Array.isArray(s.localNetwork) &&
@@ -376,14 +383,30 @@ async function main() {
   const leaked = readNetLog(path.join(netlogs, 'canary.json'), report.proxyPort);
   if (flag('verbose')) {
     console.log(`  info  canary fetch: ${JSON.stringify(s.canaryChromium)}; listener hits ${JSON.stringify(canary.hits)}`);
-    console.log(`  info  proxy asked for: ${stub.seen.join(', ')}`);
+    console.log(`  info  proxy asked for: ${asked.join(', ')}`);
     console.log(`  info  canary netlog: ${JSON.stringify(leaked)}`);
   }
   check('canary: the network log flags a deliberate direct connection',
     leaked.offenders.some((o) => o.includes(`127.0.0.1:${canary.tcpPort}`)),
     leaked.offenders.slice(0, 4).join(', ') || 'nothing flagged');
-  check('canary: the tripwire catches a deliberate direct socket',
-    s.canaryNode.caught === true, JSON.stringify(s.canaryNode.violations.slice(0, 2)));
+  if (windowsFirewall) {
+    check('kill switch: Windows reports the firewall rule covering this executable', s.killSwitch.available === true,
+      s.killSwitch.mechanism || s.killSwitch.reason);
+    check('kill switch: a real outbound connection from the private browser is refused by Windows',
+      !s.canaryNode.connected && Boolean(s.canaryNode.error), `connect: ${s.canaryNode.error || 'connected'}`);
+    firewallCleanup();
+  } else if (killSwitch) {
+    // The wall, not the detectors: from inside, the canary's address does not
+    // exist, and nothing the browser did reached the listener at all.
+    check('kill switch: the browser runs in a network namespace', s.killSwitch.available === true,
+      s.killSwitch.mechanism || s.killSwitch.reason);
+    check('kill switch: a direct connection from inside fails at the kernel',
+      !s.canaryNode.connected && /UNREACH/.test(String(s.canaryNode.error)) && canary.hits.tcp === 0,
+      `connect: ${s.canaryNode.error || 'connected'}; canary listener hits ${canary.hits.tcp}`);
+  } else {
+    check('canary: the tripwire catches a deliberate direct socket',
+      s.canaryNode.caught === true, JSON.stringify(s.canaryNode.violations.slice(0, 2)));
+  }
 
   // Amnesia.
   // The reaper deletes it after the process has fully ended, so give it a moment.
