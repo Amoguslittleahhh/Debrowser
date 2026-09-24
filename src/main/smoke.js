@@ -2324,6 +2324,50 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     bookmarks.remove('https://gitlab.test/saved-page');
   }
 
+  // Dragging a tab moves it, by real pointer input into the chrome: pressed,
+  // carried a tab and a half along the strip, released. The model and the
+  // strip must agree on the new order afterwards.
+  {
+    const chrome = shell.chromeView.webContents;
+    const a = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: false });
+    const b = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: false });
+    // At the front of the strip, where they are on screen however many tabs
+    // the suite has open by now - which also exercises `move` on its own.
+    tabs.move(a.id, 0);
+    tabs.move(b.id, 1);
+    await sleep(400);
+    const from = tabs.all().indexOf(a);
+    const rect = await chrome.executeJavaScript(`(() => {
+      const first = document.getElementById('tabs').children[0];
+      first.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const r = document.getElementById('tabs').children[${from}].getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height,
+               vertical: document.body.dataset.layout === 'left' };
+    })()`);
+    // Grabbed by its icon end: a narrow tab is mostly close button, and a
+    // press there is a close, never a drag.
+    const along = (t) => (rect.vertical
+      ? { x: Math.round(rect.x + 14), y: Math.round(rect.y + rect.h / 2 + t * rect.h) }
+      : { x: Math.round(rect.x + 14 + t * rect.w), y: Math.round(rect.y + rect.h / 2) });
+    const start = along(0);
+    chrome.sendInputEvent({ type: 'mouseDown', ...start, button: 'left', clickCount: 1 });
+    for (let i = 1; i <= 12; i++) {
+      chrome.sendInputEvent({ type: 'mouseMove', ...along(i * 0.125), button: 'left', modifiers: ['leftButtonDown'] });
+      await sleep(16);
+    }
+    chrome.sendInputEvent({ type: 'mouseUp', ...along(1.5), button: 'left', clickCount: 1 });
+    const moved = await waitFor(() => tabs.all().indexOf(a) === from + 1, { timeoutMs: 3000 });
+    await sleep(500);
+    const stripOrder = await chrome.executeJavaScript(
+      `[...document.getElementById('tabs').children].map((n) => n.dataset.id).join(',')`);
+    check('dragging a tab along the strip moves it there',
+      moved && tabs.all().indexOf(b) === from && stripOrder === tabs.all().map((t) => t.id).join(','),
+      `index ${from} -> ${tabs.all().indexOf(a)}, neighbour at ${tabs.all().indexOf(b)}, ` +
+      `tab at ${JSON.stringify(rect)}, chrome ${JSON.stringify(shell.chromeView.getBounds())}`);
+    tabs.close(a.id);
+    tabs.close(b.id);
+  }
+
   // A page that fails to load says why, in words, and Try again recovers it
   // in place; a tab whose renderer crashes says so, and Reload brings it back.
   //

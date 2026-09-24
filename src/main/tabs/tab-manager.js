@@ -474,6 +474,21 @@ class TabManager {
     return true;
   }
 
+  /**
+   * Put a tab at `index` in the strip, as dragging it there does. Returns
+   * whether anything moved.
+   */
+  move(id, index) {
+    const from = this.tabs.findIndex((tab) => tab.id === id);
+    if (from === -1 || !Number.isInteger(index)) return false;
+    const to = Math.max(0, Math.min(index, this.tabs.length - 1));
+    if (to === from) return false;
+    const [tab] = this.tabs.splice(from, 1);
+    this.tabs.splice(to, 0, tab);
+    this.onEvent(tab, 'moved');
+    return true;
+  }
+
   /** Every live renderer, deduplicated by process. */
   rendererPids() {
     const pids = new Set();

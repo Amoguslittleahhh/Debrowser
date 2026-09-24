@@ -55,6 +55,7 @@ const COMMANDS = new Set([
   'set-profile',
   'set-budget',
   'discard-tab',
+  'move-tab',
   'pin-tab',
   'mute-tab',
   'duplicate-tab',

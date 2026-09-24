@@ -521,6 +521,13 @@ function renderTabs(tabs) {
   // A tab opened while the widths are pinned has to get its share.
   if (tabs.some((tab) => !tabEls.has(tab.id))) releaseTabWidths();
 
+  // A drop on screen that the browser has not caught up with yet: the old
+  // order must not be put back in the meantime, and neither may any order
+  // while a tab is under the pointer.
+  if (heldOrder && (Date.now() > heldOrder.until ||
+      tabs.findIndex((tab) => tab.id === heldOrder.id) === heldOrder.index)) heldOrder = null;
+  const keepOrder = Boolean(heldOrder || tabDrag?.active);
+
   tabs.forEach((tab, index) => {
     let node = tabEls.get(tab.id);
 
@@ -531,7 +538,9 @@ function renderTabs(tabs) {
 
     // Keep DOM order in sync with tab order without touching untouched nodes.
     const current = el.tabs.children[index];
-    if (current !== node.root) el.tabs.insertBefore(node.root, current || null);
+    if (current !== node.root && (!keepOrder || !node.root.isConnected)) {
+      el.tabs.insertBefore(node.root, current || null);
+    }
 
     updateTabElement(node, tab);
   });
@@ -568,6 +577,7 @@ el.tabs.addEventListener('mouseleave', releaseTabWidths);
 function createTabElement(id) {
   const root = document.createElement('div');
   root.className = 'tab';
+  root.dataset.id = String(id);
 
   const tier = document.createElement('span');
   tier.className = 'tier';
@@ -630,6 +640,7 @@ function createTabElement(id) {
     if (event.button === 1) { freezeTabWidths(); api.send('close-tab', { id }); return; }
     if (event.button === 0) api.send('activate-tab', { id });
   });
+  root.addEventListener('pointerdown', (event) => armTabDrag(event, id, root));
 
   // Right-click: close the other twelve, duplicate this one, silence whichever
   // tab is making that noise. The menu is built by the browser - the strip
@@ -681,6 +692,129 @@ function createTabElement(id) {
 
   return { root, tier, icon, favicon, chip, title, audio, close, state: {} };
 }
+
+/* ------------------------------------------------------------------ */
+/* Dragging a tab to a new place                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Pressing a tab still activates it at once, as it always did; a drag only
+ * begins once the pointer has travelled a few pixels, so a click that wobbles
+ * is still a click.
+ *
+ * While dragging nothing in the DOM moves. The tab follows the pointer by a
+ * transform, along the strip's own axis, and the tabs it passes slide the
+ * other way by one tab's size - transforms only, so a drag across thirty tabs
+ * never lays out the strip. On release the DOM is put in the new order, every
+ * transform is dropped, and the dragged tab alone is animated from where it
+ * was let go into its slot. The browser is told the new index, and until its
+ * state says the same, a broadcast still carrying the old order is not
+ * allowed to undo the drop on screen.
+ */
+const DRAG_THRESHOLD = 4;
+let tabDrag = null;
+/** A drop the browser has not confirmed yet: {id, index, until}. */
+let heldOrder = null;
+
+function armTabDrag(event, id, root) {
+  if (event.button !== 0 || event.target.closest('button')) return;
+  const vertical = document.body.dataset.layout === 'left';
+  tabDrag = { id, root, vertical, pointer: event.pointerId,
+    start: vertical ? event.clientY : event.clientX, active: false };
+}
+
+function beginTabDrag() {
+  const d = tabDrag;
+  const nodes = [...el.tabs.children];
+  d.from = nodes.indexOf(d.root);
+  if (d.from === -1 || nodes.length < 2) { tabDrag = null; return false; }
+  const edge = (r) => (d.vertical ? [r.top, r.bottom] : [r.left, r.right]);
+  d.nodes = nodes;
+  d.slots = nodes.map((n) => edge(n.getBoundingClientRect()));
+  const [a, b] = d.slots[d.from];
+  d.size = b - a;
+  // The space between two tabs, so the ones that slide land exactly where
+  // their neighbour was.
+  const next = d.slots[d.from + 1] || d.slots[d.from - 1];
+  const gap = next ? Math.max(0, next[0] > a ? next[0] - b : a - next[1]) : 0;
+  d.shift = d.size + gap;
+  d.min = d.slots[0][0] - a;
+  d.max = d.slots[d.slots.length - 1][1] - b;
+  d.to = d.from;
+  d.active = true;
+  try { d.root.setPointerCapture(d.pointer); } catch { /* the pointer is already gone */ }
+  d.root.classList.add('dragging');
+  document.body.classList.add('tab-dragging');
+  return true;
+}
+
+function moveTabDrag(delta) {
+  const d = tabDrag;
+  const offset = Math.max(d.min, Math.min(d.max, delta));
+  const axis = d.vertical ? 'Y' : 'X';
+  d.root.style.transform = `translate${axis}(${offset}px)`;
+  const [a, b] = d.slots[d.from];
+  const centre = (a + b) / 2 + offset;
+  let to = d.from;
+  for (let i = d.from + 1; i < d.slots.length; i++) {
+    if (centre > (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
+  }
+  for (let i = d.from - 1; i >= 0; i--) {
+    if (centre < (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
+  }
+  if (to === d.to) return;
+  d.to = to;
+  d.nodes.forEach((node, i) => {
+    if (node === d.root) return;
+    const moved = d.from < to ? (i > d.from && i <= to ? -d.shift : 0)
+      : (i >= to && i < d.from ? d.shift : 0);
+    node.style.transform = moved ? `translate${axis}(${moved}px)` : '';
+  });
+}
+
+function endTabDrag(cancelled) {
+  const d = tabDrag;
+  tabDrag = null;
+  if (!d || !d.active) return;
+  const to = cancelled ? d.from : d.to;
+  const before = d.root.getBoundingClientRect();
+  // Final order in the DOM, every transform gone, with no transition, so the
+  // tabs that slid aside are already standing where they now belong.
+  document.body.classList.remove('tab-dragging');
+  for (const node of d.nodes) node.style.transform = '';
+  if (to !== d.from) {
+    const rest = d.nodes.filter((n) => n !== d.root);
+    el.tabs.insertBefore(d.root, rest[to] || null);
+  }
+  // Then the dragged one glides from where it was let go.
+  const after = d.root.getBoundingClientRect();
+  const offset = d.vertical ? before.top - after.top : before.left - after.left;
+  d.root.style.transform = `translate${d.vertical ? 'Y' : 'X'}(${offset}px)`;
+  d.root.getBoundingClientRect();
+  d.root.classList.add('settling');
+  d.root.style.transform = '';
+  const done = () => d.root.classList.remove('dragging', 'settling');
+  d.root.addEventListener('transitionend', done, { once: true });
+  setTimeout(done, 400);
+  if (to !== d.from) {
+    heldOrder = { id: d.id, index: to, until: Date.now() + 1500 };
+    api.send('move-tab', { id: d.id, index: to });
+  }
+}
+
+el.tabs.addEventListener('pointermove', (event) => {
+  const d = tabDrag;
+  if (!d || event.pointerId !== d.pointer) return;
+  const delta = (d.vertical ? event.clientY : event.clientX) - d.start;
+  if (!d.active && (Math.abs(delta) < DRAG_THRESHOLD || !beginTabDrag())) return;
+  moveTabDrag(delta);
+});
+el.tabs.addEventListener('pointerup', () => endTabDrag(false));
+el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
+// Esc puts it back where it came from.
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && tabDrag?.active) { event.preventDefault(); endTabDrag(true); }
+});
 
 /** Write only what changed - the cheapest update is the one we skip. */
 function updateTabElement(node, tab) {

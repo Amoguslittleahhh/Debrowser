@@ -1827,6 +1827,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      // Dropped somewhere else in the strip. The index is where the strip drew
+      // it; `move` clamps it.
+      case 'move-tab':
+        tabs.move(Number(payload?.id), Number(payload?.index));
+        break;
+
       case 'pin-tab': {
         const tab = tabs.byId(payload?.id);
         if (tab) tab.pinned = !tab.pinned;

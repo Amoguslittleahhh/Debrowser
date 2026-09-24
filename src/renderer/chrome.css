@@ -377,6 +377,20 @@ body[data-tabs="compact"] .tab {
    tab is busy" because it is a ring where an icon usually is. */
 body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
 
+/*
+ * Dragging a tab. The one under the pointer follows it exactly - no
+ * transition on its transform, or it would trail behind the hand - and is
+ * drawn over its neighbours, which slide aside. On release it settles into its
+ * slot; the others are already there.
+ */
+.tab.dragging { z-index: 2; }
+body.tab-dragging .tab:not(.dragging) {
+  transition: transform 160ms var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+}
+.tab.settling {
+  transition: transform 180ms var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+}
+
 /* A crashed page: the tab fades until it is reloaded. */
 .tab[data-crashed="on"] .tab-icon,
 .tab[data-crashed="on"] .tab-title { opacity: 0.5; }
