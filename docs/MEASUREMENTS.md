@@ -1143,6 +1143,8 @@ check.torproject.org reported `IsTor` directly and through the built-in
 bridges. Through a bridge the kit made on the runner, the client shook hands
 and then waited at 25% for five minutes: the bridge, behind NAT, logged
 "Unable to find IPv4 address" and served no directory. The kit now sets the
-address explicitly.
+address explicitly and waits for the bridge to join the network; on the next
+run, Debrowser's Tor bootstrapped through the kit's bridge and
+check.torproject.org reported `IsTor` - all three modes passing.
 
 Leak test 38/38 (40/40 with the Linux kill switch); smoke suite 148/148.
