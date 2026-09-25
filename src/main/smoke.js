@@ -535,6 +535,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       : 'the helper did not answer');
 
 
+  // The probe runs a moment after start, out of the first paint's way.
+  await waitFor(() => governor.trimReason !== 'not probed', { timeoutMs: 10_000 });
   if (!governor.trimAvailable) {
     console.log(`  SKIP  hibernation unavailable here: ${governor.trimReason}`);
   } else {

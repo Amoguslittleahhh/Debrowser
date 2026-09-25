@@ -1164,6 +1164,7 @@ function main() {
       tabs.create({ url: newTabUrl(prefs) });
     }
     shell.layout();
+    if (prewarm) prewarm.holdUntil(firstTabLoaded(tabs.activeTab()));
 
     // Updates last, and never under a test or a benchmark: both assert on
     // measured memory and CPU, and a background download competing with them
@@ -3238,6 +3239,19 @@ function preconnectLead(prefs, row) {
   try {
     session.fromPartition(BROWSING_PARTITION).preconnect({ url: origin, numSockets: 1 });
   } catch { /* the session is gone at quit */ }
+}
+
+/**
+ * Settles once the tab has loaded and drawn - or after three seconds, for a
+ * tab that never realises (a restored one) or never finishes. What waits on it
+ * should not be kept waiting by a slow site.
+ */
+function firstTabLoaded(tab) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 3000);
+    const done = () => { clearTimeout(timer); setTimeout(resolve, 100); };
+    if (tab && tab.wc && !tab.wc.isDestroyed()) tab.wc.once('did-finish-load', done);
+  });
 }
 
 function newTabUrl(prefs) {

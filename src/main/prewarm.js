@@ -101,6 +101,20 @@ class Prewarm {
     this.view = null;
     this.loaded = false;
     this.timer = null;
+    this.held = false;
+  }
+
+  /**
+   * No spare until `until` settles. At startup a spare is a second renderer
+   * starting beside the first tab's, on the same cores and the same browser
+   * thread, and the first tab is the one being waited for.
+   */
+  holdUntil(until) {
+    this.held = true;
+    Promise.resolve(until).catch(() => {}).then(() => {
+      this.held = false;
+      this.refresh();
+    });
   }
 
   /** The pointer is heading for something that opens a new tab page. */
@@ -142,7 +156,7 @@ class Prewarm {
   }
 
   make() {
-    if (!this.enabled || this.busy()) return false;
+    if (!this.enabled || this.held || this.busy()) return false;
     if (this.view) return true;
     try {
       const view = createTabView({ session: this.session(), url: pages.NEW_TAB_URL });

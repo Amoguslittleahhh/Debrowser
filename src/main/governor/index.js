@@ -50,6 +50,9 @@ const HEAP_SAMPLE_EVERY = 3;
  */
 const HEAP_COLLECT_FLOOR_MS = 60_000;
 
+/** How long after start the hibernation probe waits: past the first paint. */
+const PROBE_DELAY_MS = 1500;
+
 class Governor {
   /**
    * @param {object} deps - { app, cfg, tabManager, ipcHub, log, onUpdate }
@@ -109,7 +112,11 @@ class Governor {
     }, this.cfg.tickMs);
     if (typeof this.timer.unref === 'function') this.timer.unref();
     this.log(`governor started: budget ${this.cfg.memoryBudgetMB}MB, profile ${this.cfg.profile}`);
-    this.probeTrim();
+    // Not now: the probe spawns a process, which blocks this thread for ~8 ms
+    // while the first tab is waiting on it for its page. Nothing can hibernate
+    // in the first seconds anyway - a tab has to sit unseen for longer.
+    const probe = setTimeout(() => this.probeTrim(), PROBE_DELAY_MS);
+    if (typeof probe.unref === 'function') probe.unref();
   }
 
   /**
