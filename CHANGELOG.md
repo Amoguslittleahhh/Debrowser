@@ -2,49 +2,125 @@
 
 ## Unreleased
 
-Private windows, built against a different adversary from the usual one. An ordinary private window protects you from the next person at your computer by not writing history; every request still leaves in the open, and your router and your ISP read which sites you visit from it. Here they cannot: every request goes through a bundled Tor, reached through bridges so that by default the traffic does not even show that it is Tor, and the operating system itself refuses any connection that tries to go around it. They still see that you are online, when, and how much — nothing can hide that, and the window says so.
+Two things in this release: private windows that go through Tor, and a long list of everyday details that make the ordinary browser feel finished. The bold words are the change; the rest of each line is the detail.
 
-It is not Tor Browser, and says that too. A site that tries hard can tell this browser apart from Tor Browser's crowd, and a program running as you can read what the window holds. When someone's safety depends on it, the answer is still Tor Browser or Tails.
+**At a glance**
 
-- **Ctrl+Shift+N opens a private window that goes through Tor.** It is a separate process with its own temporary profile: no history, cookies, cache or crash dumps are kept, and the profile is deleted when the window closes and swept if it crashed. Nothing loads until Tor is connected, and the connection page shows how far along it is and, when it stops, Tor's own reason — never a direct connection instead.
-- **Bridges by default.** The Tor Project's built-in obfs4 and Snowflake bridges are all tried at once and whichever connects first is used, so an ISP inspecting the traffic cannot tell it is Tor. The built-in bridges are published, so an ISP matching addresses still can; `tools/bridge-kit/setup-bridge.sh` turns a cheap server into an unlisted bridge of your own, and Settings takes the line it prints.
-- **The operating system keeps the window off the network.** On Linux the private browser runs in a network namespace with nothing but loopback — no root needed — and Tor outside it, reached through a Unix socket; a connection that ignored every setting fails in the kernel. On Windows the installer adds one firewall rule for the private copy of the browser. macOS offers no such control without root, and a tripwire that watches every socket and closes the window on a stray one is what it has; it runs on the other two as a second wall.
-- **Tor's entry guard is kept, sealed.** Picking a new guard every session is the opposite of how Tor resists a malicious one, and costs a cold start; the guard and the directory are kept between sessions, encrypted under a key your OS keystore holds. One switch leaves no trace of Tor on the computer instead, and says what that costs.
-- **A Tor circuit per tab.** Two tabs never leave Tor from the same exit, so a site that sees both cannot link them by address; links a tab opens share its circuit, so signing in and opening a link still works. Ctrl+Shift+L gives the tab in front a new circuit; Ctrl+Shift+U, new identity, closes everything and forgets every cookie. A site that answers an exit with a block page or a captcha is retried from up to three others before the toolbar says it refuses Tor.
-- **Onion addresses.** A site that offers one over HTTPS gets a .onion button in the toolbar, or is followed there automatically if you prefer onions.
-- **Every private window looks the same to a site.** The same user agent — with no Electron or Debrowser in it — UTC, en-US, four cores, no WebGL, and a page letterboxed to 200×100 steps whose screen reports exactly that size. Applied before a tab loads anything, put back if anything takes them away, and a tab that cannot have them stops rather than loading without them. The window checks itself at start, from the page and from two kinds of worker, and `debrowser://fingerprint` shows every check.
-- **HTTPS or an explanation.** Plain HTTP is upgraded; when a site has no HTTPS the tab explains what the exit relay could read before you choose to continue. Certificate errors cannot be clicked through, and pages cannot reach this computer or your local network.
-- **JavaScript without its optimising compilers**, which is where most attacks on the engine land. Measured: everyday page work runs as fast; heavy computation about half as fast. Maximum turns off every compiler; Full speed turns them back on. A page that keeps a core busy gets one quiet hint that Full speed exists and what it costs.
-- **Ctrl+Shift+Delete closes and erases now.** Tor and the window are gone in about 70 ms and the profile in under a second. An optional idle timer does the same after the computer has been left alone for as long as you choose.
-- **Photos lose their GPS on the way out.** A JPEG, PNG or WebP picked for upload reaches the page without its Exif, GPS, XMP or comments — the pixels byte-for-byte the same, colour profiles kept.
-- **A safe copy of any downloaded PDF.** Each page as a picture, rendered with the network cut off: no scripts, forms, links or hidden details survive. Private downloads go to a folder of their own.
-- **Traffic camouflage, opt-in.** A decoy page from a list of popular sites loads beside each real one, on another circuit, so the size and timing of your traffic say less. About twice the data, and it lowers the odds rather than removing them.
-- **Private windows cannot be screen-captured** on Windows and macOS: screenshots, recordings and a screen shared in a meeting show them blank. Linux has no such control.
-- **The packaged browser can no longer be turned against itself.** Electron's fuses now disable running it as a plain Node interpreter, `NODE_OPTIONS` and `--inspect`, and check the app archive's integrity, so a program running as you cannot use Debrowser's own binary to read what it holds. This applies to ordinary windows too. The release build checks it.
-- **Nothing about your computer for a site to read.** The graphics card, memory, battery, network speed, keyboard layout, installed voices, gamepads, media devices and the dark-mode setting are removed or fixed in private windows - in the page, every frame and every worker, before any of the site's code runs. Canvas and audio output vary per tab, so they cannot link one visit to another. On Linux, pages see only a fixed set of common fonts. Client hints describe the browser, not the machine.
-- **Referrers stay within a site.** A private window no longer tells the next site where you came from.
-- **Dropped and pasted files are cleaned too**, like picked ones: no GPS, no camera details, and a fresh timestamp on every file.
-- **Downloads open inside the private window** where the browser can show them - PDFs, images, text, audio, video. Anything else opens in another program only after a warning, because that program is outside Tor.
-- **Keep a private window ready**, opt-in: Tor connects in the background when Debrowser starts, so Ctrl+Shift+N opens at once.
-- **Proven on the real Tor network**: a workflow bootstraps the bundled Tor directly, through the built-in bridges, and through a bridge the bridge kit makes, and each time check.torproject.org has to confirm the request came over Tor. Its first run found that a bridge behind NAT served its clients nothing; the kit now tells Tor its public address and waits until the bridge is ready before printing the line.
-- **The collapsed side strip keeps a toolbar.** With tabs down the side and the strip slid away, the address bar, back and the menu used to go with it; they now stay across the top.
-- **A weekly check that the bundled Tor is current**, which opens an issue when it is not; the connection page also says when the Tor network considers this Tor obsolete.
+- Ctrl+Shift+N opens a private window that goes through Tor, and the operating system blocks any connection that tries to go around it.
+- The address bar suggests open tabs, bookmarks and history as you type.
+- Pages that fail to load, and tabs that crash, explain what happened and offer one button to fix it.
+- Tabs can be dragged, pinned and muted; sites can ask for the camera, microphone, location or notifications, and the padlock opens a panel for the site.
+- Local addresses such as `localhost:3000`, `192.168.1.1` and `printer.local` open without the `https://` detour.
+- Dozens of smaller fixes to focus, keyboard, wording and appearance, found by driving every part of the browser by hand.
 
-And for everyday browsing, the details that decide whether a browser feels finished:
+### Private windows
 
-- **The address bar suggests as you type.** Pages open in another tab (picking one switches to it instead of loading the page twice), bookmarks, and history weighted by how often and how lately you went there, with the plain search always in the list. Words match in any order, anywhere in the title or address. Arrow keys walk the list, Esc puts back what you typed, and a middle click opens a row in a new tab.
-- **A page that cannot load says why, in plain words**: you are offline, the site cannot be found, it is taking too long, it refused, the connection dropped, its certificate is not valid. One button tries again, in place, and when the problem could be the network it tries again by itself as soon as you are back online. The address bar keeps the address that failed, and Back and Reload do what they should.
-- **A tab that crashes says so, with Reload**, and fades in the tab strip until it is reloaded.
-- **Drag tabs to reorder them**, across the top or down the side. The tab follows the pointer, the others slide aside, and Esc puts it back.
-- **Sites can ask for the camera, the microphone, your location or notifications**, and the answer is remembered for that site. They used to be refused silently, which quietly broke video calls, maps and chat apps. The question appears under the padlock; closing it refuses for now. Private windows still refuse all four without asking.
-- **The padlock opens a panel about the site**: whether the connection is secure, what it may use, its zoom, and Clear data for this site.
-- **Leave this page?** A page with unsaved work is asked about before it is left or its tab is closed.
-- **Save page** with Ctrl+S, or from the menus.
-- **The address bar shows a site's zoom** when it is not the default size, and pressing it resets.
-- **Ctrl+/ lists every keyboard shortcut**, also in the app menu.
-- **Pages without a background of their own are drawn on white**, as in every other browser. They used to come up black on near-black.
-- **Polish.** The window starts in your theme's colour instead of flashing dark; closed tabs fold away instead of vanishing; every button has a pressed state; the zoom steps and bookmark overflow are drawn icons rather than typed characters; the find bar and downloads button fade in; reduced motion stops the loading spinner instead of making it flicker; decorative gradients are gone; one dash style in the interface, and shorter copy in a few places that needed it.
-- **Fixed:** after typing a full address, or picking a suggestion that fills one in, the padlock was never drawn. And a reload left the page's address as the tab's title.
+An ordinary private window only hides your browsing from the next person at your computer. Your router and your ISP still see every site. In this one they can't: every request goes through a bundled Tor, reached through bridges, so by default the traffic does not even look like Tor. They can still see that you are online, when, and how much. Nothing can hide that, and the window says so.
+
+This is not Tor Browser. A site that tries hard can tell the two apart, and a program running as you can read what the window holds. When someone's safety depends on it, use Tor Browser or Tails.
+
+**Connection**
+
+- **Separate and temporary.** Each private window is its own process with a temporary profile: no history, cookies, cache or crash dumps are kept, and the profile is deleted on close (and cleaned up after a crash). Nothing loads until Tor is connected; the connection page shows progress and, if it stops, Tor's own reason. It never falls back to a direct connection.
+- **Bridges by default.** The built-in obfs4 and Snowflake bridges are tried at once and the first to connect wins. They are published lists, so an ISP matching addresses can still spot them; `tools/bridge-kit/setup-bridge.sh` turns a cheap server into an unlisted bridge of your own, and Settings takes the line it prints.
+- **The operating system keeps the window off the network.** Linux: a network namespace with nothing but loopback, no root needed. Windows: one firewall rule added by the installer. macOS has no such control without root, so it relies on a tripwire that closes the window on any stray socket; the tripwire runs on the other two as a second wall.
+- **A Tor circuit per tab.** Two tabs never share an exit, so a site cannot link them by address; links a tab opens share its circuit, so signing in still works. Ctrl+Shift+L gives the current tab a new circuit; Ctrl+Shift+U (new identity) closes everything and forgets every cookie. A site that blocks an exit is retried from up to three others before the toolbar says it refuses Tor.
+- **Onion addresses.** A site that offers one gets a .onion button in the toolbar, or is followed there automatically if you prefer.
+- **The entry guard is kept, encrypted.** Keeping the same guard is how Tor resists a malicious one, and it avoids a cold start. The guard and directory are sealed under a key in your OS keystore. One switch keeps no trace of Tor at all, and says what that costs.
+- **Keep a private window ready** (opt-in): Tor connects in the background when Debrowser starts, so Ctrl+Shift+N opens at once.
+
+**What a site can learn**
+
+- **Every private window looks the same.** Same user agent (no Electron or Debrowser in it), UTC, en-US, four cores, no WebGL, and a page letterboxed to 200×100 steps. Applied before a tab loads anything; a tab that can't have them stops rather than loading without them. `debrowser://fingerprint` shows every check.
+- **Nothing about your computer.** Graphics card, memory, battery, network speed, keyboard layout, voices, gamepads, media devices and the dark-mode setting are removed or fixed in every frame and worker. Canvas and audio output vary per tab. On Linux, pages see only a fixed set of common fonts. Client hints describe the browser, not the machine.
+- **Referrers stay within a site.**
+- **HTTPS or an explanation.** Plain HTTP is upgraded; a site without HTTPS gets a page explaining what the exit relay could read before you continue. Certificate errors cannot be clicked through, and pages cannot reach this computer or your local network.
+- **JavaScript without its optimising compilers**, where most engine attacks land. Everyday pages run as fast; heavy computation about half as fast. Maximum turns off every compiler; Full speed turns them back on, and a page that keeps a core busy gets one quiet hint that it exists.
+- **Traffic camouflage** (opt-in): a decoy page from a popular site loads beside each real one, on another circuit. About twice the data, and it lowers the odds rather than removing them.
+- **Private windows cannot be screen-captured** on Windows and macOS. Linux has no such control.
+
+**Files**
+
+- **Photos lose their GPS on the way out.** A JPEG, PNG or WebP that is picked, dropped or pasted reaches the page without Exif, GPS, XMP or comments, pixels and colour profile unchanged, with a fresh timestamp.
+- **A safe copy of any downloaded PDF**: each page as a picture, rendered offline, with no scripts, forms, links or hidden details. Private downloads go to their own folder.
+- **Downloads open inside the window** where the browser can show them (PDFs, images, text, audio, video). Anything else opens in another program only after a warning that it is outside Tor.
+
+**Erasing**
+
+- **Ctrl+Shift+Delete closes and erases now**: Tor and the window gone in about 70 ms, the profile in under a second. An optional idle timer does the same after the computer has been left alone.
+
+**Behind the scenes**
+
+- **The packaged browser can't be turned against itself.** Electron's fuses disable running it as plain Node, `NODE_OPTIONS` and `--inspect`, and check the app archive's integrity. This applies to ordinary windows too, and the release build checks it.
+- **Proven on the real Tor network.** A workflow connects the bundled Tor directly, through the built-in bridges and through a bridge-kit bridge, and check.torproject.org must confirm each. Its first run found that a bridge behind NAT served nothing; the kit now tells Tor its public address and waits until the bridge is ready.
+- **A weekly check that the bundled Tor is current** opens an issue when it isn't; the connection page also says when the Tor network considers it obsolete.
+
+### Everyday browsing
+
+**Address bar**
+
+- **Suggestions as you type**: open tabs (picking one switches to it), bookmarks, and history weighted by how often and how recently you visited, with a plain search always in the list. Words match in any order. The top row is always what Enter will do, and it is highlighted as such.
+- **Arrow keys walk the list, Esc puts back what you typed**, and a second Esc puts back the page's address. Middle-click opens a row in a new tab; hovering a row selects it, so mouse and keyboard never disagree about which row is chosen.
+- **Local addresses just work.** `localhost`, IP addresses, `name.local`, `.lan`, `.internal`, `.home.arpa` and anything with a port go straight to `http://`. When the browser guessed `https://` for a typed name and the site doesn't speak it, it retries once over `http://` (not in private windows).
+- **The address bar never overwrites what you're typing** when the page changes underneath you, and keeps the address of a page that failed to load.
+- **Zoom shows in the address bar** when a site isn't at 100%; click it to reset.
+
+**Tabs**
+
+- **Drag tabs to reorder**, across the top or down the side. The others slide aside, Esc puts it back, and a tab can reach either end of the strip. Pinned tabs stay in their own group.
+- **Pinned tabs look pinned**: just the site's icon, at the start of the strip.
+- **Mute from the tab**: the speaker shows only while a tab is actually making sound.
+- **Middle-click a tab's close button** closes it, like the rest of the tab.
+- **The strip fades at its edges** when there are more tabs than fit, so you can tell there's more to scroll to.
+- **Switching tabs puts the keyboard in the page**, so you can scroll or type straight away.
+
+**When things go wrong**
+
+- **A page that can't load says why in plain words**: offline, site not found, too slow, refused, connection dropped, certificate not valid. The title names the site ("Can't load example.com"). Try again works in place, and when the problem could be the network it retries by itself once you're back online.
+- **A crashed tab says so, with Reload**, and fades in the tab strip until reloaded.
+- **Leave this page?** A page with unsaved work is asked about before it is left or its tab closed; choosing Stay keeps the right address in the bar.
+- **Esc stops a page that is loading.**
+
+**Sites and permissions**
+
+- **Sites can ask for the camera, microphone, location or notifications**, and the answer is remembered per site. These used to be refused silently, which broke video calls, maps and chat apps. Closing the question refuses for now. Private windows still refuse all four without asking.
+- **The padlock opens a panel for the site**: whether the connection is secure, what it may use (changeable), its zoom, and Clear data for this site, which asks once more before it deletes anything.
+
+**Bookmarks, history, downloads**
+
+- **Bookmarks on the bar have a right-click menu**: open, open in a new tab, edit or delete. Middle-click opens in a new tab. New bookmarks are added at the end, and every list updates the moment you save one.
+- **History opens newest first** and refreshes when you come back to it. Clear is greyed out when there is nothing to clear.
+- **Downloads show progress as a ring** on the toolbar button, and each finished download has Show in folder. A failed download is dimmed rather than struck through.
+- **New tab tiles**: a forgotten tile fades where it stands instead of shuffling the rest, and stays forgotten. Local servers show their port, so four of them aren't four tiles reading "127.0.0.1".
+
+**Menus, panels and keys**
+
+- **Save page** with Ctrl+S, or from the menus. **Copy image** in an image's right-click menu.
+- **Right-click menus are shorter**: a link, image, field or selection gets its own items and Inspect, not the whole page menu.
+- **Ctrl+/ lists every keyboard shortcut**, including alternative keys, and the list scrolls with the arrow keys, Page Up/Down, Home and End. Also in the app menu.
+- **The app menu** gains New private window, Bookmarks and Keyboard shortcuts; Print is greyed out on the browser's own pages, and the zoom buttons at their limits.
+- **Menus and panels fade out** when closed, scroll when taller than the window, and return the keyboard to the page afterwards.
+
+**Settings**
+
+- **Options that don't apply on your system are greyed out** with a one-line reason, instead of switches that do nothing.
+- **The side list follows along** as you scroll, down to the last section.
+- **Works in a narrow window**, bookmark rows show the site's icon, and hints are shorter and plainer.
+
+**Appearance**
+
+- **The window starts in your theme's colour** instead of flashing dark, and error, crash and blank pages use it too. Changing theme or accent redraws every open page of the browser's own at once.
+- **Pages without a background of their own are drawn on white**, as in every other browser. They used to come up black.
+- **Closed tabs fold away** instead of vanishing; every button has a pressed state; tab close buttons are round; icons are drawn, not typed characters.
+- **Reduced motion** stops the loading spinner instead of making it flicker. Decorative gradients are gone, and the interface uses one dash style throughout.
+
+### Fixed
+
+- After typing a full address, or picking a suggestion that fills one in, the padlock was never drawn.
+- A reload left the page's address as the tab's title.
+- With tabs down the side and the strip collapsed, the address bar, Back and the menu disappeared with it; they now stay across the top.
+- Zoom, the speaker icon, bookmarks and new tab tiles could show out-of-date state until something else changed.
+- The downloads button, the padlock and several menu items did nothing when pressed.
 
 ## 1.6.0
 

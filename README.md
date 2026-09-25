@@ -12,6 +12,14 @@ hand-rolled engine would fail that on the first site you tried.
 
 The interesting part is `src/main/governor/`.
 
+**Contents:** [Installing](#installing-it) ·
+[Using it](#using-it) · [Keyboard](#keyboard) ·
+[Private windows](#private-windows) ·
+[Running from source](#running-from-source) ·
+[How it keeps tabs cheap](#how-it-keeps-tabs-cheap) ·
+[Measured results](#measured-results) ·
+[Limits worth knowing](#limits-worth-knowing)
+
 ---
 
 ## Installing it
@@ -21,11 +29,11 @@ push, or on demand from the Actions tab, and attached to the release.
 
 | | Download | Then |
 |---|---|---|
-| **Windows** | `Debrowser-1.0.0-win-x64.exe` | Run it. SmartScreen will warn — see below. |
+| **Windows** | `Debrowser-<version>-win-x64.exe` | Run it. SmartScreen will warn — see below. |
 | **Windows** (no install) | `...-win-x64-portable.exe` | Run it from anywhere. Installs nothing. |
-| **macOS** | `Debrowser-1.0.0-mac-arm64.dmg` (or `-x64` on Intel) | Drag to Applications, then right-click → Open the first time. |
-| **Linux** | `Debrowser-1.0.0-linux-x86_64.AppImage` | `chmod +x` and run. |
-| **Debian/Ubuntu** | `Debrowser-1.0.0-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
+| **macOS** | `Debrowser-<version>-mac-arm64.dmg` (or `-x64` on Intel) | Drag to Applications, then right-click → Open the first time. |
+| **Linux** | `Debrowser-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
+| **Debian/Ubuntu** | `Debrowser-<version>-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
 
 **None of it is signed.** Windows SmartScreen shows "Windows protected your PC"
 (More info → Run anyway) and macOS Gatekeeper refuses the first launch
@@ -60,8 +68,127 @@ Debrowser.exe --smoke-test              # Windows
 /opt/Debrowser/debrowser --smoke-test   # Linux
 ```
 
-114 checks on real pages. Worth doing here rather than taking it on trust: this
+165 checks on real pages. Worth doing here rather than taking it on trust: this
 project is tested on Linux and only *expected* to work on Windows and macOS.
+
+---
+
+## Using it
+
+Everything a browser is expected to do, without the parts you have to learn.
+The details below are the ones people tend to ask about.
+
+**Address bar.** Type and it suggests open tabs (picking one switches to it
+instead of opening it twice), bookmarks, history and a search. The top row is
+always what Enter will do. Esc puts back what you typed, and pressing it again
+puts back the page's address. Local addresses (`localhost:3000`, `192.168.1.1`,
+`printer.local`) open over `http://` without a detour.
+
+**Tabs.** Drag to reorder, across the top or down the side (Settings →
+Appearance). Right-click a tab to pin, mute, duplicate or close several at
+once. The speaker appears while a tab plays sound; click it to mute. Tabs come
+back when you restart, and a tab you haven't looked at in a while gives its
+memory back and reloads when you return to it, behind a picture of how you
+left it.
+
+**The padlock** opens a panel for the site: whether the connection is secure,
+what it may use (camera, microphone, location, notifications), its zoom, and
+Clear data for this site. When a site asks for one of those, the question
+appears under the padlock and your answer is remembered for that site.
+
+**When a page won't load** it says why in plain words and offers Try again.
+If the cause could be your connection, it retries by itself when you're back
+online. A tab that crashes says so and offers Reload.
+
+**Bookmarks, history and downloads.** Ctrl+D bookmarks the page; the bar
+(Ctrl+Shift+B) shows what fits and puts the rest behind `»`. Bookmarks can be
+imported from other browsers in Settings. History (Ctrl+H) is searchable and
+can be paused. Downloads show progress on the toolbar button, which opens the
+list (Ctrl+J).
+
+**Settings** (Ctrl+,) has a search box and a side list. An option that doesn't
+apply on your system is greyed out and says why.
+
+**Task manager** (Ctrl+M) shows what each tab costs and lets you set the memory
+budget.
+
+### Keyboard
+
+`Ctrl` is `⌘` on a Mac. **Ctrl+/ shows every shortcut** in the browser itself,
+alternative keys included.
+
+| | Keys |
+|---|---|
+| **Tabs** | |
+| New tab · close · reopen closed | `Ctrl+T` · `Ctrl+W` · `Ctrl+Shift+T` |
+| Next · previous tab | `Ctrl+Tab` · `Ctrl+Shift+Tab` (or `Ctrl+PgDn` · `Ctrl+PgUp`) |
+| Tab 1–8 · last tab | `Ctrl+1`…`Ctrl+8` · `Ctrl+9` |
+| **Page** | |
+| Back · forward | `Alt+←` · `Alt+→` (Mac: `⌘[` · `⌘]`) |
+| Reload · ignoring cache | `Ctrl+R` or `F5` · `Ctrl+Shift+R` |
+| Stop loading | `Esc` |
+| Address bar | `Ctrl+L`, `Alt+D` or `F6` |
+| Find · next · previous | `Ctrl+F` · `F3` or `Ctrl+G` · `Shift+F3` or `Ctrl+Shift+G` |
+| Zoom in · out · reset | `Ctrl+=` · `Ctrl+-` · `Ctrl+0` (or Ctrl and the wheel) |
+| Save · print · page source | `Ctrl+S` · `Ctrl+P` · `Ctrl+U` |
+| Full screen | `F11` |
+| **Browser** | |
+| Bookmark this page · bookmarks bar · all bookmarks | `Ctrl+D` · `Ctrl+Shift+B` · `Ctrl+Shift+O` |
+| History · downloads · settings | `Ctrl+H` · `Ctrl+J` · `Ctrl+,` |
+| Task manager · developer tools | `Ctrl+M` · `F12` or `Ctrl+Shift+I` |
+| **Private windows** | |
+| New private window | `Ctrl+Shift+N` |
+| New circuit for this tab · new identity | `Ctrl+Shift+L` · `Ctrl+Shift+U` |
+| Close and erase now | `Ctrl+Shift+Delete` |
+
+Every shortcut works wherever the keyboard is: in a page, in a panel, in the
+task manager. They all come from one table, `src/main/shortcuts.js`, which is
+also where the menus get the keys they print, so a label can't disagree with
+its key.
+
+---
+
+## Private windows
+
+Ctrl+Shift+N opens a private window that your router and your ISP cannot
+read: every request goes through a bundled Tor, reached through bridges so
+that by default they cannot tell from the traffic that it is Tor either. They
+still see that you are online, when, and how much - nothing can hide that.
+
+- **The operating system keeps it off the network.** On Linux the private
+  window runs in a network namespace with nothing but loopback, and Tor
+  outside it; on Windows a firewall rule blocks the private copy of the
+  browser from everything but Tor. A request that ignored every setting would
+  have nowhere to go. macOS has no such control without root, and says so: a
+  tripwire that watches every socket and closes the window is what it has.
+- **A Tor circuit per tab**, a new one on request (Ctrl+Shift+L), and new
+  identity (Ctrl+Shift+U). A site that blocks one exit is retried from others
+  before you are told it refuses Tor.
+- **One fingerprint for every private window**: the same user agent (with no
+  Electron or Debrowser in it), UTC, en-US, four cores, a letterboxed screen,
+  no WebGL - checked by the window itself at start
+  (`debrowser://fingerprint`).
+- **HTTPS or an explanation**, no local-network addresses, certificate errors
+  fatal, and JavaScript without its optimising compilers by default.
+- **Nothing kept**: the profile is a temp directory deleted on exit.
+  Ctrl+Shift+Delete deletes it immediately, Tor with it.
+- **Nothing about this computer**: no graphics card, memory, battery, network
+  speed, keyboard layout, voices, gamepads or dark-mode setting for a page to
+  read; canvas and audio output vary per tab; on Linux, pages see only a fixed
+  set of common fonts. Referrers are not sent between sites.
+- **Files cleaned both ways**: photos lose their GPS and camera data before a
+  page receives them - picked, dropped or pasted - and a downloaded PDF can be
+  saved as a flat copy with no scripts, forms or links. Downloads open inside
+  the private window where the browser can show them, and anything else only
+  after a warning that another program is outside Tor.
+- **Your own bridge**: `tools/bridge-kit/` turns a cheap server into an
+  unlisted bridge, the one thing that also hides Tor from an ISP matching
+  addresses against published bridge lists.
+
+What it is not: Tor Browser. Sites can tell this browser apart from others
+more easily, and a program running as you on this computer can read what the
+window holds. When someone's safety depends on it, use Tor Browser or Tails.
+The threat model is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#private-windows).
 
 ---
 
@@ -75,7 +202,7 @@ npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
 npm run start:merged       # + page merging (KSM) - side-channel risk, read below
 npm run start:performance  # most headroom
 
-npm run smoke              # 89-check end-to-end test against real renderers
+npm run smoke              # 165-check end-to-end test against real renderers
 npm run bench              # memory benchmark
 ```
 
@@ -140,28 +267,9 @@ above); `--max-live-tabs=0` turns it off, `--max-live-tabs=N` sets it.
 `balanced` sizes its budget from the host's actual RAM. Override with
 `--budget=1200`, or drag the slider in the task manager.
 
-### Keyboard
-
-`Ctrl/Cmd+T` new tab · `+W` close · `+Shift+T` reopen closed · `+Tab` /
-`+1`…`+9` switch tabs · `+R` reload (`+Shift+R` ignoring cache) ·
-`Alt+←` / `Alt+→` back and forward · `+L` address bar · `+F` find in page
-(`F3` next, `Shift+F3` previous) · `+D` bookmark · `+Shift+B` bookmarks bar ·
-`+Shift+O` bookmarks · `+H` history · `+J` downloads · `+M` task manager ·
-`+,` settings · `+S` save page · `+P` print · `+U` page source · `+0` / `+−` / `+=` zoom ·
-`F11` full screen · `F12` or `Ctrl+Shift+I` developer tools ·
-`+Shift+N` private window · `+/` every shortcut, in a list. In a private
-window: `+Shift+L` new circuit for this tab · `+Shift+U` new identity ·
-`+Shift+Delete` close and erase now
-
-Every one of them works wherever the keyboard is — in a page, in the task
-manager, in a panel. There is one table, `src/main/shortcuts.js`, and it is
-also where the app menu gets the key it prints beside each item, so a label and
-the key it advertises cannot drift apart. There used to be two tables that
-disagreed, which is why `Ctrl+L` did nothing for most of this browser's life.
-
 ---
 
-## What it actually does
+## How it keeps tabs cheap
 
 Every tab sits in one of six tiers. The governor moves tabs between them on a
 2-second tick, driven by how long they have been out of sight and how close the
@@ -280,11 +388,7 @@ sudo swapon /dev/zram0                       # somewhere to compress into
 ```
 
 Without either, the tier is inert and the task manager says which piece is
-missing rather than showing a silent zero. Windows would reach the same effect
-through `SetProcessWorkingSetSizeEx` and needs no elevation at all, which makes
-it the *better* platform for this — it is not implemented because it could not be
-tested here, and shipping a plausible-looking call nobody has run is worse than
-saying so. macOS has no public API to force its compressor.
+missing rather than showing a silent zero.
 
 Unlike page merging, this is on by default where available and carries no
 warning. The distinction is real: KSM shares identical pages *between* processes
@@ -313,48 +417,6 @@ per-renderer floor is not movable — so what moved the number was discarding mo
 of them, once discarding stopped being something you could see.
 
 ---
-
-## Private windows
-
-Ctrl+Shift+N opens a private window that your router and your ISP cannot
-read: every request goes through a bundled Tor, reached through bridges so
-that by default they cannot tell from the traffic that it is Tor either. They
-still see that you are online, when, and how much - nothing can hide that.
-
-- **The operating system keeps it off the network.** On Linux the private
-  window runs in a network namespace with nothing but loopback, and Tor
-  outside it; on Windows a firewall rule blocks the private copy of the
-  browser from everything but Tor. A request that ignored every setting would
-  have nowhere to go. macOS has no such control without root, and says so: a
-  tripwire that watches every socket and closes the window is what it has.
-- **A Tor circuit per tab**, a new one on request (Ctrl+Shift+L), and new
-  identity (Ctrl+Shift+U). A site that blocks one exit is retried from others
-  before you are told it refuses Tor.
-- **One fingerprint for every private window**: the same user agent (with no
-  Electron or Debrowser in it), UTC, en-US, four cores, a letterboxed screen,
-  no WebGL - checked by the window itself at start
-  (`debrowser://fingerprint`).
-- **HTTPS or an explanation**, no local-network addresses, certificate errors
-  fatal, and JavaScript without its optimising compilers by default.
-- **Nothing kept**: the profile is a temp directory deleted on exit.
-  Ctrl+Shift+Delete deletes it immediately, Tor with it.
-- **Nothing about this computer**: no graphics card, memory, battery, network
-  speed, keyboard layout, voices, gamepads or dark-mode setting for a page to
-  read; canvas and audio output vary per tab; on Linux, pages see only a fixed
-  set of common fonts. Referrers are not sent between sites.
-- **Files cleaned both ways**: photos lose their GPS and camera data before a
-  page receives them - picked, dropped or pasted - and a downloaded PDF can be
-  saved as a flat copy with no scripts, forms or links. Downloads open inside
-  the private window where the browser can show them, and anything else only
-  after a warning that another program is outside Tor.
-- **Your own bridge**: `tools/bridge-kit/` turns a cheap server into an
-  unlisted bridge, the one thing that also hides Tor from an ISP matching
-  addresses against published bridge lists.
-
-What it is not: Tor Browser. Sites can tell this browser apart from others
-more easily, and a program running as you on this computer can read what the
-window holds. When someone's safety depends on it, use Tor Browser or Tails.
-The threat model is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#private-windows).
 
 ## Measured results
 
@@ -573,6 +635,8 @@ tried, measured and removed — live on the `claude/research-build` branch.
 
 ## Limits worth knowing
 
+### Private windows
+
 - **Private windows are not Tor Browser.** Nothing about your computer is
   readable from a page - hardware, settings, installed fonts (on Linux),
   canvas and audio output - and every private window on one OS looks the same.
@@ -583,6 +647,8 @@ tried, measured and removed — live on the `claude/research-build` branch.
   harder, not impossible, at about twice the data.
 - **Linux cannot block screenshots of a private window**; Windows and macOS
   can, and do.
+
+### Tabs and memory
 
 - Restoring a discarded tab replays navigation history, scroll offset and
   unsubmitted form input. It does **not** restore in-page JavaScript state — a
@@ -605,17 +671,37 @@ tried, measured and removed — live on the `claude/research-build` branch.
   how many tabs hold a renderer, never how many can be open: past the cap the
   least-recently-used tab is discarded, and returning to it reloads the page
   behind a picture of how you left it. `--max-live-tabs=0` turns it off.
-- **The interface is set in Aptos, then Calibri, then whatever the system has.**
-  Neither can be bundled — both are Microsoft's and not redistributable — so the
-  stack degrades, and it names Carlito before the system default: Carlito is
-  metric-compatible with Calibri, is under the Open Font License, and on Linux is
-  one `apt install fonts-crosextra-carlito` away. With it the layout is identical
-  to the pixel; without it you get your own platform's UI face and nothing looks
-  broken. Two measured consequences are built into the rest of the styling:
-  Calibri's x-height is about 10% shorter than the faces desktop UI usually
-  assumes, so the base size is 14px rather than 13, and it ships exactly two
-  weights, so emphasis here is carried by colour and size rather than by a
-  semibold that does not exist.
+- Developer tools are Chromium's own, opened detached. The tab being inspected
+  is held at `WARM` for as long as they are open — never frozen, never
+  discarded — because freezing a page stops the task queues the inspector is
+  driving. That is one resident renderer for as long as you are debugging.
+- A restored tab is covered by a thumbnail while it reloads. Pages carrying a
+  password or payment field are never photographed, the images live in the OS
+  temp directory, and they are deleted on close, on quit and again on startup.
+- Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
+  per-site (the default) several same-site tabs share one, and a page's own CPU
+  is read per-document over CDP — which covers its main thread but not its Web
+  Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
+- **The memory figure is measured per platform, and each measure is named.**
+  Linux reads a real proportional figure (Pss) from `smaps_rollup`. Windows and
+  macOS have no such thing, so a small native helper ships beside the app and
+  is asked instead — the browser no longer sums working set and warns you about
+  it. Two caveats, both reported rather than hidden: on Windows the figure is a
+  true proportional set size, computed by walking each process's working set
+  and dividing every shared page by its share count, but that count is three
+  bits wide and saturates at seven — a page shared by more than seven processes
+  is counted slightly high, and a Chromium browser runs close to that many. On
+  macOS the figure is `phys_footprint`, the number the OS charges each process
+  and shows in Activity Monitor; it excludes the clean file-backed pages that
+  caused the over-counting, but it does not divide shared dirty pages, so it is
+  not proportional set size and is not described as though it were. If the
+  helper is missing or refused, the old summed-working-set figure returns with
+  its "over-counts" label intact — and the panel now says how many processes
+  were measured and why the rest were not, because "summed" on its own gives
+  nobody a way to find out which of those two it is.
+
+### Your data
+
 - **Site icons are fetched by the browser, without cookies, and never stored.**
   A tab, a history row and a task-manager row all show the real favicon, with
   the site's initial on a colour derived from its hostname underneath it — what
@@ -647,65 +733,6 @@ tried, measured and removed — live on the `claude/research-build` branch.
   clears all of it, and has the switch that stops it recording; turning that off
   leaves what is already stored alone, because not adding to a record and
   deleting one are different decisions.
-- Developer tools are Chromium's own, opened detached. The tab being inspected
-  is held at `WARM` for as long as they are open — never frozen, never
-  discarded — because freezing a page stops the task queues the inspector is
-  driving. That is one resident renderer for as long as you are debugging.
-- A restored tab is covered by a thumbnail while it reloads. Pages carrying a
-  password or payment field are never photographed, the images live in the OS
-  temp directory, and they are deleted on close, on quit and again on startup.
-- Minimising and restoring the window used to bring it back empty on Windows —
-  no tab strip, no page, just the background colour. Minimising fires a resize
-  with a client area of zero, and laying out from that wrote zero-width bounds
-  over every view with nothing to put them back. Fixed in 1.0.1: the layout
-  refuses to compute from a minimised or zero-sized window, and re-runs on
-  restore.
-- **The memory figure is measured per platform, and each measure is named.**
-  Linux reads a real proportional figure (Pss) from `smaps_rollup`. Windows and
-  macOS have no such thing, so a small native helper ships beside the app and
-  is asked instead — the browser no longer sums working set and warns you about
-  it. Two caveats, both reported rather than hidden: on Windows the figure is a
-  true proportional set size, computed by walking each process's working set
-  and dividing every shared page by its share count, but that count is three
-  bits wide and saturates at seven — a page shared by more than seven processes
-  is counted slightly high, and a Chromium browser runs close to that many. On
-  macOS the figure is `phys_footprint`, the number the OS charges each process
-  and shows in Activity Monitor; it excludes the clean file-backed pages that
-  caused the over-counting, but it does not divide shared dirty pages, so it is
-  not proportional set size and is not described as though it were. If the
-  helper is missing or refused, the old summed-working-set figure returns with
-  its "over-counts" label intact — and the panel now says how many processes
-  were measured and why the rest were not, because "summed" on its own gives
-  nobody a way to find out which of those two it is.
-- Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
-  per-site (the default) several same-site tabs share one, and a page's own CPU
-  is read per-document over CDP — which covers its main thread but not its Web
-  Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
-- **An Intune-shaped Windows installer exists and is experimental.** It is
-  per-machine and silent, because the Intune Management Extension runs install
-  commands as SYSTEM. It has never been run against a real tenant — it was built
-  with no access to Windows or Intune — and being unsigned is likely to be the
-  actual blocker in any estate enforcing WDAC or Smart App Control. See
-  `build/intune/README.md`. A machine-wide install turns its own updater off,
-  since it cannot write to its install directory and update scheduling belongs
-  to whoever deployed it.
-- **Updates are differential on Windows and on the Linux AppImage, and absent
-  on macOS.** Only the changed blocks of the installer are downloaded rather
-  than the whole ~110MB, almost all of which is Chromium and identical between
-  releases. macOS is not a missing feature but a signing prerequisite:
-  Squirrel.Mac validates that an update is signed by the same identity as the
-  running app and refuses when there is none, and this build is unsigned. The
-  `.deb`, `.tar.gz` and Windows `portable` builds are not updatable formats.
-  Settings, the browsing session and saved data live in `userData`, which an
-  installer does not touch.
-- No extensions, no bookmarks, no history UI, no downloads UI. Chrome extension
-  support is intended and not built. Settings covers appearance, search and the
-  two resource limits; anything not listed there is not a setting yet, which is
-  deliberate - a control that does nothing is worse than a short page.
-- `legacy/debrowser.hta` ports the residency model to MSHTML for machines that
-  can only run an HTA. It is a curiosity, not a supported browser: unsandboxed,
-  untested, and unable to do anything this project measures per-tab. See
-  `legacy/README.md`.
 - Password and payment fields are deliberately never read into the session
   store, so a discarded tab will not restore them. Saving one is a separate,
   explicit act: the browser asks after you sign in, and stores nothing unless
@@ -715,3 +742,41 @@ tried, measured and removed — live on the `claude/research-build` branch.
   fill automatically only when exactly one saved sign-in matches the page's
   origin; payment details are never filled without a click, because a page can
   hide a card field and a card number is not bound to any one site.
+
+### Platforms and updates
+
+- **Updates are differential on Windows and on the Linux AppImage, and absent
+  on macOS.** Only the changed blocks of the installer are downloaded rather
+  than the whole ~110MB, almost all of which is Chromium and identical between
+  releases. macOS is not a missing feature but a signing prerequisite:
+  Squirrel.Mac validates that an update is signed by the same identity as the
+  running app and refuses when there is none, and this build is unsigned. The
+  `.deb`, `.tar.gz` and Windows `portable` builds are not updatable formats.
+  Settings, the browsing session and saved data live in `userData`, which an
+  installer does not touch.
+- **An Intune-shaped Windows installer exists and is experimental.** It is
+  per-machine and silent, because the Intune Management Extension runs install
+  commands as SYSTEM. It has never been run against a real tenant — it was built
+  with no access to Windows or Intune — and being unsigned is likely to be the
+  actual blocker in any estate enforcing WDAC or Smart App Control. See
+  `build/intune/README.md`. A machine-wide install turns its own updater off,
+  since it cannot write to its install directory and update scheduling belongs
+  to whoever deployed it.
+- **The interface is set in Aptos, then Calibri, then whatever the system has.**
+  Neither can be bundled — both are Microsoft's and not redistributable — so the
+  stack degrades, and it names Carlito before the system default: Carlito is
+  metric-compatible with Calibri, is under the Open Font License, and on Linux is
+  one `apt install fonts-crosextra-carlito` away. With it the layout is identical
+  to the pixel; without it you get your own platform's UI face and nothing looks
+  broken. Two measured consequences are built into the rest of the styling:
+  Calibri's x-height is about 10% shorter than the faces desktop UI usually
+  assumes, so the base size is 14px rather than 13, and it ships exactly two
+  weights, so emphasis here is carried by colour and size rather than by a
+  semibold that does not exist.
+- **No extensions yet.** Chrome extension support is intended and not built.
+  Anything not in Settings is not a setting yet, which is deliberate: a control
+  that does nothing is worse than a short page.
+- `legacy/debrowser.hta` ports the residency model to MSHTML for machines that
+  can only run an HTA. It is a curiosity, not a supported browser: unsandboxed,
+  untested, and unable to do anything this project measures per-tab. See
+  `legacy/README.md`.
