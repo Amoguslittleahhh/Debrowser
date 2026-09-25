@@ -909,10 +909,6 @@ function endTabDrag(cancelled) {
 el.tabs.addEventListener('pointermove', (event) => {
   const d = tabDrag;
   if (!d || event.pointerId !== d.pointer) return;
-  // The button came up somewhere this view never heard about - off the strip,
-  // over the page - before the drag had begun and taken the pointer. A move
-  // with no button held is not a drag, however far it goes.
-  if (!(event.buttons & 1)) { endTabDrag(true); return; }
   const delta = (d.vertical ? event.clientY : event.clientX) - d.start;
   if (!d.active && (Math.abs(delta) < DRAG_THRESHOLD || !beginTabDrag())) return;
   moveTabDrag(delta);
@@ -920,7 +916,10 @@ el.tabs.addEventListener('pointermove', (event) => {
 el.tabs.addEventListener('pointerup', () => endTabDrag(false));
 el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
 // And when the pointer leaves the strip before the drag has begun: only a
-// begun drag holds the pointer, so the release may land somewhere else.
+// begun drag holds the pointer, so the release may land somewhere else - over
+// the page - and this view would never hear of it. Not `event.buttons`, which
+// read as no button held on Windows for moves that had one, and cancelled
+// every drag there.
 el.tabs.addEventListener('pointerleave', () => { if (tabDrag && !tabDrag.active) tabDrag = null; });
 // Esc puts it back where it came from.
 document.addEventListener('keydown', (event) => {
