@@ -262,12 +262,17 @@ class Tor {
     const boot = /Bootstrapped (\d+)% \(([^)]+)\): (.*)$/.exec(text);
     if (boot) {
       const progress = Number(boot[1]);
+      // A complaint from before Tor got further is about something it has
+      // since got past - with bridges raced, usually one dead bridge while
+      // another connected - and left on screen it read as the reason for a
+      // stall it had nothing to do with.
+      const moved = progress > (this.status.progress || 0);
       this.set({
         state: progress >= 100 ? 'ready' : 'bootstrapping',
         progress,
         tag: boot[2],
         summary: boot[3],
-        warning: progress >= 100 ? null : this.status.warning
+        warning: progress >= 100 || moved ? null : this.status.warning
       });
       if (progress >= 100) {
         this.everReady = true;

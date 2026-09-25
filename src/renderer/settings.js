@@ -155,9 +155,9 @@ const SECTIONS = {
     // First, because it is what someone looking for "why did my tabs vanish"
     // scans for, and it was once easy to miss below the search engine.
     {
-      key: 'restoreSession',
-      label: 'Continue where you left off',
-      hint: 'Off opens a fresh tab each time you start. Restored tabs load when you visit them.',
+      key: 'restoreTabs',
+      label: 'Reopen your tabs when you start',
+      hint: 'Off starts with a fresh tab each time. Reopened tabs load when you visit them.',
       type: 'checkbox'
     },
     { key: 'searchEngine', label: 'Search engine', type: 'select', options: 'engines' },
@@ -301,6 +301,13 @@ const SECTIONS = {
   ],
 
   private: [
+    {
+      key: 'incognitoSearchEngine',
+      label: 'Search engine',
+      hint: 'Private windows search with this one. Google answers most Tor connections with a captcha.',
+      type: 'select',
+      options: 'engines'
+    },
     {
       key: 'incognitoBridges',
       label: 'Connect to Tor',
@@ -1103,27 +1110,35 @@ function watchSections() {
 
   /*
    * The section being read is the last one whose heading has passed a line a
-   * quarter of the way down the page - or, at the very end of the page, the
-   * last one showing, since short final sections never reach that line.
+   * quarter of the way down the page.
    *
-   * This replaced a rule of "the topmost section still in the top 45%", which
-   * lagged: a long section kept the mark while the next section's heading was
-   * already well up the screen.
+   * Short sections at the end reach that line late or never - the page runs
+   * out of scroll first - so the last stretch of scrolling is shared between
+   * them: each gets an equal part of the distance after the section before
+   * them. A rule of "at the very end, the last one showing" gave
+   * Advanced a sliver between two sections and was mostly skipped over.
    */
   let queued = false;
   const mark = () => {
     queued = false;
-    const box = main.getBoundingClientRect();
     const shown = sections.filter((s) => !s.hidden);
     if (!shown.length) return;
-    const atEnd = main.scrollTop + main.clientHeight >= main.scrollHeight - 2;
-    let current = shown[0];
-    if (atEnd) {
-      current = shown.filter((s) => s.getBoundingClientRect().top < box.bottom).pop() || current;
-    } else {
-      const line = box.top + box.height * 0.25;
-      for (const section of shown) if (section.getBoundingClientRect().top <= line) current = section;
+    const top = main.getBoundingClientRect().top;
+    const scroll = main.scrollTop;
+    const max = Math.max(0, main.scrollHeight - main.clientHeight);
+    const line = main.clientHeight * 0.25;
+    // Where each heading crosses the line, in scroll offsets.
+    const at = shown.map((s) => s.getBoundingClientRect().top - top + scroll - line);
+    // "Late": reaching the line only in the last half-screen of scroll, or
+    // never. Such a heading gets there with the page all but ended.
+    const late = at.findIndex((v) => v > max - main.clientHeight * 0.5);
+    if (late > 0) {
+      const from = at[late - 1];
+      const steps = shown.length - late + 1;
+      for (let i = late; i < shown.length; i++) at[i] = from + ((max - from) * (i - late + 1)) / steps;
     }
+    let current = shown[0];
+    for (let i = 0; i < shown.length; i++) if (at[i] <= scroll + 1) current = shown[i];
     markRail(current.dataset.section);
   };
   const soon = () => {

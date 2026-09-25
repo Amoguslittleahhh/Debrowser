@@ -416,6 +416,10 @@ input[type="range"] {
 .ghost-btn:hover { background: var(--wash-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .ghost-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
 .ghost-btn:active:not(:disabled) { background: var(--wash); }
+/* Every button of this kind, not only the update one: Clear on the history and
+   downloads pages was disabled with nothing to clear and looked pressable. */
+.ghost-btn:disabled,
+.ghost-btn:disabled:hover { opacity: 0.45; background: transparent; border-color: var(--border); cursor: default; }
 
 /* A revealed secret is selectable - the point of showing one is usually to
    copy it - and wraps rather than stretching the row off the page. */
@@ -432,24 +436,25 @@ input[type="range"] {
   line-height: var(--lh-body);
   color: var(--text-dim);
 }
+/* A note introducing a section sits between its heading and its card, and
+   needs room below it as well; with none, the card's edge touched the text. */
+h2 + .note { margin: 0 2px var(--s4); }
 
 /*
- * The update line and its button share a baseline, and the button keeps its
+ * The update line and its button share a row, and the button keeps its
  * width while the line beside it changes length - a control that slides along
  * the row as a percentage counts up is a control that is hard to press.
  */
 .update-foot {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s3);
+  /* The row's own space above the card, rather than the note's: aligned to
+     the text's baseline, the taller button rose into the card's edge. */
+  margin-top: var(--s3);
 }
-.update-foot .note { flex: 1; }
-.update-foot .ghost-btn { flex: none; align-self: center; }
-.update-foot .ghost-btn[disabled] { opacity: 0.5; }
-.update-foot .ghost-btn[disabled]:hover {
-  background: transparent;
-  border-color: var(--border);
-}
+.update-foot .note { flex: 1; margin-top: 0; }
+.update-foot .ghost-btn { flex: none; }
 
 /*
  * A slider's track is thin by design, and a thin track is a thin target. The

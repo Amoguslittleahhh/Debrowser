@@ -131,7 +131,9 @@ window.debrowser.onState((state) => applyThemePrefs(state.prefs));
 // The pointer moves the keyboard's place. With the two apart, a menu showed
 // two highlighted rows - one hovered, one focused - and the next arrow key
 // went on from the one the pointer had left.
+document.addEventListener('keydown', () => document.body.classList.add('keys'), true);
 document.addEventListener('mousemove', (event) => {
+  document.body.classList.remove('keys');
   const item = event.target.closest && event.target.closest('.item');
   if (item && !item.disabled && document.activeElement !== item) item.focus({ preventScroll: true });
 });

@@ -404,13 +404,18 @@ function applyThemePrefs(prefs) {
  */
 /* eslint-disable-next-line no-unused-vars -- read by menu.js, flyout.js, context.js */
 function anchorSheet(sheet, anchor, edge = 8, align = 'right') {
-  // A panel can be ready before its view has been given a size, and one
-  // placed in a 0x0 window is clamped into its top-left corner - where the
-  // downloads panel kept opening. Placed once the size exists.
-  if (!window.innerWidth || !window.innerHeight) {
+  // A panel can be ready before its view has been given a size - it draws its
+  // first frame at one pixel (see BrowserShell#openSheet) - and one placed in
+  // a window that small is clamped into its top-left corner, where the
+  // downloads panel kept opening. Placed once the real size exists, and not
+  // shown until then; a resize is handled before the frame at the new size is
+  // drawn, so that frame already has it in place.
+  if (window.innerWidth < 64 || window.innerHeight < 64) {
+    sheet.style.visibility = 'hidden';
     window.addEventListener('resize', () => anchorSheet(sheet, anchor, edge, align), { once: true });
     return;
   }
+  sheet.style.visibility = '';
   const width = sheet.offsetWidth;
   const height = sheet.offsetHeight;
   const right = anchor.right || anchor.x;

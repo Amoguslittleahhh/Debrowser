@@ -97,7 +97,10 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
 }
 /* Pressed: a step deeper than hover, for the instant between press and act. */
 .item:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.item:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+/* The ring says where the keyboard is, so only while it is being used: an
+   item focused by the pointer passing over it counts as focus-visible in a
+   panel that has had no key or click of its own, and wore a box on hover. */
+body.keys .item:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .item:disabled { opacity: 0.38; }
 
 .item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

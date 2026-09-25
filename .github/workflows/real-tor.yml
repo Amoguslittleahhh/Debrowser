@@ -32,7 +32,7 @@ permissions:
 jobs:
   real-tor:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,9 +40,9 @@ jobs:
           node-version: 22
       - name: Fetch and verify Tor
         run: node tools/fetch-tor.js
-      - name: Plain Tor, and the built-in bridges
-        timeout-minutes: 14
-        run: node test/real-tor.js --direct --bridges
+      - name: Plain Tor, the built-in bridges, and each transport alone
+        timeout-minutes: 30
+        run: node test/real-tor.js --direct --bridges --obfs4 --snowflake
       - name: Make a bridge with the bridge kit
         timeout-minutes: 8
         run: sudo bash tools/bridge-kit/setup-bridge.sh --port 8443 | tee kit.txt

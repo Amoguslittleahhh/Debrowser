@@ -31,7 +31,7 @@
  */
 
 /** The page-side script. Serialised: it must not reference anything outside itself. */
-function scrubber(seed, cores) {
+function scrubber(seed, cores, languages) {
   /* global self -- runs in a page or a worker, where `self` is the global */
   const g = self;
   const define = (obj, prop, value) => {
@@ -54,6 +54,13 @@ function scrubber(seed, cores) {
   define(nav, 'deviceMemory', 8);
   // Also set through the DevTools protocol; here too, for the workers it misses.
   define(nav, 'hardwareConcurrency', cores);
+  // The same for the languages. A dedicated worker on Windows took its list
+  // from the OS, which `--lang` does not reach: en-US on the CI runner, and
+  // "en-US,en-SG,zh-Hans-SG" on a machine set up in Singapore. One array,
+  // frozen, so every read returns the same object, as the real one does.
+  const langs = Object.freeze(languages.slice());
+  define(nav, 'languages', langs);
+  define(nav, 'language', langs[0]);
   for (const p of ['gpu', 'getBattery', 'connection', 'keyboard', 'hid', 'usb', 'serial', 'bluetooth', 'xr', 'ml',
                    'serviceWorker', 'getInstalledRelatedApps', 'storageBuckets']) remove(nav, p);
   if (g.Performance) remove(g.Performance.prototype, 'memory');
@@ -144,8 +151,9 @@ function scrubber(seed, cores) {
 }
 
 /** The script for one tab, with its own seed. */
-function sourceFor(seed, cores) {
-  return `(${scrubber})(${seed >>> 0}, ${Number(cores) || 4});`;
+function sourceFor(seed, cores, languages = 'en-US') {
+  const list = String(languages).split(',').map((l) => l.trim()).filter((l) => /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/.test(l));
+  return `(${scrubber})(${seed >>> 0}, ${Number(cores) || 4}, ${JSON.stringify(list.length ? list : ['en-US'])});`;
 }
 
 /** A fresh seed: one per tab. */

@@ -150,16 +150,18 @@ const SCHEMA = {
   /**
    * Whether the tabs you had open come back when the browser starts.
    *
-   * On, and that default is the whole argument of this browser applied to its
-   * own front door: tabs are cheap to keep, so keeping them across a restart is
-   * what someone with forty of them expects. They come back unrealised - a row
-   * in the strip and a saved address - so a restored session costs about what
-   * one tab costs until you touch them.
+   * Off, as the owner asked: a browser that opens on whatever you were looking
+   * at yesterday shows it to anyone at the screen. On, they come back
+   * unrealised - a row in the strip and a saved address - so a restored
+   * session costs about what one tab costs until you touch them.
    *
    * What comes back is the page, not the scroll position or anything typed into
    * it. That state is never written to disk on purpose; see session.js.
+   *
+   * Named afresh rather than `restoreSession` with a new default: every profile
+   * saves every value, so an old profile would have kept its saved "on".
    */
-  restoreSession: { def: true, ok: (v) => typeof v === 'boolean' },
+  restoreTabs: { def: false, ok: (v) => typeof v === 'boolean' },
 
   /**
    * Where a bookmark opens when it is clicked.
@@ -194,9 +196,9 @@ const SCHEMA = {
   // someone who closes tabs faster than they mean to close the browser.
   lastTabCloses: { def: 'quit', ok: (v) => ['quit', 'new-tab'].includes(v) },
 
-  // Off by default because restoreSession already brings the tabs back; this
-  // is for anyone who has that off, or who closes windows by accident.
-  confirmCloseTabs: { def: false, ok: (v) => typeof v === 'boolean' },
+  // On by default now that tabs are not reopened by default: closing a window
+  // of twenty tabs by accident would otherwise lose all twenty.
+  confirmCloseTabs: { def: true, ok: (v) => typeof v === 'boolean' },
 
   // Where a tab opened from a link lands. 'after-current' keeps a page's
   // spawned tabs beside it rather than at the far end of a long strip.
@@ -324,7 +326,11 @@ const SCHEMA = {
 
   // Close every private window after this many minutes with no input. 0 is never.
   incognitoIdleWipeMinutes: { def: 0, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 240 },
-  incognitoKeepWarm: { def: false, ok: (v) => typeof v === 'boolean' }
+  incognitoKeepWarm: { def: false, ok: (v) => typeof v === 'boolean' },
+  // Its own engine, and not Google's by default: a private window that sends
+  // every search to the company that most wants to link them to you undoes
+  // part of what Tor is for, and Google answers most Tor exits with a captcha.
+  incognitoSearchEngine: { def: 'duckduckgo', ok: (v) => Object.hasOwn(SEARCH_ENGINES, v) }
 
   // Still nothing here for the resource profile: it decides Chromium switches
   // applied before the app starts, so it cannot take effect without a restart.
@@ -470,8 +476,14 @@ class Prefs {
     return Object.entries(SEARCH_ENGINES).map(([id, { name }]) => ({ id, name }));
   }
 
+  /** The engine this window searches with: a private window has its own. */
+  engine() {
+    const id = this.readOnly ? this.values.incognitoSearchEngine : this.values.searchEngine;
+    return SEARCH_ENGINES[id] || SEARCH_ENGINES.google;
+  }
+
   searchTemplate() {
-    return (SEARCH_ENGINES[this.values.searchEngine] || SEARCH_ENGINES.google).url;
+    return this.engine().url;
   }
 
   /**
@@ -482,7 +494,7 @@ class Prefs {
    * written beside it.
    */
   engineName() {
-    return (SEARCH_ENGINES[this.values.searchEngine] || SEARCH_ENGINES.google).name;
+    return this.engine().name;
   }
 }
 

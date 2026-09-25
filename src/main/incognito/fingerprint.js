@@ -148,7 +148,7 @@ async function apply(tab) {
   const results = await Promise.all([
     ...emulation(cdp.send.bind(cdp)),
     screenOverride(cdp, screen),
-    cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: scrub.sourceFor(seedOf(tab.wc), PROFILE.cores) }),
+    cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: scrub.sourceFor(seedOf(tab.wc), PROFILE.cores, PROFILE.languages) }),
     ...coverHooks.map((fn) => Promise.resolve(fn(tab)).then((ok) => (ok === false ? null : true), () => null))
   ]);
   // Last: from here every new frame and worker is held until it is covered.
@@ -193,7 +193,7 @@ async function coverChild(tab, { sessionId, targetInfo }) {
   const cdp = tab.cdp;
   if (!cdp || !tab.wc || tab.wc.isDestroyed()) return;
   const send = (method, params) => cdp.sendTo(sessionId, method, params);
-  const source = scrub.sourceFor(seedOf(tab.wc), PROFILE.cores);
+  const source = scrub.sourceFor(seedOf(tab.wc), PROFILE.cores, PROFILE.languages);
   let ok;
   if (targetInfo.type === 'iframe' || targetInfo.type === 'page') {
     const enabled = await send('Page.enable');

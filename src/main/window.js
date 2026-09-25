@@ -689,6 +689,16 @@ class BrowserShell {
       this.log(`transparent menu unavailable: ${err.message}`);
     }
 
+    // In the window from the start, but one pixel big, until it has drawn.
+    //
+    // Added only once loaded, it still flashed white on Windows: a view that
+    // has never produced a frame is drawn as a white rectangle until its first
+    // one arrives, and "loaded" is not "drawn". A view in the window draws
+    // frames while it loads, and a pixel of it is nothing anyone can see.
+    this.window.contentView.addChildView(sheetView);   // topmost, over the chrome
+    sheetView.setBounds({ x: 0, y: 0, width: 1, height: 1 });
+    this.sheetDrawn = false;
+
     const wc = sheetView.webContents;
     this.bindShortcuts(wc);
     wc.loadFile(path.join(RENDERER_DIR, file), {
@@ -723,13 +733,21 @@ class BrowserShell {
     // blur that arrives while the menu is still loading is focus settling, not
     // the user clicking away, and treating it as a dismissal closed the menu
     // in the same breath as opening it.
-    wc.once('did-finish-load', () => {
+    wc.once('did-finish-load', async () => {
       // Dismissed before it finished loading - Escape, or a second press. The
       // view is already being torn down; putting it on screen now would show a
       // menu the user has closed.
       if (this.sheetView !== sheetView || wc.isDestroyed()) return;
 
-      this.window.contentView.addChildView(sheetView);   // topmost, over the chrome
+      // Two animation frames: the page has laid out and drawn at least once.
+      // Bounded, so a renderer that never answers still shows its panel.
+      await Promise.race([
+        wc.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))', true),
+        new Promise((r) => setTimeout(r, 150))
+      ]).catch(() => {});
+      if (this.sheetView !== sheetView || wc.isDestroyed()) return;
+
+      this.sheetDrawn = true;
       this.layoutSheet();
 
       // Focused so it can take the keyboard, which is how the arrow keys and
@@ -851,7 +869,8 @@ class BrowserShell {
   }
 
   layoutSheet() {
-    if (!this.sheetView || this.window.isDestroyed()) return;
+    // Still drawing its first frame at one pixel; see openSheet.
+    if (!this.sheetView || !this.sheetDrawn || this.window.isDestroyed()) return;
     const { width, height } = this.window.getContentBounds();
     if (width <= 0 || height <= 0) return;
     this.sheetView.setBounds({ x: 0, y: 0, width, height });

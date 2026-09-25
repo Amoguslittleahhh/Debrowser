@@ -1112,7 +1112,7 @@ function main() {
      * rather than from whatever the machine's last real run left behind.
      */
     sessionStore = OFFLINE_MODE || INCOGNITO ? null : new Session(log);
-    const saved = sessionStore && prefs.get('restoreSession') !== false
+    const saved = sessionStore && prefs.get('restoreTabs') === true
       ? sessionStore.load()
       : { tabs: [], activeIndex: 0 };
 
@@ -1263,7 +1263,7 @@ function main() {
       cancelId: 1,
       title: 'Close window?',
       message: `Close the window and its ${count} tabs?`,
-      detail: prefs.get('restoreSession') ? 'They reopen the next time you start the browser.' : '',
+      detail: prefs.get('restoreTabs') ? 'They reopen the next time you start the browser.' : '',
       checkboxLabel: 'Don\'t ask again'
     }).then(({ response, checkboxChecked }) => {
       quitState.asking = false;

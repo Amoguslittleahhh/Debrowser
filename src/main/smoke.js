@@ -1137,8 +1137,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // rectangle - which is what pressing the three dots flashed. So "is it on
     // top and window-sized" is now a question with a moment's delay in front of
     // it, and asking it immediately is asking before the answer exists.
+    // In the window from the start at one pixel, and window-sized once it
+    // has drawn (see BrowserShell#openSheet): shown means both.
     const shown = await waitFor(
-      () => shell.window.contentView.children.includes(view), { timeoutMs: 8000 });
+      () => shell.window.contentView.children.includes(view) && shell.sheetDrawn, { timeoutMs: 8000 });
 
     const children = shell.window.contentView.children;
     const onTop = shown && children[children.length - 1] === view;
