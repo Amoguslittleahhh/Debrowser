@@ -14,6 +14,12 @@
 
 name: Release
 
+# What the run is called in the Actions list: "Release v1.7.0 - Test 3"
+# rather than "Release #36". The test number counts the tries at that version,
+# and is given by whoever starts the run, since a workflow cannot count its own
+# earlier runs; a tag push is the real thing and has none.
+run-name: "${{ format('Release {0}{1}', inputs.tag || (github.event_name == 'push' && github.ref_name) || '(build only)', inputs.test && format(' - Test {0}', inputs.test) || '') }}"
+
 on:
   push:
     # Version tags only. The negations matter: not every `v*` tag is a build.
@@ -32,6 +38,10 @@ on:
     inputs:
       tag:
         description: 'Tag to release, e.g. v1.0.0. Leave empty to build artifacts only.'
+        required: false
+        default: ''
+      test:
+        description: 'Which try at this version this is (1, 2, 3...). Shown in the run name only.'
         required: false
         default: ''
       draft:
