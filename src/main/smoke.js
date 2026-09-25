@@ -2484,6 +2484,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         typing.items[0].kind === 'history' && deleting.items[0].kind === 'search',
         `${typing.items[0].kind} / ${deleting.items[0].kind}`);
 
+      const words = ['how to reach printer.local', 'note:3', 'what is example.com'].map(classifyAddress);
+      check('a question ending in a host name is searched, not opened',
+        words.every((k) => k === null) && classifyAddress('github.com/a b') === 'host', words.join(','));
+
       const port = suggest({ text: 'router:8080' });
       check('the list and Enter agree about local addresses',
         classifyAddress('router:8080') === 'local' && port.items[0].kind === 'go', port.items[0].kind);

@@ -1,6 +1,6 @@
 {
   "name": "debrowser",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "A memory-adaptive web browser: minimum RAM and CPU per tab, without costing smoothness.",
   "main": "src/main/main.js",

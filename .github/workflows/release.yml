@@ -409,6 +409,10 @@ jobs:
           # On a hand-run the tag does not exist yet; the action creates it at
           # this run's commit.
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          # The commit that was built and tested. Without it a draft's tag is
+          # made when the draft is published, from whatever the branch holds
+          # by then - which need not be what the installers were built from.
+          target_commitish: ${{ github.sha }}
           draft: ${{ github.event.inputs.draft == 'true' }}
           body_path: RELEASE_NOTES.md
           files: artifacts/*

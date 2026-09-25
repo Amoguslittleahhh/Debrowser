@@ -86,21 +86,38 @@ window.addEventListener('wheel', (event) => {
 }, { passive: false, capture: true });
 
 /*
- * Ctrl+S and Ctrl+/ reach the page first (see `pageFirst` in shortcuts.js):
- * an editor saves its document or toggles a comment, and the browser acts
- * only if the page did not. Checked after the event has been through the
- * page's own handlers, which is when `defaultPrevented` says whether it used
- * the key.
+ * Ctrl+S and Ctrl+/ reach the page first (see `awaitPageKey` in main.js): an
+ * editor saves its document or toggles a comment, and the browser acts only
+ * if the page did not. Checked after the event has been through the page's
+ * own handlers, which is when `defaultPrevented` says whether it used the key,
+ * and answered either way - silence is what tells the browser this frame
+ * could not see the key.
+ *
+ * A key typed into a frame of the same site never reaches this window, so
+ * such a frame is listened to as well once focus goes into it.
  */
 const PAGE_FIRST = { s: 'save-page', '/': 'show-shortcuts' };
-window.addEventListener('keydown', (event) => {
-  const mod = process.platform === 'darwin' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+function pageFirstKey(event) {
+  const mac = process.platform === 'darwin';
+  const mod = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   const command = PAGE_FIRST[String(event.key).toLowerCase()];
   if (!command || !mod || event.shiftKey || event.altKey || event.repeat) return;
+  setTimeout(() => ipcRenderer.send('debrowser:page-key', command, event.defaultPrevented), 0);
+}
+window.addEventListener('keydown', pageFirstKey, true);
+const watchedFrames = new WeakSet();
+window.addEventListener('blur', () => {
   setTimeout(() => {
-    if (!event.defaultPrevented) ipcRenderer.send('debrowser:page-key', command);
+    const frame = document.activeElement;
+    if (!frame || frame.tagName !== 'IFRAME') return;
+    try {
+      const inner = frame.contentWindow;
+      if (!inner || watchedFrames.has(inner)) return;
+      inner.addEventListener('keydown', pageFirstKey, true);   // throws for another site's frame
+      watchedFrames.add(inner);
+    } catch { /* another site's frame: the browser's fallback covers it */ }
   }, 0);
-}, true);
+});
 
 const passive = { passive: true, capture: true };
 window.addEventListener('scroll', markScroll, passive);

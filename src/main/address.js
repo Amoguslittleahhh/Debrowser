@@ -25,9 +25,16 @@ function classifyAddress(input) {
   if (!text) return null;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(about|data|blob|file):/i.test(text)) return 'url';
   const host = text.split(/[/?#]/)[0];
+  // Words with spaces between them are a search, whatever the last one looks
+  // like: "how to reach printer.local" is a question, not an address. A space
+  // later in a path (`github.com/a b`) is still an address.
+  if (/\s/.test(host)) return null;
+  // A bare name with a port only when the port is a plausible one - two to
+  // five digits, at most 65535 - so "note:3" is searched for.
+  const bareNamePort = /^[a-z0-9-]+:(\d{2,5})$/i.exec(host);
   if (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host) || /^\[[0-9a-f:.]+\](:\d+)?$/i.test(host) ||
-      /^localhost(:\d+)?$/i.test(host) || /\.(local|lan|internal|home\.arpa)(:\d+)?$/i.test(host) ||
-      /^[a-z0-9-]+:\d+$/i.test(host)) return 'local';
+      /^localhost(:\d+)?$/i.test(host) || /^[a-z0-9.-]+\.(local|lan|internal|home\.arpa)(:\d+)?$/i.test(host) ||
+      (bareNamePort && Number(bareNamePort[1]) <= 65535)) return 'local';
   if (/^[^\s/?#]+\.[^\s/?#]{2,}([/?#]|$)/.test(text)) return 'host';
   return null;
 }

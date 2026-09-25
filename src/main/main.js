@@ -496,14 +496,50 @@ function main() {
       }
       const hit = shortcuts.match(input);
       if (!hit || (only && !only.has(hit.command))) return;
-      // On a website, a key the page may want for itself goes to the page;
-      // the page probe asks for the browser's action afterwards if the page
-      // did not use it (`debrowser:page-key`, below).
-      if (hit.pageFirst && tab && !tab.internal) return;
+      // On a website, a key the page may want for itself goes to the page
+      // first. See `awaitPageKey`.
+      if (hit.pageFirst && tab && !tab.internal) {
+        if (!input.isAutoRepeat) awaitPageKey(tab, hit.command);
+        return;
+      }
       event.preventDefault();
       runCommand(hit.command, hit.payload);
     });
   };
+
+  /*
+   * Ctrl+S and Ctrl+/ on a website: the page's, if it uses them - an editor
+   * saves its document, a code editor toggles a comment - and the browser's
+   * otherwise.
+   *
+   * The page probe watches the key go through the page's own handlers and says
+   * whether the page took it (`debrowser:page-key`). It runs in the top frame
+   * and in frames of the same site. Where it cannot see - a frame from another
+   * site, a PDF - nothing answers, and the browser acts after a moment, as it
+   * did before the page was asked first. The cost of that is an editor inside
+   * another site's frame getting both its own action and the browser's.
+   */
+  const PAGE_KEY_WAIT_MS = 250;
+  const pageKeys = new Map();         // tab id -> { command, timer }
+  const awaitPageKey = (tab, command) => {
+    const had = pageKeys.get(tab.id);
+    if (had) clearTimeout(had.timer);
+    const timer = setTimeout(() => {
+      pageKeys.delete(tab.id);
+      if (tab === tabs?.activeTab()) runCommand(command, null);
+    }, PAGE_KEY_WAIT_MS);
+    pageKeys.set(tab.id, { command, timer });
+  };
+  ipcMain.on('debrowser:page-key', (event, command, used) => {
+    const tab = tabs?.all().find((t) => t.isLive && t.wc.id === event.sender.id);
+    const pending = tab && pageKeys.get(tab.id);
+    // Only an answer to a key the browser saw pressed: a page cannot open a
+    // dialog by sending this on its own.
+    if (!pending || pending.command !== command) return;
+    clearTimeout(pending.timer);
+    pageKeys.delete(tab.id);
+    if (!used && tab === tabs.activeTab()) runCommand(command, null);
+  });
 
   const bindPageShortcuts = (tab) => {
     if (tab.isLive) bindShortcuts(tab.wc, tab);
@@ -1420,7 +1456,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           : item.kind === 'go' ? item.url : normaliseUrl(item.url, prefs.searchTemplate());
         if (!url) break;
         // A middle-click opens it as a link would: behind the page, beside it.
-        if (payload?.newTab) openLinkTab(tabs, prefs, active, url);
+        // A new tab has no retry over http, so it gets the full address.
+        if (payload?.newTab) openLinkTab(tabs, prefs, active, normaliseUrl(url, prefs.searchTemplate()));
         else runCommand('navigate', { url });
         break;
       }
@@ -2235,20 +2272,6 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
    * No privilege is involved - a page asking to zoom itself is a page changing
    * its own scale - so this needs no sender check beyond being a tab we own.
    */
-  /*
-   * A page-first key the page did not use. Only the commands marked
-   * `pageFirst` in shortcuts.js, and only for a tab we own: the most a page can
-   * do by sending this itself is open its own Save dialog or the shortcut list,
-   * which is what pressing the key does.
-   */
-  const PAGE_FIRST = new Set(['save-page', 'show-shortcuts']);
-  ipcMain.on('debrowser:page-key', (event, command) => {
-    if (!PAGE_FIRST.has(command)) return;
-    const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
-    if (!tab || tab !== tabs.activeTab()) return;
-    runCommand(command, null);
-  });
-
   ipcMain.on('debrowser:zoom-gesture', (event, payload) => {
     const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
     if (!tab) return;
