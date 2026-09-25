@@ -740,7 +740,11 @@ class BrowserShell {
       // menu that stays up after the user has gone somewhere else is a menu
       // they have to dismiss twice. This is the backstop for the click-away the
       // transparent backdrop already handles; both funnel into `closeSheet`.
-      wc.on('blur', () => this.closeSheet({ blurred: true }));
+      //
+      // Only ever itself. A panel replaced by another is removed at once, and
+      // on Windows its blur can arrive after that - when the panel on screen
+      // is already the new one, which this used to close in its place.
+      wc.on('blur', () => { if (this.sheetView === sheetView) this.closeSheet({ blurred: true }); });
     });
   }
 

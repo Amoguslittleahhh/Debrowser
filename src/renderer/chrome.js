@@ -915,12 +915,12 @@ el.tabs.addEventListener('pointermove', (event) => {
 });
 el.tabs.addEventListener('pointerup', () => endTabDrag(false));
 el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
-// And when the pointer leaves the strip before the drag has begun: only a
-// begun drag holds the pointer, so the release may land somewhere else - over
-// the page - and this view would never hear of it. Not `event.buttons`, which
-// read as no button held on Windows for moves that had one, and cancelled
-// every drag there.
-el.tabs.addEventListener('pointerleave', () => { if (tabDrag && !tabDrag.active) tabDrag = null; });
+// A press that has not become a drag yet does not hold the pointer, so its
+// release can land on the page, which this view never hears of; the browser
+// does, and says so (`pointer-released`). Not read from the pointer here:
+// `buttons` and `pointerleave` both misreport on Windows under test input,
+// and cancelled every drag there.
+window.addEventListener('pointerup', () => { if (tabDrag && !tabDrag.active) tabDrag = null; });
 // Esc puts it back where it came from.
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && tabDrag?.active) { event.preventDefault(); endTabDrag(true); }
@@ -1507,6 +1507,9 @@ api.onMessage((message) => {
       selected = message.index;
       el.url.value = shown(suggestions[selected]);
       el.url.setSelectionRange(el.url.value.length, el.url.value.length);
+      break;
+    case 'pointer-released':
+      if (tabDrag && !tabDrag.active) tabDrag = null;
       break;
     case 'suggest-done':
       closeList();

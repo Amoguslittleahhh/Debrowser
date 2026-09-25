@@ -2350,6 +2350,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const along = (t) => (rect.vertical
       ? { x: Math.round(rect.x + 14), y: Math.round(rect.y + rect.h / 2 + t * rect.h) }
       : { x: Math.round(rect.x + 14 + t * rect.w), y: Math.round(rect.y + rect.h / 2) });
+    // What the strip actually receives, for the failure message: the input
+    // is synthetic, and platforms differ in what they make of it.
+    await chrome.executeJavaScript(`(() => {
+      window.__dragTrace = [];
+      for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointerleave', 'pointercancel', 'lostpointercapture']) {
+        document.getElementById('tabs').addEventListener(type, (e) => {
+          if (window.__dragTrace.length < 40) window.__dragTrace.push(type.replace('pointer', '') + ':' + e.buttons + ':' + Math.round(e.clientX));
+        }, true);
+      }
+    })()`);
     const start = along(0);
     chrome.sendInputEvent({ type: 'mouseDown', ...start, button: 'left', clickCount: 1 });
     for (let i = 1; i <= 12; i++) {
@@ -2359,12 +2369,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     chrome.sendInputEvent({ type: 'mouseUp', ...along(1.5), button: 'left', clickCount: 1 });
     const moved = await waitFor(() => tabs.all().indexOf(a) === from + 1, { timeoutMs: 3000 });
     await sleep(500);
+    const trace = await chrome.executeJavaScript('(window.__dragTrace || []).join(" ")').catch(() => '?');
     const stripOrder = await chrome.executeJavaScript(
       `[...document.querySelectorAll('#tabs > .tab:not(.closing)')].map((n) => n.dataset.id).join(',')`);
     check('dragging a tab along the strip moves it there',
       moved && tabs.all().indexOf(b) === from && stripOrder === tabs.all().map((t) => t.id).join(','),
       `index ${from} -> ${tabs.all().indexOf(a)}, neighbour at ${tabs.all().indexOf(b)}, ` +
-      `tab at ${JSON.stringify(rect)}, chrome ${JSON.stringify(shell.chromeView.getBounds())}`);
+      `tab at ${JSON.stringify(rect)}, chrome ${JSON.stringify(shell.chromeView.getBounds())}, ` +
+      `saw ${trace}`);
     tabs.close(a.id);
     tabs.close(b.id);
   }

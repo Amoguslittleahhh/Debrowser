@@ -542,7 +542,13 @@ function main() {
   });
 
   const bindPageShortcuts = (tab) => {
-    if (tab.isLive) bindShortcuts(tab.wc, tab);
+    if (!tab.isLive) return;
+    bindShortcuts(tab.wc, tab);
+    // A tab pressed in the strip and let go over the page: the strip never
+    // sees that release, so it is told. See chrome.js, `pointer-released`.
+    tab.wc.on('input-event', (_event, input) => {
+      if (input.type === 'mouseUp' && shell) shell.toChrome('pointer-released');
+    });
   };
 
   /**
