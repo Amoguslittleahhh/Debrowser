@@ -2335,6 +2335,15 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // the suite has open by now - which also exercises `move` on its own.
     tabs.move(a.id, 0);
     tabs.move(b.id, 1);
+    // At the strip's minimum width, whatever the window: that is where the
+    // active tab is all close button, and where this check once passed on a
+    // wide window and failed on a narrow one.
+    await chrome.executeJavaScript(`(() => {
+      const s = document.createElement('style');
+      s.id = 'smoke-narrow';
+      s.textContent = '#tabs > .tab { max-width: 52px !important; flex: 0 0 52px !important; }';
+      document.head.append(s);
+    })()`);
     await sleep(400);
     const from = tabs.all().indexOf(a);
     const rect = await chrome.executeJavaScript(`(() => {
@@ -2345,8 +2354,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       return { x: r.left, y: r.top, w: r.width, h: r.height,
                vertical: document.body.dataset.layout === 'left' };
     })()`);
-    // Grabbed by its icon end: a narrow tab is mostly close button, and a
-    // press there is a close, never a drag.
+    // Pressed 14px in, which on a tab this narrow is the close button: a press
+    // there that moves has to be a drag, and not a close.
     const along = (t) => (rect.vertical
       ? { x: Math.round(rect.x + 14), y: Math.round(rect.y + rect.h / 2 + t * rect.h) }
       : { x: Math.round(rect.x + 14 + t * rect.w), y: Math.round(rect.y + rect.h / 2) });
@@ -2370,10 +2379,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const moved = await waitFor(() => tabs.all().indexOf(a) === from + 1, { timeoutMs: 3000 });
     await sleep(500);
     const trace = await chrome.executeJavaScript('(window.__dragTrace || []).join(" ")').catch(() => '?');
+    await chrome.executeJavaScript("document.getElementById('smoke-narrow')?.remove()").catch(() => {});
     const stripOrder = await chrome.executeJavaScript(
       `[...document.querySelectorAll('#tabs > .tab:not(.closing)')].map((n) => n.dataset.id).join(',')`);
-    check('dragging a tab along the strip moves it there',
-      moved && tabs.all().indexOf(b) === from && stripOrder === tabs.all().map((t) => t.id).join(','),
+    check('dragging a tab along the strip moves it there, even by its close button',
+      moved && tabs.all().includes(a) && tabs.all().indexOf(b) === from && stripOrder === tabs.all().map((t) => t.id).join(','),
       `index ${from} -> ${tabs.all().indexOf(a)}, neighbour at ${tabs.all().indexOf(b)}, ` +
       `tab at ${JSON.stringify(rect)}, chrome ${JSON.stringify(shell.chromeView.getBounds())}, ` +
       `saw ${trace}`);

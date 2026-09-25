@@ -810,7 +810,12 @@ let tabDrag = null;
 let heldOrder = null;
 
 function armTabDrag(event, id, root) {
-  if (event.button !== 0 || event.target.closest('button')) return;
+  // The close button included, as in Chrome: a press that moves is a drag, one
+  // that does not is still a close. A narrow active tab is all close button -
+  // at the strip's minimum width there is no room for the icon beside it - and
+  // without this the tab you were on could not be moved once the strip filled.
+  const button = event.target.closest('button');
+  if (event.button !== 0 || (button && !button.classList.contains('tab-close'))) return;
   const vertical = document.body.dataset.layout === 'left';
   tabDrag = { id, root, vertical, pointer: event.pointerId,
     start: vertical ? event.clientY : event.clientX, active: false };
@@ -880,6 +885,11 @@ function endTabDrag(cancelled) {
   const d = tabDrag;
   tabDrag = null;
   if (!d || !d.active) return;
+  // A drag that began on the close button ends in that button's click, which
+  // must not close the tab just moved.
+  const swallow = (event) => { event.stopPropagation(); event.preventDefault(); };
+  window.addEventListener('click', swallow, { capture: true, once: true });
+  setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
   const to = cancelled ? d.from : d.to;
   const before = d.root.getBoundingClientRect();
   // Final order in the DOM, every transform gone, with no transition, so the
