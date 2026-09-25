@@ -57,6 +57,7 @@ const COMMANDS = new Set([
   'discard-tab',
   'move-tab',
   'bookmark-menu',
+  'copy-image',
   'forget-bookmark',
   // The site panel under the padlock, and the permission questions it asks.
   'open-site',

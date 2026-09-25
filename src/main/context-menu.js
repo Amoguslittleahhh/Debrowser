@@ -77,6 +77,9 @@ function buildModel(params = {}, state = {}) {
         enabled: openable(media), payload: { url: media } },
       { id: 'save-link', label: 'Save image as…', icon: 'download',
         payload: { url: media } });
+    // The picture itself, as a copy-and-paste into a chat or a document
+    // expects - not only its address.
+    items.push({ id: 'copy-image', label: 'Copy image', icon: 'copy' });
     if (hasAddress(media)) {
       items.push({ id: 'copy-link', label: 'Copy image address', icon: 'copy',
         payload: { text: media } });
@@ -111,9 +114,23 @@ function buildModel(params = {}, state = {}) {
         icon: 'search', payload: { text: selection } });
   }
 
-  // The page itself, always last and always present - so the menu is never
-  // empty, and back is where it is in every other browser.
-  if (items.length) items.push(sep());
+  const inspect = {
+    id: 'inspect', label: 'Inspect', icon: 'inspect',
+    accel: shortcuts.accelFor('toggle-devtools'),
+    // Chromium's coordinates are relative to the page, which is exactly what
+    // `inspectElement` wants - so they are passed through untouched rather
+    // than converted to window coordinates and back.
+    payload: { x: Math.round(params.x || 0), y: Math.round(params.y || 0) }
+  };
+
+  // A link, an image, a field or a selection gets its own items and Inspect -
+  // not Back, Reload, Print and the rest of the page's menu under them, which
+  // made a link's menu fifteen rows long. The page's menu is for the page.
+  if (items.length) {
+    items.push(sep(), inspect);
+    return items;
+  }
+
   items.push(
     { id: 'back', label: 'Back', icon: 'back', accel: shortcuts.accelFor('back'),
       enabled: state.canGoBack === true },
@@ -128,18 +145,13 @@ function buildModel(params = {}, state = {}) {
     { id: 'print', label: 'Print…', icon: 'print', accel: shortcuts.accelFor('print') },
     { id: 'view-source', label: 'View page source', icon: 'code',
       accel: shortcuts.accelFor('view-source'), enabled: !state.internal },
-    { id: 'inspect', label: 'Inspect', icon: 'inspect',
-      accel: shortcuts.accelFor('toggle-devtools'),
-      // Chromium's coordinates are relative to the page, which is exactly what
-      // `inspectElement` wants - so they are passed through untouched rather
-      // than converted to window coordinates and back.
-      payload: { x: Math.round(params.x || 0), y: Math.round(params.y || 0) } });
+    inspect);
 
   return items;
 }
 
 /** Enough of the selection to recognise it, and no more than a menu can hold. */
-function ellipsis(text, max = 24) {
+function ellipsis(text, max = 18) {
   const flat = text.replace(/\s+/g, ' ');
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }

@@ -541,3 +541,12 @@ main { scrollbar-gutter: stable; }
   .row { flex-wrap: wrap; }
   .row-control { margin-left: auto; }
 }
+
+/* A bookmark's three buttons, when the row is pointed at or reached by the
+   keyboard: a list of forty with a hundred and twenty permanent buttons
+   was mostly buttons. */
+.bookmark-row { gap: var(--s3); }
+.bookmark-row .row-control { opacity: 0; transition: opacity var(--fast) var(--ease); }
+.bookmark-row:hover .row-control,
+.bookmark-row:focus-within .row-control { opacity: 1; }
+@media (hover: none) { .bookmark-row .row-control { opacity: 1; } }

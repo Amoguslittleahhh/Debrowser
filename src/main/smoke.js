@@ -1707,7 +1707,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('the page menu offers what was under the pointer',
       ids(link).includes('open-link-tab') && ids(link).includes('copy-link') &&
         ids(editable).includes('edit-paste') && !ids(plain).includes('open-link-tab') &&
-        ids(plain).includes('back'),
+        ids(plain).includes('back') && !ids(link).includes('back') && !ids(editable).includes('print'),
       `link: ${ids(link).slice(0, 3).join(',')} · editable: ${ids(editable).slice(0, 2).join(',')}`);
 
     check('a link the browser would not open is not offered',

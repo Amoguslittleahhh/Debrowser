@@ -90,7 +90,7 @@ function explain(code, description, url) {
     return { title: 'File not found',
       detail: 'It may have been moved, renamed or deleted.', retryOnline: false };
   }
-  return { title: 'This page couldn’t be loaded',
+  return { title: host ? `Can’t load ${host}` : 'This page couldn’t be loaded',
     detail: 'Try again. If it keeps happening, the site may be having trouble.', retryOnline: true };
 }
 

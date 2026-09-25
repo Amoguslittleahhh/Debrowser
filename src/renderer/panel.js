@@ -75,7 +75,7 @@ function coverageNote(state) {
 }
 
 const PRESSURE_TEXT = {
-  none: 'Under budget. Tabs are demoted on the idle ladder and by the live cap.',
+  none: 'Under budget. Tabs you are not using are put to sleep as they go quiet.',
   moderate: 'Approaching budget. Idle tabs are being trimmed sooner.',
   high: 'Over budget. Idle tabs are being frozen and may be discarded.',
   critical: 'Well over budget. Reclaiming aggressively from the least-used tabs.'
@@ -215,14 +215,14 @@ function render(state) {
   // "2 process(es)" beside a total of 510MB, which makes the total look
   // impossible rather than merely high, and sends anyone reading it after the
   // wrong bug.
+  const n = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
   let line =
-    `${state.profile} profile · ${state.processCount} process(es), ` +
-    `${state.rendererCount} renderer(s) · ` +
-    `${s.freezes} frozen · ${s.discards} discarded · ~${s.reclaimedMB} MB reclaimed`;
+    `${n(state.processCount, 'process', 'processes')}, ${n(state.rendererCount, 'for pages', 'for pages')} · ` +
+    `${n(s.freezes, 'tab frozen', 'tabs frozen')} · ${s.discards} discarded · about ${s.reclaimedMB} MB freed`;
   // Only shown once the heap limit rule has actually acted, so the line stays
   // quiet in the default configuration where the rule is off.
   if (s.heapCollections) {
-    line += ` · ${s.heapCollections} heap collection(s), ~${s.heapReclaimedMB} MB`;
+    line += ` · ${n(s.heapCollections, 'memory clean-up')}, about ${s.heapReclaimedMB} MB`;
   }
 
   // An inert lever must be visible, not silent: "nothing has hibernated yet" and
@@ -257,11 +257,10 @@ function render(state) {
 
   // What the reclaim cost, next to what it saved. `restore` is the one that
   // matters: it is the only reclaim in this browser the user can feel.
+  // Typical figures, in words; the slow tail is for the benchmark, not here.
   const lat = state.latency || {};
-  const timings = [];
-  if (lat.restore) timings.push(`restore ${lat.restore.p50}/${lat.restore.p95} ms`);
-  if (lat.switch) timings.push(`switch ${lat.switch.p50}/${lat.switch.p95} ms`);
-  if (timings.length) line += ` · ${timings.join(', ')} (p50/p95)`;
+  if (lat.restore) line += ` · waking a tab takes about ${lat.restore.p50} ms`;
+  if (lat.switch) line += ` · switching about ${lat.switch.p50} ms`;
 
   el.stats.textContent = line;
 }

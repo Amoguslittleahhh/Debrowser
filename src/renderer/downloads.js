@@ -226,6 +226,8 @@ async function load() {
   const res = await api.request('list-downloads');
   const all = (res && res.items) || [];
   render(all.filter((item) => matches(item, el.query.value.trim())));
+  // "Clear finished" with nothing finished is a button that does nothing.
+  el.clear.disabled = !all.some((item) => !RUNNING.has(item.state));
 
   // Polled only while something is actually moving. A downloads page with
   // nothing running should cost exactly nothing, which is most of the time it

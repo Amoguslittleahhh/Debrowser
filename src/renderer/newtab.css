@@ -209,3 +209,6 @@ body.still .tile { animation: none; }
 
 .tile:hover .tile-forget { opacity: 1; }
 .tile-forget:hover { color: var(--crit); }
+
+/* A forgotten tile: gone from sight, its place kept. */
+.tile.gone { opacity: 0; visibility: hidden; transition: opacity var(--fast) var(--ease), visibility 0s linear var(--fast); }

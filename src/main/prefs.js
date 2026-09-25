@@ -200,7 +200,7 @@ const SCHEMA = {
 
   // Where a tab opened from a link lands. 'after-current' keeps a page's
   // spawned tabs beside it rather than at the far end of a long strip.
-  newTabPosition: { def: 'end', ok: (v) => ['end', 'after-current'].includes(v) },
+  newTabPosition: { def: 'after-current', ok: (v) => ['end', 'after-current'].includes(v) },
 
   // Links opened in a new tab stay behind the page you are reading by default,
   // which is also what keeps them unrealised and free until visited.

@@ -98,7 +98,7 @@ class Updater {
    */
   capability() {
     if (!app.isPackaged) {
-      return { available: false, reason: 'running from source - updates apply to installed builds only' };
+      return { available: false, reason: 'running from source – updates apply to installed builds only' };
     }
     if (process.platform === 'darwin') {
       // Squirrel.Mac validates that the update is signed by the same identity
@@ -121,7 +121,7 @@ class Updater {
     if (!this.canWriteInstallDir()) {
       return {
         available: false,
-        reason: 'installed for all users - updates are handled by whoever deployed it'
+        reason: 'installed for all users – updates are handled by whoever deployed it'
       };
     }
 

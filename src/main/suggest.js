@@ -126,17 +126,23 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
     }
   }
 
-  const rows = [];
-  if (looksLikeAddress(typed)) rows.push({ kind: 'go', title: typed, url: typed });
-  // The row Enter would take comes first: the completed address if there is
-  // one, then everything else by score, with the search row never lower than
-  // third - a list full of history must not bury the plain search.
+  // The first row is always what Enter does, and is marked so: the address
+  // inline completion filled in, else the address as typed, else the search.
+  // After it, the best matches - with the search no lower than third for
+  // words, and last for something that is plainly an address, where a second
+  // row repeating the typed text read as noise.
   const matches = ranked.slice(0, MAX_ROWS);
   const searchRow = { kind: 'search', title: typed, engine };
+  const address = looksLikeAddress(typed);
   const lead = inlineUrl ? matches.findIndex((c) => c.url === inlineUrl) : -1;
-  if (lead > 0) matches.unshift(matches.splice(lead, 1)[0]);
-  const head = matches.slice(0, rows.length ? 1 : 2);
-  rows.push(...head, searchRow, ...matches.slice(head.length));
+  const rows = [];
+  if (lead >= 0) rows.push(matches.splice(lead, 1)[0]);
+  else if (address) rows.push({ kind: 'go', title: typed, url: typed });
+  else rows.push(searchRow);
+  if (rows[0] === searchRow) rows.push(...matches);
+  else if (address) rows.push(...matches, searchRow);
+  else rows.push(...matches.slice(0, 1), searchRow, ...matches.slice(1));
+  rows[0] = { ...rows[0], isDefault: true };
   return {
     items: rows.slice(0, MAX_ROWS).map(({ score, ...row }) => row),
     inline,

@@ -1385,7 +1385,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           ? normaliseUrl(item.title, prefs.searchTemplate(), { search: true })
           : normaliseUrl(item.url, prefs.searchTemplate());
         if (!url) break;
-        if (payload?.newTab) tabs.create({ url });
+        // A middle-click opens it as a link would: behind the page, beside it.
+        if (payload?.newTab) openLinkTab(tabs, prefs, active, url);
         else runCommand('navigate', { url });
         break;
       }
@@ -1490,7 +1491,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // opener focuses the existing Settings tab or makes a new one, which is
         // both correct and what the user meant.
         if (pages.isInternal(target)) {
-          openInternalPage(tabs, target);
+          // The private window's own pages mean nothing here - the plain-HTTP
+          // explanation's buttons did nothing, the self-check checked nothing -
+          // so the ordinary browser shows the page that says what private
+          // windows are, instead.
+          const privateOnly = ['insecure', 'fingerprint', 'blank'].includes(pages.pageName(target));
+          openInternalPage(tabs, !INCOGNITO && privateOnly ? pages.TOR_URL : target);
           break;
         }
 
@@ -1665,7 +1671,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const url = String(payload?.url || '');
         // The page that was right-clicked, which the menu recorded; the tab in
         // front is the same one unless something switched tabs meanwhile.
-        const opener = (context.model?.tabId && tabs.byId(context.model.tabId)) || active;
+        // From the bookmarks bar there is no menu behind it: the tab in front.
+        const opener = (!payload?.fromBar && context.model?.tabId && tabs.byId(context.model.tabId)) || active;
         if (openableUrl(url)) openLinkTab(tabs, prefs, opener, url);
         break;
       }
@@ -1704,6 +1711,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // Opens the inspector on the element that was right-clicked. The dock is
       // ours, so the inspector has to exist before it can be pointed at a node.
+      // The image under the pointer, onto the clipboard as a picture.
+      case 'copy-image': {
+        const at = context.model?.params;
+        if (active?.isLive && at) active.wc.copyImageAt(Math.round(at.x || 0), Math.round(at.y || 0));
+        break;
+      }
+
       case 'inspect': {
         if (!active?.isLive) break;
         const { x, y } = context.model?.params || payload || {};
@@ -3071,6 +3085,7 @@ function menuModel({ tabs, shell }) {
       accel: accel('new-incognito-window'), icon: 'shield'
     }]),
     { kind: 'separator' },
+    { id: 'open-bookmarks', label: 'Bookmarks', accel: accel('open-bookmarks'), icon: 'star' },
     { id: 'open-history', label: 'History', accel: accel('open-history'), icon: 'clock' },
     { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },
     { kind: 'separator' },
@@ -3087,7 +3102,8 @@ function menuModel({ tabs, shell }) {
     },
     { id: 'save-page', label: 'Save page as\u2026', accel: accel('save-page'), icon: 'download',
       enabled: live && !tabs.activeTab()?.internal },
-    { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print', enabled: live },
+    { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print',
+      enabled: live && !tabs.activeTab()?.internal },
     { kind: 'separator' },
     {
       id: 'toggle-panel',

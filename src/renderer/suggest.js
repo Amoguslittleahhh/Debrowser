@@ -41,7 +41,7 @@ const tidy = (url) => String(url || '').replace(/^https?:\/\//i, '').replace(/^w
 
 function row(item, index) {
   const el = document.createElement('div');
-  el.className = 'row';
+  el.className = item.isDefault ? 'row default' : 'row';
   el.setAttribute('role', 'option');
   el.dataset.index = String(index);
 

@@ -188,6 +188,8 @@ async function refreshCount() {
 
 function showCount(total, shown) {
   if (typeof total !== 'number') return;
+  // Nothing to clear is not a button to press.
+  el.clear.disabled = total === 0;
   const pages = `${total} page${total === 1 ? '' : 's'}`;
   el.count.textContent = shown !== null && shown < total ? `${shown} of ${pages}` : pages;
 }

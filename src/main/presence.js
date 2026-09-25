@@ -185,7 +185,7 @@ async function capability() {
   }
 
   cachedCapability = { available: false, mechanism: null, experimental: false,
-    reason: `no system presence check on ${process.platform}` };
+    reason: `this system has no way to confirm it’s you (${({ linux: 'Linux', darwin: 'macOS', win32: 'Windows' })[process.platform] || process.platform})` };
   return cachedCapability;
 }
 

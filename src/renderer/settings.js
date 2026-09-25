@@ -22,6 +22,15 @@ const api = window.debrowser;
 /** Set by watchSections: look again at which section is current. */
 let remarkRail = () => {};
 
+/** Why saved logins cannot be filled here, or '' - set by renderCredentials. */
+let credentialsUnavailable = '';
+
+/** A reason as a sentence: capital first, full stop last. */
+function sentence(text) {
+  const t = String(text).trim();
+  return t ? `${t[0].toUpperCase()}${t.slice(1)}${/[.!?]$/.test(t) ? '' : '.'}` : '';
+}
+
 /**
  * Accent choices, and the reason none of them is bright.
  *
@@ -75,7 +84,7 @@ const SECTIONS = {
     {
       key: 'tabBarPosition',
       label: 'Tab bar position',
-      hint: 'Down the side, titles stay readable however many tabs are open.',
+      hint: 'Across the top, as in most browsers; down the side, titles stay readable however many tabs are open.',
       type: 'select',
       options: [
         { value: 'top', name: 'Across the top' },
@@ -95,13 +104,14 @@ const SECTIONS = {
     {
       key: 'tabBarColor',
       label: 'Tab strip colour',
-      hint: 'Separate from the accent. The second swatch follows it.',
+      hint: 'Its own colour, or the second swatch to match your accent.',
       type: 'stripColor'
     },
     {
       key: 'windowOpacity',
       label: 'Tab bar translucency',
       hint: 'The strip alone, never pages. Needs a window material behind it.',
+      unavailable: () => (api.platform === 'linux' ? 'Needs Windows or macOS: Linux has no window material to show through.' : ''),
       type: 'range',
       min: 0.4,
       max: 1,
@@ -111,7 +121,8 @@ const SECTIONS = {
     {
       key: 'backgroundMaterial',
       label: 'Window material',
-      hint: 'Windows 11 only. Ignored elsewhere.',
+      hint: 'What shows through a translucent tab bar.',
+      unavailable: () => (api.platform !== 'win32' ? 'Windows 11 only.' : ''),
       type: 'select',
       options: [
         { value: 'none', name: 'None' },
@@ -176,7 +187,7 @@ const SECTIONS = {
     {
       key: 'defaultZoom',
       label: 'Page zoom',
-      hint: 'Every site you have not zoomed yourself. Reset returns a site to it.',
+      hint: 'For every site you haven’t zoomed yourself. Resetting a site’s zoom brings it back to this.',
       type: 'select',
       numeric: true,
       options: [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
@@ -304,7 +315,7 @@ const SECTIONS = {
     {
       key: 'incognitoBridgeLines',
       label: 'My bridges',
-      hint: 'One per line, as a bridge gives them – obfs4, webtunnel or snowflake. tools/bridge-kit sets up your own.',
+      hint: 'One per line, as your bridge gives them (obfs4, webtunnel or snowflake). The bridge kit that comes with Debrowser can set one up for you.',
       type: 'textarea',
       placeholder: 'obfs4 203.0.113.5:443 FINGERPRINT cert=… iat-mode=0'
     },
@@ -359,7 +370,7 @@ const SECTIONS = {
   credentials: [
     {
       key: 'requirePresence',
-      label: 'Ask for Windows Hello or Touch ID first',
+      label: 'Confirm it’s you first',
       hint: 'Before a saved password or card is shown or filled.',
       type: 'checkbox'
     },
@@ -367,6 +378,7 @@ const SECTIONS = {
       key: 'fillPasswords',
       label: 'Fill saved passwords automatically',
       hint: 'Passwords only, and only when one saved sign-in matches the site.',
+      unavailable: () => credentialsUnavailable,
       type: 'checkbox'
     }
   ],
@@ -402,6 +414,8 @@ const SECTIONS = {
       key: 'autoUpdate',
       label: 'Install updates automatically',
       hint: 'Checks on launch and when you open this section. Downloads only what changed.',
+      unavailable: (state) => (state.updates && state.updates.available === false
+        ? sentence(state.updates.reason || 'Updates are not available for this copy.') : ''),
       type: 'checkbox'
     }
   ]
@@ -882,6 +896,7 @@ async function renderCredentials() {
   const data = await api.request('list-credentials');
   if (!data) return;
 
+  credentialsUnavailable = data.available ? '' : 'Needs saving to be available – see above.';
   if (!data.available) {
     state.textContent = `Saving is unavailable: ${data.reason}. Nothing is written to disk ` +
                         'unless it can be encrypted by the operating system.';
@@ -1300,8 +1315,8 @@ async function renderBookmarks() {
         button.disabled = false;
         const profiles = (res && res.profiles) || [];
         if (!profiles.length) {
-          state.textContent = 'No other browser profiles found in the usual places. ' +
-            'Export a bookmarks file from that browser instead.';
+          state.textContent = 'No other browsers found on this computer. ' +
+            'Export a bookmarks file from the browser you use and choose it below.';
           return;
         }
         renderProfiles(profiles, state, host);
@@ -1399,7 +1414,9 @@ function renderProfiles(profiles, state, host) {
 
 function bookmarkRow(item) {
   const row = document.createElement('div');
-  row.className = 'row';
+  row.className = 'row bookmark-row';
+  // The site's mark, as on the bar, so a long list can be scanned by eye.
+  row.append(siteChip(item.url, { icon: item.icon }));
 
   const text = document.createElement('div');
   text.className = 'row-text';

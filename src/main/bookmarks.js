@@ -198,11 +198,15 @@ class Bookmarks {
 
     const existing = this.items.findIndex((b) => b.url === entry.url);
     if (existing !== -1) {
-      // Keep the id, so anything holding a reference to it still resolves.
+      // Keep the id, so anything holding a reference to it still resolves -
+      // and its place on the bar.
       entry.id = this.items[existing].id;
-      this.items.splice(existing, 1);
+      this.items[existing] = entry;
+    } else {
+      // At the end of the bar, as in every browser. Added at the start, each
+      // new bookmark pushed the ones already there towards the overflow.
+      this.items.push(entry);
     }
-    this.items.unshift(entry);
     this.save();
     return entry;
   }

@@ -50,6 +50,8 @@ body { padding: 0 var(--s6) var(--s7); }
   white-space: nowrap;
 }
 .row.selected { background: var(--wash); }
+/* What Enter will do, before anything is chosen: the first row, lightly. */
+.list:not(:has(.selected)) .row.default { background: var(--wash-soft); }
 
 /* The search and address glyphs sit in a box the size of a site's chip (22px),
    so every row's text starts on the same line. */

@@ -58,7 +58,7 @@ function keystoreCapability() {
     return {
       available: false,
       reason: process.platform === 'linux'
-        ? 'no OS keyring available - install gnome-keyring or another libsecret provider'
+        ? 'no OS keyring available – install gnome-keyring or another libsecret provider'
         : 'the OS keystore is unavailable'
     };
   }

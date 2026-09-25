@@ -201,7 +201,14 @@ function accelFor(command, payload = null) {
  * @returns {Array<{title: string, rows: Array<{label: string, keys: string}>}>}
  */
 function sheet({ incognito = false } = {}) {
-  const row = (label, command, payload) => ({ label, keys: accelFor(command, payload) });
+  // Every spelling of a command, not only the first: F5 is how many people
+  // reload, and a list that leaves it out suggests it does not work.
+  const same = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
+  const row = (label, command, payload) => ({
+    label,
+    keys: TABLE.filter((r) => r.command === command && (!payload || same(r.payload, payload)))
+      .map(labelFor).join('  ·  ')
+  });
   const groups = [
     { title: 'Tabs', rows: [
       row('New tab', 'new-tab'),
@@ -224,6 +231,8 @@ function sheet({ incognito = false } = {}) {
     ] },
     { title: 'This page', rows: [
       row('Find', 'find-open'),
+      row('Next match', 'find-next'),
+      row('Previous match', 'find-prev'),
       row('Zoom in', 'zoom', { direction: 'in' }),
       row('Zoom out', 'zoom', { direction: 'out' }),
       row('Actual size', 'zoom', { direction: 'reset' }),

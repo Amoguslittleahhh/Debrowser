@@ -71,7 +71,11 @@ function tile(item) {
 
   const label = document.createElement('span');
   label.className = 'tile-label';
-  label.textContent = host;
+  // With its port, when it has one: four local servers are four places, and
+  // four tiles all reading "127.0.0.1" said otherwise.
+  let port = '';
+  try { port = new URL(item.url).port; } catch { /* no URL, no port */ }
+  label.textContent = port ? `${host}:${port}` : host;
 
   open.append(chip, label);
   open.addEventListener('click', (event) => {
@@ -94,10 +98,12 @@ function tile(item) {
   forget.addEventListener('click', async (event) => {
     event.stopPropagation();
     await api.request('forget-site', { url: item.url });
-    // Removed here rather than by redrawing: a redraw would slide every
-    // remaining tile sideways under the pointer that is still over this one.
-    root.remove();
-    if (!tiles.children.length) tiles.hidden = true;
+    // Faded where it stands, keeping its place in the grid until the next new
+    // tab: removing it slid every tile after it sideways under the pointer
+    // and re-centred the page.
+    root.classList.add('gone');
+    root.setAttribute('aria-hidden', 'true');
+    if (![...tiles.children].some((t) => !t.classList.contains('gone'))) tiles.hidden = true;
   });
 
   root.append(open, forget);

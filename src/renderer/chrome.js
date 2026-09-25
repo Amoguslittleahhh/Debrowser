@@ -399,8 +399,9 @@ function renderBookmarks(items) {
       const newTab = event.ctrlKey || event.metaKey || bookmarkOpensIn() !== 'current-tab';
       api.send(newTab ? 'new-tab' : 'navigate', { url: item.url });
     });
+    // Middle-click opens it in the background, beside this tab, as a link would.
     button.addEventListener('auxclick', (event) => {
-      if (event.button === 1) api.send('new-tab', { url: item.url });
+      if (event.button === 1) api.send('open-link-tab', { url: item.url, fromBar: true });
     });
     button.addEventListener('contextmenu', (event) => {
       event.preventDefault();
@@ -655,7 +656,9 @@ function releaseTabWidths() {
   for (const node of tabEls.values()) node.root.style.flex = '';
 }
 
-el.tabs.addEventListener('mouseleave', releaseTabWidths);
+// The whole strip, not only the tabs: moving onto the + beside the last tab
+// is still closing tabs in a row, and releasing there made the + jump.
+document.getElementById('tabstrip').addEventListener('mouseleave', releaseTabWidths);
 
 function createTabElement(id) {
   const root = document.createElement('div');

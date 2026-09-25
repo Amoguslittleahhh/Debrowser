@@ -192,3 +192,10 @@
 .visit:hover .forget { opacity: 1; }
 .forget:hover { background-color: var(--border); color: var(--text); }
 .forget:active { transform: var(--press); }
+
+/* The same width armed or not: "Clear all history?" used to push the search
+   box sideways as it appeared. */
+#clear { min-width: 132px; }
+
+/* The list keeps its gutter, so filtering never shifts it sideways. */
+html, body, main { scrollbar-gutter: stable; }

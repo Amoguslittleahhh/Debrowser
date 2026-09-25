@@ -687,6 +687,9 @@ class Tab {
 
   showError(url, code, description) {
     this.failed = true;
+    // At the zoom the site would have had: an error page does not commit the
+    // way a page does, so the navigation's zoom never reached it.
+    try { this.applyZoom(this.wc); } catch { /* the view is going away */ }
     this.errorArgs = { url, code, description };
     // The last page's icon is not this one's.
     this.favicon = null;
