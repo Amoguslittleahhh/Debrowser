@@ -1067,7 +1067,9 @@ function main() {
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
-      sitePermissions, permissionAsks
+      sitePermissions, permissionAsks,
+      // A getter: the manager is made just below, once the commands exist.
+      getDownloads: () => downloads
     });
 
     // Downloads are taken over from Chromium rather than added beside it.
@@ -1083,8 +1085,10 @@ function main() {
       connections: () => (INCOGNITO ? 1 : prefs.get('downloadConnections')),
       // The system's own save dialog, when Settings asks for one. Never under a
       // test, where nobody is there to answer it.
-      saveAs: (defaultPath) => {
-        if (OFFLINE_MODE || !prefs.get('askWhereToSave')) return undefined;
+      // "Save link as…" and "Save image as…" always ask - that is what the
+      // words promise - whatever the setting says.
+      saveAs: (defaultPath, { ask = false } = {}) => {
+        if (OFFLINE_MODE || (!ask && !prefs.get('askWhereToSave'))) return undefined;
         const asked = shell && !shell.window.isDestroyed()
           ? dialog.showSaveDialog(shell.window, { defaultPath })
           : dialog.showSaveDialog({ defaultPath });
@@ -1349,7 +1353,8 @@ function startIncognito({ prefs, log, warm = false }) {
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
-                       circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null }) {
+                       circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
+                       getDownloads = () => null }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -1771,7 +1776,21 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // link takes.
       case 'save-link': {
         const url = String(payload?.url || '');
-        if (active?.isLive && /^https?:/.test(url)) active.wc.downloadURL(url);
+        if (!active?.isLive) break;
+        const downloads = getDownloads();
+        if (/^https?:/i.test(url) && downloads) {
+          // Asking where, with the page as referrer - except from a private
+          // window, whose referrers never leave the site (see policy.js).
+          downloads.start(url, {
+            session: active.wc.session,
+            ask: true,
+            referrer: INCOGNITO ? null : active.wc.getURL()
+          });
+        } else if (/^(data|blob):/i.test(url)) {
+          // No server to fetch it from again: Chromium saves these itself, and
+          // asks where.
+          active.wc.downloadURL(url);
+        }
         break;
       }
 

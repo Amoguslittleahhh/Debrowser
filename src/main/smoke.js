@@ -3119,6 +3119,27 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       item.segments > 1 && rangeRequests > 2, `${item.segments} segments, ${rangeRequests} range requests`);
     ranged.close();
 
+    // --- "Save image as…": always asks, and sends the page as referrer ---
+    // A hotlink-protected image refuses a request that names no page, which
+    // the refetch used to be.
+    const guarded = http.createServer((req, res) => {
+      if (req.headers.referer !== 'http://page.test/') { res.writeHead(403); res.end('no'); return; }
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': 4 });
+      res.end(Buffer.from([1, 2, 3, 4]));
+    });
+    const guardedPort = await listen(guarded);
+    let asked = null;
+    const mgr4 = new dl.DownloadManager({
+      dir: outDir, connections: () => 1, log: () => {},
+      saveAs: (defaultPath, options) => { asked = options; return undefined; }
+    });
+    const pic = mgr4.start(`http://127.0.0.1:${guardedPort}/cat.png`, { ask: true, referrer: 'http://page.test/gallery' });
+    await finished(pic);
+    check('"Save image as" asks where, and sends the page it came from as referrer',
+      pic.state === 'done' && asked && asked.ask === true,
+      `state=${pic.state}${pic.error ? ` (${pic.error})` : ''}, asked=${JSON.stringify(asked)}`);
+    guarded.close();
+
     // --- a server that refuses ranges: expect one connection, same bytes ---
     const plain = serve(false);
     const plainPort = await listen(plain);

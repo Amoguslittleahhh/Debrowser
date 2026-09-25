@@ -65,11 +65,15 @@ class Download {
    * @param {(defaultPath: string) => any} [opts.saveAs] - see DownloadManager
    */
   constructor({ url, dir, connections, session = null, log = () => {}, onChange = () => {},
-                saveAs = null }) {
+                saveAs = null, ask = false, referrer = null }) {
     this.id = `dl-${Date.now().toString(36)}-${(nextId += 1).toString(36)}`;
     this.url = url;
     this.dir = dir;
     this.saveAs = saveAs;
+    /** "Save as…" was chosen: the dialog is shown whatever Settings says. */
+    this.ask = ask;
+    /** The page it was saved from, for sites that refuse a request without one. */
+    this.referrer = referrer;
     this.session = session;
     this.wanted = clampConnections(connections);
     this.log = log;
@@ -208,7 +212,7 @@ class Download {
   async chooseTarget(suggested) {
     // The folder may still be being checked - see `downloadDir` in main.js.
     this.dir = await this.dir;
-    const picked = this.saveAs ? await this.saveAs(path.join(this.dir, suggested)) : undefined;
+    const picked = this.saveAs ? await this.saveAs(path.join(this.dir, suggested), { ask: this.ask }) : undefined;
     // Cancelled from the list while the dialog was up: nothing to open.
     if (picked === null || this.cancelled) return false;
     if (typeof picked === 'string' && path.isAbsolute(picked)) {
@@ -399,13 +403,19 @@ class Download {
         // sends no cookies, so a download behind a login quietly saves the
         // sign-in page under the real filename - the right size, the wrong file,
         // and no error anywhere.
+        const referrer = referrerFor(this.referrer, url);
         req = net.request({
           url,
           method: 'GET',
           redirect: 'manual',
           session: this.session || undefined,
-          useSessionCookies: true
+          useSessionCookies: true,
+          // Electron refuses a Referer set by hand unless a policy allows it
+          // (measured: ERR_BLOCKED_BY_CLIENT). It has already been trimmed
+          // below to what Chrome's own default policy would send.
+          ...(referrer ? { referrerPolicy: 'unsafe-url' } : {})
         });
+        if (referrer) req.setHeader('Referer', referrer);
       } catch (err) {
         reject(err);
         return;
@@ -497,7 +507,7 @@ class DownloadManager {
    * @param {{session?: Electron.Session}} [options] - the session the download
    *   came from, when tabs do not all share one (incognito)
    */
-  start(url, { session = null } = {}) {
+  start(url, { session = null, ask = false, referrer = null } = {}) {
     let clean;
     try {
       const parsed = new URL(url);
@@ -515,6 +525,8 @@ class DownloadManager {
       connections: this.connections(),
       session: session || this.session,
       saveAs: this.saveAs,
+      ask,
+      referrer: /^https?:\/\//i.test(referrer || '') ? referrer : null,
       log: this.log,
       onChange: () => this.onChange(this.list())
     });
@@ -615,6 +627,28 @@ function strongValidator(etag) {
 }
 
 /** Header lookup that does not care about case, and flattens arrays. */
+/**
+ * The referrer a page's own request for `target` would carry, under Chrome's
+ * default policy (strict-origin-when-cross-origin): the whole address to its
+ * own origin, the origin alone elsewhere, and nothing from https to http.
+ *
+ * An image saved from a page is often refused without its page as referrer -
+ * hotlink protection - and the refetch here would otherwise arrive with none,
+ * which loading it in the page never does.
+ */
+function referrerFor(page, target) {
+  if (!page) return null;
+  try {
+    const from = new URL(page);
+    const to = new URL(target);
+    if (from.protocol === 'https:' && to.protocol === 'http:') return null;
+    if (from.origin === to.origin) return `${from.origin}${from.pathname}${from.search}`;
+    return `${from.origin}/`;
+  } catch {
+    return null;
+  }
+}
+
 function header(headers, name) {
   if (!headers) return null;
   const key = Object.keys(headers).find((k) => k.toLowerCase() === name);

@@ -12,6 +12,7 @@ From the first day of using 1.7.0 on Windows.
 - **Private windows report the same languages in every worker.** A dedicated worker on Windows gave away the computer's own languages (en-SG, zh-Hans-SG in the report that found it).
 - **The Tor connection page shows Tor's current complaint,** not one from before it got further.
 - **No white flash when a menu or panel opens on Windows.** A panel now starts one pixel big and grows once it has drawn.
+- **"Save link as…" and "Save image as…" work.** They always ask where to save, as their names say; they used to drop the file in Downloads without a word unless Settings asked for a dialog. An image is fetched with its page as the referrer, as the page itself would, so sites that refuse hotlinked images give it up; and images that live in the page itself (`data:` and `blob:` addresses), which did nothing before, are saved too.
 - **Fixed:** the Settings side list all but skipped Advanced; a hovered menu item wore the keyboard's focus ring; a section's intro sat against its card; the update row's button touched the card above; disabled buttons (Clear on History and Downloads) looked pressable.
 
 ## 1.7.0
