@@ -1363,6 +1363,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'suggest-size':
         shell.sizeSuggestions(Number(payload?.height));
         break;
+      // The pointer moved onto a row: it is the selection now, for Enter too.
+      case 'suggest-hover': {
+        const index = Number(payload?.index);
+        if (!Number.isInteger(index) || index < 0) break;
+        shell.suggestSelected = index;
+        shell.toChrome('suggest-hover', { index });
+        break;
+      }
+
       case 'suggest-pick': {
         const item = (shell.suggestItems || [])[Number(payload?.index)];
         shell.hideSuggestions();
@@ -3058,7 +3067,7 @@ function menuModel({ tabs, shell }) {
       { id: 'new-identity', label: 'New identity', accel: accel('new-identity'), icon: 'shield' },
       { id: 'panic', label: 'Close and erase now', accel: accel('panic'), icon: 'close' }
     ] : [{
-      id: 'new-incognito-window', label: 'New incognito window',
+      id: 'new-incognito-window', label: 'New private window',
       accel: accel('new-incognito-window'), icon: 'shield'
     }]),
     { kind: 'separator' },

@@ -84,7 +84,18 @@ function createRow(item) {
   open.textContent = 'Open file';
   open.hidden = true;
 
-  text.append(name, meter, status, open);
+  // Where it landed, as a word rather than a middle-click nobody would find.
+  const reveal = document.createElement('button');
+  reveal.className = 'dl-link';
+  reveal.type = 'button';
+  reveal.textContent = 'Show in folder';
+  reveal.hidden = true;
+
+  const links = document.createElement('span');
+  links.className = 'dl-links';
+  links.append(open, reveal);
+
+  text.append(name, meter, status, links);
 
   // Cancel while it runs, and out of the way once it does not - a finished row
   // keeps its × for clearing, which is the same button doing the same job.
@@ -94,11 +105,16 @@ function createRow(item) {
 
   root.append(chip, text, action);
 
-  const node = { root, name, meter, fill, status, open, action, state: {} };
+  const node = { root, name, meter, fill, status, open, reveal, action, state: {}, steadyAt: 0 };
 
   open.addEventListener('click', () => api.request('open-download', { id: item.id }));
+  reveal.addEventListener('click', () => api.request('reveal-download', { id: item.id }));
 
   action.addEventListener('click', async () => {
+    // The button changes job when a download ends - Cancel becomes Clear in
+    // the same place - so a click landing just after the change is taken as
+    // the second half of the first, not as a request to remove the row.
+    if (Date.now() < node.steadyAt) return;
     const running = RUNNING.has(node.state.state);
     await api.request(running ? 'cancel-download' : 'clear-download', { id: item.id });
     load();
@@ -121,7 +137,9 @@ function updateRow(node, item) {
   const label = item.filename || item.url;
   if (prev.label !== label) {
     node.name.textContent = label;
-    node.root.title = `${label}\n${item.url}`;
+    // On the name, not the row: a tooltip on the row outlived the row when
+    // it was cleared, and hung over the page.
+    node.name.title = `${label}\n${item.url}`;
     prev.label = label;
   }
 
@@ -145,6 +163,8 @@ function updateRow(node, item) {
   if (prev.state !== item.state) {
     node.root.dataset.state = item.state;
     node.open.hidden = item.state !== 'done';
+    node.reveal.hidden = item.state !== 'done';
+    if (prev.state !== undefined && running !== RUNNING.has(prev.state)) node.steadyAt = Date.now() + 500;
     node.action.replaceChildren(running ? 'Cancel' : crossIcon());
     node.action.setAttribute('aria-label',
       `${running ? 'Cancel' : 'Clear'} ${item.filename || item.url}`);

@@ -238,7 +238,7 @@ function sheet({ incognito = false } = {}) {
       row('Full screen', 'toggle-fullscreen'),
       row('Task manager', 'toggle-panel'),
       row('Developer tools', 'toggle-devtools'),
-      row('New incognito window', 'new-incognito-window'),
+      row('New private window', 'new-incognito-window'),
       row('This list', 'show-shortcuts')
     ] }
   ];

@@ -299,7 +299,7 @@ function renderDownloadsButton(summary) {
   // toolbar. An indeterminate one - no server-declared size - leaves the ring
   // empty rather than sitting at zero, which would read as stalled.
   const part = active && typeof summary.progress === 'number' ? summary.progress : 0;
-  el.downloadsRing.style.transform = `scaleX(${part})`;
+  el.downloadsRing.style.strokeDasharray = `${(part * 100).toFixed(1)} 100`;
 }
 
 /** The flyout anchors to this button, so the chrome is what measures it. */
@@ -585,7 +585,26 @@ function renderTabs(tabs) {
 
     updateTabElement(node, tab);
   });
+  updateStripFades();
 }
+
+/**
+ * The strip fades out at an edge with more tabs beyond it. It used to stop
+ * cleanly at a tab boundary, so six tabs scrolled off to the left looked like
+ * no tabs at all.
+ */
+function updateStripFades() {
+  const t = el.tabs;
+  const side = document.body.dataset.layout === 'left';
+  const pos = side ? t.scrollTop : t.scrollLeft;
+  const room = side ? t.scrollHeight - t.clientHeight : t.scrollWidth - t.clientWidth;
+  const start = pos > 1 ? '24px' : '0px';
+  const end = room - pos > 1 ? '24px' : '0px';
+  if (t.style.getPropertyValue('--fade-start') !== start) t.style.setProperty('--fade-start', start);
+  if (t.style.getPropertyValue('--fade-end') !== end) t.style.setProperty('--fade-end', end);
+}
+el.tabs.addEventListener('scroll', updateStripFades, { passive: true });
+window.addEventListener('resize', updateStripFades);
 
 /**
  * A closed tab folds away rather than vanishing: its width (its height, down
@@ -1457,6 +1476,11 @@ api.onMessage((message) => {
       break;
     case 'open-downloads':
       openDownloads();
+      break;
+    // The list's selection moved under the pointer; the field keeps what was
+    // typed, and Enter takes the row pointed at.
+    case 'suggest-hover':
+      if (listOpen) selected = message.index;
       break;
     case 'suggest-done':
       closeList();

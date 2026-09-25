@@ -75,6 +75,7 @@ function row(item, index) {
 
 function render(items, selected) {
   const wasEmpty = rows.length === 0;
+  hovered = -1;
   rows = items;
   list.replaceChildren(...items.map(row));
   select(selected);
@@ -98,6 +99,19 @@ function reportSize() {
   api.send('suggest-size', { height });
 }
 
+// Pointing at a row selects it, as the arrow keys do - one highlight, and
+// it is the row Enter takes. A separate hover tint beside the keyboard's left
+// two rows lit and no way to tell which one Enter meant.
+let hovered = -1;
+list.addEventListener('mousemove', (event) => {
+  const el = event.target.closest('.row');
+  const index = el ? Number(el.dataset.index) : -1;
+  if (index < 0 || index === hovered) return;
+  hovered = index;
+  select(index);
+  api.send('suggest-hover', { index });
+});
+
 list.addEventListener('mousedown', (event) => {
   const el = event.target.closest('.row');
   if (!el || (event.button !== 0 && event.button !== 1)) return;
@@ -108,7 +122,7 @@ list.addEventListener('mousedown', (event) => {
 api.onMessage((message) => {
   if (message.kind === 'suggest-items') render(message.items || [], message.selected ?? -1);
   else if (message.kind === 'suggest-select') select(message.index);
-  else if (message.kind === 'suggest-reset') { rows = []; lastHeight = 0; list.replaceChildren(); }
+  else if (message.kind === 'suggest-reset') { rows = []; lastHeight = 0; hovered = -1; list.replaceChildren(); }
 });
 
 api.onState((state) => applyThemePrefs(state.prefs));

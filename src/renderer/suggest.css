@@ -49,7 +49,6 @@ body { padding: 0 var(--s6) var(--s7); }
   cursor: default;
   white-space: nowrap;
 }
-.row:hover { background: var(--wash-soft); }
 .row.selected { background: var(--wash); }
 
 /* The search and address glyphs sit in a box the size of a site's chip (22px),

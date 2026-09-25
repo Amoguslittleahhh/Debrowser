@@ -33,7 +33,7 @@
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
   font: inherit;
   font-size: var(--fs-small);
   cursor: default;
@@ -78,11 +78,12 @@
 /* A file that is gone reads as gone, the way Edge strikes it through - a row
    that looks identical to a live one but does nothing when pressed is worse
    than one that says so. */
-.dl[data-state="cancelled"] .dl-name,
-.dl[data-state="failed"] .dl-name {
+.dl[data-state="cancelled"] .dl-name {
   text-decoration: line-through;
   color: var(--text-dim);
 }
+/* Failed is not gone - it may be worth trying again - so dimmed, not struck. */
+.dl[data-state="failed"] .dl-name { color: var(--text-dim); }
 
 .dl-status {
   display: block;
@@ -90,17 +91,24 @@
   font-size: var(--fs-small);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dl[data-state="failed"] .dl-status { color: var(--crit); }
 
+.dl-links { display: flex; gap: var(--s3); }
+
 /* "Open file", styled as the link it behaves like. */
 .dl-link {
-  display: block;
+  display: inline-block;
   margin-top: 1px;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  /* Small text, so not the bare accent - theme.css's own rule - but the
+     accent pulled towards the text, which reads in both palettes. */
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
   font: inherit;
   font-size: var(--fs-small);
   text-align: left;

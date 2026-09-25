@@ -585,3 +585,8 @@ body {
   color: color-mix(in srgb, var(--text-dim) 78%, transparent);
   opacity: 1;                      /* Firefox-ism, harmless and explicit here */
 }
+
+/* See applyThemePrefs: a theme switch does not animate. */
+body.switching-theme *, body.switching-theme *::before, body.switching-theme *::after {
+  transition: none !important;
+}

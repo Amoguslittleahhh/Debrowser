@@ -19,6 +19,9 @@
 
 const api = window.debrowser;
 
+/** Set by watchSections: look again at which section is current. */
+let remarkRail = () => {};
+
 /**
  * Accent choices, and the reason none of them is bright.
  *
@@ -1080,65 +1083,43 @@ function markRail(name) {
  * does not keep a second collection in step with the first.
  */
 function watchSections() {
-  if (typeof IntersectionObserver !== 'function') return;
-
   const main = document.querySelector('main');
   if (!main) return;
 
-  /**
-   * The end of the page, watched as a thing in its own right.
+  /*
+   * The section being read is the last one whose heading has passed a line a
+   * quarter of the way down the page - or, at the very end of the page, the
+   * last one showing, since short final sections never reach that line.
    *
-   * Without it the mark stopped moving two sections early, and the reason is
-   * the band below: the last sections are shorter than the scroller, so once
-   * the page has scrolled as far as it goes they never reach the top 45% and
-   * the topmost-intersecting rule keeps naming whichever section does. Reported
-   * as the rail sticking on "Passwords and payment" while Advanced and Updates
-   * were both on screen.
-   *
-   * A sentinel rather than a scroll handler, so the whole thing stays in one
-   * mechanism: when the last pixel of the page is in view, the reader is in the
-   * last section, whichever section that happens to be after a filter.
+   * This replaced a rule of "the topmost section still in the top 45%", which
+   * lagged: a long section kept the mark while the next section's heading was
+   * already well up the screen.
    */
-  const end = document.createElement('div');
-  end.className = 'rail-end';
-  end.setAttribute('aria-hidden', 'true');
-  main.append(end);
-
-  let atEnd = false;
-
+  let queued = false;
   const mark = () => {
-    // Two different questions, and the second one is why this went wrong the
-    // first time. "Which section is the reader in" is answered against the top
-    // band; "which section is last on screen" has to be answered against the
-    // whole scroller, because a section sitting below the band is exactly the
-    // case at the end of the page - and asking the band about it returned the
-    // section above, which is how the mark stopped one short of the last.
-    const key = atEnd ? 'inView' : 'onScreen';
-    const visible = sections.filter((s) => !s.hidden && s.dataset[key] === 'true');
-    if (!visible.length) return;
-    markRail((atEnd ? visible[visible.length - 1] : visible[0]).dataset.section);
-  };
-
-  // The reading position: the topmost section still in the top 45%.
-  const reading = new IntersectionObserver((entries) => {
-    for (const entry of entries) entry.target.dataset.onScreen = String(entry.isIntersecting);
-    mark();
-  }, { root: main, rootMargin: '0px 0px -55% 0px' });
-
-  // What is actually on screen, and whether the end of the page is.
-  const onScreen = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.target === end) atEnd = entry.isIntersecting;
-      else entry.target.dataset.inView = String(entry.isIntersecting);
+    queued = false;
+    const box = main.getBoundingClientRect();
+    const shown = sections.filter((s) => !s.hidden);
+    if (!shown.length) return;
+    const atEnd = main.scrollTop + main.clientHeight >= main.scrollHeight - 2;
+    let current = shown[0];
+    if (atEnd) {
+      current = shown.filter((s) => s.getBoundingClientRect().top < box.bottom).pop() || current;
+    } else {
+      const line = box.top + box.height * 0.25;
+      for (const section of shown) if (section.getBoundingClientRect().top <= line) current = section;
     }
-    mark();
-  }, { root: main });
-
-  for (const section of sections) {
-    reading.observe(section);
-    onScreen.observe(section);
-  }
-  onScreen.observe(end);
+    markRail(current.dataset.section);
+  };
+  const soon = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(mark);
+  };
+  main.addEventListener('scroll', soon, { passive: true });
+  window.addEventListener('resize', soon);
+  remarkRail = soon;
+  soon();
 }
 
 /**
@@ -1155,6 +1136,7 @@ function watchSections() {
  * string, and this page can hold five hundred bookmark rows.
  */
 function filterSettings(query) {
+  requestAnimationFrame(() => remarkRail());
   const needle = query.trim().toLowerCase();
   let shown = 0;
 

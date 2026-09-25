@@ -90,14 +90,28 @@ function formatBytes(n) {
  * connection count, and nothing for a finished file, whose row offers
  * "Open file" instead.
  */
+/** Why a download failed, in words - never the engine's net::ERR_ code. */
+function failureReason(error) {
+  const e = String(error || '');
+  if (!e) return 'Failed';
+  if (/FILE_|ACCESS_DENIED|NO_SPACE|DISK|PATH|permission/i.test(e)) return 'Failed – couldn’t save the file';
+  if (/SERVER|HTTP|FORBIDDEN|UNAUTHORIZED|NOT_FOUND|BAD_CONTENT/i.test(e)) return 'Failed – the site stopped it';
+  if (/NETWORK|CONNECTION|TIMED_OUT|DISCONNECTED|CONTENT_LENGTH|INCOMPLETE|RESET|interrupt/i.test(e)) {
+    return 'Failed – the connection dropped';
+  }
+  return 'Failed';
+}
+
 /* eslint-disable-next-line no-unused-vars -- read by downloads.js, flyout.js, settings.js */
 function describeDownload(item, { brief = false } = {}) {
-  const over = brief ? '' : ` over ${item.segments} connection${item.segments === 1 ? '' : 's'}`;
+  // Only worth saying when there is more than one: "over 1 connection" is a
+  // fact about the plumbing, not about the file.
+  const over = brief || !(item.segments > 1) ? '' : ` over ${item.segments} connections`;
   switch (item.state) {
     case 'done':
       return brief ? null : `Finished – ${formatBytes(item.received)}${over}`;
     case 'failed':
-      return item.error ? `Failed – ${item.error}` : 'Failed';
+      return failureReason(item.error);
     case 'cancelled':
       return 'Cancelled';
     default: {
@@ -319,6 +333,13 @@ function applyThemePrefs(prefs) {
     meter: prefs.showMemoryMeter ? 'on' : 'off',
     dots: prefs.showTierDots ? 'on' : 'off'
   };
+  // A palette change is instant everywhere. Without this, anything with a
+  // colour transition - Settings' rows, most buttons - faded through a
+  // half-way mix for a moment while the page around it had already switched.
+  if (body.dataset.theme !== undefined && body.dataset.theme !== flags.theme) {
+    body.classList.add('switching-theme');
+    requestAnimationFrame(() => requestAnimationFrame(() => body.classList.remove('switching-theme')));
+  }
   for (const [key, value] of Object.entries(flags)) {
     if (body.dataset[key] !== value) body.dataset[key] = value;
   }
@@ -462,4 +483,11 @@ function watchTransientInput(api) {
   document.addEventListener('change', report);
   // For a caller that removes a field outright, which fires neither event.
   return report;
+}
+
+// A panel being closed fades out; see BrowserShell#closeSheet.
+if (window.debrowser && typeof window.debrowser.onMessage === 'function') {
+  window.debrowser.onMessage((message) => {
+    if (message && message.kind === 'closing') document.body.classList.add('closing');
+  });
 }

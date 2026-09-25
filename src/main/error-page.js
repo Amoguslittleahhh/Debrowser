@@ -111,7 +111,7 @@ function draw(e) {
     button:hover { filter: brightness(1.1); }
     button:active { filter: brightness(0.94); }
     button:focus-visible { outline: 2px solid ${e.accent}; outline-offset: 2px; }
-    .code { font: 10.5px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; color: ${e.p.dim}; opacity: 0.8; }
+    .code { font: 10.5px/1 ui-monospace, "Cascadia Mono", Consolas, monospace; color: ${e.p.dim}; }
     @keyframes in { from { opacity: 0; transform: translateY(4px); } }
     @media (prefers-reduced-motion: reduce) { main { animation: none; } }`;
   const el = (tag, text, cls) => {

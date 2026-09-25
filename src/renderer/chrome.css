@@ -45,14 +45,12 @@ body[data-translucent="on"] { background: transparent; }
    * `--strip-alpha` is 1 unless set, so the default build paints exactly as
    * before and the mix is a no-op.
    *
-   * The gradient is the accent-tinted top fading into the strip's own colour.
-   * Both stops carry the alpha, because a translucent strip with an opaque
-   * gradient over it is an opaque strip.
+   * The colour carries the alpha, because a translucent strip painted with an
+   * opaque colour is an opaque strip.
    */
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--tint-1) calc(var(--strip-alpha, 1) * 100%), transparent),
-    color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent));
+  /* One flat colour, the same one the system's window buttons are given: a
+     gradient here left those buttons sitting in a visibly different box. */
+  background: color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent);
   /* Empty strip drags the window, because the strip *is* the title bar now. */
   -webkit-app-region: drag;
 
@@ -178,6 +176,16 @@ body[data-platform="linux"] { --caption-right: 146px; }
   transition: background-color var(--slow) var(--ease), color var(--slow) var(--ease);
   animation: tab-in var(--slow) var(--ease-out);
 }
+/* The fade at an edge with more tabs past it; see updateStripFades. */
+.tabs {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-start, 0px),
+    #000 calc(100% - var(--fade-end, 0px)), transparent 100%);
+}
+body[data-layout="left"] .tabs {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-start, 0px),
+    #000 calc(100% - var(--fade-end, 0px)), transparent 100%);
+}
+
 /* Folding away (see closeTabElement): nothing inside may hold it open, and
    nothing on it can be pressed any more. */
 .tab.closing { overflow: hidden; pointer-events: none; }
@@ -374,6 +382,12 @@ body[data-tabs="compact"] .tab {
   border-top-color: var(--accent);
   animation: tab-spin 700ms linear infinite;
 }
+/* On the dark palette the teal arc sank into its track: a brighter arc, a
+   lighter track. */
+body[data-theme="dark"] .tab[data-loading="on"] .tab-icon::after {
+  border-color: color-mix(in srgb, var(--text) 18%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent) 70%, #fff);
+}
 
 @keyframes tab-spin { to { transform: rotate(360deg); } }
 
@@ -432,10 +446,10 @@ body:not([data-layout="left"]) .tab.pinned .tier,
 }
 
 .tier[data-tier="warm"]      { background: var(--ok); opacity: 0.7; }
-.tier[data-tier="cold"]      { background: var(--warn); opacity: 0.8; }
+.tier[data-tier="cold"]      { background: var(--text-dim); opacity: 0.6; }
 .tier[data-tier="frozen"]    { background: var(--accent); }
 .tier[data-tier="hibernated"] { background: var(--accent); opacity: 0.55; }
-.tier[data-tier="discarded"] { background: var(--text-dim); opacity: 0.5; }
+.tier[data-tier="discarded"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-dim); opacity: 0.6; }
 
 .tab.boosted .tier {
   background: var(--accent);
@@ -449,7 +463,8 @@ body:not([data-layout="left"]) .tab.pinned .tier,
   width: 18px;
   height: 18px;
   border: none;
-  border-radius: 4px;
+  /* Round, like the + and the window's own buttons beside it. */
+  border-radius: 50%;
   background: transparent;
   color: var(--text-dim);
   cursor: default;
@@ -464,6 +479,11 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
    `background-clip`, which is what keeps the hover square the size of the
    cross rather than the size of the target. See "Hit targets" below. */
 .tab-close:hover { background-color: var(--border); color: var(--text); }
+.tab-close:active { background-color: color-mix(in srgb, var(--text) 22%, transparent); }
+
+/* Down the side, a hidden close button gives its room back to the title,
+   which was cut a button's width early on every tab but the one hovered. */
+body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: none; }
 
 .audio-dot {
   flex: none;
@@ -559,6 +579,7 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
   width: 28px;
   height: 28px;
   flex: none;
+  font: inherit;
   margin: 0 0 3px 4px;
   border: none;
   border-radius: 50%;
@@ -591,7 +612,7 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
 }
 
 .omnibox:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); }
-.omnibox:focus-within {
+.omnibox:has(#url:focus) {
   border-color: var(--accent);
   background: var(--bg);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
@@ -1003,17 +1024,10 @@ body[data-layout="left"] .new-tab:hover { color: var(--text); }
 body[data-layout="left"] .strip-filler { flex: 1 1 auto; }
 
 /*
- * The colour treatment, turned to face the other way.
- *
- * The tint fades out over the first couple of hundred pixels rather than over
- * the whole column: across a 40px strip a top-to-bottom fade is a gradient, and
- * down an 800px one it is a wash that never resolves into anything.
+ * The strip's colour down the side too: flat, like the top.
  */
 body[data-layout="left"] .tabstrip {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--tint-1) calc(var(--strip-alpha, 1) * 100%), transparent) 0,
-    color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent) 260px);
+  background: color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent);
 }
 
 /* A row in a list is marked down its leading edge, not along its top: that is
@@ -1194,24 +1208,25 @@ body .bookmark-chip.has-icon {
  * so it is clipped to the button's rounded corners rather than drawing a bar
  * across the toolbar.
  */
-.icon-btn.downloads {
-  position: relative;
-  overflow: hidden;
-}
+.icon-btn.downloads { position: relative; }
 
-.downloads-ring {
+.icon-btn .downloads-ring {
   position: absolute;
-  left: 4px;
-  right: 4px;
-  bottom: 3px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--accent);
-  /* A transform, so a download updating twice a second stays on the compositor
-     and never lays out the toolbar. */
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 200ms linear;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.downloads-ring circle { fill: none; stroke-width: 1.5; }
+.downloads-ring .ring-track { stroke: color-mix(in srgb, var(--accent) 18%, transparent); }
+.downloads-ring .ring-fill {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-dasharray: 0 100;
+  /* Drawn by the dash, so a download updating twice a second repaints one
+     small circle and never lays out the toolbar. */
+  transition: stroke-dasharray 200ms linear;
 }
 
 /* A finished download leaves the button in place - you may still want the
@@ -1341,6 +1356,7 @@ body[data-sidebar="true"][data-compact="true"] .meter { display: none; }
  */
 .pin {
   display: none;
+  flex: none;
   place-items: center;
   width: 28px;
   height: 28px;
@@ -1428,6 +1444,9 @@ body[data-layout="left"] .pin { display: grid; }
   font: inherit;
   outline: none;
 }
+/* The bar is the field's frame; theme.css's focus ring drew a hard rectangle
+   inside it, touching its top and bottom edges. */
+#find-input:focus-visible { box-shadow: none; }
 
 /* The count sits between the field and the steppers, which is where every
    browser puts it - and it is tabular, because it changes on every keystroke
@@ -1571,12 +1590,15 @@ body[data-floating="true"] .toolbar {
  * thing you can still do to it; and a background tab stops offering a close
  * button a stray click could hit.
  */
-@container tab (max-width: 96px) {
+/* Measured against the tab's content box, which is 19px narrower than the tab
+   (its 11px and 8px padding): these are tab widths of 96px and 64px. Written
+   as 96 and 64, titles disappeared from 115px tabs and icons from 83px ones. */
+@container tab (max-width: 77px) {
   .tab-title, .tier { display: none; }
   .tab-icon { margin-inline: auto; }
   .tab:not(.active) .tab-close { display: none; }
 }
-@container tab (max-width: 64px) {
+@container tab (max-width: 45px) {
   .tab.active .tab-icon { display: none; }
   .tab.active .tab-close { margin-inline: auto; }
 }

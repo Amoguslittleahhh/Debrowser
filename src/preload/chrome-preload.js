@@ -105,6 +105,7 @@ const COMMANDS = new Set([
   // The address bar's list of suggestions.
   'suggest',
   'suggest-select',
+  'suggest-hover',
   'suggest-hide',
   'suggest-size',
   'suggest-pick',

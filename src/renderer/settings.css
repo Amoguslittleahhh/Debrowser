@@ -206,6 +206,8 @@ h2 {
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
+/* An empty list draws nothing - not a card edge with nothing in it. */
+.rows:empty { border: 0; }
 
 .row {
   display: flex;
@@ -320,6 +322,10 @@ select {
   cursor: default;
   appearance: none;
   padding-right: 26px;
+  /* A long option ends in an ellipsis rather than being cut mid-word. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239b978e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 9px center;
@@ -374,6 +380,10 @@ input[type="checkbox"] {
   padding: 0;
 }
 .swatch[aria-pressed="true"] { border-color: var(--text); }
+/* An inner edge, so a dark swatch stays visible on the dark palette and
+   dark ones stay apart from each other. */
+.swatch { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 22%, transparent); }
+.swatch:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .swatch { transition: transform var(--fast) var(--ease), border-color var(--fast) var(--ease); }
 .swatch:hover { transform: scale(1.12); }
 .swatch:active { transform: scale(1.02); }
@@ -498,3 +508,36 @@ section.landed .rows {
 .row.unavailable .row-label { color: var(--text-dim); }
 .row.unavailable input,
 .row.unavailable select { opacity: 0.5; }
+
+/* A switched-off checkbox looks it, label and all. */
+input[type="checkbox"]:disabled { opacity: 0.45; }
+.row:has(input[type="checkbox"]:disabled) .row-label { color: var(--text-dim); }
+
+/* Scrollbars that do not appear and vanish as a filter changes the page's
+   length - which shifted every row sideways by the bar's width. */
+main { scrollbar-gutter: stable; }
+
+/*
+ * A narrow window: the rail goes across the top as a row of section names,
+ * and each setting's control goes under its label rather than squeezing the
+ * hint into a column a few words wide.
+ */
+@media (max-width: 860px) {
+  .shell { flex-direction: column; }
+  .rail {
+    width: auto;
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: var(--s2) var(--s4);
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    scrollbar-width: none;
+  }
+  .rail-item { width: auto; white-space: nowrap; margin: 0; }
+  .rail-item.current { box-shadow: inset 0 -2px 0 var(--accent); }
+  main { padding: var(--s2) var(--s4) var(--s7); }
+  .row { flex-wrap: wrap; }
+  .row-control { margin-left: auto; }
+}

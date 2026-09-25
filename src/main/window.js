@@ -621,6 +621,7 @@ class BrowserShell {
     if (this.window.isDestroyed()) return;
     const file = SHEET_PAGES[page];
     if (!file) return;
+    this.flushLeavingSheet();
 
     // Toggle: pressing the same button again closes it, as a system menu does
     // when the click lands on its dismissing grab. Pressing the *other* one
@@ -762,16 +763,40 @@ class BrowserShell {
     // A permission question closed without an answer is a refusal; main.js
     // decides that, since it holds the question.
     if (this.onSheetClosed) this.onSheetClosed(page);
-    try {
-      this.window.contentView.removeChildView(view);
-      view.webContents.close();
-    } catch { /* already gone */ }
+    // Faded out rather than cut: the page is told, and the view goes when
+    // the fade has run. Forgotten at once, above, so a new panel can open and
+    // nothing mistakes this one for the panel on screen.
+    // Not when another panel is taking its place: that one is on screen at
+    // once, and a view removed under it a moment later moved focus and closed
+    // the new panel as if the user had clicked away.
+    this.flushLeavingSheet();
+    const remove = () => {
+      try {
+        this.window.contentView.removeChildView(view);
+        view.webContents.close();
+      } catch { /* already gone */ }
+    };
+    if (replacing) {
+      remove();
+    } else {
+      send(view, 'debrowser:ui', { kind: 'closing' });
+      this.leavingSheet = { remove, timer: setTimeout(() => this.flushLeavingSheet(), 110) };
+    }
     // The keyboard goes back to the page. Closing the view that held focus
     // handed it to nobody, so the next keystrokes - after Cut in a context
     // menu, or after choosing Full screen - went nowhere. Not when focus left
     // for somewhere the user chose (a click elsewhere), and not when another
     // panel is replacing this one.
     if (!blurred && !replacing) this.focusPage();
+  }
+
+  /** Finish removing a panel that is still fading out. */
+  flushLeavingSheet() {
+    const leaving = this.leavingSheet;
+    if (!leaving) return;
+    this.leavingSheet = null;
+    clearTimeout(leaving.timer);
+    leaving.remove();
   }
 
   /** Give the keyboard to the page in front. */

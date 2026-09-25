@@ -58,6 +58,11 @@ html, body {
 
 body.calm .sheet { animation: none; }
 
+/* Leaving: a short fade, and nothing on it can be pressed on the way out. */
+body.closing { pointer-events: none; }
+body.closing .sheet,
+body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
+
 /* ---------------------------------------------------------------- */
 
 .item {
@@ -116,7 +121,7 @@ body.calm .sheet { animation: none; }
   stroke-linejoin: round;
   color: var(--text-dim);
 }
-.item:hover:not(:disabled) svg, .item[aria-checked="true"] svg { color: var(--accent); }
+.item:hover:not(:disabled) svg, .item:focus-visible svg, .item[aria-checked="true"] svg { color: var(--accent); }
 
 /*
  * A checked item says so in its own colour rather than with a tick glyph that

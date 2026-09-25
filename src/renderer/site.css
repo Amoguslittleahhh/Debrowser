@@ -31,7 +31,8 @@ section { padding: var(--s3) var(--s4) var(--s3); }
   min-height: 30px;
 }
 
-.kinds svg {
+.kinds svg,
+.row.zoom svg {
   flex: none;
   width: var(--icon-sm);
   height: var(--icon-sm);
@@ -85,7 +86,7 @@ section { padding: var(--s3) var(--s4) var(--s3); }
   font-size: var(--fs-small);
   color: var(--text-dim);
 }
-.connection.insecure { color: var(--warn); }
+.connection.insecure { color: color-mix(in srgb, var(--warn) 65%, var(--text)); }
 
 .rows { margin-top: var(--s2); }
 
@@ -120,7 +121,7 @@ section { padding: var(--s3) var(--s4) var(--s3); }
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
   font: inherit;
   font-size: var(--fs-small);
   cursor: default;

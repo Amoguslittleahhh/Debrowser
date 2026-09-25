@@ -93,7 +93,11 @@
         <path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/>
         <path d="M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5"/>
       </svg>
-      <span class="downloads-ring" id="downloads-ring" aria-hidden="true"></span>
+      <!-- A thin circle round the button, filling clockwise from the top. -->
+      <svg class="downloads-ring" viewBox="0 0 32 32" aria-hidden="true">
+        <circle class="ring-track" cx="16" cy="16" r="14.5"/>
+        <circle class="ring-fill" id="downloads-ring" cx="16" cy="16" r="14.5" pathLength="100"/>
+      </svg>
     </button>
 
     <!--
