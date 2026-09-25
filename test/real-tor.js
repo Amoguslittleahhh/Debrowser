@@ -12,6 +12,7 @@
  *
  *   --direct       plain Tor, no bridges
  *   --bridges      the built-in bridges, raced - the browser's default
+ *   --obfs4, --snowflake  the built-in bridges of that transport alone
  *   --bridge-line  one bridge of your own, as Settings takes it (the CI job
  *                  passes the line tools/bridge-kit/setup-bridge.sh printed)
  *
@@ -137,6 +138,15 @@ async function main() {
   if (all || args.includes('--direct')) results.push(await check('plain Tor', []));
   if (all || args.includes('--bridges')) {
     results.push(await check('built-in bridges (obfs4 and Snowflake, raced)', bridges.torrcLines({ mode: 'auto' }, bundleDir())));
+  }
+  // Each transport alone, so a failure says which one: raced, a working one
+  // hides a broken one, and a broken one can hold the race up.
+  for (const transport of ['obfs4', 'snowflake']) {
+    if (!args.includes(`--${transport}`)) continue;
+    const only = bridges.torrcLines({ mode: 'auto' }, bundleDir())
+      .map((l) => (l.startsWith('ClientTransportPlugin ') ? l.replace(/ClientTransportPlugin \S+/, `ClientTransportPlugin ${transport}`) : l))
+      .filter((l) => !l.startsWith('Bridge ') || l.startsWith(`Bridge ${transport} `));
+    results.push(await check(`built-in ${transport} bridges only`, only));
   }
   if (lineAt >= 0) {
     const lines = bridges.torrcLines({ mode: 'custom', custom: args[lineAt + 1] || '' }, bundleDir());

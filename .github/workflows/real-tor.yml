@@ -55,3 +55,20 @@ jobs:
       - name: The bridge's own log, if that failed
         if: failure()
         run: sudo journalctl -u 'tor*' --no-pager -n 80 || sudo tail -n 80 /var/lib/tor/notices.log || true
+
+  # The same on Windows, where the browser's private windows run Tor and its
+  # bridge transport as their own programs. The Linux job above never covered
+  # it, and a Windows user's private window stalled at 30%.
+  real-tor-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch and verify Tor
+        run: node tools/fetch-tor.js
+      - name: Plain Tor, the built-in bridges, and each transport alone
+        timeout-minutes: 30
+        run: node test/real-tor.js --direct --bridges --obfs4 --snowflake
