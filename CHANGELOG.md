@@ -121,6 +121,13 @@ This is not Tor Browser. A site that tries hard can tell the two apart, and a pr
 - With tabs down the side and the strip collapsed, the address bar, Back and the menu disappeared with it; they now stay across the top.
 - Zoom, the speaker icon, bookmarks and new tab tiles could show out-of-date state until something else changed.
 - The downloads button, the padlock and several menu items did nothing when pressed.
+- Ctrl+S and Ctrl+/ go to the page first, so a document editor saves and a code editor toggles a comment; the browser saves the page or lists its shortcuts only when the page doesn't use the key. DevTools keeps its own keys, too: only tab, reload, full screen and DevTools shortcuts reach the browser from there.
+- Pressing Allow on a permission question answers only the question on screen, and after one is dismissed the next one appears instead of waiting unseen. A question arriving while the site panel is open now shows in the panel instead of closing it.
+- A download link typed into a new tab no longer downloads twice.
+- A click during the fraction of a second a menu takes to fade out now reaches the page instead of being lost.
+- Removing a new tab tile no longer leaves the site on a hidden list after history is cleared, and bookmarking or visiting the site again brings its tile back.
+- Bookmarks in a private window can be opened but no longer edited or deleted.
+- The private window no longer claims it "couldn't open" when it closes after being used.
 
 ## 1.6.0
 

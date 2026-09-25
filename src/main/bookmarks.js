@@ -208,6 +208,7 @@ class Bookmarks {
       this.items.push(entry);
     }
     this.save();
+    if (this.onAdd && !this.readOnly) this.onAdd(entry);
     return entry;
   }
 

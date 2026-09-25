@@ -142,7 +142,8 @@ alternative keys included.
 | Close and erase now | `Ctrl+Shift+Delete` |
 
 Every shortcut works wherever the keyboard is: in a page, in a panel, in the
-task manager. They all come from one table, `src/main/shortcuts.js`, which is
+task manager. Two give way to the page: in a web app that uses `Ctrl+S` or
+`Ctrl+/` itself (a document editor, a code editor), the app gets the key. They all come from one table, `src/main/shortcuts.js`, which is
 also where the menus get the keys they print, so a label can't disagree with
 its key.
 

@@ -259,6 +259,14 @@ class History {
     return this.items.slice();
   }
 
+  /**
+   * The stored entries themselves, not a copy, for a caller that only reads
+   * them and does so on every keystroke. Not to be kept or changed.
+   */
+  entries() {
+    return this.items;
+  }
+
   remove(id) {
     const before = this.items.length;
     this.items = this.items.filter((e) => e.id !== id);

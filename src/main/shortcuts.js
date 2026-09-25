@@ -108,13 +108,16 @@ const TABLE = [
 
   // Tools
   { command: 'print', mod: true, key: 'p' },
-  { command: 'save-page', mod: true, key: 's' },
+  // A web application's own key first - Ctrl+S saves the document in an
+  // editor, Ctrl+/ toggles a comment in a code editor - and the browser's only
+  // when the page leaves it alone. See `pageFirst` in main.js.
+  { command: 'save-page', mod: true, key: 's', pageFirst: true },
   { command: 'view-source', mod: true, key: 'u' },
   { command: 'toggle-panel', mod: true, key: 'm' },
   { command: 'toggle-devtools', key: 'f12' },
   { command: 'toggle-devtools', mod: true, shift: true, key: 'i' },
   { command: 'toggle-fullscreen', key: 'f11' },
-  { command: 'show-shortcuts', mod: true, key: '/' }
+  { command: 'show-shortcuts', mod: true, key: '/', pageFirst: true }
 ];
 
 // Every entry answers to a list of spellings, normalised once here rather than
@@ -157,7 +160,7 @@ function match(input) {
     if (entry.shift !== 'any' && Boolean(entry.shift) !== shift) continue;
     if (Boolean(entry.alt) !== alt) continue;
     if (!entry.keys.includes(key)) continue;
-    return { command: entry.command, payload: entry.payload || null };
+    return { command: entry.command, payload: entry.payload || null, pageFirst: Boolean(entry.pageFirst) };
   }
   return null;
 }

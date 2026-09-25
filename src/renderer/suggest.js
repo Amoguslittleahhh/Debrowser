@@ -102,8 +102,18 @@ function reportSize() {
 // Pointing at a row selects it, as the arrow keys do - one highlight, and
 // it is the row Enter takes. A separate hover tint beside the keyboard's left
 // two rows lit and no way to tell which one Enter meant.
+//
+// Only for a pointer that actually moved. Chromium sends a mousemove after
+// every relayout to a pointer resting where the list opens, and that used to
+// select a row nobody pointed at - so typing and pressing Enter took some
+// history row instead of searching.
 let hovered = -1;
+let pointer = null;
 list.addEventListener('mousemove', (event) => {
+  const at = `${event.screenX},${event.screenY}`;
+  const moved = pointer !== null && pointer !== at;
+  pointer = at;
+  if (!moved) return;
   const el = event.target.closest('.row');
   const index = el ? Number(el.dataset.index) : -1;
   if (index < 0 || index === hovered) return;

@@ -2462,12 +2462,67 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       local.every((u) => u.startsWith('http://')) && normaliseUrl('example.com', 'https://s/?q=%s') === 'https://example.com',
       local.join(' '));
 
+    // From the code review: the address bar's list and the permission queue.
+    {
+      const { suggest } = require('./suggest');
+      const { classifyAddress } = require('./address');
+      const history = Array.from({ length: 9 }, (_, i) =>
+        ({ title: `GitHub ${i}`, url: `https://github.com/p${i}`, visits: 9 - i, visitedAt: Date.now() }));
+      const address = suggest({ text: 'github.com', history });
+      check('the search row survives a full list of matches',
+        address.items.length <= 7 && address.items.some((r) => r.kind === 'search'),
+        address.items.map((r) => r.kind).join(','));
+
+      const art = suggest({ text: 'art', history: [{ title: 'Smart Art Gallery', url: 'https://gallery.test/', visits: 1 }] });
+      check('a word is found at the start of a later word, after appearing inside an earlier one',
+        art.items.some((r) => r.kind === 'history'), art.items.map((r) => r.kind).join(','));
+
+      const gh = [{ title: 'GitHub', url: 'https://github.com/', visits: 5, visitedAt: Date.now() }];
+      const typing = suggest({ text: 'gith', history: gh, complete: true });
+      const deleting = suggest({ text: 'gith', history: gh, complete: false });
+      check('the row marked as Enter\'s is the completion only when the bar will complete',
+        typing.items[0].kind === 'history' && deleting.items[0].kind === 'search',
+        `${typing.items[0].kind} / ${deleting.items[0].kind}`);
+
+      const port = suggest({ text: 'router:8080' });
+      check('the list and Enter agree about local addresses',
+        classifyAddress('router:8080') === 'local' && port.items[0].kind === 'go', port.items[0].kind);
+
+      const { PermissionAsks } = require('./site-permissions');
+      const stored = [];
+      const store = { decide: () => 'ask', set: (o, k, v) => stored.push(`${o} ${k} ${v}`) };
+      const fakeTab = { id: 999, url: 'https://a.test/' };
+      let shows = 0;
+      const asks = new PermissionAsks(store, {
+        tabFor: () => fakeTab, tabById: () => fakeTab, isActive: () => true, show: () => { shows += 1; }
+      });
+      const answers = [];
+      asks.request({}, ['media'], { requestingUrl: 'https://a.test/' }, (ok) => answers.push(`media ${ok}`));
+      asks.request({}, ['geolocation'], { requestingUrl: 'https://a.test/' }, (ok) => answers.push(`geo ${ok}`));
+      const unshown = asks.answer(fakeTab, true);        // nothing drawn yet: no answer
+      asks.markShown(fakeTab);
+      asks.dismissShown();                               // refuses media, shows geolocation
+      check('a permission answer needs the question on screen, and a dismissed one shows the next',
+        !unshown && stored.length === 0 && answers.join() === 'media false' && shows === 2 && asks.has(fakeTab),
+        `answered=${unshown} stored=${stored.length} answers=${answers.join()} shows=${shows}`);
+      asks.forget(fakeTab);
+
+      const saveKey = require('./shortcuts').match({ type: 'keyDown', key: 's', control: process.platform !== 'darwin',
+        meta: process.platform === 'darwin' });
+      check('Ctrl+S goes to a website first', Boolean(saveKey && saveKey.pageFirst), JSON.stringify(saveKey));
+    }
+
     // A tab that started as the new tab page, sent to a website: the page
     // bridge must not come along into the site's renderer.
     const start = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
     await waitFor(() => start.isLive && !start.loading);
     runCommand('navigate', { url: pageUrl('idle.html') });
+    // What it goes back to if the site never commits: the page it left, not
+    // the site - which reloaded a download a second time.
+    const cameFrom = start.rebuiltFrom;
     await waitFor(() => start.isLive && !start.loading && /idle\.html/.test(start.url), { timeoutMs: 5000 });
+    check('a new tab sent to a website remembers the new tab page, not the site, to go back to',
+      pages.pageName(cameFrom || '') === 'newtab', String(cameFrom));
     const bridge = start.isLive ? await start.wc.executeJavaScript('typeof window.debrowser').catch(() => '?') : '?';
     check('a new tab sent to a website gets a website\'s renderer, without the page bridge',
       bridge === 'undefined' && !start.realisedInternal, `window.debrowser is ${bridge}`);

@@ -22,44 +22,71 @@
  * hands it fixtures.
  */
 
+const { classifyAddress } = require('./address');
+
 const MAX_ROWS = 7;
 
 /** The part of an address people type: no scheme, no `www.`. */
 const stem = (url) => String(url || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '');
 
 /** Whether text reads as an address rather than words to search for. */
-function looksLikeAddress(text) {
-  const t = text.trim();
-  if (/\s/.test(t)) return false;
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^[^\s/?#]+\.[^\s/?#]{2,}([/?#]|$)/.test(t) ||
-    t === 'localhost' || t.startsWith('localhost:');
-}
+const looksLikeAddress = (text) => classifyAddress(text) !== null;
 
 /**
  * How well `words` match a title and an address, or 0 for no match. Every word
  * must appear somewhere; where it appears decides the score.
  */
 function matchScore(words, title, url) {
-  const t = String(title || '').toLowerCase();
-  const s = stem(url).toLowerCase();
+  return scoreLower(words, String(title || '').toLowerCase(), stem(url).toLowerCase());
+}
+
+/**
+ * The best place a word appears in `text`, scored by `at`. Every occurrence is
+ * looked at, not only the first: "art" is inside "smart" before it starts
+ * "Art Gallery", and the first `indexOf` alone scored that title as no match.
+ */
+function bestHit(text, word, at) {
+  let best = 0;
+  for (let i = text.indexOf(word); i !== -1 && best < 60; i = text.indexOf(word, i + 1)) {
+    best = Math.max(best, at(i, text));
+  }
+  return best;
+}
+
+function scoreLower(words, t, s) {
   let score = 0;
   for (const w of words) {
     // In the middle of a word only counts for a longer word: "git" inside
     // "digital" is noise, "hub" inside "github" is not what anyone meant
     // either, but "request" inside "pullrequest" is.
     const midOk = w.length >= 4;
-    const inUrl = s.indexOf(w);
-    const inTitle = t.indexOf(w);
-    let hit = 0;
-    if (inUrl === 0) hit += 60;                                              // start of the address
-    else if (inUrl > 0 && /[./\-_?=&]/.test(s[inUrl - 1])) hit += 30;         // start of a part of it
-    else if (inUrl > 0 && midOk) hit += 10;
-    if (inTitle === 0 || (inTitle > 0 && /[\s\-·|:(]/.test(t[inTitle - 1]))) hit += 25;
-    else if (inTitle > 0 && midOk) hit += 8;
+    const hit =
+      bestHit(s, w, (i) => (i === 0 ? 60                                // start of the address
+        : /[./\-_?=&]/.test(s[i - 1]) ? 30                              // start of a part of it
+          : midOk ? 10 : 0)) +
+      bestHit(t, w, (i) => (i === 0 || /[\s\-·|:(]/.test(t[i - 1]) ? 25 : midOk ? 8 : 0));
     if (!hit) return 0;
     score += hit;
   }
   return score;
+}
+
+/*
+ * The lowercased title and address stem of each history entry, kept between
+ * keystrokes. Every letter typed in the bar ranks the whole history - up to
+ * ten thousand pages - on the browser's main thread, and lowercasing and
+ * stemming each one again for every letter was most of that work. Keyed by the
+ * entry itself and checked against its current title and address, so a
+ * renamed or forgotten entry is never matched on what it used to say.
+ */
+const prepared = new WeakMap();
+function prepare(item) {
+  const had = prepared.get(item);
+  if (had && had.title === item.title && had.url === item.url) return had;
+  const s = stem(item.url).toLowerCase();
+  const p = { title: item.title, url: item.url, t: String(item.title || '').toLowerCase(), s, key: s.replace(/\/$/, '') };
+  prepared.set(item, p);
+  return p;
 }
 
 /**
@@ -69,39 +96,39 @@ function matchScore(words, title, url) {
  * @param {Array<{title, url}>} input.bookmarks
  * @param {Array<{title, url, visits, visitedAt}>} input.history
  * @param {string} input.engine                      - search engine's name, for the search row
+ * @param {boolean} [input.complete]                 - the bar will fill in `inline` as typed
  * @param {number} [input.now]
- * @returns {{items: object[], inline: string|null}}
+ * @returns {{items: object[], inline: string|null, inlineUrl: string|null}}
  *   `inline` is the address stem inline completion should fill, if any.
  */
-function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the web', now = Date.now() }) {
+function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the web', complete = true, now = Date.now() }) {
   const typed = String(text || '').trim();
-  if (!typed) return { items: [], inline: null };
+  if (!typed) return { items: [], inline: null, inlineUrl: null };
   const lower = typed.toLowerCase();
   const words = lower.split(/\s+/).filter(Boolean);
 
   // How much each address has been used, whichever list it comes from: a
   // bookmark visited every day should outrank one saved and never opened.
-  const key = (url) => stem(url).replace(/\/$/, '').toLowerCase();
   const usage = new Map();
   for (const h of history) {
     const days = Math.max(0, (now - (h.visitedAt || 0)) / 86_400_000);
     const frequency = Math.min(Math.log2((h.visits || 1) + 1) * 30, 150);
     const recency = Math.max(0, 60 - days * 2);
-    usage.set(key(h.url), frequency + recency);
+    usage.set(prepare(h).key, frequency + recency);
   }
 
   const seen = new Map();   // one row per address; the better kind of row wins
   const offer = (kind, base, item) => {
-    const m = matchScore(words, item.title, item.url);
+    const p = prepare(item);
+    const m = scoreLower(words, p.t, p.s);
     if (!m) return;
-    const k = key(item.url);
     const candidate = {
       kind, title: item.title || stem(item.url), url: item.url,
       ...(kind === 'tab' ? { tabId: item.id } : {}),
-      score: base + m + (usage.get(k) || 0)
+      score: base + m + (usage.get(p.key) || 0)
     };
-    const had = seen.get(k);
-    if (!had || candidate.score > had.score) seen.set(k, candidate);
+    const had = seen.get(p.key);
+    if (!had || candidate.score > had.score) seen.set(p.key, candidate);
   };
   for (const tab of tabs) if (/^https?:/i.test(tab.url || '')) offer('tab', 150, tab);
   for (const b of bookmarks) offer('bookmark', 80, b);
@@ -126,25 +153,32 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
     }
   }
 
-  // The first row is always what Enter does, and is marked so: the address
-  // inline completion filled in, else the address as typed, else the search.
-  // After it, the best matches - with the search no lower than third for
-  // words, and last for something that is plainly an address, where a second
-  // row repeating the typed text read as noise.
-  const matches = ranked.slice(0, MAX_ROWS);
+  // The first row is always what Enter does, and is marked so. That is the
+  // completed address only when the bar is really going to fill it in - it
+  // does not after a backspace, a paste, or with completion turned off - or
+  // when the text already is that address. Otherwise it is the address as
+  // typed, or the search.
+  const exact = inline !== null && inline.toLowerCase() === lower;
+  const leadUrl = inlineUrl && (exact || (complete && inline.length > typed.length)) ? inlineUrl : null;
   const searchRow = { kind: 'search', title: typed, engine };
   const address = looksLikeAddress(typed);
-  const lead = inlineUrl ? matches.findIndex((c) => c.url === inlineUrl) : -1;
-  const rows = [];
-  if (lead >= 0) rows.push(matches.splice(lead, 1)[0]);
-  else if (address) rows.push({ kind: 'go', title: typed, url: typed });
-  else rows.push(searchRow);
-  if (rows[0] === searchRow) rows.push(...matches);
+  const leadIndex = leadUrl ? ranked.findIndex((c) => c.url === leadUrl) : -1;
+  const lead = leadIndex >= 0 ? ranked.splice(leadIndex, 1)[0]
+    : address ? { kind: 'go', title: typed, url: typed }
+      : searchRow;
+
+  // After it, the best matches, and the search is always somewhere in the
+  // list: no lower than third for words, last for something that is plainly
+  // an address, where a second row repeating the typed text read as noise.
+  // Room is kept for it before the matches are cut, rather than cutting it.
+  const room = MAX_ROWS - (lead === searchRow ? 1 : 2);
+  const matches = ranked.slice(0, room);
+  const rows = [{ ...lead, isDefault: true }];
+  if (lead === searchRow) rows.push(...matches);
   else if (address) rows.push(...matches, searchRow);
   else rows.push(...matches.slice(0, 1), searchRow, ...matches.slice(1));
-  rows[0] = { ...rows[0], isDefault: true };
   return {
-    items: rows.slice(0, MAX_ROWS).map(({ score, ...row }) => row),
+    items: rows.map(({ score, ...row }) => row),
     inline,
     inlineUrl
   };

@@ -85,6 +85,23 @@ window.addEventListener('wheel', (event) => {
   ipcRenderer.send('debrowser:zoom-gesture', { direction: event.deltaY < 0 ? 'in' : 'out' });
 }, { passive: false, capture: true });
 
+/*
+ * Ctrl+S and Ctrl+/ reach the page first (see `pageFirst` in shortcuts.js):
+ * an editor saves its document or toggles a comment, and the browser acts
+ * only if the page did not. Checked after the event has been through the
+ * page's own handlers, which is when `defaultPrevented` says whether it used
+ * the key.
+ */
+const PAGE_FIRST = { s: 'save-page', '/': 'show-shortcuts' };
+window.addEventListener('keydown', (event) => {
+  const mod = process.platform === 'darwin' ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  const command = PAGE_FIRST[String(event.key).toLowerCase()];
+  if (!command || !mod || event.shiftKey || event.altKey || event.repeat) return;
+  setTimeout(() => {
+    if (!event.defaultPrevented) ipcRenderer.send('debrowser:page-key', command);
+  }, 0);
+}, true);
+
 const passive = { passive: true, capture: true };
 window.addEventListener('scroll', markScroll, passive);
 window.addEventListener('wheel', markScroll, passive);

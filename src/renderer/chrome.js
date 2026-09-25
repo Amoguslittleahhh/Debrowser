@@ -76,15 +76,16 @@ el.omnibox.addEventListener('mousedown', (event) => {
  * left edge just left of the glyph. The browser opens it here too when a site
  * asks for something, so the question appears where the answer is kept.
  */
-function openSite() {
+function openSite(ask = false) {
   const pill = el.omnibox.getBoundingClientRect();
   const lock = el.site.getBoundingClientRect();
   api.send('open-site', {
     x: Math.round((lock.width ? lock.left : pill.left + 8) - 4),
-    y: Math.round(pill.bottom + 6)
+    y: Math.round(pill.bottom + 6),
+    ask
   });
 }
-el.site.addEventListener('click', openSite);
+el.site.addEventListener('click', () => openSite());
 
 /** Whether the loading line is currently running, so it is only re-armed on a change. */
 let progressRunning = null;
@@ -908,12 +909,19 @@ function endTabDrag(cancelled) {
 el.tabs.addEventListener('pointermove', (event) => {
   const d = tabDrag;
   if (!d || event.pointerId !== d.pointer) return;
+  // The button came up somewhere this view never heard about - off the strip,
+  // over the page - before the drag had begun and taken the pointer. A move
+  // with no button held is not a drag, however far it goes.
+  if (!(event.buttons & 1)) { endTabDrag(true); return; }
   const delta = (d.vertical ? event.clientY : event.clientX) - d.start;
   if (!d.active && (Math.abs(delta) < DRAG_THRESHOLD || !beginTabDrag())) return;
   moveTabDrag(delta);
 });
 el.tabs.addEventListener('pointerup', () => endTabDrag(false));
 el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
+// And when the pointer leaves the strip before the drag has begun: only a
+// begun drag holds the pointer, so the release may land somewhere else.
+el.tabs.addEventListener('pointerleave', () => { if (tabDrag && !tabDrag.active) tabDrag = null; });
 // Esc puts it back where it came from.
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && tabDrag?.active) { event.preventDefault(); endTabDrag(true); }
@@ -1345,14 +1353,17 @@ el.url.addEventListener('input', async () => {
   if (!typed.trim()) { closeList(); return; }
 
   const ask = ++asked;
-  const res = await api.request('suggest', { text: typed, anchor: anchor() });
+  // Whether this keystroke will be completed in place, so the list marks as
+  // Enter's the row Enter will really take.
+  const complete = completing && chromePrefs.inlineAutocomplete !== false && typed.length >= 2;
+  const res = await api.request('suggest', { text: typed, anchor: anchor(), complete });
   // Dropped unless the field still says what was asked about: the answer
   // crosses a process boundary, and typing does not stop while it is in flight.
   if (ask !== asked || el.url.value !== typed || !res) return;
   suggestions = res.items || [];
   listOpen = suggestions.length > 0;
 
-  if (!completing || chromePrefs.inlineAutocomplete === false || typed.length < 2) return;
+  if (!complete) return;
   const stem = res.inline;
   if (!stem || !stem.toLowerCase().startsWith(typed.toLowerCase()) || stem.length <= typed.length) return;
   // What the user typed, with their own capitalisation, plus the rest of the
@@ -1380,8 +1391,16 @@ el.url.addEventListener('keydown', (event) => {
     el.url.setSelectionRange(el.url.value.length, el.url.value.length);
     api.send('suggest-select', { index: selected });
   } else if (event.key === 'Enter') {
+    // The list's first row is what Enter does when nothing is highlighted -
+    // it says so - and when that row is a page rather than the typed text,
+    // it is taken as a row: an open tab is switched to, not loaded twice.
+    const lead = suggestions[0];
+    const leadIsPage = listOpen && lead && lead.isDefault && lead.kind !== 'go' && lead.kind !== 'search' &&
+      (el.url.value === completed || el.url.value === typed);
     if (listOpen && selected >= 0) {
       api.send('suggest-pick', { index: selected, newTab: event.altKey });
+    } else if (leadIsPage) {
+      api.send('suggest-pick', { index: 0, newTab: event.altKey });
     } else if (completed && completedUrl && el.url.value === completed) {
       api.send('navigate', { url: completedUrl });
     } else {
@@ -1475,15 +1494,20 @@ el.findClose.addEventListener('click', () => api.send('find-close'));
 api.onMessage((message) => {
   switch (message.kind) {
     case 'site-ask':
-      openSite();
+      openSite(true);
       break;
     case 'open-downloads':
       openDownloads();
       break;
     // The list's selection moved under the pointer; the field keeps what was
     // typed, and Enter takes the row pointed at.
+    // It is shown in the field too, as the arrow keys do, so Enter never takes
+    // a row the field is not showing.
     case 'suggest-hover':
-      if (listOpen) selected = message.index;
+      if (!listOpen || !suggestions[message.index]) break;
+      selected = message.index;
+      el.url.value = shown(suggestions[selected]);
+      el.url.setSelectionRange(el.url.value.length, el.url.value.length);
       break;
     case 'suggest-done':
       closeList();

@@ -116,7 +116,9 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
     if (state.onExit) child.on('exit', state.onExit);
     // A private browser that ends with an error never showed anything - its
     // output goes nowhere - so the one that asked for it has to say so.
-    if (state.onFail) child.on('exit', (code) => { if (code) state.onFail(code); });
+    // With how long it ran, which is what says whether it ever had a window.
+    const started = Date.now();
+    if (state.onFail) child.on('exit', (code) => { if (code) state.onFail(code, Date.now() - started); });
     child.unref();
     return true;
   } catch (err) {

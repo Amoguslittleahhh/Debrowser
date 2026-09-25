@@ -203,6 +203,12 @@ function setRadius(view, radius) {
   } catch { /* not supported here; square corners */ }
 }
 
+
+/** The browser commands whose keys the inspector answers; see openDevTools. */
+const DEVTOOLS_KEYS = new Set([
+  'new-tab', 'new-incognito-window', 'close-tab', 'reopen-closed-tab', 'cycle-tab', 'select-tab',
+  'reload', 'reload-hard', 'toggle-devtools', 'toggle-fullscreen'
+]);
 class BrowserShell {
   /**
    * @param {object} deps - { tabManager, log, onCommand }
@@ -617,7 +623,7 @@ class BrowserShell {
    *   in window coordinates. The renderer sends it because only it knows where
    *   the button ended up after the strip laid out.
    */
-  openSheet(page, anchor = {}) {
+  openSheet(page, anchor = {}, { refresh = false } = {}) {
     if (this.window.isDestroyed()) return;
     const file = SHEET_PAGES[page];
     if (!file) return;
@@ -625,11 +631,13 @@ class BrowserShell {
 
     // Toggle: pressing the same button again closes it, as a system menu does
     // when the click lands on its dismissing grab. Pressing the *other* one
-    // swaps, which is what a toolbar full of panels should do.
+    // swaps, which is what a toolbar full of panels should do. A `refresh` is
+    // not a press - the panel has something new to say - so it redraws the
+    // one that is open instead of closing it.
     if (this.sheetView) {
       const same = this.sheetPage === page;
-      this.closeSheet({ replacing: !same });
-      if (same) return;
+      this.closeSheet({ replacing: !same || refresh });
+      if (same && !refresh) return;
     }
 
     // The same toggle, for the ordering that actually happens.
@@ -649,7 +657,7 @@ class BrowserShell {
     // backdrop dismisses the menu, and the right-click that follows - the one
     // that should raise it at the new point - arrived inside the window and was
     // swallowed, so the menu appeared to have stopped working for a moment.
-    if (page !== 'context' &&
+    if (page !== 'context' && !refresh &&
         this.sheetClosedPage === page && Date.now() - this.sheetClosedAt < 250) return;
 
     const x = Number(anchor?.x);
@@ -781,6 +789,14 @@ class BrowserShell {
     } else {
       send(view, 'debrowser:ui', { kind: 'closing' });
       this.leavingSheet = { remove, timer: setTimeout(() => this.flushLeavingSheet(), 110) };
+      // The fading view still covers the window, and a press in that moment
+      // was swallowed by a panel already gone. It goes at once instead, and
+      // the press is handed to whatever is underneath it.
+      view.webContents.on('input-event', (_event, input) => {
+        if (input.type !== 'mouseDown' || this.leavingSheet?.remove !== remove) return;
+        this.flushLeavingSheet();
+        this.passPointerThrough(input);
+      });
     }
     // The keyboard goes back to the page. Closing the view that held focus
     // handed it to nobody, so the next keystrokes - after Cut in a context
@@ -788,6 +804,30 @@ class BrowserShell {
     // for somewhere the user chose (a click elsewhere), and not when another
     // panel is replacing this one.
     if (!blurred && !replacing) this.focusPage();
+  }
+
+  /**
+   * Give a press to the view under it. The point is in window coordinates -
+   * the panel's view covers the window from its corner - and each view is sent
+   * it in its own.
+   */
+  passPointerThrough(input) {
+    if (this.window.isDestroyed()) return;
+    const views = [...this.window.contentView.children].reverse();
+    const target = views.find((v) => {
+      const b = v.getBounds();
+      return v.getVisible?.() !== false && input.x >= b.x && input.y >= b.y &&
+        input.x < b.x + b.width && input.y < b.y + b.height;
+    });
+    if (!target || !target.webContents || target.webContents.isDestroyed()) return;
+    const b = target.getBounds();
+    try {
+      target.webContents.focus();
+      target.webContents.sendInputEvent({
+        type: 'mouseDown', x: input.x - b.x, y: input.y - b.y,
+        button: input.button || 'left', clickCount: input.clickCount || 1, modifiers: input.modifiers || []
+      });
+    } catch { /* the view went too */ }
   }
 
   /** Finish removing a panel that is still fading out. */
@@ -1018,9 +1058,11 @@ class BrowserShell {
     let view;
     try {
       view = new WebContentsView();
-      // The browser's keys work in the inspector too: F12 closes it again, as
-      // in Chrome, and Ctrl+T still opens a tab.
-      this.bindShortcuts(view.webContents);
+      // Some of the browser's keys work in the inspector too: F12 closes it
+      // again, as in Chrome, and Ctrl+T still opens a tab. Only those that
+      // DevTools has no use for - it has its own Ctrl+P, Ctrl+F, Ctrl+S,
+      // Ctrl+L, Ctrl+/ and Ctrl+[ and ], and the browser's took them away.
+      this.bindShortcuts(view.webContents, null, { only: DEVTOOLS_KEYS });
       this.window.contentView.addChildView(view);
       tab.wc.setDevToolsWebContents(view.webContents);
       // Still 'detach', even though nothing detaches: it is what tells Chromium

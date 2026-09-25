@@ -50,6 +50,7 @@ const policy = require('./incognito/policy');
 const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
 const { suggest } = require('./suggest');
+const { classifyAddress } = require('./address');
 const palette = require('./palette');
 const { SitePermissions, PermissionAsks } = require('./site-permissions');
 
@@ -483,7 +484,7 @@ function main() {
    * own DOM. That is what made which shortcuts existed depend on where focus
    * happened to be, so the DOM table is gone and this is the only one.
    */
-  const bindShortcuts = (wc, tab = null) => {
+  const bindShortcuts = (wc, tab = null, { only = null } = {}) => {
     if (!wc || wc.isDestroyed()) return;
     wc.on('before-input-event', (event, input) => {
       // Esc stops a page that is still loading, as in every browser - and
@@ -494,7 +495,11 @@ function main() {
         return;
       }
       const hit = shortcuts.match(input);
-      if (!hit) return;
+      if (!hit || (only && !only.has(hit.command))) return;
+      // On a website, a key the page may want for itself goes to the page;
+      // the page probe asks for the browser's action afterwards if the page
+      // did not use it (`debrowser:page-key`, below).
+      if (hit.pageFirst && tab && !tab.internal) return;
       event.preventDefault();
       runCommand(hit.command, hit.payload);
     });
@@ -692,7 +697,11 @@ function main() {
         if (tabs && payload?.url) openLinkTab(tabs, prefs, tab, payload.url);
         break;
       case 'visited':
-        if (history && payload?.url) history.record({ url: payload.url, title: tab.title });
+        if (history && payload?.url && history.record({ url: payload.url, title: tab.title })) {
+          // Going back to a forgotten site brings its tile back through
+          // history; the hidden entry would only be a record of the visit.
+          unhideTile(prefs, payload.url);
+        }
         break;
       case 'described':
         if (history && payload?.url) history.describe(payload.url, payload);
@@ -818,9 +827,12 @@ function main() {
       sitePermissions = new SitePermissions(log, OFFLINE_MODE ? null : app.getPath('userData'));
       permissionAsks = new PermissionAsks(sitePermissions, {
         tabFor: (wc) => tabs.all().find((t) => t.isLive && t.wc.id === wc.id) || null,
+        tabById: (id) => tabs.byId(id),
         isActive: (tab) => tabs.activeTab() === tab,
         // The chrome opens the panel, because only it knows where the padlock is.
-        show: () => { if (shell) shell.toChrome('site-ask'); }
+        show: () => { if (shell) shell.toChrome('site-ask'); },
+        // The page the panel was asking for is gone, so is its question.
+        withdrawn: () => { if (shell && shell.sheetPage === 'site') shell.closeSheet({ replacing: true }); }
       });
       tabs.askPermission = (wc, kinds, details, callback) => permissionAsks.request(wc, kinds, details, callback);
       tabs.permissionGranted = (origin, kinds) => sitePermissions.decide(originOf(origin), kinds) === 'allow';
@@ -986,6 +998,8 @@ function main() {
     // private window would be a record of it in the ordinary profile.
     bookmarks = INCOGNITO ? new Bookmarks(log, incognitoCtx.normalUserData) : new Bookmarks(log);
     bookmarks.onChange = () => publish();
+    // Bookmarking a site whose tile was taken away is asking for it back.
+    bookmarks.onAdd = (entry) => unhideTile(prefs, entry.url);
     if (INCOGNITO) bookmarks.readOnly = true;
     // So the state broadcast can carry the revision the bookmarks bar watches.
     shell.bookmarks = bookmarks;
@@ -1168,7 +1182,10 @@ function main() {
     // Writes are debounced by a few seconds, and quit does not wait for a
     // timer, so the last few pages visited would be lost on every close.
     // Cleared instead, if Settings asks for that; `clear` writes synchronously.
-    if (history && !OFFLINE_MODE && prefs && prefs.get('clearHistoryOnExit')) history.clear();
+    if (history && !OFFLINE_MODE && prefs && prefs.get('clearHistoryOnExit')) {
+      history.clear();
+      if (prefs.get('hiddenTiles').length) prefs.set('hiddenTiles', []);
+    }
     else if (history) history.flush();
     // Before `closeAll`, which empties the list this describes. Written
     // synchronously because quit does not wait for a timer, and the debounce
@@ -1228,21 +1245,16 @@ function main() {
 /* Commands from the browser chrome                                    */
 /* ------------------------------------------------------------------ */
 
-/**
- * Wire the command channel, and hand back the dispatcher behind it.
- *
- * Returned rather than kept private because two things issue commands now: the
- * browser's own renderers, over IPC, and the keyboard, which a *page* owns
- * while it has focus. Both must mean the same thing by 'new-tab', so there is
- * one switch and two ways in rather than a second copy for shortcuts.
- */
+let quittingForGood = false;
+/** A private window gone this soon never got as far as showing itself. */
+const PRIVATE_START_MS = 15_000;
+
 /**
  * Start the private browser - or, with `warm`, one that connects Tor and keeps
  * its window back until Ctrl+Shift+N reaches it. A kept-ready one that ends,
  * because it was shown and then closed, is replaced by a new one while the
  * setting is on and this browser is not quitting.
  */
-let quittingForGood = false;
 function startIncognito({ prefs, log, warm = false }) {
   return launchIncognito(log, bridges.torrcLines({
     mode: prefs.get('incognitoBridges'),
@@ -1257,21 +1269,36 @@ function startIncognito({ prefs, log, warm = false }) {
     } : null,
     // Asked for and gone with an error: without this, Ctrl+Shift+N did
     // nothing at all that anyone could see.
-    onFail: warm ? null : (code) => {
-      log('incognito', `private window exited with code ${code}`);
-      if (quittingForGood) return;
+    //
+    // Only a failure to start says it failed to start. The tripwire closes a
+    // window in use with its own explanation (exit 70), and a private window
+    // that ends later with an error had a window - saying it "couldn't open"
+    // then would be false, and would bury the real reason under it.
+    onFail: warm ? null : (code, ranMs) => {
+      log('incognito', `private window exited with code ${code} after ${ranMs} ms`);
+      if (quittingForGood || code === 70) return;
+      const early = ranMs < PRIVATE_START_MS;
       const parent = BaseWindow.getAllWindows().find((w) => !w.isDestroyed());
       dialog.showMessageBox(parent, {
         type: 'warning',
         buttons: ['OK'],
         title: 'Private window',
-        message: 'The private window couldn’t open.',
-        detail: 'It stopped before its window appeared. Try again in a moment.'
+        message: early ? 'The private window couldn’t open.' : 'The private window closed unexpectedly.',
+        detail: early ? 'It stopped before its window appeared. Try again in a moment.'
+          : 'Nothing from it was kept. Open a new one with Ctrl+Shift+N.'
       }).catch(() => {});
     }
   });
 }
 
+/**
+ * Wire the command channel, and hand back the dispatcher behind it.
+ *
+ * Returned rather than kept private because two things issue commands now: the
+ * browser's own renderers, over IPC, and the keyboard, which a *page* owns
+ * while it has focus. Both must mean the same thing by 'new-tab', so there is
+ * one switch and two ways in rather than a second copy for shortcuts.
+ */
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
@@ -1320,6 +1347,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     if (prefs.get('lastTabCloses') === 'new-tab') tabs.create({ url: newTabUrl(prefs) });
     else shell.close();
   };
+
+  // Commands that change nothing the state broadcast carries. Each is sent as
+  // the pointer moves, and repainting every view in the browser for each one
+  // would cost more than the command itself.
+  const UNPUBLISHED = new Set(['suggest-hover', 'suggest-select', 'suggest-size', 'prefetch-tab']);
 
   const runCommand = (command, payload, sender = null) => {
     if (INCOGNITO && INCOGNITO_REFUSED.has(command)) return undefined;
@@ -1381,9 +1413,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           if (tabs.byId(item.tabId)) goTo(item.tabId);
           break;
         }
+        // The go row is exactly what was typed, and goes as typed, so it gets
+        // the same retry over http that Enter on the same text does.
         const url = item.kind === 'search'
           ? normaliseUrl(item.title, prefs.searchTemplate(), { search: true })
-          : normaliseUrl(item.url, prefs.searchTemplate());
+          : item.kind === 'go' ? item.url : normaliseUrl(item.url, prefs.searchTemplate());
         if (!url) break;
         // A middle-click opens it as a link would: behind the page, beside it.
         if (payload?.newTab) openLinkTab(tabs, prefs, active, url);
@@ -1503,21 +1537,21 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const tab = payload?.id ? tabs.byId(payload.id) : active;
         if (!tab) break;
         if (!tab.isLive) tab.realise();
-        tab.url = target;
         // https was a guess - the user typed no scheme - so a site that turns
         // out not to speak it is tried again over http rather than left as an
         // error page. Never in a private window, which has its own rule: the
         // plain version is only loaded after the user is told what it costs.
-        const typed = String(payload?.url || '').trim();
-        tab.httpFallback = !INCOGNITO && target.startsWith('https://') && !/^[a-z][a-z0-9+.-]*:/i.test(typed)
-          ? target : null;
+        const fallback = !INCOGNITO && classifyAddress(payload?.url) === 'host' ? target : null;
         // A renderer built for one of our pages never carries a website.
+        // Before `url` changes: the rebuild remembers the page it left, to go
+        // back to if the site never commits (a download link, or Esc).
         if (tab.realisedInternal) {
-          const fallback = tab.httpFallback;
           tab.rebuildFor(target);
           tab.httpFallback = fallback;
           break;
         }
+        tab.url = target;
+        tab.httpFallback = fallback;
         tab.wc.loadURL(target).catch((err) => log(`navigate failed: ${err.message}`));
         break;
       }
@@ -1773,17 +1807,21 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // The padlock, or a site asking for something: the site panel, hung
       // from the padlock. The chrome measures where that is.
+      // From the padlock, a toggle. From a question arriving, never a close:
+      // the panel already open is drawn again with the question in it.
       case 'open-site':
-        shell.openSheet('site', payload);
+        shell.openSheet('site', payload, { refresh: payload?.ask === true });
         break;
 
       // An answer to the question the panel is showing, which is always the
       // active tab's: the origin comes from the tab, never from the payload.
       case 'permission-answer': {
         if (!permissionAsks || !active) break;
-        permissionAsks.answer(active, payload?.allow === true);
+        // Only the question the panel drew. If the page has since moved on
+        // and asked something else, that one is shown instead of answered.
+        const answered = permissionAsks.answer(active, payload?.allow === true);
         shell.closeSheet();
-        if (permissionAsks.has(active)) shell.toChrome('site-ask');
+        if (!answered || permissionAsks.has(active)) shell.toChrome('site-ask');
         break;
       }
 
@@ -1955,9 +1993,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           items: [
             { id: 'navigate', label: 'Open', icon: 'forward', payload: { url: mark.url } },
             { id: 'new-tab', label: 'Open in new tab', icon: 'plus', payload: { url: mark.url } },
-            { kind: 'separator' },
-            { id: 'open-bookmarks', label: 'Edit…', icon: 'star' },
-            { id: 'forget-bookmark', label: 'Delete', icon: 'close', payload: { id: mark.id } }
+            // A private window reads the bookmarks and never changes them.
+            ...(INCOGNITO ? [] : [
+              { kind: 'separator' },
+              { id: 'open-bookmarks', label: 'Edit…', icon: 'star' },
+              { id: 'forget-bookmark', label: 'Delete', icon: 'close', payload: { id: mark.id } }
+            ])
           ]
         };
         const x = Math.round(Number(payload?.x) || 0);
@@ -2173,7 +2214,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
     }
 
-    publish();
+    if (!UNPUBLISHED.has(command)) publish();
   };
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
@@ -2194,6 +2235,20 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
    * No privilege is involved - a page asking to zoom itself is a page changing
    * its own scale - so this needs no sender check beyond being a tab we own.
    */
+  /*
+   * A page-first key the page did not use. Only the commands marked
+   * `pageFirst` in shortcuts.js, and only for a tab we own: the most a page can
+   * do by sending this itself is open its own Save dialog or the shortcut list,
+   * which is what pressing the key does.
+   */
+  const PAGE_FIRST = new Set(['save-page', 'show-shortcuts']);
+  ipcMain.on('debrowser:page-key', (event, command) => {
+    if (!PAGE_FIRST.has(command)) return;
+    const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
+    if (!tab || tab !== tabs.activeTab()) return;
+    runCommand(command, null);
+  });
+
   ipcMain.on('debrowser:zoom-gesture', (event, payload) => {
     const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
     if (!tab) return;
@@ -2281,7 +2336,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
 const INCOGNITO_REFUSED = new Set([
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
-  'toggle-bookmark', 'remove-bookmark', 'bookmark-page', 'bookmark-profiles',
+  'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
   'import-from-profile', 'import-bookmark-file',
   'check-for-updates', 'update-restart', 'presence-capability',
   'prefetch-tab', 'prefetch-new-tab'
@@ -2458,7 +2513,9 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       case 'delete-history':
         return { removed: Boolean(history && history.remove(String(payload?.id ?? ''))) };
 
+      // Hidden tiles go with it: that list is a list of sites visited too.
       case 'clear-history':
+        prefs.set('hiddenTiles', []);
         return { removed: history ? history.clear() : 0 };
 
       // The history page's own recording switch, and only that one. Every other
@@ -2561,21 +2618,6 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
         return shell.updater ? shell.updater.checkNow(payload?.auto !== true)
           : { available: false, reason: 'updates are off in this build' };
 
-      /*
-       * The rest of the address, while it is being typed.
-       *
-       * One answer, not a list: a dropdown needs a sheet of its own, and the
-       * completion people actually use is the one that finishes the word in
-       * place so Enter goes where they meant. Two letters and a return is how
-       * anyone reaches a site they visit daily, and without this every one of
-       * those was a full address typed out.
-       *
-       * Matched on where a URL *starts*, after dropping the scheme and `www.`,
-       * because that is what someone is typing: "git" should find github.com
-       * and not every page with "git" anywhere in its address. Bookmarks first
-       * - a page saved on purpose outranks one merely visited - then history by
-       * how often it was visited.
-       */
       // What the address bar offers for what has been typed so far: drawn in
       // the list under it, and returned so the bar can complete inline and
       // move the highlight without asking again. See suggest.js.
@@ -2586,8 +2628,10 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
           text,
           tabs: tabs.all().filter((t) => t !== active).map((t) => ({ id: t.id, title: t.title, url: t.url })),
           bookmarks: bookmarks ? bookmarks.all() : [],
-          history: history ? history.all() : [],
-          engine: prefs.engineName()
+          // Not `all()`, which copies ten thousand entries on every letter.
+          history: history ? history.entries() : [],
+          engine: prefs.engineName(),
+          complete: payload?.complete !== false
         });
         shell.suggestItems = result.items;
         shell.suggestSelected = -1;
@@ -3176,6 +3220,22 @@ const DEFAULT_SEARCH = 'https://duckduckgo.com/?q=%s';
  * would be an empty grid, and the first thing anyone does in a new browser is
  * import their bookmarks.
  */
+/**
+ * Give a site back its new tab tile, if it was taken away.
+ *
+ * The hidden list exists only so a forgotten site is not filled back in from
+ * the bookmarks. Visiting or bookmarking the site again means the user wants
+ * it, and keeping its origin there after that would be a second record of
+ * where they go, kept after history is cleared.
+ */
+function unhideTile(prefs, url) {
+  if (!prefs) return;
+  let origin;
+  try { origin = new URL(url).origin; } catch { return; }
+  const hidden = prefs.get('hiddenTiles');
+  if (hidden.includes(origin)) prefs.set('hiddenTiles', hidden.filter((o) => o !== origin));
+}
+
 function topSites(history, bookmarks, limit = 8, hidden = []) {
   const byOrigin = new Map();
 
@@ -3262,20 +3322,11 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
   // an article and asked to search for it wants the results page.
   if (search) return searchTemplate.replace('%s', encodeURIComponent(text));
 
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
-  if (/^(about|data|blob|file):/i.test(text)) return text;
-
-  // A machine on this network - an IP address, `localhost`, a `.local` name,
-  // or any name given with a port - is reached over plain HTTP, as every
-  // browser does: a router or a development server rarely has a
-  // certificate, and guessing https for it only produced an error page.
-  const host = text.split(/[/?#]/)[0];
-  const local = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host) || /^\[[0-9a-f:.]+\](:\d+)?$/i.test(host) ||
-    /^localhost(:\d+)?$/i.test(host) || /\.(local|lan|internal|home\.arpa)(:\d+)?$/i.test(host) ||
-    /^[a-z0-9-]+:\d+$/i.test(host);
-  if (local) return `http://${text}`;
-  const looksLikeHost = /^[^\s/?#]+\.[^\s/?#]{2,}([/?#]|$)/.test(text);
-  if (looksLikeHost) return `https://${text}`;
+  // See address.js: one rule, shared with the suggestion list.
+  const kind = classifyAddress(text);
+  if (kind === 'url') return text;
+  if (kind === 'local') return `http://${text}`;
+  if (kind === 'host') return `https://${text}`;
 
   return searchTemplate.replace('%s', encodeURIComponent(text));
 }

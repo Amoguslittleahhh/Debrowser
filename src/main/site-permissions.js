@@ -154,12 +154,16 @@ class PermissionAsks {
    * @param {(wc: object) => object|null} hooks.tabFor - the tab a webContents belongs to
    * @param {(tab: object) => boolean} hooks.isActive
    * @param {(tab: object) => void} hooks.show - put the question on screen
+   * @param {(id: number) => object|null} [hooks.tabById]
+   * @param {(tab: object) => void} [hooks.withdrawn] - the question on screen is void
    */
-  constructor(store, { tabFor, isActive, show }) {
+  constructor(store, { tabFor, tabById = () => null, isActive, show, withdrawn = () => {} }) {
     this.store = store;
     this.tabFor = tabFor;
+    this.tabById = tabById;
     this.isActive = isActive;
     this.show = show;
+    this.withdrawn = withdrawn;
     /** tab id -> [{origin, kinds, key, callbacks}] */
     this.pending = new Map();
     /** tab id -> Set of questions dismissed on the current page */
@@ -203,12 +207,23 @@ class PermissionAsks {
     this.shown = head ? { tabId: tab.id, entry: head } : null;
   }
 
-  /** The user chose. Remembered for the site, and every waiting ask it settles is answered. */
+  /**
+   * The user chose. Remembered for the site, and every waiting ask it settles
+   * is answered.
+   *
+   * Only for the question the panel drew. The head of the queue is not good
+   * enough: a page that navigated and asked again while the panel was up has
+   * a new head, for another site, and the Allow pressed was for the old one.
+   *
+   * @returns {boolean} whether it answered anything
+   */
   answer(tab, allow) {
+    const shown = this.shown;
     const head = tab && this.pending.get(tab.id)?.[0];
-    if (!head) return;
+    if (!head || !shown || shown.tabId !== tab.id || shown.entry !== head) return false;
     for (const kind of head.kinds) this.store.set(head.origin, kind, allow ? 'allow' : 'block');
     this.settle(tab);
+    return true;
   }
 
   /** The panel closed without an answer. Refused for now; not asked again on this page. */
@@ -222,7 +237,11 @@ class PermissionAsks {
     for (const callback of shown.entry.callbacks) callback(false);
     if (!this.dismissed.has(shown.tabId)) this.dismissed.set(shown.tabId, new Set());
     this.dismissed.get(shown.tabId).add(shown.entry.key);
-    if (!queue.length) this.pending.delete(shown.tabId);
+    if (!queue.length) { this.pending.delete(shown.tabId); return; }
+    // The next question, if the page asked more than one: left unshown it
+    // waited, and the page's call with it, until the page was left.
+    const tab = this.tabById(shown.tabId);
+    if (tab && this.isActive(tab)) this.show(tab);
   }
 
   /** Answer everything in this tab's queue the stored answers now decide. */
@@ -244,7 +263,10 @@ class PermissionAsks {
     for (const q of this.pending.get(tab.id) || []) for (const callback of q.callbacks) callback(false);
     this.pending.delete(tab.id);
     this.dismissed.delete(tab.id);
-    if (this.shown?.tabId === tab.id) this.shown = null;
+    if (this.shown?.tabId === tab.id) {
+      this.shown = null;
+      this.withdrawn(tab);
+    }
   }
 
   /** Whether this tab has a question waiting. */

@@ -80,16 +80,6 @@ function formatBytes(n) {
   return `${Math.max(0, Math.round(bytes / 1024))} KB`;
 }
 
-/**
- * The line under a download's filename, in one wording for every view.
- *
- * What the browser is doing, how far through, and over how many connections -
- * that last because a download split across several is otherwise invisible.
- * Three views each carried a copy, and a fix made to one ("Failed — undefined")
- * had to be made three times. `brief` is the flyout's shorter line: no
- * connection count, and nothing for a finished file, whose row offers
- * "Open file" instead.
- */
 /** Why a download failed, in words - never the engine's net::ERR_ code. */
 function failureReason(error) {
   const e = String(error || '');
@@ -102,6 +92,16 @@ function failureReason(error) {
   return 'Failed';
 }
 
+/**
+ * The line under a download's filename, in one wording for every view.
+ *
+ * What the browser is doing, how far through, and over how many connections -
+ * that last because a download split across several is otherwise invisible.
+ * Three views each carried a copy, and a fix made to one ("Failed — undefined")
+ * had to be made three times. `brief` is the flyout's shorter line: no
+ * connection count, and nothing for a finished file, whose row offers
+ * "Open file" instead.
+ */
 /* eslint-disable-next-line no-unused-vars -- read by downloads.js, flyout.js, settings.js */
 function describeDownload(item, { brief = false } = {}) {
   // Only worth saying when there is more than one: "over 1 connection" is a

@@ -657,11 +657,6 @@ class Tab {
     });
   }
 
-  /**
-   * Say, in the tab, why the page did not load. See error-page.js: drawn into
-   * the error entry Chromium committed at the failed address, so the address
-   * bar, Reload and Back all keep meaning what they did.
-   */
   /** Bring `url` back to the committed address, if a navigation left it elsewhere. */
   reconcileUrl() {
     if (!this.isLive) return;
@@ -685,6 +680,11 @@ class Tab {
     }
   }
 
+  /**
+   * Say, in the tab, why the page did not load. See error-page.js: drawn into
+   * the error entry Chromium committed at the failed address, so the address
+   * bar, Reload and Back all keep meaning what they did.
+   */
   showError(url, code, description) {
     this.failed = true;
     // At the zoom the site would have had: an error page does not commit the
