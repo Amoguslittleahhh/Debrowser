@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+From the first day of using 1.7.0 on Windows.
+
+- **Passwords have a page of their own, behind a lock.** `debrowser://passwords` (also in the menu) lists saved sign-ins and cards, with Show, Copy, Delete, Fill and Add a card. It opens locked: Windows Hello or Touch ID unlocks it where the computer has one, a passcode always does, and it locks itself after five minutes without use. Settings no longer shows saved passwords at all.
+- **Saved passwords are off until you set a passcode** (Settings → Passwords and payment). Without one nothing is offered, saved or filled. The passcode is stored only as a salted scrypt hash, changing or removing it needs the current one, and wrong guesses cost more each time. Removing it deletes everything saved, so nobody can set a new passcode and read the old passwords.
+- **Private windows connect through Snowflake by default.** Measured on the real Tor network from Windows and Linux, Snowflake alone connected every time in 20–41 seconds, while the built-in obfs4 bridges, two of which have stopped answering, took two minutes or stalled, and racing the two together inherited the stalls. That is where a private window on Windows sat at 30%. obfs4 is still a choice in Settings for networks that block Snowflake.
+- **Private windows search with DuckDuckGo by default,** with their own choice in Settings → Private windows. Google answers most Tor connections with a captcha.
+- **Tabs are not reopened at start by default.** Turn on "Reopen your tabs when you start" in Settings to have them back. Closing a window with several tabs now asks first, by default.
+- **Private windows report the same languages in every worker.** A dedicated worker on Windows gave away the computer's own languages (en-SG, zh-Hans-SG in the report that found it).
+- **The Tor connection page shows Tor's current complaint,** not one from before it got further.
+- **No white flash when a menu or panel opens on Windows.** A panel now starts one pixel big and grows once it has drawn.
+- **Fixed:** the Settings side list all but skipped Advanced; a hovered menu item wore the keyboard's focus ring; a section's intro sat against its card; the update row's button touched the card above; disabled buttons (Clear on History and Downloads) looked pressable.
+
 ## 1.7.0
 
 Two things in this release: private windows that go through Tor, and a long list of everyday details that make the ordinary browser feel finished. The bold words are the change; the rest of each line is the detail.

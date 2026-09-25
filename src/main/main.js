@@ -27,6 +27,7 @@ const { Session, loadWindowState, saveWindowState } = require('./session');
 const { History } = require('./history');
 const icons = require('./icons');
 const presence = require('./presence');
+const { Vault } = require('./vault');
 const { DownloadManager } = require('./downloads');
 const { Governor } = require('./governor');
 const { Prewarm } = require('./prewarm');
@@ -383,6 +384,8 @@ function main() {
   let updater = null;
   /** @type {Credentials|null} */
   let credentials = null;
+  /** The passcode lock in front of them; see vault.js. */
+  let vault = null;
   let bookmarks = null;
   // `sessionStore`, not `session`: Electron's own `session` is imported at the
   // top of this file and used to reach the browsing partition a few lines
@@ -713,7 +716,7 @@ function main() {
       case 'loaded':
         // Fill on load, for passwords only. Payment details are never filled
         // without a click; see the note on fillSavedLogin.
-        fillSavedLogin(tab, credentials, prefs, log);
+        fillSavedLogin(tab, credentials, prefs, log, vault);
         if (circuits) onPrivateLoad(tab);
         break;
       case 'activated':
@@ -886,11 +889,13 @@ function main() {
     // that created one in the private profile: the leak test found it left
     // behind after exit. A store that is not there cannot be asked.
     credentials = INCOGNITO ? null : new Credentials(log);
+    // In memory under a test, which must not leave a passcode behind.
+    vault = INCOGNITO ? null : new Vault(OFFLINE_MODE ? null : app.getPath('userData'), { log });
 
     // A submitted sign-in becomes a question, never a save. The origin comes
     // from the tab, not from the page that sent the message.
     if (!INCOGNITO) ipcHub.wireCredentialOffer((tab, offer) => {
-      offerToSaveCredential({ tab, offer, credentials, shell, log }).catch(
+      offerToSaveCredential({ tab, offer, credentials, vault, shell, log }).catch(
         (err) => log(`credential offer failed: ${err.message}`));
     });
 
@@ -1095,7 +1100,7 @@ function main() {
     // button draws, without carrying the list itself.
     shell.downloads = downloads;
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
-    wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log, context,
+    wireRequests({ tabs, shell, credentials, vault, bookmarks, history, downloads, prefs, log, context,
       sitePermissions, permissionAsks });
 
     /*
@@ -1161,7 +1166,7 @@ function main() {
         app.exit(1);
       });
     } else if (SMOKE_TEST) {
-      runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context });
+      runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault });
     } else if (argv.includes('--bench-test')) {
       const { runBench } = require('./bench');
       const tabCount = Number(argValue('tabs')) || 8;
@@ -1900,12 +1905,20 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'open-settings':
-        openInternalPage(tabs, pages.SETTINGS_URL);
+        // One deep link, from the passwords page to where its passcode is set.
+        openInternalPage(tabs, payload?.section === 'credentials'
+          ? `${pages.SETTINGS_URL}#credentials` : pages.SETTINGS_URL);
         publish();
         break;
 
       case 'open-history':
         openInternalPage(tabs, pages.HISTORY_URL);
+        publish();
+        break;
+
+      case 'open-passwords':
+        if (INCOGNITO) break;
+        openInternalPage(tabs, pages.PASSWORDS_URL);
         publish();
         break;
 
@@ -2364,6 +2377,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
  */
 const INCOGNITO_REFUSED = new Set([
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment',
+  'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
   'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
   'import-from-profile', 'import-bookmark-file',
@@ -2434,14 +2448,25 @@ const DOWNLOAD_REQUESTS = new Set([
  * Who may send what, on both channels, in one table.
  *
  * Commands are open to the chrome and Settings, and to our other pages by list;
- * requests are stricter, since only Settings may touch credentials. Adding a
+ * requests are stricter, since only the passwords page may touch credentials. Adding a
  * page is one row here. A Map, not an object: the key comes from a page's own
  * URL, and `constructor` must not find anything.
  */
 const ANY = '*';
+/** What only the passwords page may ask: unlocking, and the records. */
+const VAULT_RECORD_REQUESTS = new Set([
+  'vault-unlock', 'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment'
+]);
 const PAGE_POLICY = new Map([
   ['chrome', { commands: ANY, requests: CHROME_REQUESTS }],
-  ['settings', { commands: ANY, requests: ANY }],
+  // Settings may ask anything but the saved records themselves, which are the
+  // passwords page's alone: it sets and removes the passcode, and that is all.
+  ['settings', { commands: ANY, requests: { except: VAULT_RECORD_REQUESTS } }],
+  // The passwords page: the lock, and the records behind it.
+  ['passwords', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'open-settings', 'close-tab']),
+    requests: new Set([...VAULT_RECORD_REQUESTS, 'vault-status', 'vault-lock', 'presence-capability'])
+  }],
   ['newtab', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab']),
     requests: NEWTAB_REQUESTS
@@ -2477,14 +2502,15 @@ const PAGE_POLICY = new Map([
 /** Whether a page - a `senderPage` answer - may send `name` on `channel`. */
 function pageMay(page, channel, name) {
   const allowed = PAGE_POLICY.get(page)?.[channel];
+  if (allowed && allowed.except) return !allowed.except.has(name);
   return allowed === ANY || Boolean(allowed?.has(name));
 }
 
-function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads, prefs, log,
+function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null,
                        context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
-    // Stricter than the command channel: only Settings may touch credentials.
+    // Stricter than the command channel: only the passwords page may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
     if (!pageMay(sender, 'requests', command)) return null;
     if (INCOGNITO && INCOGNITO_REFUSED.has(command)) return null;
@@ -2798,78 +2824,105 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
     }
 
     switch (command) {
-      case 'list-credentials': {
+      /*
+       * Saved sign-ins and cards, and the lock in front of them (vault.js).
+       *
+       * Everything that reads or changes a saved record needs the vault
+       * unlocked, and using it keeps it unlocked; the page asks to unlock with
+       * Windows Hello or Touch ID, or with the passcode. Only the passwords
+       * page may ask any of this (PAGE_POLICY); Settings sets and removes the
+       * passcode and nothing else.
+       */
+      case 'vault-status': {
         const cap = credentials.capability();
-        return { ...credentials.list(), available: cap.available, reason: cap.reason };
+        return { ...vault.status(), available: cap.available, reason: cap.reason };
       }
 
-      case 'delete-credential':
-        return credentials.remove(payload?.kind, payload?.id);
+      case 'vault-unlock': {
+        if (payload?.method === 'presence') {
+          if (!vault.configured()) return { ok: false };
+          const allowed = await presence.verify(
+            'Unlock saved passwords',
+            shell && !shell.window.isDestroyed() ? shell.window : null);
+          if (!allowed) return { ok: false, reason: 'The check was not completed.' };
+          vault.unlockByPresence();
+          return { ok: true };
+        }
+        return vault.unlockWithPasscode(payload?.passcode);
+      }
+
+      case 'vault-lock':
+        vault.lock();
+        return true;
+
+      case 'vault-set':
+        return vault.setPasscode(payload?.passcode, payload?.current ?? null);
+
+      case 'vault-remove': {
+        const result = await vault.removePasscode(payload?.current);
+        // Everything saved goes with it; see vault.js.
+        if (result.ok) log('credentials', `passcode removed; ${credentials.clear()} saved item(s) deleted`);
+        return result;
+      }
 
       case 'presence-capability':
         return presence.capability();
 
-      case 'reveal-credential': {
-        // Deliberate, one at a time, and never logged.
-        //
-        // Gated on a presence check where the machine can make one and the user
-        // has asked for it. `verify` returns true only on an observed success -
-        // a helper that will not start, a throw, a timeout and an unrecognised
-        // answer are all refusals - so an error here denies the reveal rather
-        // than waving it through. A check that fails open is not a check.
-        if (prefs.get('requirePresence')) {
-          const allowed = await presence.verify(
-            'Show a saved password',
-            shell && !shell.window.isDestroyed() ? shell.window : null);
-          if (!allowed) {
-            log('credentials', 'reveal refused: presence check not satisfied');
-            return { denied: true };
-          }
-        }
-        const record = credentials.reveal(payload?.kind, payload?.id);
-        if (!record) return null;
-        return payload?.kind === 'login'
-          ? { password: record.password }
-          : { number: record.number, holder: record.holder };
-      }
-
+      case 'list-credentials':
+      case 'delete-credential':
+      case 'reveal-credential':
       case 'save-payment':
-        return credentials.put('payment', {
-          label: String(payload?.label ?? ''),
-          number: String(payload?.number ?? '').replace(/\s+/g, ''),
-          expiry: String(payload?.expiry ?? ''),
-          holder: String(payload?.holder ?? '')
-        });
-
       case 'fill-payment': {
-        if (prefs.get('requirePresence')) {
-          const allowed = await presence.verify(
-            'Fill saved payment details',
-            shell && !shell.window.isDestroyed() ? shell.window : null);
-          if (!allowed) {
-            log('credentials', 'payment fill refused: presence check not satisfied');
-            return false;
-          }
-        }
-        // Into the page behind Settings, not into Settings.
-        //
-        // `activeTab()` is the Settings tab - it is the one the user just
-        // clicked in - so filling "the active tab" always refused. The target
-        // is the most recently used tab that is actually a web page.
-        const record = credentials.reveal('payment', payload?.id);
-        const tab = tabs.all()
-          .filter((t) => !t.internal && t.isLive)
-          .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
-        if (!record || !tab) return false;
-        tab.sendToPage('debrowser:payment-fill', record);
-        log('credentials', 'filled payment details on request');
-        return true;
+        if (!vault.unlocked()) return { locked: true };
+        vault.touch();
+        return credentialRequest(command, payload, { tabs, credentials, log });
       }
 
       default:
         return null;
     }
   });
+}
+
+/** The saved-record requests, once the vault is known to be unlocked. */
+function credentialRequest(command, payload, { tabs, credentials, log }) {
+  switch (command) {
+    case 'list-credentials': {
+      const cap = credentials.capability();
+      return { ...credentials.list(), available: cap.available, reason: cap.reason };
+    }
+    case 'delete-credential':
+      return credentials.remove(payload?.kind, payload?.id);
+    // Deliberate, one at a time, and never logged.
+    case 'reveal-credential': {
+      const record = credentials.reveal(payload?.kind, payload?.id);
+      if (!record) return null;
+      return payload?.kind === 'login'
+        ? { password: record.password }
+        : { number: record.number, holder: record.holder };
+    }
+    case 'save-payment':
+      return credentials.put('payment', {
+        label: String(payload?.label ?? ''),
+        number: String(payload?.number ?? '').replace(/\s+/g, ''),
+        expiry: String(payload?.expiry ?? ''),
+        holder: String(payload?.holder ?? '')
+      });
+    case 'fill-payment': {
+      // Into the page behind this one, not into the passwords page: the most
+      // recently used tab that is actually a web page.
+      const record = credentials.reveal('payment', payload?.id);
+      const tab = tabs.all()
+        .filter((t) => !t.internal && t.isLive)
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+      if (!record || !tab) return false;
+      tab.sendToPage('debrowser:payment-fill', record);
+      log('credentials', 'filled payment details on request');
+      return true;
+    }
+    default:
+      return null;
+  }
 }
 
 /**
@@ -2883,7 +2936,9 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
  */
 let credentialPromptOpen = false;
 
-async function offerToSaveCredential({ tab, offer, credentials, shell, log }) {
+async function offerToSaveCredential({ tab, offer, credentials, vault = null, shell, log }) {
+  // No passcode, no saved passwords: see vault.js.
+  if (!vault || !vault.configured()) return;
   const origin = originOf(tab.url);
   if (!origin) return;                       // not a web page we can key on
 
@@ -2943,8 +2998,10 @@ async function askAndSave({ origin, offer, credentials, shell, log }) {
  * Exactly one match fills. With several accounts on a site, picking one would
  * be guessing, and guessing wrong signs the user into the wrong account.
  */
-function fillSavedLogin(tab, credentials, prefs, log) {
+function fillSavedLogin(tab, credentials, prefs, log, vault = null) {
   if (!credentials || !tab || tab.internal) return;
+  // The feature is off until a passcode is set; see vault.js.
+  if (!vault || !vault.configured()) return;
   if (!prefs || prefs.get('fillPasswords') === false) return;
   if (!credentials.capability().available) return;
 
@@ -3161,6 +3218,8 @@ function menuModel({ tabs, shell }) {
     { id: 'open-bookmarks', label: 'Bookmarks', accel: accel('open-bookmarks'), icon: 'star' },
     { id: 'open-history', label: 'History', accel: accel('open-history'), icon: 'clock' },
     { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },
+    // Not in a private window, which has no saved passwords to show.
+    ...(INCOGNITO ? [] : [{ id: 'open-passwords', label: 'Passwords', icon: 'key' }]),
     { kind: 'separator' },
     { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live,
       // The ends of the ladder, so − and + can say when there is no further.
@@ -3364,7 +3423,7 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
 /* Smoke test - exercises the full lifecycle headlessly                */
 /* ------------------------------------------------------------------ */
 
-function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context }) {
+function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault }) {
   const { runSmoke } = require('./smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
@@ -3372,7 +3431,7 @@ function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, his
             // the context menu the way a keystroke does rather than by calling
             // into their parts.
             runCommand: (command, payload) => runCommand(command, payload),
-            history, context }).then((code) => {
+            history, context, credentials, vault }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

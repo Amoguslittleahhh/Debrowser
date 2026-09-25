@@ -66,6 +66,19 @@ function parseCustom(text) {
 }
 
 /**
+ * Which built-in transports each mode uses.
+ *
+ * `auto`, the default, is Snowflake alone. Measured on the real network from
+ * Windows and Linux (test/real-tor.js, the Real Tor workflow): Snowflake on its
+ * own connected every time, in 20-41 seconds, while the built-in obfs4 bridges
+ * - two of which had stopped answering - took two minutes or stalled, and
+ * racing the two together inherited the stalls: Tor fetched the directory
+ * through whichever bridge answered first and waited on it. obfs4 stays as a
+ * choice for networks that block Snowflake.
+ */
+const BUILT_IN = { auto: ['snowflake'], snowflake: ['snowflake'], obfs4: ['obfs4'] };
+
+/**
  * The torrc lines for a bridge mode.
  *
  * Transport programs are named relative to Tor's working directory - the
@@ -77,7 +90,7 @@ function torrcLines({ mode = 'auto', custom = '' } = {}, bundle) {
   const config = ptConfig(bundle);
   const bridges = mode === 'custom'
     ? parseCustom(custom).good
-    : ['obfs4', 'snowflake']
+    : (BUILT_IN[mode] || BUILT_IN.auto)
       .flatMap((t) => ((config && config.bridges && config.bridges[t]) || []).map((line) => ({ transport: t, line })));
   if (!bridges.length) return [];
 

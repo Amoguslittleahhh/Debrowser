@@ -389,6 +389,21 @@ class Credentials {
     return this.records.login.filter((r) => r.origin === origin);
   }
 
+  /**
+   * Forget every saved sign-in and card - what taking the passcode away means.
+   * The files are removed rather than written empty, so nothing is left to
+   * decrypt. Returns how many records went.
+   */
+  clear() {
+    this.load();
+    const removed = this.records.login.length + this.records.payment.length;
+    for (const kind of Object.keys(KINDS)) {
+      this.records[kind] = [];
+      try { fs.unlinkSync(path.join(this.dir, KINDS[kind])); } catch { /* none saved */ }
+    }
+    return removed;
+  }
+
   /** One full record, for a fill or a deliberate reveal. */
   reveal(kind, id) {
     this.load();

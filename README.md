@@ -86,10 +86,18 @@ puts back the page's address. Local addresses (`localhost:3000`, `192.168.1.1`,
 
 **Tabs.** Drag to reorder, across the top or down the side (Settings →
 Appearance). Right-click a tab to pin, mute, duplicate or close several at
-once. The speaker appears while a tab plays sound; click it to mute. Tabs come
-back when you restart, and a tab you haven't looked at in a while gives its
-memory back and reloads when you return to it, behind a picture of how you
-left it.
+once. The speaker appears while a tab plays sound; click it to mute. Each start
+begins with a fresh tab unless you turn on "Reopen your tabs when you start"
+in Settings. A tab you haven't looked at in a while gives its memory back and
+reloads when you return to it, behind a picture of how you left it.
+
+**Passwords.** Off until you set a passcode (Settings → Passwords and
+payment). Then the browser offers to remember sign-ins, fills a site's own
+when exactly one matches, and keeps them, with your cards, on
+`debrowser://passwords` (also in the menu). That page opens locked: Windows
+Hello or Touch ID unlocks it where the computer has one, the passcode always
+does, and it locks itself after five minutes without use. Removing the
+passcode deletes what was saved.
 
 **The padlock** opens a panel for the site: whether the connection is secure,
 what it may use (camera, microphone, location, notifications), its zoom, and
@@ -152,9 +160,12 @@ its key.
 ## Private windows
 
 Ctrl+Shift+N opens a private window that your router and your ISP cannot
-read: every request goes through a bundled Tor, reached through bridges so
-that by default they cannot tell from the traffic that it is Tor either. They
-still see that you are online, when, and how much - nothing can hide that.
+read: every request goes through a bundled Tor, reached by default through
+Snowflake so that they cannot tell from the traffic that it is Tor either
+(obfs4 bridges, your own bridge, or a direct connection are the other
+choices, in Settings). They still see that you are online, when, and how
+much - nothing can hide that. Private windows search with DuckDuckGo unless
+you choose another engine for them.
 
 - **The operating system keeps it off the network.** On Linux the private
   window runs in a network namespace with nothing but loopback, and Tor
@@ -737,7 +748,9 @@ tried, measured and removed — live on the `claude/research-build` branch.
 - Password and payment fields are deliberately never read into the session
   store, so a discarded tab will not restore them. Saving one is a separate,
   explicit act: the browser asks after you sign in, and stores nothing unless
-  you say yes. Records are AES-256-GCM under a key held by the OS keystore —
+  you say yes - and asks nothing until a passcode is set. The passcode itself
+  is never stored, only a salted scrypt hash, and wrong guesses cost more each
+  time. Records are AES-256-GCM under a key held by the OS keystore —
   DPAPI, Keychain or libsecret — and if no real keystore is available the store
   **refuses to save** rather than falling back to something weaker. Passwords
   fill automatically only when exactly one saved sign-in matches the page's

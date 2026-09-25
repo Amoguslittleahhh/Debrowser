@@ -22,7 +22,7 @@ const api = window.debrowser;
 /** Set by watchSections: look again at which section is current. */
 let remarkRail = () => {};
 
-/** Why saved logins cannot be filled here, or '' - set by renderCredentials. */
+/** Why saved logins cannot be filled here, or '' - set by renderPasscode. */
 let credentialsUnavailable = '';
 
 /** A reason as a sentence: capital first, full stop last. */
@@ -314,7 +314,8 @@ const SECTIONS = {
       hint: 'Bridges hide from your ISP that you use Tor. A bridge of your own also hides it from lists of known bridges.',
       type: 'select',
       options: [
-        { value: 'auto', name: 'Through built-in bridges' },
+        { value: 'auto', name: 'Through Snowflake (built in)' },
+        { value: 'obfs4', name: 'Through obfs4 bridges (built in)' },
         { value: 'custom', name: 'Through my own bridges' },
         { value: 'none', name: 'Directly – fastest, and your ISP can see Tor' }
       ]
@@ -375,12 +376,6 @@ const SECTIONS = {
   ],
 
   credentials: [
-    {
-      key: 'requirePresence',
-      label: 'Confirm it’s you first',
-      hint: 'Before a saved password or card is shown or filled.',
-      type: 'checkbox'
-    },
     {
       key: 'fillPasswords',
       label: 'Fill saved passwords automatically',
@@ -840,152 +835,155 @@ document.getElementById('check-updates')?.addEventListener('click', async () => 
 /* Saved sign-ins and payment details                                  */
 /* ------------------------------------------------------------------ */
 
-/**
- * Drawn from an explicit request, never from the state broadcast.
+/*
+ * The passcode, and a way to the passwords page.
  *
- * That broadcast reaches three views on every governor tick, and a list of
- * someone's accounts has no business being pushed into a renderer twice a
- * second on the chance this page is open. Secrets are not in the list at all:
- * a row needs a site and a username, and revealing is a separate deliberate
- * call that fetches one record.
+ * The saved records themselves are not here: they live on
+ * debrowser://passwords, behind the lock (src/main/vault.js), and this page
+ * cannot ask for them. What it can do is set the passcode that turns the
+ * feature on, change it, or take it away - which turns the feature off and
+ * deletes what was saved.
  */
-/**
- * Turn the presence control off where nothing can satisfy it.
- *
- * A checkbox that locks the user out of their own passwords is worse than no
- * checkbox, so it is disabled with the reason attached where the machine has no
- * Hello or Touch ID - and labelled experimental where it has one this has never
- * been able to test against.
- */
-async function renderPresence() {
-  const control = controls.get('requirePresence');
-  if (!control || !control.input) return;
-  const cap = await api.request('presence-capability');
-  const row = control.input.closest('.row');
-  const hint = row ? row.querySelector('.row-hint') : null;
-  if (!cap) return;
-
-  if (!cap.available) {
-    control.input.disabled = true;
-    // Turned off for real, not just unticked.
-    //
-    // Unticking alone left the saved preference true, so the next state
-    // broadcast re-ticked it from prefs - and a profile carrying
-    // `requirePresence: true` onto a machine with no Hello or Touch ID locked
-    // the user out of their own saved passwords with no control left enabled to
-    // clear it. Writing it back is the only way out that does not require
-    // editing the file by hand.
-    if (control.input.checked) {
-      control.input.checked = false;
-      api.send('set-pref', { key: 'requirePresence', value: false });
-    }
-    if (hint) {
-      hint.textContent = `Not available: ${cap.reason}. Turned off, so your saved ` +
-        'passwords stay reachable.';
-    }
-    return;
-  }
-  control.input.disabled = false;
-  if (hint && cap.experimental) {
-    hint.textContent = `Uses ${cap.mechanism}. This has never been run against real ` +
-      'hardware, so try it before relying on it – if the prompt does not appear, the ' +
-      'check refuses rather than letting the secret through.';
-  } else if (hint) {
-    hint.textContent = `Uses ${cap.mechanism}, before a saved password or card is shown or filled.`;
-  }
-}
-
-async function renderCredentials() {
-  const host = document.getElementById('credential-list');
+async function renderPasscode() {
+  const host = document.getElementById('passcode-rows');
   const state = document.getElementById('credential-state');
   if (!host) return;
+  const status = await api.request('vault-status');
+  if (!status) return;
 
-  const data = await api.request('list-credentials');
-  if (!data) return;
-
-  credentialsUnavailable = data.available ? '' : 'Needs saving to be available – see above.';
-  if (!data.available) {
-    state.textContent = `Saving is unavailable: ${data.reason}. Nothing is written to disk ` +
+  if (!status.available) {
+    credentialsUnavailable = 'Saving is not available on this computer.';
+    state.textContent = `Saving is unavailable: ${status.reason}. Nothing is written to disk ` +
                         'unless it can be encrypted by the operating system.';
     host.replaceChildren();
+    remarkControls();
     return;
   }
+  credentialsUnavailable = status.configured ? '' : 'Set a passcode first.';
+  state.textContent = status.configured
+    ? 'Saved passwords and cards are on. They open with the passcode, or Windows Hello or Touch ID where this computer has it.'
+    : 'Off until you set a passcode. Nothing is saved or filled without one.';
 
-  const count = data.logins.length + data.payments.length;
-  state.textContent = count
-    ? 'Encrypted with a key held by your operating system. Nothing leaves this machine.'
-    : 'Nothing saved yet. Sign in to a site and the browser will offer to remember it.';
-
-  const rows = [];
-  for (const item of data.logins) rows.push(credentialRow('login', item.id, item.origin, item.username));
-  for (const item of data.payments) {
-    rows.push(credentialRow('payment', item.id, item.label, `•••• ${item.last4} · ${item.expiry}`));
-  }
+  const rows = [passcodeRow(status)];
+  if (status.configured) rows.push(openRow());
   host.replaceChildren(...rows);
+  remarkControls();
   reapplyFilter();
 }
 
-function credentialRow(kind, id, title, subtitle) {
+/** Redraw the controls that depend on the passcode (fill passwords). */
+function remarkControls() {
+  const fill = controls.get('fillPasswords');
+  if (fill) markUnavailable(fill, credentialsUnavailable);
+}
+
+function simpleRow(title, hint) {
   const row = document.createElement('div');
   row.className = 'row';
-
   const text = document.createElement('div');
   text.className = 'row-text';
   const label = document.createElement('span');
   label.className = 'row-label';
   label.textContent = title;
-  const hint = document.createElement('span');
-  hint.className = 'row-hint';
-  hint.textContent = subtitle || '(no username)';
-  text.append(label, hint);
-
+  const note = document.createElement('span');
+  note.className = 'row-hint';
+  note.textContent = hint;
+  text.append(label, note);
   const control = document.createElement('div');
   control.className = 'row-control';
-
-  const reveal = document.createElement('button');
-  reveal.className = 'ghost-btn';
-  reveal.textContent = 'Show';
-  reveal.addEventListener('click', async () => {
-    if (reveal.dataset.shown === 'yes') {
-      hint.textContent = subtitle || '(no username)';
-      reveal.textContent = 'Show';
-      reveal.dataset.shown = 'no';
-      return;
-    }
-    const secret = await api.request('reveal-credential', { kind, id });
-    if (!secret) return;
-    // A refused presence check answers `{ denied: true }`, which is an object
-    // and therefore truthy - so it sailed past the guard above and rendered the
-    // literal word "undefined" where the password goes, with the button flipped
-    // to Hide. A refusal has to look like a refusal.
-    if (secret.denied) {
-      hint.textContent = 'Not shown – the identity check was not completed.';
-      return;
-    }
-    hint.textContent = kind === 'login' ? secret.password : secret.number;
-    reveal.textContent = 'Hide';
-    reveal.dataset.shown = 'yes';
-  });
-
-  const remove = document.createElement('button');
-  remove.className = 'ghost-btn danger';
-  remove.textContent = 'Delete';
-  remove.addEventListener('click', async () => {
-    await api.request('delete-credential', { kind, id });
-    renderCredentials();
-  });
-
-  control.append(reveal, remove);
-  if (kind === 'payment') {
-    const fill = document.createElement('button');
-    fill.className = 'ghost-btn';
-    fill.textContent = 'Fill';
-    fill.title = 'Put these details into the page in the tab behind this one';
-    fill.addEventListener('click', () => api.request('fill-payment', { id }));
-    control.prepend(fill);
-  }
-
   row.append(text, control);
+  return { row, note, control };
+}
+
+function smallButton(text, className = 'ghost-btn') {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = className;
+  b.textContent = text;
+  return b;
+}
+
+function openRow() {
+  const { row, control } = simpleRow('Saved passwords and cards', 'See, copy, add and delete them.');
+  const open = smallButton('Open');
+  open.addEventListener('click', () => api.send('open-passwords'));
+  control.append(open);
+  return row;
+}
+
+/**
+ * The passcode row: Set when there is none; Change and Remove when there is.
+ * Each opens a small form in the row rather than a dialog.
+ */
+function passcodeRow(status) {
+  const { row, note, control } = simpleRow('Passcode',
+    status.configured ? 'Unlocks saved passwords when Windows Hello or Touch ID cannot.'
+      : `Turns saved passwords on. At least ${status.minLength} characters.`);
+
+  const form = document.createElement('form');
+  form.className = 'passcode-form';
+  form.hidden = true;
+  form.autocomplete = 'off';
+  const error = document.createElement('p');
+  error.className = 'note error';
+  error.setAttribute('role', 'alert');
+
+  const field = (placeholder) => {
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.placeholder = placeholder;
+    input.setAttribute('aria-label', placeholder);
+    input.autocomplete = 'new-password';
+    return input;
+  };
+
+  const openForm = (mode) => {
+    form.replaceChildren();
+    error.textContent = '';
+    const current = status.configured ? field('Current passcode') : null;
+    const next = mode === 'remove' ? null : field(status.configured ? 'New passcode' : 'Passcode');
+    const again = mode === 'remove' ? null : field('Type it again');
+    const submit = smallButton(mode === 'remove' ? 'Remove and delete saved items' : 'Save passcode',
+      mode === 'remove' ? 'ghost-btn danger' : 'ghost-btn');
+    submit.type = 'submit';
+    const cancel = smallButton('Cancel');
+    cancel.addEventListener('click', () => { form.hidden = true; form.replaceChildren(); });
+    form.append(...[current, next, again].filter(Boolean), submit, cancel, error);
+    if (mode === 'remove') {
+      const warn = document.createElement('p');
+      warn.className = 'note';
+      warn.textContent = 'This turns saved passwords off and deletes every saved sign-in and card, ' +
+        'so nobody can set a new passcode and read them.';
+      form.prepend(warn);
+    }
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      if (next && next.value !== again.value) { error.textContent = 'The two passcodes are not the same.'; return; }
+      const res = mode === 'remove'
+        ? await api.request('vault-remove', { current: current.value })
+        : await api.request('vault-set', { passcode: next.value, current: current ? current.value : null });
+      if (res && res.ok) { renderPasscode(); return; }
+      error.textContent = res && res.waitMs
+        ? `Too many tries. Wait ${Math.ceil(res.waitMs / 1000)} seconds.`
+        : (res && res.reason) || 'That did not work.';
+    };
+    form.hidden = false;
+    requestAnimationFrame(() => form.querySelector('input')?.focus());
+  };
+
+  if (status.configured) {
+    const change = smallButton('Change');
+    change.addEventListener('click', () => openForm('change'));
+    const remove = smallButton('Remove', 'ghost-btn danger');
+    remove.addEventListener('click', () => openForm('remove'));
+    control.append(change, remove);
+  } else {
+    const set = smallButton('Set passcode');
+    set.addEventListener('click', () => openForm('set'));
+    control.append(set);
+  }
+  // The form sits under the row's text, inside the row.
+  note.after(form);
   return row;
 }
 
@@ -998,7 +996,7 @@ api.onState((state) => {
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) {
-    buildAll(); renderCredentials(); renderBookmarks(); renderPresence();
+    buildAll(); renderPasscode(); renderBookmarks();
     buildRail();
     revealSection();
   }

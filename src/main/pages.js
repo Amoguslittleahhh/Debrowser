@@ -46,6 +46,8 @@ const PAGES = {
   settings: 'settings.html',
   history: 'history.html',
   downloads: 'downloads.html',
+  // Saved sign-ins and cards, behind the passcode or Windows Hello / Touch ID.
+  passwords: 'passwords.html',
   // Incognito only: connecting to Tor, and what the connection does and does
   // not hide. Served to the normal browser too, where it has nothing to say.
   tor: 'tor.html',
@@ -64,6 +66,7 @@ const NEW_TAB_URL = `${SCHEME}://newtab`;
 const SETTINGS_URL = `${SCHEME}://settings`;
 const HISTORY_URL = `${SCHEME}://history`;
 const DOWNLOADS_URL = `${SCHEME}://downloads`;
+const PASSWORDS_URL = `${SCHEME}://passwords`;
 const TOR_URL = `${SCHEME}://tor`;
 const INSECURE_URL = `${SCHEME}://insecure`;
 const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
@@ -226,6 +229,7 @@ function titleFor(url) {
     case 'newtab': return 'New tab';
     case 'history': return 'History';
     case 'downloads': return 'Downloads';
+    case 'passwords': return 'Passwords';
     case 'tor': return 'Private connection';
     case 'insecure': return 'Not private';
     case 'fingerprint': return 'What sites can see';
@@ -234,6 +238,6 @@ function titleFor(url) {
 }
 
 module.exports = {
-  SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, TOR_URL,
+  SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL,
   INSECURE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

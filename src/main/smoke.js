@@ -81,7 +81,8 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
 
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
                           openInternalPage, senderPage, bookmarks,
-                          runCommand = () => {}, history = null, context = { model: null } }) {
+                          runCommand = () => {}, history = null, context = { model: null },
+                          credentials = null, vault = null }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -2475,6 +2476,52 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     tabs.close(other.id);
     tabs.close(tab.id);
     for (const server of servers) server.close();
+  }
+
+  // The passwords page and its lock (vault.js), end to end over the real
+  // request channel. The store gets a key injected, as the credential checks
+  // above do, because a CI machine has no keyring to hand one out.
+  if (credentials && vault) {
+    credentials.key = require('crypto').randomBytes(32);
+    credentials.loaded = true;
+    credentials.unavailable = null;
+    credentials.capability = () => ({ available: true, reason: null });
+    credentials.records = { login: [{ origin: 'https://vault.test', username: 'me', password: 'hunter2-secret' }], payment: [] };
+
+    const settingsTab = tabs.create({ url: pages.SETTINGS_URL, activate: true, realise: true });
+    const pwTab = tabs.create({ url: pages.PASSWORDS_URL, activate: true, realise: true });
+    await waitFor(() => settingsTab.isLive && !settingsTab.loading && pwTab.isLive && !pwTab.loading, { timeoutMs: 8000 });
+    const ask = (tab, command, payload) => tab.wc.executeJavaScript(
+      `window.debrowser.request(${JSON.stringify(command)}, ${JSON.stringify(payload || null)})`).catch(() => 'threw');
+
+    const settingsList = await ask(settingsTab, 'list-credentials');
+    const offList = await ask(pwTab, 'list-credentials');
+    check('saved passwords are the passwords page\'s alone, and off until a passcode is set',
+      settingsList === null && offList && offList.locked === true && !vault.configured(),
+      `settings got ${JSON.stringify(settingsList)}, page got ${JSON.stringify(offList)}`);
+
+    const set = await ask(settingsTab, 'vault-set', { passcode: 'smoke-passcode' });
+    const lockedList = await ask(pwTab, 'list-credentials');
+    const wrong = await ask(pwTab, 'vault-unlock', { method: 'passcode', passcode: 'not-it' });
+    const right = await ask(pwTab, 'vault-unlock', { method: 'passcode', passcode: 'smoke-passcode' });
+    const list = await ask(pwTab, 'list-credentials');
+    const shown = await ask(pwTab, 'reveal-credential', { kind: 'login', id: 'https://vault.test\u0000me' });
+    check('the passcode unlocks the page, and a wrong one does not',
+      set && set.ok && lockedList && lockedList.locked && wrong && !wrong.ok && right && right.ok &&
+      list && list.logins && list.logins.length === 1 && shown && shown.password === 'hunter2-secret',
+      `set=${JSON.stringify(set)} wrong=${JSON.stringify(wrong)} right=${JSON.stringify(right)} logins=${list && list.logins && list.logins.length}`);
+
+    await ask(pwTab, 'vault-lock');
+    const relocked = await ask(pwTab, 'list-credentials');
+    const badRemove = await ask(settingsTab, 'vault-remove', { current: 'wrong-one' });
+    const removed = await ask(settingsTab, 'vault-remove', { current: 'smoke-passcode' });
+    check('locking closes it, and removing the passcode deletes what was saved',
+      relocked && relocked.locked && badRemove && !badRemove.ok && removed && removed.ok &&
+      !vault.configured() && credentials.records.login.length === 0,
+      `relocked=${JSON.stringify(relocked)} removed=${JSON.stringify(removed)} left=${credentials.records.login.length}`);
+
+    tabs.close(pwTab.id);
+    tabs.close(settingsTab.id);
   }
 
   // From the hands-on audit: the fixes most likely to regress.

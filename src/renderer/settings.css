@@ -555,3 +555,28 @@ main { scrollbar-gutter: stable; }
 .bookmark-row:hover .row-control,
 .bookmark-row:focus-within .row-control { opacity: 1; }
 @media (hover: none) { .bookmark-row .row-control { opacity: 1; } }
+
+/* Passwords and payment: the passcode card, then the fill option under it. */
+#passcode-rows + .rows { margin-top: var(--s3); }
+.passcode-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+.passcode-form input {
+  height: 32px;
+  width: 190px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+.passcode-form input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.passcode-form .note { flex-basis: 100%; margin: 0; }
+.passcode-form .note.error { color: var(--crit); }
+.passcode-form .note.error:empty { display: none; }
+

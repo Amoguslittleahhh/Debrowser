@@ -113,9 +113,20 @@ async function check(label, extra) {
   let result = { label, bootstrapped: tor.ready, seconds: tor.seconds, isTor: false };
   try {
     if (tor.ready) {
-      const body = await getViaSocks(tor.port, 'check.torproject.org', '/api/ip');
-      const json = JSON.parse(body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1));
-      result = { ...result, isTor: json.IsTor === true };
+      // Asked up to three times: a fresh circuit's first request can come
+      // back empty, which says nothing about whether the connection is Tor.
+      let lastError = null;
+      for (let attempt = 0; attempt < 3 && !result.isTor; attempt++) {
+        try {
+          const body = await getViaSocks(tor.port, 'check.torproject.org', '/api/ip');
+          const json = JSON.parse(body.slice(body.indexOf('{'), body.lastIndexOf('}') + 1));
+          result = { ...result, isTor: json.IsTor === true };
+        } catch (err) {
+          lastError = err;
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+      if (!result.isTor && lastError) throw lastError;
     } else {
       console.log(tor.log.slice(-15).map((l) => `    ${l}`).join('\n'));
     }
@@ -123,7 +134,10 @@ async function check(label, extra) {
     result.error = err.message;
   } finally {
     tor.child.kill();
-    fs.rmSync(tor.dir, { recursive: true, force: true });
+    // Tor holds a lock file for a moment after it is told to go, and Windows
+    // will not delete a file that is open: retried, and never fatal - a temp
+    // directory left behind is not a failed test.
+    try { fs.rmSync(tor.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* left */ }
   }
   console.log(`  ${result.isTor ? 'PASS' : 'FAIL'}  ${label}: bootstrapped ${result.bootstrapped} in ${result.seconds}s, ` +
     `IsTor ${result.isTor}${result.error ? ` (${result.error})` : ''}`);
@@ -137,16 +151,12 @@ async function main() {
   const results = [];
   if (all || args.includes('--direct')) results.push(await check('plain Tor', []));
   if (all || args.includes('--bridges')) {
-    results.push(await check('built-in bridges (obfs4 and Snowflake, raced)', bridges.torrcLines({ mode: 'auto' }, bundleDir())));
+    results.push(await check('the default: built-in Snowflake', bridges.torrcLines({ mode: 'auto' }, bundleDir())));
   }
-  // Each transport alone, so a failure says which one: raced, a working one
-  // hides a broken one, and a broken one can hold the race up.
+  // Each built-in transport on its own, so a failure says which one.
   for (const transport of ['obfs4', 'snowflake']) {
     if (!args.includes(`--${transport}`)) continue;
-    const only = bridges.torrcLines({ mode: 'auto' }, bundleDir())
-      .map((l) => (l.startsWith('ClientTransportPlugin ') ? l.replace(/ClientTransportPlugin \S+/, `ClientTransportPlugin ${transport}`) : l))
-      .filter((l) => !l.startsWith('Bridge ') || l.startsWith(`Bridge ${transport} `));
-    results.push(await check(`built-in ${transport} bridges only`, only));
+    results.push(await check(`built-in ${transport} bridges only`, bridges.torrcLines({ mode: transport }, bundleDir())));
   }
   if (lineAt >= 0) {
     const lines = bridges.torrcLines({ mode: 'custom', custom: args[lineAt + 1] || '' }, bundleDir());

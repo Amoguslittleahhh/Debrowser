@@ -82,15 +82,6 @@ const SCHEMA = {
    */
   windowOpacity: { def: 1, ok: (v) => Number.isFinite(v) && v >= 0.4 && v <= 1 },
 
-  /**
-   * Ask for a fingerprint, face or PIN before a saved secret is shown or filled.
-   *
-   * Off by default, and that is not timidity: the check is only as good as the
-   * machine's support for it, and turning it on where nothing can satisfy it
-   * would lock the user out of their own passwords. Settings turns it on only
-   * where `presence.capability()` reports something usable.
-   */
-  requirePresence: { def: false, ok: (v) => typeof v === 'boolean' },
 
   /**
    * Where the tab strip lives.
@@ -308,7 +299,7 @@ const SCHEMA = {
   incognitoJsLevel: { def: 'balanced', ok: (v) => ['maximum', 'balanced', 'full'].includes(v) },
 
   // How Tor connects: through built-in bridges, through your own, or plain.
-  incognitoBridges: { def: 'auto', ok: (v) => ['auto', 'custom', 'none'].includes(v) },
+  incognitoBridges: { def: 'auto', ok: (v) => ['auto', 'obfs4', 'custom', 'none'].includes(v) },
   incognitoBridgeLines: { def: '', ok: (v) => typeof v === 'string' && v.length <= 20_000 },
 
   // Keep Tor's entry guard and its copy of the network between sessions,
