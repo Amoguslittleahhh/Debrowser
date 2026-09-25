@@ -23,17 +23,6 @@ document.getElementById('search').addEventListener('submit', (event) => {
   if (text) api.send('navigate', { url: text });
 });
 
-// Animate only once the page is actually on screen. A hidden view's animation
-// frames are throttled, so one started in the background is still running when
-// the tab is shown, and the user sees it settle rather than arrive.
-function releaseAnimation() {
-  if (document.visibilityState !== 'visible') return;
-  document.body.classList.remove('still');
-  document.removeEventListener('visibilitychange', releaseAnimation);
-}
-document.body.classList.add('still');
-document.addEventListener('visibilitychange', releaseAnimation);
-releaseAnimation();
 
 // Focus without stealing it from the address bar if the user went there first.
 window.addEventListener('DOMContentLoaded', () => {
@@ -121,6 +110,18 @@ async function loadTiles() {
 }
 
 loadTiles();
+
+// A spare new tab page is loaded before anyone asks for it (prewarm.js), so
+// what it showed may be a little old by the time it is: brought up to date as
+// it is shown. And it gets the keyboard, as a freshly loaded one does.
+let tilesAt = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (Date.now() - tilesAt > 1000) { tilesAt = Date.now(); loadTiles(); }
+});
+window.addEventListener('focus', () => {
+  if (document.activeElement === document.body) q.focus();
+});
 
 // One line of the thing this browser is actually for. It costs nothing to
 // render because the numbers are already in the state message the chrome gets.

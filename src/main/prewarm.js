@@ -1,7 +1,27 @@
 'use strict';
 
 /**
- * A renderer warmed up while the pointer is still travelling to the button.
+ * A new tab page, ready before it is asked for.
+ *
+ * ## What this is now
+ *
+ * It used to warm a renderer and throw it away, so the tab that followed only
+ * paid less to start its own. Now the warmed view *is* the next new tab: a
+ * view built exactly as a tab builds one (createTabView), with the new tab page
+ * already loaded and drawn, which the tab takes over (Tab#adopt). Measured:
+ * shown, it draws its next frame in about 6 ms, where a new tab page built on
+ * Ctrl+T took about 55 ms to first paint. Clicking the + or pressing Ctrl+T
+ * both get it.
+ *
+ * It is kept only while it costs next to nothing. Our pages share a renderer,
+ * so while one of them is open - a new tab page, Settings, History - a spare
+ * beside it measured 0.3 MB. When the last one goes, the spare would be a
+ * renderer of its own (~13 MB), so it is kept for TTL_MS in case another
+ * new tab is on its way - the common Ctrl+T, type, Ctrl+T again - and then
+ * dropped. A dwell on the + or the menu makes one as before, for as long.
+ * Never under memory pressure or an animation, never in a private window.
+ *
+ * ## How the renderer-warming half was measured
  *
  * Opening a new tab was not instant unless one was already open, and the reason
  * turned out to be the process rather than the page. Measured, with the
@@ -41,43 +61,37 @@
  *
  * ## Why it expires
  *
- * A warm renderer is ~13MB, and this is a browser whose whole argument is that
- * a tab should not cost that when nobody is looking at it. So it is held for
- * seconds, not for the life of the window: hovering the + and walking away must
- * not leave a renderer behind. It also declines to do anything when one of the
- * browser's own pages is already live, because then the process it would create
- * already exists and this would be a second one for nothing.
+ * A renderer of its own is ~13MB, and this is a browser whose whole argument
+ * is that a tab should not cost that when nobody is looking at it. So when the
+ * spare would be the only one of our pages alive, it is held for seconds, not
+ * for the life of the window: a new tab page left for a website, or a hover
+ * over the + that went nowhere, costs half a minute of one renderer at most.
  */
 
-const { WebContentsView, session } = require('electron');
 const pages = require('./pages');
+const { createTabView } = require('./tabs/tab');
 
 /**
- * How long a warmed renderer is kept.
+ * How long a warmed renderer is kept when nothing else of ours is open.
  *
- * Long enough to cover a pointer that pauses on the way to the button, short
- * enough that a hover the user did not follow through on costs a few seconds of
- * one renderer rather than the rest of the session.
+ * Long enough to cover a pointer that pauses on the way to the button, or a
+ * new tab opened again shortly after the last one was left; short enough that
+ * it costs seconds of one renderer rather than the rest of the session.
  */
-const TTL_MS = 12_000;
+const TTL_MS = 30_000;
 
 class Prewarm {
   /**
    * @param {object} deps
-   * @param {string} deps.partition - the browsing partition, so the warmed
-   *   renderer is the same one a real tab would get. A different session would
-   *   warm a process no tab will ever join.
-   * @param {string} deps.preload
+   * @param {() => Electron.Session} deps.session - the browsing session
    * @param {() => boolean} deps.hasLiveInternal - is one of our own pages
-   *   already holding a renderer?
-   * @param {() => boolean} deps.busy - true when the browser is under memory
-   *   pressure or keeping out of an animation's way, in which case spending a
-   *   renderer on a guess is the wrong trade.
+   *   already holding a renderer? Then a spare costs next to nothing.
+   * @param {() => boolean} deps.busy - memory pressure, or an animation to keep
+   *   out of the way of: no spare then.
    */
-  constructor({ partition, preload, hasLiveInternal = () => false, busy = () => false,
+  constructor({ session, hasLiveInternal = () => false, busy = () => false,
                 log = () => {}, enabled = true }) {
-    this.partition = partition;
-    this.preload = preload;
+    this.session = session;
     this.hasLiveInternal = hasLiveInternal;
     this.busy = busy;
     this.log = log;
@@ -85,43 +99,68 @@ class Prewarm {
 
     /** @type {Electron.WebContentsView|null} */
     this.view = null;
+    this.loaded = false;
     this.timer = null;
   }
 
-  /** The pointer is heading for something that opens one of our pages. */
+  /** The pointer is heading for something that opens a new tab page. */
   warm() {
-    if (!this.enabled) return false;
-    // Already warm: just give it longer, since the user is evidently still here.
-    if (this.view) { this.arm(); return true; }
-    if (this.busy() || this.hasLiveInternal()) return false;
+    if (!this.make()) return false;
+    this.arm();
+    return true;
+  }
 
+  /**
+   * Keep a spare while it is cheap, and start its clock when it is not. Called
+   * as tabs come and go; cheap to call often.
+   */
+  refresh() {
+    if (!this.enabled) return;
+    if (this.hasLiveInternal()) {
+      clearTimeout(this.timer);
+      this.timer = null;
+      this.make();
+    } else if (this.view && !this.timer) {
+      this.arm();
+    }
+  }
+
+  /**
+   * The spare, for a new tab to take, if one is loaded and waiting. The next
+   * one is made on the following tick - cheaply, since the tab that took this
+   * one now holds the renderer.
+   */
+  take() {
+    const view = this.view;
+    if (!view || !this.loaded || view.webContents.isDestroyed() || this.busy()) return null;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.view = null;
+    this.loaded = false;
+    setImmediate(() => this.refresh());
+    return view;
+  }
+
+  make() {
+    if (!this.enabled || this.busy()) return false;
+    if (this.view) return true;
     try {
-      this.view = new WebContentsView({
-        webPreferences: {
-          session: session.fromPartition(this.partition),
-          preload: this.preload,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-          // Nothing is on screen to throttle, and the point is to get the
-          // process up rather than to keep it running.
-          backgroundThrottling: true
-        }
-      });
+      const view = createTabView({ session: this.session(), url: pages.NEW_TAB_URL });
+      this.view = view;
+      this.loaded = false;
+      view.webContents.once('did-finish-load', () => { if (this.view === view) this.loaded = true; });
       // Caught, because `drop()` closes this mid-load on purpose - on the TTL,
       // at quit, and in the smoke test - and an aborted load rejects. Nothing
       // in this project installs an `unhandledRejection` handler, so the one
       // uncaught promise in the main process would be a crash.
-      this.view.webContents.loadURL(pages.NEW_TAB_URL)
-        .catch((err) => this.log(`prewarm load ended: ${err.message}`));
+      view.webContents.loadURL(pages.NEW_TAB_URL)
+        .catch((err) => this.log(`spare new tab load ended: ${err.message}`));
+      return true;
     } catch (err) {
-      this.log(`prewarm failed: ${err.message}`);
+      this.log(`spare new tab failed: ${err.message}`);
       this.view = null;
       return false;
     }
-
-    this.arm();
-    return true;
   }
 
   arm() {
@@ -135,6 +174,7 @@ class Prewarm {
     this.timer = null;
     const view = this.view;
     this.view = null;
+    this.loaded = false;
     if (!view) return;
     try {
       view.webContents.close();

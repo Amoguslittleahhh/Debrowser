@@ -9,6 +9,7 @@
     "start:economy": "electron . --profile=economy",
     "start:performance": "electron . --profile=performance",
     "bench": "node bench/bench.js",
+    "speed": "electron . --speed-test --disable-gpu",
     "smoke": "electron . --smoke-test --disable-gpu",
     "start:minimal": "electron . --profile=minimal",
     "build:ksm": "cc -O2 -Wall -o tools/ksm-launch tools/ksm-launch.c",

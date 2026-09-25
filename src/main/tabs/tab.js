@@ -80,6 +80,47 @@ async function sweepThumbnails() {
 }
 
 /**
+ * The view a tab's page lives in, built the one way every tab's is: the
+ * preload its page gets, the sandbox, the session, and the colour it shows
+ * before the page paints. Shared with the spare new tab page (prewarm.js),
+ * which is built ahead of time and handed to a tab - so that it is exactly the
+ * view the tab would have built for itself.
+ */
+function createTabView({ session, url }) {
+  const view = new WebContentsView({
+    webPreferences: {
+      session,
+      preload: pages.isInternal(url) ? PAGE_PRELOAD : PROBE_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      // Chromium's own background throttling stays on; the governor layers
+      // its harder tiers on top rather than replacing it.
+      backgroundThrottling: true,
+      transparent: false,
+      // A new spellchecker fetches its dictionary on its own; in incognito
+      // that is a request no page asked for.
+      spellcheck: !INCOGNITO,
+      // WebGL hands a page the graphics card's name and quirks; a private
+      // window gives it none. See incognito/fingerprint.js for WebGPU.
+      webgl: !INCOGNITO,
+      // Tells the page preload it is in a private window: see the end of
+      // probe-preload.js, where dropped and pasted files are cleaned.
+      additionalArguments: INCOGNITO ? ['--debrowser-private'] : []
+      // No `zoomFactor` here: Chromium records it against the site the page
+      // loads, so a default applied this way pinned every site. The zoom is
+      // set per document instead, by the tab - see zoom.js.
+    }
+  });
+
+  // What shows before the page paints, and wherever it paints nothing: the
+  // view's own background, which the webPreferences above do not govern -
+  // an earlier comment there claimed they did. See palette.surfaceFor.
+  view.setBackgroundColor(palette.surfaceFor(url));
+  return view;
+}
+
+/**
  * The same sweep, synchronously, for `before-quit`.
  *
  * Quit does not wait for promises, so the async version would be abandoned
@@ -354,40 +395,38 @@ class Tab {
    * Create the renderer for this tab. Called on first open and again on every
    * restore-from-discard.
    */
+  /**
+   * Become live on a view that has already loaded the new tab page - the
+   * spare, built ahead of time (prewarm.js) - instead of building one and
+   * waiting for it. Everything `realise` does but the load.
+   *
+   * Measured: shown, a spare draws its next frame in about 6 ms, where a new
+   * tab page built on Ctrl+T took about 55 ms to its first paint.
+   */
+  adopt(view) {
+    if (this.isLive) return;
+    this.realisedInternal = true;
+    this.view = view;
+    this.view.setBackgroundColor(palette.surfaceFor(this.url));
+    this.wc = this.view.webContents;
+    this.cdp = new CdpSession(this.wc, this.log);
+    this.crashed = false;
+    this.confineToInternalPages();
+    this.wireEvents();
+    // What the page has already said about itself, which the events above
+    // were not there to hear.
+    this.url = this.wc.getURL() || this.url;
+    this.title = this.wc.getTitle() || this.title;
+    this.loading = this.wc.isLoading();
+    this.tier = this.visible ? Tier.ACTIVE : Tier.WARM;
+    this.emit('realised');
+    this.emit('updated');
+  }
+
   realise() {
     if (this.isLive) return;
     this.realisedInternal = this.internal;
-
-    this.view = new WebContentsView({
-      webPreferences: {
-        session: this.session,
-        preload: this.internal ? PAGE_PRELOAD : PROBE_PRELOAD,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        // Chromium's own background throttling stays on; the governor layers
-        // its harder tiers on top rather than replacing it.
-        backgroundThrottling: true,
-        transparent: false,
-        // A new spellchecker fetches its dictionary on its own; in incognito
-        // that is a request no page asked for.
-        spellcheck: !INCOGNITO,
-        // WebGL hands a page the graphics card's name and quirks; a private
-        // window gives it none. See incognito/fingerprint.js for WebGPU.
-        webgl: !INCOGNITO,
-        // Tells the page preload it is in a private window: see the end of
-        // probe-preload.js, where dropped and pasted files are cleaned.
-        additionalArguments: INCOGNITO ? ['--debrowser-private'] : []
-        // No `zoomFactor` here: Chromium records it against the site the page
-        // loads, so a default applied this way pinned every site. The zoom is
-        // set per document instead, below - see zoom.js.
-      }
-    });
-
-    // What shows before the page paints, and wherever it paints nothing: the
-    // view's own background, which the webPreferences above do not govern -
-    // an earlier comment there claimed they did. See palette.surfaceFor.
-    this.view.setBackgroundColor(palette.surfaceFor(this.url));
+    this.view = createTabView({ session: this.session, url: this.url });
 
     this.wc = this.view.webContents;
     // WebRTC gathers ICE candidates over UDP, which does not go through a SOCKS
@@ -1035,4 +1074,5 @@ function safePid(wc) {
   }
 }
 
-module.exports = { Tab, sweepThumbnails, sweepThumbnailsSync };
+module.exports = {
+  createTabView, Tab, sweepThumbnails, sweepThumbnailsSync };

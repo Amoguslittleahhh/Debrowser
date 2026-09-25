@@ -206,6 +206,9 @@ const SCHEMA = {
   // Speculative realisation on a hover dwell costs a renderer the user may not
   // want, on a machine where memory is the point.
   hoverPrefetch: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Fetching the page behind a link the pointer rests on; see speculation.js.
+  // Never in a private window, whatever this says.
+  preloadPages: { def: true, ok: (v) => typeof v === 'boolean' },
 
   // Size, position and maximised state, put back on the next launch.
   rememberWindowBounds: { def: true, ok: (v) => typeof v === 'boolean' },

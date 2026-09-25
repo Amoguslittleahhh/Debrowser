@@ -12,7 +12,7 @@
  */
 
 const fs = require('fs');
-const { app } = require('electron');
+const { app, session } = require('electron');
 const { Tier, tierRank, isStopped } = require('./config');
 const { applyPrefs } = require('./prefs');
 const platform = require('./platform');
@@ -1947,44 +1947,44 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `${back.x},${back.y} ${back.width}x${back.height}`);
   }
 
-  // The renderer warmed on a dwell over the + button.
+  // The spare new tab page (prewarm.js): built on a dwell over the + button,
+  // and taken whole by the next new tab.
   //
   // Exercised directly, because it is switched off under a test - a spare
   // renderer appearing on a timer would move the memory figures every other
-  // check in this suite asserts on. The two properties worth holding are that
-  // it actually starts a process, since a prefetch that quietly does nothing
-  // would look exactly like one that works, and that it declines whenever
-  // spending 13MB on a guess is the wrong trade.
+  // check in this suite asserts on. What is worth holding: it really is a
+  // loaded new tab page in a renderer of its own, since a spare that quietly
+  // does nothing would look exactly like one that works; it is handed over
+  // once and not twice; and it is never built when memory is tight or an
+  // animation is running.
   {
     const { Prewarm } = require('./prewarm');
-    let liveInternal = false;
     let busy = false;
     const warmer = new Prewarm({
-      partition: BROWSING_PARTITION,
-      preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
-      hasLiveInternal: () => liveInternal,
+      session: () => session.fromPartition(BROWSING_PARTITION),
       busy: () => busy,
       log: () => {}
     });
 
     warmer.warm();
     const spawned = await waitFor(
-      () => Boolean(warmer.view) && warmer.view.webContents.getOSProcessId() > 0,
+      () => Boolean(warmer.view) && warmer.loaded && warmer.view.webContents.getOSProcessId() > 0,
       { timeoutMs: 10_000 });
+    const onNewTab = spawned && pages.pageName(warmer.view.webContents.getURL()) === 'newtab';
+    const taken = warmer.take();
+    const once = Boolean(taken) && warmer.take() === null;
+    if (taken) taken.webContents.close();
+    await sleep(20);   // take() makes the next spare on the following tick
     warmer.drop();
 
-    liveInternal = true;
-    const skipsWhenLive = warmer.warm() === false;
-    liveInternal = false;
     busy = true;
-    const skipsWhenBusy = warmer.warm() === false;
+    const skipsWhenBusy = warmer.warm() === false && warmer.view === null;
     busy = false;
-    warmer.drop();
 
-    check('a hover warms a real renderer, and only when it would pay',
-      spawned && warmer.view === null && skipsWhenLive && skipsWhenBusy,
-      `spawned=${spawned}, released=${warmer.view === null}, ` +
-      `declined with a page already live=${skipsWhenLive}, mid-animation=${skipsWhenBusy}`);
+    check('a spare new tab page is a real loaded page, handed over once, never when busy',
+      spawned && onNewTab && once && skipsWhenBusy && warmer.view === null,
+      `spawned=${spawned}, new tab page=${onNewTab}, taken once=${once}, ` +
+      `declined mid-animation=${skipsWhenBusy}, released=${warmer.view === null}`);
   }
 
   // Updates must never run under a test: a background download competing with
@@ -2325,6 +2325,40 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     if (before && tabs.all().includes(before)) await tabs.activate(before.id);
     tabs.close(other.id);
     bookmarks.remove('https://gitlab.test/saved-page');
+
+    // While an address is typed, a connection is opened to where Enter will
+    // go - if the user has been there - and nothing is sent on it. An address
+    // typed for the first time gets no connection at all. Counted at the
+    // sockets, so a request slipping out would show as bytes received.
+    const net = require('net');
+    const listen = () => new Promise((resolve) => {
+      const seen = { connections: 0, bytes: 0 };
+      const server = net.createServer((socket) => {
+        seen.connections++;
+        socket.on('data', (d) => { seen.bytes += d.length; seen.first = seen.first || d.toString().split('\r\n')[0]; });
+        socket.on('error', () => {});
+      });
+      server.listen(0, '127.0.0.1', () => resolve({ server, seen, port: server.address().port }));
+    });
+    const known = await listen();
+    const unknown = await listen();
+    const knownUrl = `http://127.0.0.1:${known.port}/been-here`;
+    bookmarks.add({ url: knownUrl, title: 'Been here' });
+    // Adding a bookmark fetches its site's icon; that is not what is counted.
+    await sleep(1000);
+    known.seen.connections = 0;
+    known.seen.bytes = 0;
+    known.seen.first = undefined;
+    await ask(`127.0.0.1:${known.port}/be`);
+    await ask(`127.0.0.1:${unknown.port}/never`);
+    await waitFor(() => known.seen.connections > 0, { timeoutMs: 3000 });
+    await sleep(300);
+    check('typing a known address opens a connection to it, and sends nothing on it',
+      known.seen.connections === 1 && known.seen.bytes === 0 && unknown.seen.connections === 0,
+      `known: ${JSON.stringify(known.seen)}, never visited: ${JSON.stringify(unknown.seen)}`);
+    bookmarks.remove(knownUrl);
+    known.server.close();
+    unknown.server.close();
   }
 
   // Dragging a tab moves it, by real pointer input into the chrome: pressed,

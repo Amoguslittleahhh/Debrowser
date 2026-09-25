@@ -617,3 +617,70 @@ if (process.argv.includes('--debrowser-private')) {
     bubbles: true, cancelable: true, composed: true, clipboardData: dt
   }));
 }
+
+/*
+ * Fetch the page behind a link the user is about to follow (see
+ * src/main/speculation.js). Top frame of an ordinary web page only, and never
+ * in a private window.
+ *
+ * Intent is a pointer resting on the link for a moment, or the button going
+ * down on it - a pointer passing over a list of links fetches none of them.
+ * Each link is asked about once; the browser says whether this page may carry
+ * a rule, and if so one rule naming that one link is added. At most a few per
+ * page, so a page of links cannot be turned into a page of requests.
+ */
+if (!process.argv.includes('--debrowser-private') && window === window.top &&
+    /^https?:$/.test(location.protocol)) {
+  const DWELL_MS = 120;
+  const MAX_PER_PAGE = 8;
+  const asked = new Set();
+  let dwell = null;
+  // Once the page is navigating away, a rule added now arrives behind the
+  // navigation it was meant to speed up - measured, it then made a click that
+  // came too fast for it slower, 362 ms against 206. So none is added after.
+  let leaving = false;
+  if (window.navigation) window.navigation.addEventListener('navigate', (e) => { if (!e.hashChange) leaving = true; });
+  window.addEventListener('pageshow', () => { leaving = false; });
+
+  // A <meta> content security policy the response headers did not carry:
+  // checked here, where it can be seen.
+  const metaPolicyBlocks = () => [...document.querySelectorAll('meta[http-equiv]')]
+    .some((m) => /^content-security-policy$/i.test(m.httpEquiv) &&
+      /(^|;)\s*(script-src|script-src-elem|default-src)\b/i.test(m.content) &&
+      !/'inline-speculation-rules'/i.test(m.content));
+
+  const linkOf = (target) => {
+    const a = target && target.closest ? target.closest('a[href]') : null;
+    if (!a || a.hasAttribute('download') || (a.target && a.target !== '_self')) return null;
+    let url;
+    try { url = new URL(a.href, location.href); } catch { return null; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    // A jump within this page is not a navigation.
+    if (url.origin === location.origin && url.pathname === location.pathname &&
+        url.search === location.search) return null;
+    url.hash = '';
+    return url.href;
+  };
+
+  const prefetch = async (href) => {
+    if (!href || asked.has(href) || asked.size >= MAX_PER_PAGE) return;
+    asked.add(href);
+    if (metaPolicyBlocks()) return;
+    const ok = await ipcRenderer.invoke('debrowser:may-speculate', href).catch(() => false);
+    if (!ok || leaving || !document.head) return;
+    const rule = document.createElement('script');
+    rule.type = 'speculationrules';
+    rule.textContent = JSON.stringify({ prefetch: [{ source: 'list', urls: [href] }] });
+    document.head.append(rule);
+  };
+
+  document.addEventListener('pointerover', (event) => {
+    const href = linkOf(event.target);
+    clearTimeout(dwell);
+    if (href && !asked.has(href)) dwell = setTimeout(() => prefetch(href), DWELL_MS);
+  }, { capture: true, passive: true });
+  document.addEventListener('pointerout', () => clearTimeout(dwell), { capture: true, passive: true });
+  document.addEventListener('pointerdown', (event) => {
+    if (event.button === 0) prefetch(linkOf(event.target));
+  }, { capture: true, passive: true });
+}

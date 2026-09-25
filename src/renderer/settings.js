@@ -242,6 +242,12 @@ const SECTIONS = {
       ]
     },
     {
+      key: 'preloadPages',
+      label: 'Preload pages you point at',
+      hint: 'Fetches a link’s page while the pointer rests on it, and connects to a site you have visited while you type its address, so both open sooner. Never in private windows.',
+      type: 'checkbox'
+    },
+    {
       key: 'hoverPrefetch',
       label: 'Preload tabs when I hover them',
       hint: 'A head start on switching. Off saves the memory a hovered tab would wake.',

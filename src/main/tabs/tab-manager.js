@@ -18,6 +18,7 @@
 
 const { session: electronSession } = require('electron');
 const { Tab } = require('./tab');
+const pages = require('../pages');
 const { Tier, isStopped } = require('../config');
 const { LatencyTracker } = require('../latency');
 const { kindsFor } = require('../site-permissions');
@@ -81,6 +82,8 @@ class TabManager {
      * crucially, to unfreeze it - while it is still off screen.
      */
     this.onPresent = onPresent;
+    /** Hands over a spare new tab page view, or null; set by main.js (prewarm.js). */
+    this.takeSpare = null;
     /**
      * Show / take away the restore placeholder. The shell owns the view; the
      * tab manager owns the moment, because only it knows a restore is starting.
@@ -210,7 +213,11 @@ class TabManager {
     if (index == null) this.tabs.push(tab);
     else this.tabs.splice(index, 0, tab);
 
-    if (realise) this.admit(tab);
+    // A new tab page takes the spare one if there is one waiting, already
+    // loaded and drawn (prewarm.js); otherwise it is built as any tab is.
+    const spare = realise && pages.pageName(url) === 'newtab' && this.takeSpare ? this.takeSpare() : null;
+    if (spare) tab.adopt(spare);
+    else if (realise) this.admit(tab);
     else tab.tier = Tier.DISCARDED;
 
     this.onEvent(tab, 'created');

@@ -214,8 +214,9 @@ npm run start:minimal      # least memory - DISABLES SITE ISOLATION, read below
 npm run start:merged       # + page merging (KSM) - side-channel risk, read below
 npm run start:performance  # most headroom
 
-npm run smoke              # 165-check end-to-end test against real renderers
+npm run smoke              # 178-check end-to-end test against real renderers
 npm run bench              # memory benchmark
+npm run speed              # how long new tabs, typed addresses and links take
 ```
 
 Needs Node 18+ and runs on Windows, macOS and Linux. `npm run smoke` drives a
@@ -452,6 +453,46 @@ roughly 3x. PSS divides each shared page by the number of processes mapping it,
 so summing it corresponds to real memory. It is a Linux figure
 (`/proc/pid/smaps_rollup`); on macOS and Windows the code falls back to RSS and
 labels itself as doing so.
+
+### How fast things open
+
+From `npm run speed` on the same host: the time from the command (a key, a
+click) to the first paint of what was asked for, read from the page's own
+performance timeline, median of 15 runs. Pages are served locally, so this is
+the browser's own overhead with the network taken out; the link rows add a
+server that takes 150 ms to answer, to show what fetching early buys.
+
+| Moment | Before | Now |
+|---|---:|---:|
+| New tab (Ctrl+T) | 58 ms | 30 ms |
+| Typed address, on a site | 88 ms | 88 ms |
+| Link, clicked at once | 206 ms | 206 ms |
+| Link, a person's click (button held ~90 ms) | 202 ms | 117 ms |
+| Link, pointer rested on it first | 206 ms | 54 ms |
+| Switch to an open tab | 21 ms | 21 ms |
+
+Where the time went:
+
+- **A new tab page is already built.** A spare one is kept loaded and drawn
+  beside any of the browser's own pages, where it measured 0.3 MB, and Ctrl+T
+  shows it instead of building one. Otherwise it is kept for 30 seconds after
+  the last one closes, and never under memory pressure. Ctrl+T now takes about
+  as long as switching to a tab that is already open.
+- **A link's page is fetched on the way to the click.** A pointer resting on a
+  link for 120 ms, or a mouse button going down, fetches that one page, so
+  the click finds it waiting. At most eight per page, never where the page's
+  content security policy would refuse it, and never in a private window.
+  Chromium also declines on its own for a cross-site link to a site you hold
+  cookies for, so a signed-in page is never fetched without being opened.
+- **The connection is opened while you type.** When Enter would go to a site
+  you have been to before, or to your search engine, the connection (DNS,
+  TCP, TLS) is set up before the key goes down. Only the connection is made;
+  nothing is requested on it, and an address typed for the first time gets
+  none. The local numbers above cannot show this; on a real network it is
+  most of the first 100-300 ms of a page.
+
+All three are off in private windows, and the last two are off together with
+"Preload pages you point at" in Settings.
 
 ### Per tab
 

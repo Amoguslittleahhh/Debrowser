@@ -38,42 +38,12 @@ main {
   font-weight: var(--fw-regular);
   letter-spacing: 0.01em;
   color: var(--text-dim);
-  /* One short fade on open. Cheap - opacity and transform stay on the
-     compositor - and it runs once rather than looping, so an idle new tab
-     costs nothing at all.
-
-     Deliberately no `animation-fill-mode`. With `both` the element is pinned at
-     the keyframe's starting opacity until the animation runs, and a view that
-     is never composited - created in the background, or captured while hidden -
-     never runs it, leaving the page permanently faded. Without a fill mode the
-     element's own style is what shows, so the worst case is no animation rather
-     than an invisible page. */
-  animation: rise 140ms var(--ease-out);
+  /* No entrance. There was a 140 ms fade from transparent, and a page that is
+     ready 20 ms after Ctrl+T but fades in over the next 140 is a page that
+     looks slow: measured, its first contentful paint came 35-40 ms after the
+     document was ready, because Chromium does not count transparent text as
+     painted and neither does the eye. It is drawn whole on its first frame. */
 }
-
-/* Opacity only, and short. This page opens on Ctrl+T dozens of times a day,
-   and anything that slides in on a shortcut that frequent reads as lag. */
-@keyframes rise {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
-/* Anyone who has asked not to see motion sees none. */
-@media (prefers-reduced-motion: reduce) {
-  #wordmark { animation: none; }
-}
-
-/*
- * And nobody sees half of one.
- *
- * A view that is not composited has its animation frames throttled hard, so an
- * animation started while hidden is still part-way through when the tab is
- * finally shown - the page appears half-faded and settles afterwards, which
- * looks like a rendering fault rather than an entrance. This browser realises
- * tabs in the background routinely, so that is the common case, not the odd
- * one. newtab.js sets this until the page is actually on screen.
- */
-body.still #wordmark { animation: none; }
 
 #q {
   width: 100%;
@@ -132,13 +102,6 @@ body.still #wordmark { animation: none; }
 
 .tile {
   position: relative;
-  animation: rise 140ms var(--ease-out);
-}
-
-body.still .tile { animation: none; }
-
-@media (prefers-reduced-motion: reduce) {
-  .tile { animation: none; }
 }
 
 .tile-open {

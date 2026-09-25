@@ -28,6 +28,7 @@ const { History } = require('./history');
 const icons = require('./icons');
 const presence = require('./presence');
 const { Vault } = require('./vault');
+const { Speculation } = require('./speculation');
 const { DownloadManager } = require('./downloads');
 const { Governor } = require('./governor');
 const { Prewarm } = require('./prewarm');
@@ -101,7 +102,8 @@ function panic(reason) {
   }
   app.exit(0);
 }
-const OFFLINE_MODE = SMOKE_TEST || process.argv.includes('--bench-test');
+const SPEED_TEST = process.argv.includes('--speed-test');
+const OFFLINE_MODE = SMOKE_TEST || SPEED_TEST || process.argv.includes('--bench-test');
 
 // Tests and benchmarks must not depend on the network: they assert on memory
 // behaviour, and a slow or blocked fetch would make them vary for reasons that
@@ -229,7 +231,7 @@ function log(...args) {
 // file:// URLs into one renderer. That needs `*.test` to resolve locally.
 // Not in incognito, whose resolver refuses every name: its tests reach the
 // fixtures through a stand-in for Tor, the same way a real page would.
-if (!INCOGNITO && (SMOKE_TEST || (argv.includes('--bench-test') && argv.includes('--distinct-origins')))) {
+if (!INCOGNITO && (SMOKE_TEST || SPEED_TEST || (argv.includes('--bench-test') && argv.includes('--distinct-origins')))) {
   const { HOST_RESOLVER_RULES } = require('./fixture-server');
   app.commandLine.appendSwitch('host-resolver-rules', HOST_RESOLVER_RULES);
 }
@@ -471,6 +473,8 @@ function main() {
     setImmediate(() => {
       publishQueued = false;
       if (shell && governor) shell.publish(governor.snapshot());
+      // Tabs came or went: keep a spare new tab while it is cheap (prewarm.js).
+      if (prewarm) prewarm.refresh();
     });
   };
 
@@ -889,6 +893,19 @@ function main() {
     // that created one in the private profile: the leak test found it left
     // behind after exit. A store that is not there cannot be asked.
     credentials = INCOGNITO ? null : new Credentials(log);
+    // Links fetched on the pointer's way to them (speculation.js). Not in a
+    // private window, where nothing is watched and nothing is asked - and not
+    // under `--no-speculation`, which the speed test uses to measure what the
+    // whole thing, header watch included, costs and saves.
+    if (!INCOGNITO && !argv.includes('--no-speculation')) {
+      const speculation = new Speculation({
+        enabled: () => prefs.get('preloadPages') !== false,
+        isTab: (sender) => tabs.all().some((t) => t.isLive && t.wc.id === sender.id && !t.internal)
+      });
+      speculation.watch(session.fromPartition(BROWSING_PARTITION));
+      speculation.wire();
+    }
+
     // In memory under a test, which must not leave a passcode behind.
     vault = INCOGNITO ? null : new Vault(OFFLINE_MODE ? null : app.getPath('userData'), { log });
 
@@ -1032,13 +1049,18 @@ function main() {
     // memory, and a spare renderer appearing on a timer would make the numbers
     // depend on where a pointer had been.
     prewarm = new Prewarm({
-      partition: BROWSING_PARTITION,
-      preload: path.join(__dirname, '..', 'preload', 'chrome-preload.js'),
+      session: () => session.fromPartition(BROWSING_PARTITION),
       hasLiveInternal: () => tabs.all().some((t) => t.internal && t.isLive),
-      busy: () => Boolean(governor && governor.boost.quiesceRequested),
-      enabled: !OFFLINE_MODE && !INCOGNITO,
+      // An animation to keep out of the way of, or memory getting tight: a
+      // spare is the first thing to give up.
+      busy: () => Boolean(governor && (governor.boost.quiesceRequested || governor.pressure !== 'none')),
+      // The speed test measures it; the smoke test and the memory benchmark
+      // must not have a spare view appearing under their counts.
+      enabled: !INCOGNITO && (!OFFLINE_MODE || SPEED_TEST),
       log
     });
+    // A new tab page takes the spare, already loaded and drawn.
+    tabs.takeSpare = () => prewarm.take();
 
     // Incognito reads the normal profile's bookmarks - they are how people get
     // to the sites they use - and cannot change them: a bookmark saved from a
@@ -1171,6 +1193,23 @@ function main() {
       });
     } else if (SMOKE_TEST) {
       runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault });
+    } else if (SPEED_TEST) {
+      // Startup, from this process starting to the first tab drawn.
+      const startedAt = Date.now() - process.uptime() * 1000;
+      const first = tabs.activeTab();
+      const speed = require('./speed');
+      (async () => {
+        let startup = null;
+        if (first && first.wc) {
+          const painted = await speed.paintedAt(first.wc).catch(() => null);
+          if (painted) startup = Math.round(painted - startedAt);
+        }
+        const runs = Number((argv.find((a) => a.startsWith('--speed-runs=')) || '').split('=')[1]) || 15;
+        const report = await speed.runSpeed({ tabs, runCommand, log, runs });
+        speed.print(report, startup);
+        if (argv.includes('--speed-json')) console.log(`SPEED_JSON ${JSON.stringify({ startup, report })}`);
+        app.exit(0);
+      })().catch((err) => { console.error('[speed] failed:', err.stack || err.message); app.exit(1); });
     } else if (argv.includes('--bench-test')) {
       const { runBench } = require('./bench');
       const tabCount = Number(argValue('tabs')) || 8;
@@ -2709,6 +2748,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         });
         shell.suggestItems = result.items;
         shell.suggestSelected = -1;
+        preconnectLead(prefs, result.items[0]);
         const a = payload?.anchor || {};
         if (Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.width)) {
           shell.showSuggestions(result.items, a);
@@ -3170,7 +3210,39 @@ function fitToDisplay(saved) {
  * homepage under `--smoke-test` or `--bench-test`, which must not depend on
  * whatever the machine they run on has saved.
  */
+/**
+ * Open a connection to where Enter is about to go, while the rest of the
+ * address is still being typed: DNS, TCP and TLS, which on a real network are
+ * most of the first 100-300 ms of a page, are done by the time the key goes
+ * down. Only a connection - no request, no cookie, nothing a site can log as a
+ * visit - and only to somewhere the user has already been (an open tab, a
+ * bookmark, history) or to their own search engine when Enter would search.
+ * An address being typed for the first time is not guessed at. Never in a
+ * private window; off with "Preload pages you point at".
+ */
+const preconnected = new Map();   // origin -> when, so each letter is not another connection
+function preconnectLead(prefs, row) {
+  if (INCOGNITO || !row || prefs.get('preloadPages') === false) return;
+  // Tests make no connections outside the machine, a search engine's included.
+  if (OFFLINE_MODE && row.kind === 'search') return;
+  let target = null;
+  if (row.kind === 'search') target = prefs.searchTemplate();
+  else if (row.kind === 'tab' || row.kind === 'bookmark' || row.kind === 'history') target = row.url;
+  let origin;
+  try { origin = new URL(String(target || '').replace('%s', '')).origin; } catch { return; }
+  if (!/^https?:/.test(origin)) return;
+  const now = Date.now();
+  if (now - (preconnected.get(origin) || 0) < 10_000) return;
+  preconnected.set(origin, now);
+  if (preconnected.size > 64) preconnected.delete(preconnected.keys().next().value);
+  try {
+    session.fromPartition(BROWSING_PARTITION).preconnect({ url: origin, numSockets: 1 });
+  } catch { /* the session is gone at quit */ }
+}
+
 function newTabUrl(prefs) {
+  // The speed test times the real new tab page; the rest stay on a file.
+  if (SPEED_TEST) return pages.NEW_TAB_URL;
   if (OFFLINE_MODE) return HOME_URL;
   const home = prefs?.get('homepage');
   return (home && normaliseUrl(home)) || HOME_URL;
