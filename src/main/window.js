@@ -376,7 +376,14 @@ class BrowserShell {
     // it is a relayout like a resize - and a publish, because the chrome draws
     // itself differently as a floating panel and only the window knows.
     this.window.on('enter-full-screen', () => { this.layout(); this.publishSidebar(); });
-    this.window.on('leave-full-screen', () => { this.layout(); this.publishSidebar(); });
+    // Laid out again a moment later too: the event can arrive before the
+    // window's final size, and the views kept the full-screen size - wider
+    // than the window, clipping the menu button - until the next resize.
+    this.window.on('leave-full-screen', () => {
+      this.layout();
+      this.publishSidebar();
+      setTimeout(() => { if (!this.window.isDestroyed()) this.layout(); }, 150);
+    });
     /*
      * The two extra buttons on a mouse.
      *
@@ -1145,6 +1152,14 @@ class BrowserShell {
     // the one the user is most likely to change while looking at the thing it
     // moves. `redockDevTools` is a no-op unless the mode actually changed.
     this.redockDevTools();
+
+    // The engine's own idea of the theme follows the browser's: developer
+    // tools stayed light beside a dark browser, and so did native dialogs.
+    // Websites see it too, as prefers-color-scheme - which is what Chrome
+    // tells them. Private windows set their own and are not touched by this.
+    const theme = this.prefs.get('theme');
+    const source = theme === 'light' || theme === 'dark' ? theme : 'system';
+    if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source;
 
     // The two views that are not sent the state broadcast take the new palette
     // here, so a theme changed while one exists does not leave it in the old one.

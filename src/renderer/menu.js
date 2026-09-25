@@ -146,7 +146,7 @@ function zoomRow(item) {
   out.append(menuIcon('minus'));
   out.dataset.zoom = 'out';
   out.setAttribute('aria-label', 'Zoom out');
-  out.disabled = item.enabled === false;
+  out.disabled = item.enabled === false || (item.min && item.value <= item.min);
   out.addEventListener('click', () => step('out'));
 
   const value = document.createElement('span');
@@ -159,7 +159,7 @@ function zoomRow(item) {
   into.append(menuIcon('plus'));
   into.dataset.zoom = 'in';
   into.setAttribute('aria-label', 'Zoom in');
-  into.disabled = item.enabled === false;
+  into.disabled = item.enabled === false || (item.max && item.value >= item.max);
   into.addEventListener('click', () => step('in'));
 
   // Reset last, after the stepper it resets.
@@ -184,7 +184,11 @@ async function step(direction) {
   // tab instead of stepping the zoom again.
   if (was) {
     const again = el.sheet.querySelector(`[data-zoom="${was}"]`);
-    if (again && !again.disabled) again.focus();
+    // Reset disables itself, and a step can reach the end of the ladder: the
+    // keyboard stays in the stepper rather than falling back to the top.
+    const stay = again && !again.disabled ? again
+      : el.sheet.querySelector('[data-zoom="in"]:not(:disabled), [data-zoom="out"]:not(:disabled)');
+    if (stay) stay.focus();
   }
 }
 

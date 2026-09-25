@@ -52,6 +52,11 @@ const BUDGET_MB = { min: 256, max: 65536 };
 const SCHEMA = {
   /* --- Personalisation ------------------------------------------- */
   theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
+  // Sites whose new tab tile the user took away. History forgets itself; a
+  // bookmark does not, so without this a forgotten tile filled back in from
+  // the bookmarks on the next new tab.
+  hiddenTiles:  { def: [], ok: (v) => Array.isArray(v) && v.length <= 200 &&
+                  v.every((o) => typeof o === 'string' && o.length < 300) },
   accent:       { def: '#2f857b', ok: (v) => /^#[0-9a-f]{6}$/i.test(v) },
   tabWidth:     { def: 'roomy',  ok: (v) => ['roomy', 'compact'].includes(v) },
 

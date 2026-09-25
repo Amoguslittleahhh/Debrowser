@@ -28,6 +28,11 @@ html, body {
 .sheet {
   position: fixed;
   width: 292px;
+  /* Never taller than the window: in a short one the menu scrolls rather
+     than running off the bottom with its last items out of reach. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

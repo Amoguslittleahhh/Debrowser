@@ -167,6 +167,9 @@ class Bookmarks {
       fs.writeFileSync(tmp, body, { mode: 0o600 });
       fs.renameSync(tmp, this.file);
       this.revision += 1;
+      // The bar and Settings learn of it now rather than at the next tick; the
+      // star waited up to two seconds for its bookmark to appear.
+      if (this.onChange) this.onChange();
       return true;
     } catch (err) {
       this.log(`bookmarks: could not save: ${err.message}`);

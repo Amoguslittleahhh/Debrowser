@@ -483,9 +483,16 @@ function main() {
    * own DOM. That is what made which shortcuts existed depend on where focus
    * happened to be, so the DOM table is gone and this is the only one.
    */
-  const bindShortcuts = (wc) => {
+  const bindShortcuts = (wc, tab = null) => {
     if (!wc || wc.isDestroyed()) return;
     wc.on('before-input-event', (event, input) => {
+      // Esc stops a page that is still loading, as in every browser - and
+      // still reaches the page, which uses it to close its own dialogs.
+      if (tab && input.type === 'keyDown' && input.key === 'Escape' && !input.control && !input.alt &&
+          !input.meta && !input.shift && tab.loading && tab.isLive) {
+        tab.wc.stop();
+        return;
+      }
       const hit = shortcuts.match(input);
       if (!hit) return;
       event.preventDefault();
@@ -494,7 +501,7 @@ function main() {
   };
 
   const bindPageShortcuts = (tab) => {
-    if (tab.isLive) bindShortcuts(tab.wc);
+    if (tab.isLive) bindShortcuts(tab.wc, tab);
   };
 
   /**
@@ -978,6 +985,7 @@ function main() {
     // to the sites they use - and cannot change them: a bookmark saved from a
     // private window would be a record of it in the ordinary profile.
     bookmarks = INCOGNITO ? new Bookmarks(log, incognitoCtx.normalUserData) : new Bookmarks(log);
+    bookmarks.onChange = () => publish();
     if (INCOGNITO) bookmarks.readOnly = true;
     // So the state broadcast can carry the revision the bookmarks bar watches.
     shell.bookmarks = bookmarks;
@@ -1862,6 +1870,16 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (payload.key === 'defaultZoom') {
           for (const tab of tabs.all()) if (tab.isLive) siteZoom.apply(tab.wc);
         }
+        // What the main process painted in the old palette: error pages, and
+        // the surface behind our own pages.
+        if (payload.key === 'theme' || payload.key === 'accent') {
+          for (const tab of tabs.all()) {
+            if (!tab.isLive) continue;
+            if (tab.failed) tab.redrawError();
+            try { tab.view.setBackgroundColor(palette.surfaceFor(tab.url)); } catch { /* view going away */ }
+          }
+        }
+        publish();
         // The governor reads cfg on its next tick, so a budget or cap change
         // takes effect there. Everything else is the UI's to apply, and it gets
         // it from the state snapshot publish() is about to send.
@@ -1905,6 +1923,30 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
        * commands anchored to a point - the same view the page menu and the
        * bookmarks overflow use.
        */
+      // Right-click on a bookmark in the bar: open it, change it, or let it go.
+      case 'bookmark-menu': {
+        const mark = bookmarks && bookmarks.all().find((b) => b.id === String(payload?.id ?? ''));
+        if (!mark) break;
+        context.model = {
+          params: {},
+          items: [
+            { id: 'navigate', label: 'Open', icon: 'forward', payload: { url: mark.url } },
+            { id: 'new-tab', label: 'Open in new tab', icon: 'plus', payload: { url: mark.url } },
+            { kind: 'separator' },
+            { id: 'open-bookmarks', label: 'Edit…', icon: 'star' },
+            { id: 'forget-bookmark', label: 'Delete', icon: 'close', payload: { id: mark.id } }
+          ]
+        };
+        const x = Math.round(Number(payload?.x) || 0);
+        const y = Math.round(Number(payload?.y) || 0);
+        shell.openSheet('context', { x, y, right: x });
+        break;
+      }
+
+      case 'forget-bookmark':
+        if (bookmarks) bookmarks.remove(String(payload?.id ?? ''));
+        break;
+
       case 'tab-menu': {
         const tab = tabs.byId(payload?.id);
         if (!tab) break;
@@ -1934,7 +1976,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               payload: { id }
             },
             { kind: 'separator' },
-            { id: 'close-tab', label: 'Close', icon: 'close', payload: { id } },
+            { id: 'close-tab', label: 'Close', icon: 'close', accel: shortcuts.accelFor('close-tab'), payload: { id } },
             {
               id: 'close-other-tabs',
               label: 'Close other tabs',
@@ -1954,6 +1996,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               id: 'reopen-closed-tab',
               label: 'Reopen closed tab',
               icon: 'clock',
+              accel: shortcuts.accelFor('reopen-closed-tab'),
               enabled: closedTabs.length > 0
             }
           ]
@@ -2363,13 +2406,21 @@ function wireRequests({ tabs, shell, credentials, bookmarks, history, downloads,
       // stored separately: a second list of "places you go" would be a second
       // thing to forget when the user clears their history.
       case 'top-sites':
-        return { items: topSites(history, bookmarks, Number(payload?.limit) || 8) };
+        return { items: topSites(history, bookmarks, Number(payload?.limit) || 8, prefs.get('hiddenTiles')) };
 
       // Removing a tile removes the site from history, which is the only
       // honest thing it can mean - a tile that came back tomorrow because the
       // visit was still recorded would be a button that does nothing.
-      case 'forget-site':
-        return { removed: history ? history.forgetSite(String(payload?.url || '')) : 0 };
+      case 'forget-site': {
+        const url = String(payload?.url || '');
+        let origin = null;
+        try { origin = new URL(url).origin; } catch { /* not a site */ }
+        if (origin && origin !== 'null') {
+          const hidden = prefs.get('hiddenTiles').filter((o) => o !== origin);
+          prefs.set('hiddenTiles', [origin, ...hidden].slice(0, 200));
+        }
+        return { removed: history ? history.forgetSite(url) : 0 };
+      }
 
       // Newest first, filtered by the page's search box. Filtered here rather
       // than in the renderer: ten thousand entries is a list worth not copying
@@ -3014,7 +3065,9 @@ function menuModel({ tabs, shell }) {
     { id: 'open-history', label: 'History', accel: accel('open-history'), icon: 'clock' },
     { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },
     { kind: 'separator' },
-    { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live },
+    { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live,
+      // The ends of the ladder, so − and + can say when there is no further.
+      min: Math.round(ZOOM_STEPS[0] * 100), max: Math.round(ZOOM_STEPS[ZOOM_STEPS.length - 1] * 100) },
     {
       id: 'toggle-fullscreen',
       label: 'Full screen',
@@ -3098,7 +3151,7 @@ const DEFAULT_SEARCH = 'https://duckduckgo.com/?q=%s';
  * would be an empty grid, and the first thing anyone does in a new browser is
  * import their bookmarks.
  */
-function topSites(history, bookmarks, limit = 8) {
+function topSites(history, bookmarks, limit = 8, hidden = []) {
   const byOrigin = new Map();
 
   for (const entry of history ? history.all() : []) {
@@ -3142,7 +3195,7 @@ function topSites(history, bookmarks, limit = 8) {
 
   if (items.length >= limit || !bookmarks) return items;
 
-  const have = new Set(items.map((item) => item.origin));
+  const have = new Set([...items.map((item) => item.origin), ...hidden]);
   for (const mark of bookmarks.all()) {
     if (items.length >= limit) break;
     let origin;

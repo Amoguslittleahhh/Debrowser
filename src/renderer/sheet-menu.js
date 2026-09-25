@@ -123,3 +123,7 @@ function wireMenuKeyboard(sheet, backdrop, close) {
   // view is window-sized rather than menu-sized.
   backdrop.addEventListener('mousedown', close);
 }
+
+// A theme changed while a menu is open reaches it too; it used to keep the
+// palette it opened with until it closed.
+window.debrowser.onState((state) => applyThemePrefs(state.prefs));

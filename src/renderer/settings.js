@@ -65,7 +65,9 @@ const SECTIONS = {
       key: 'showBookmarksBar',
       label: 'Show the bookmarks bar',
       hint: 'A row of saved sites under the toolbar. Ctrl+Shift+B toggles it.',
-      type: 'checkbox'
+      type: 'checkbox',
+      unavailable: (state) => (state.prefs.tabBarPosition === 'left'
+        ? 'Shown with tabs across the top. Down the side, bookmarks are under Ctrl+Shift+O.' : '')
     },
     {
       key: 'tabBarPosition',
@@ -463,10 +465,11 @@ function buildRow(spec) {
   label.textContent = spec.label;
   text.append(label);
 
-  if (spec.hint) {
-    const hint = document.createElement('span');
+  let hint = null;
+  if (spec.hint || spec.unavailable) {
+    hint = document.createElement('span');
     hint.className = 'row-hint';
-    hint.textContent = spec.hint;
+    hint.textContent = spec.hint || '';
     text.append(hint);
   }
 
@@ -480,6 +483,7 @@ function buildRow(spec) {
   }
 
   row.append(text, holder);
+  Object.assign(control, { spec, row, hint });
   controls.set(spec.key, control);
   return row;
 }
@@ -960,6 +964,9 @@ function credentialRow(kind, id, title, subtitle) {
   return row;
 }
 
+/** The bookmarks revision the list was last drawn at. */
+let bookmarksShown = null;
+
 api.onState((state) => {
   applyThemePrefs(state.prefs);
   renderUpdateState(state.updates);
@@ -971,8 +978,37 @@ api.onState((state) => {
     revealSection();
   }
   renderDownloads();
-  for (const [key, control] of controls) control.write(state.prefs[key]);
+  // A bookmark saved elsewhere - the star, Ctrl+D - shows here while Settings
+  // is open, not after a reload. Held while someone is typing in the section,
+  // which the redraw would throw away.
+  if (built && state.bookmarksRevision !== bookmarksShown) {
+    const typing = document.activeElement &&
+      document.activeElement.closest('#bookmark-list, #bookmark-actions');
+    if (!typing) {
+      if (bookmarksShown !== null) renderBookmarks();
+      bookmarksShown = state.bookmarksRevision;
+    }
+  }
+  for (const [key, control] of controls) {
+    control.write(state.prefs[key]);
+    if (control.spec?.unavailable) markUnavailable(control, control.spec.unavailable(state));
+  }
 });
+
+/**
+ * A setting that cannot do anything here - on this platform, in this layout -
+ * is shown switched off and says why, instead of accepting a change that goes
+ * nowhere.
+ */
+function markUnavailable(control, why) {
+  const off = Boolean(why);
+  if (control.input && control.input.disabled !== off) control.input.disabled = off;
+  control.row.classList.toggle('unavailable', off);
+  if (control.hint) {
+    const text = off ? why : (control.spec.hint || '');
+    if (control.hint.textContent !== text) control.hint.textContent = text;
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* The rail, and search                                                */

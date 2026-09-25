@@ -10,8 +10,22 @@ const close = () => api.send('close-menu');
 document.getElementById('close').append(crossIcon());
 document.getElementById('close').addEventListener('click', close);
 document.getElementById('backdrop').addEventListener('mousedown', close);
+// The keys that scroll a page scroll the list, wherever focus is in the card.
+const SCROLL = {
+  ArrowDown: 40, ArrowUp: -40, PageDown: 0.9, PageUp: -0.9, ' ': 0.9
+};
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') close();
+  if (event.key === 'Escape') { close(); return; }
+  if (event.key === 'Home' || event.key === 'End') {
+    groups.scrollTo({ top: event.key === 'Home' ? 0 : groups.scrollHeight });
+    event.preventDefault();
+    return;
+  }
+  const step = SCROLL[event.key];
+  if (step === undefined) return;
+  const by = Math.abs(step) < 1 ? step * groups.clientHeight * (event.shiftKey ? -1 : 1) : step;
+  groups.scrollBy({ top: by });
+  event.preventDefault();
 });
 
 async function load() {

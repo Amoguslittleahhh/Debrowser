@@ -244,6 +244,12 @@ window.addEventListener('keydown', (event) => {
 
 api.onState((state) => applyThemePrefs(state.prefs));
 
+// Brought back to the front - Ctrl+H focuses an open History tab rather than
+// making another - it shows what has happened since, not the list it had.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') load();
+});
+
 // A half-written search keeps this page off the reclaim ladder; see theme.js.
 watchTransientInput(api);
 

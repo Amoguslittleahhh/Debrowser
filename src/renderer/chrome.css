@@ -482,8 +482,19 @@ body[data-close-button="always"] .tab-close { opacity: 1; }
   cursor: default;
 }
 .audio-dot:hover { background: var(--wash); color: var(--text); }
+.audio-dot svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.audio-dot:active { background: color-mix(in srgb, var(--text) 16%, transparent); }
 /* Muted reads as off rather than as another kind of sound: dimmer than the
-   playing mark, and the glyph itself changes to a cross. */
+   playing mark, and the speaker struck through. */
 .audio-dot.muted { color: var(--text-dim); opacity: 0.75; }
 
 /* ---------------------------------------------------------------- */

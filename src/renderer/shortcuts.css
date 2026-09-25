@@ -8,7 +8,11 @@
   top: 50%;
   width: min(640px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
-  overflow-y: auto;
+  /* The heading stays; the list scrolls inside the card's padding, so the
+     scrollbar never runs over its rounded corner. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: var(--s4) var(--s5) var(--s5);
   transform: translate(-50%, -50%);
   transform-origin: center;
@@ -52,6 +56,10 @@
 .keys-close .x-icon { width: 14px; height: 14px; }
 
 .keys-groups {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   columns: 2 240px;
   column-gap: var(--s6);
 }

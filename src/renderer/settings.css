@@ -493,3 +493,8 @@ section.landed .rows {
    exists so "the bottom is in view" is an observation like any other rather
    than a scroll handler. */
 .rail-end { height: 0; }
+
+/* A setting that does nothing here says so, and looks it. */
+.row.unavailable .row-label { color: var(--text-dim); }
+.row.unavailable input,
+.row.unavailable select { opacity: 0.5; }

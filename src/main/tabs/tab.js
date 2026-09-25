@@ -339,6 +339,9 @@ class Tab {
    * has no history worth keeping, so nothing is lost by starting clean.
    */
   rebuildFor(url) {
+    // Where it came from, in case nothing commits - a download link typed
+    // into the new tab page leaves the new renderer with no page at all.
+    this.rebuiltFrom = this.internal ? this.url : null;
     this.emit('rebuild');
     this.teardownView();
     this.suspendedState = null;
@@ -500,6 +503,7 @@ class Tab {
       this.url = url;
       this.httpFallback = null;
       this.failed = false;
+      this.rebuiltFrom = null;
       // At commit, before the new document paints.
       try { this.applyZoom(wc); } catch { /* the view is going away */ }
       /*
@@ -662,14 +666,28 @@ class Tab {
   reconcileUrl() {
     if (!this.isLive) return;
     const committed = this.wc.getURL();
+    if (!committed && this.rebuiltFrom) {
+      const back = this.rebuiltFrom;
+      this.rebuiltFrom = null;
+      setImmediate(() => { if (!this.closed) this.rebuildFor(back); });
+      return;
+    }
     if (committed && committed !== this.url) {
       this.url = committed;
       this.emit('updated');
     }
   }
 
+  /** Draw the error page again - in a new palette, after a theme change. */
+  redrawError() {
+    if (this.failed && this.errorArgs && this.isLive) {
+      errorPage.show(this.wc, this.errorArgs).catch(() => {});
+    }
+  }
+
   showError(url, code, description) {
     this.failed = true;
+    this.errorArgs = { url, code, description };
     // The last page's icon is not this one's.
     this.favicon = null;
     errorPage.show(this.wc, { url, code, description }).then(() => this.emit('updated'));

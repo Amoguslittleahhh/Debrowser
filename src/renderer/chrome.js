@@ -402,6 +402,10 @@ function renderBookmarks(items) {
     button.addEventListener('auxclick', (event) => {
       if (event.button === 1) api.send('new-tab', { url: item.url });
     });
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      api.send('bookmark-menu', { id: item.id, x: Math.round(event.clientX), y: Math.round(event.clientY) });
+    });
 
     bar.append(button);
   }
@@ -893,6 +897,21 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && tabDrag?.active) { event.preventDefault(); endTabDrag(true); }
 });
 
+/** The tab's sound mark, drawn in the same 16px, 1.5-stroke set as the rest. */
+function speakerIcon(muted) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const paths = ['M2.5 6.2h2.3L8 3.5v9L4.8 9.8H2.5z',
+    ...(muted ? ['M10.8 6.3l3.2 3.4', 'M14 6.3l-3.2 3.4'] : ['M10.6 5.8a3 3 0 0 1 0 4.4', 'M12.4 4.2a5.2 5.2 0 0 1 0 7.6'])];
+  for (const d of paths) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 /** Write only what changed - the cheapest update is the one we skip. */
 function updateTabElement(node, tab) {
   const prev = node.state;
@@ -971,7 +990,9 @@ function updateTabElement(node, tab) {
   if (prev.sound !== sound || prev.muted !== tab.muted) {
     node.audio.hidden = !sound;
     node.audio.classList.toggle('muted', tab.muted === true);
-    node.audio.textContent = tab.muted ? '\u2715' : '\u25b6';
+    // A speaker, struck through when muted. The muted mark was a ✕, which
+    // on a hovered tab sat beside the close ✕ and looked just like it.
+    node.audio.replaceChildren(speakerIcon(tab.muted === true));
     node.audio.title = tab.muted ? 'Unmute this tab' : 'Mute this tab';
     node.audio.setAttribute('aria-label', node.audio.title);
     prev.sound = sound;

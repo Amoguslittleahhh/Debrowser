@@ -142,6 +142,9 @@ class History {
     this.items = list
       .map((entry) => this.normalise(entry))
       .filter(Boolean)
+      // Newest first whatever order the file is in - a clock change, or a file
+      // from elsewhere, and the History page's day headings came out repeated.
+      .sort((a, b) => (b.visitedAt || 0) - (a.visitedAt || 0))
       .slice(0, MAX_ENTRIES);
   }
 
