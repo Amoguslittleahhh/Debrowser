@@ -391,7 +391,7 @@ class BrowserShell {
     // moved. Closed rather than re-anchored: the user is dragging a window
     // edge, not reading a menu.
     this.window.on('resize', () => { this.closeSheet(); this.hideSuggestions(); this.layout(); });
-    this.window.on('restore', () => this.revive());
+    this.window.on('restore', () => { this.revive(); this.reapplyMaterial(); });
     this.window.on('show', () => this.revive());
     // Full screen changes which rectangle everything gets, in both layouts, so
     // it is a relayout like a resize - and a publish, because the chrome draws
@@ -425,8 +425,8 @@ class BrowserShell {
       event.preventDefault();
     });
 
-    this.window.on('maximize', () => this.layout());
-    this.window.on('unmaximize', () => this.layout());
+    this.window.on('maximize', () => { this.layout(); this.reapplyMaterial(); });
+    this.window.on('unmaximize', () => { this.layout(); this.reapplyMaterial(); });
     this.window.once('ready-to-show', () => this.reveal());
   }
 
@@ -438,6 +438,7 @@ class BrowserShell {
       this.window.maximize();
     }
     this.window.show();
+    setImmediate(() => this.reapplyMaterial());
   }
 
   /** Show a window that was being held back. */
@@ -1323,8 +1324,13 @@ class BrowserShell {
     // without a material there is only the window's own background colour
     // behind the chrome and the strip just tints towards it.
     let material = this.prefs.get('backgroundMaterial');
-    const translucent = this.prefs.get('windowOpacity') < 1;
+    const translucent = this.translucentNow();
     if (material === 'none' && translucent) material = 'acrylic';
+    // Only 'none' when translucency is off here rather than in the settings:
+    // a strip that slides over the page cannot show the desktop, so a window
+    // of glass round an opaque strip is all that setting could give there.
+    if (!translucent && this.prefs.get('windowOpacity') < 1) material = 'none';
+    this.material = material;
 
     // A translucent strip shows whatever is behind it, and behind it is the
     // window's own background unless that is cleared too. Both the window and
@@ -1407,7 +1413,7 @@ class BrowserShell {
       try {
         // Tinted to match when translucent, rather than an opaque box sitting
         // on a see-through band.
-        const translucent = this.prefs.get('windowOpacity') < 1 && this.seeThrough();
+        const translucent = this.translucentNow() && this.seeThrough();
         const color = translucent ? withAlpha(strip, this.prefs.get('windowOpacity'), 'rgba') : strip;
         this.window.setTitleBarOverlay({ color, symbolColor: this.symbolColour(), height: 40 });
       } catch { /* no overlay on this platform */ }
@@ -1753,6 +1759,34 @@ class BrowserShell {
    */
   seeThrough() {
     return process.platform !== 'linux' && typeof this.window.setBackgroundMaterial === 'function';
+  }
+
+  /**
+   * Whether translucency is in force in the layout the window is in now.
+   *
+   * Not down the side while the strip slides over the page - tucked away or
+   * detached. What is behind that strip is the page, not the desktop, so it
+   * has to be opaque, and a window of glass round it looked like a mistake:
+   * the band and margins see-through to the wallpaper beside a solid column.
+   * Pinned, or across the top, the strip sits on the window and can show it.
+   */
+  translucentNow() {
+    if (!(this.prefs.get('windowOpacity') < 1)) return false;
+    return !this.vertical() || this.sidebarPinned();
+  }
+
+  /**
+   * Set the window material again. Windows ignores one set before the window
+   * is on screen, and drops it across a maximise - the glass came back only
+   * when the setting was changed, and was gone again on the next start.
+   */
+  reapplyMaterial() {
+    if (this.window.isDestroyed() || typeof this.window.setBackgroundMaterial !== 'function') return;
+    if (!this.material || this.material === 'none') return;
+    try {
+      this.window.setBackgroundMaterial('none');
+      this.window.setBackgroundMaterial(this.material);
+    } catch { /* the setting simply does not apply here */ }
   }
 
   /** Whether something the strip started should keep it out. */

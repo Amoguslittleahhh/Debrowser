@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.5
+
+- **Translucency comes back after a restart.** Windows ignored the window material when it was set before the window was on screen, so the glass appeared only after changing the setting and was gone on the next start. It is set again once the window is showing, and after it is maximised or restored.
+- **Translucency applies where it can look right:** tabs across the top, or the side strip pinned beside the page. A strip that slides over the page (tucked away or detached) has the page behind it, not the desktop, so it has to be solid, and the band and margins see-through to the wallpaper beside it looked like a mistake. In those layouts the window is solid in the strip's colour now; pin the strip and the glass is back. The setting itself is untouched.
+
 ## 1.8.4
 
 The tabs down the side, made to behave: they follow your design, slide instead of jumping, open wherever the edge looks like it should, and stay out while you are using them.
