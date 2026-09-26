@@ -8,6 +8,7 @@
 - **The whole margin left of the page opens the strip.** Only the first 12 pixels did, so a pointer that stopped in the last few pixels before the page, in plain sight of the strip's edge, opened nothing.
 - **The strip stays out while you are using it.** Typing in its address bar, its suggestions and a menu opened from it all keep it open; moving the pointer away mid-word used to take the address bar with it and leave the menu or the list hanging. It goes once they close.
 - **Tapping the page puts the strip away,** for touch screens, which send no hover to say the finger left it.
+- **Ledger's Settings, History and Downloads keep the lines** between the side list, the header and the page. 1.8.3 took them out, and the list ran into the settings beside it.
 - **The Settings gear in the menu is a gear.** Its teeth were a fraction of a pixel wide and filled in to a lumpy blob at menu size, worst on a screen scaled to 125%. It has six broad teeth and a round hole now, and the Passwords key a clear bow and bit.
 
 ## 1.8.3

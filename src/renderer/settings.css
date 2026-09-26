@@ -593,9 +593,8 @@ main { scrollbar-gutter: stable; }
  * inverted blocks. Legacy keeps everything above, unchanged.
  */
 
-/* Ledger: no hairlines where a fill will do. */
-body[data-design="ledger"] header { border-bottom-color: transparent; }
-body[data-design="ledger"] .rail { border-right-color: transparent; }
+/* Ledger: filled cards, but the side list and the header keep their rules -
+   without them the list and the settings ran together as one field. */
 body[data-design="ledger"] .rail-item { border-radius: var(--radius); }
 body[data-design="ledger"] .rail-item.current {
   background: var(--bg-raised);
