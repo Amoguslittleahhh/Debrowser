@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.8.4
+
+The tabs down the side, made to behave: they follow your design, slide instead of jumping, open wherever the edge looks like it should, and stay out while you are using them.
 
 - **Tabs down the side look like the design you picked.** Ledger, Paper and Grid each have their own side strip now, as they were drawn: Ledger's raised chip for the open tab, Paper's words with a rule in the accent beside the open one, Grid's column of cells with numbered rows and the open tab inverted. The memory figure moves to the foot of the strip, beside the pin.
 - **Legacy's side strip is one surface with the window.** With translucency on, the band across the top and the margins round the page were left bare - a grey band beside a tinted strip, and the window buttons in a dark box of their own. They are tinted with the strip's colour and translucency now, and so are the window buttons.
