@@ -1864,3 +1864,100 @@ body[data-design="grid"][data-layout="left"] .meter { font-family: var(--font-mo
    the page, must not show through the band beside the toolbar. The tabs are
    the panel's to draw. */
 body[data-sidebar="true"][data-compact="true"]:not([data-role="strip"]) :is(.tabstrip, .bookmarks) { display: none; }
+
+/* ------------------------------------------------------------------ */
+/* Designs, across the top: Chrome's shape, each design's own hand      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The foundation is the one everyone reads without thinking: a strip of tabs
+ * on the window colour, the open tab lifted into the toolbar's colour and run
+ * straight into it - curving out at its feet - and the toolbar and the
+ * bookmarks bar one surface below it. The designs then differ in the details
+ * Chrome leaves alone: the tab's corners, how the open one is marked, the
+ * type. Legacy keeps its own rules above.
+ */
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) {
+  --bar: var(--tint-2);
+  --foot: 8px;
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .bookmarks {
+  background: var(--bar);
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab {
+  height: 34px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab:hover:not(.active) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab.active {
+  background: var(--bar);
+  color: var(--text);
+  font-weight: 500;
+}
+/* The separators come back: without them equal-width tabs read as captions
+   floating at intervals. */
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab + .tab::after {
+  display: block;
+}
+/* The feet: the open tab curving out into the toolbar on both sides. */
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::before,
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: auto;
+  bottom: 0;
+  width: var(--foot);
+  height: var(--foot);
+  border-radius: 0;
+  opacity: 1;
+}
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::before {
+  left: calc(var(--foot) * -1);
+  right: auto;
+  background: radial-gradient(circle at 0 0, transparent calc(var(--foot) - 0.5px), var(--bar) var(--foot));
+}
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::after {
+  left: auto;
+  right: calc(var(--foot) * -1);
+  background: radial-gradient(circle at 100% 0, transparent calc(var(--foot) - 0.5px), var(--bar) var(--foot));
+}
+
+/* Ledger: soft, generous corners, and a sage wash on the tab you point at. */
+body[data-design="ledger"]:not([data-layout="left"]) { --foot: 10px; }
+body[data-design="ledger"]:not([data-layout="left"]) .tab { border-radius: 12px 12px 0 0; }
+body[data-design="ledger"]:not([data-layout="left"]) .tab:hover:not(.active) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: 10px;
+}
+
+/* Paper: an index card - barely rounded, a rule in the accent along its top
+   edge where Chrome has nothing, and titles set in the serif. */
+body[data-design="paper"]:not([data-layout="left"]) { --foot: 4px; }
+body[data-design="paper"]:not([data-layout="left"]) .tab { border-radius: 4px 4px 0 0; }
+body[data-design="paper"]:not([data-layout="left"]) .tab-title { font-family: var(--font-display); font-size: 14px; }
+body[data-design="paper"]:not([data-layout="left"]) .tab.active {
+  box-shadow: inset 0 1.5px 0 var(--accent);
+  font-weight: 400;
+}
+
+/* Grid: square cells ruled off from each other, no curves anywhere; the open
+   one carries a full-width bar in the text colour, and keeps its number. */
+body[data-design="grid"]:not([data-layout="left"]) .tab {
+  height: 40px;
+  border-radius: 0;
+  border-right: 0;
+}
+body[data-design="grid"]:not([data-layout="left"]) .tab + .tab::after { top: 0; bottom: 0; opacity: 1; }
+body[data-design="grid"]:not([data-layout="left"]) .tab.active {
+  background: var(--bar);
+  color: var(--text);
+  box-shadow: inset 0 3px 0 var(--text);
+}
+body[data-design="grid"]:not([data-layout="left"]) .tab.active .tab-close { color: var(--text-dim); }
+/* Room for the feet at the ends of the row: the list scrolls, so it clips
+   whatever reaches past its first and last tab, and a curve cut off on one
+   side is a notch. */
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tabs { padding: 0 var(--foot); }
