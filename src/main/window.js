@@ -212,6 +212,16 @@ const DEVTOOLS_KEYS = new Set([
   'new-tab', 'new-incognito-window', 'close-tab', 'reopen-closed-tab', 'cycle-tab', 'select-tab',
   'reload', 'reload-hard', 'toggle-devtools', 'toggle-fullscreen'
 ]);
+/** `#rrggbb` with an alpha, as Electron's '#aarrggbb' or a CSS rgba(). */
+function withAlpha(hex, alpha, form) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex));
+  if (!m) return hex;
+  const a = Math.max(0, Math.min(1, Number(alpha) || 0));
+  if (form === 'argb') return `#${Math.round(a * 255).toString(16).padStart(2, '0')}${m[1]}`;
+  const n = parseInt(m[1], 16);
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
 class BrowserShell {
   /**
    * @param {object} deps - { tabManager, log, onCommand }
@@ -1305,8 +1315,15 @@ class BrowserShell {
     // unpainted view, and a dark window under a paper-white UI is a black frame
     // around the page.
     const sheer = translucent ? '#00000000' : this.surface();
+    // Down the side, the window itself shows round the page - the band across
+    // the top and the gutters - wherever the strip's view does not reach. Left
+    // clear, that was bare material beside a tinted strip: a grey band with
+    // the window buttons in a dark box of their own. Tinted like the strip, it
+    // is one surface with it.
+    const opacity = this.prefs.get('windowOpacity');
+    const windowBg = translucent && this.vertical() ? withAlpha(this.stripColour(), opacity, 'argb') : sheer;
     try {
-      this.window.setBackgroundColor(sheer);
+      this.window.setBackgroundColor(windowBg);
       // Detached, the chrome's view is clear: collapsed it is an invisible
       // edge over the page rather than a painted stripe, and out it is a panel
       // that slides in over the page, which needs the page behind it.
@@ -1360,7 +1377,11 @@ class BrowserShell {
     const strip = this.stripColour();
     if (process.platform !== 'darwin' && typeof this.window.setTitleBarOverlay === 'function') {
       try {
-        this.window.setTitleBarOverlay({ color: strip, symbolColor: this.symbolColour(), height: 40 });
+        // Tinted to match when translucent, rather than an opaque box sitting
+        // on a see-through band.
+        const translucent = this.prefs.get('windowOpacity') < 1;
+        const color = translucent ? withAlpha(strip, this.prefs.get('windowOpacity'), 'rgba') : strip;
+        this.window.setTitleBarOverlay({ color, symbolColor: this.symbolColour(), height: 40 });
       } catch { /* no overlay on this platform */ }
     }
   }

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Tabs down the side look like the design you picked.** Ledger, Paper and Grid each have their own side strip now, as they were drawn: Ledger's raised chip for the open tab, Paper's words with a rule in the accent beside the open one, Grid's column of cells with numbered rows and the open tab inverted. The memory figure moves to the foot of the strip, beside the pin.
+- **Legacy's side strip is one surface with the window.** With translucency on, the band across the top and the margins round the page were left bare - a grey band beside a tinted strip, and the window buttons in a dark box of their own. They are tinted with the strip's colour and translucency now, and so are the window buttons.
+- **The Settings gear in the menu is a gear.** Its teeth were a fraction of a pixel wide and filled in to a lumpy blob at menu size, worst on a screen scaled to 125%. It has six broad teeth and a round hole now, and the Passwords key a clear bow and bit.
+
 ## 1.8.3
 
 - **Settings, History, Downloads, Passwords and the Tor and warning pages follow your design,** not only its colours: Ledger's filled cards and soft chips, Paper's serif headings and ruled lists, Grid's square, numbered sections with the current one inverted. Legacy design keeps them as they were.

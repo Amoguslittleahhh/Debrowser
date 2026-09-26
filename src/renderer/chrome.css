@@ -1753,3 +1753,79 @@ body[data-sidebar="true"][data-pinned="false"][data-sidebar-open="true"][data-de
   background: var(--strip);
   box-shadow: inset -1px 0 0 var(--border);
 }
+
+/*
+ * Translucent, down the side: the window behind is tinted with the strip's own
+ * colour and translucency (window.js), so the strip and the compact band stop
+ * painting their own on top of it - a second coat made the column denser than
+ * the band beside it. The strip brought out over a page keeps its opaque rule
+ * above, which is more specific.
+ */
+body[data-layout="left"][data-translucent="on"],
+body[data-layout="left"][data-translucent="on"] .tabstrip,
+body[data-sidebar="true"][data-translucent="on"][data-compact="true"] { background: transparent; }
+
+/*
+ * Designs, down the side: the strip each design was drawn with, not Legacy's
+ * column in new colours. The navigation row stays on top and the address bar
+ * under it; the memory figure goes to the foot, beside the pin, where the
+ * mockups keep it out of the way of the tabs.
+ */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"] .meter {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  flex: none;
+  width: auto;
+  padding: 0;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"] .meter-bar { flex: none; width: 56px; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"][data-sidebar-open="false"]:not([data-pinned="true"]) .meter { visibility: hidden; }
+
+/* Ledger: chips on a sage column, the open tab raised like a card. */
+body[data-design="ledger"][data-layout="left"] .toolbar { padding: calc(env(titlebar-area-y, 0px) + 12px) 10px 10px; row-gap: 12px; }
+body[data-design="ledger"][data-layout="left"] .omnibox { height: 36px; border-radius: 10px; }
+body[data-design="ledger"][data-layout="left"] .tabstrip { padding: 0 10px 10px; }
+body[data-design="ledger"][data-layout="left"] .tab { height: 36px; padding: 0 12px; border-radius: var(--radius); }
+body[data-design="ledger"][data-layout="left"] .tab.active { background: var(--bg-raised); font-weight: 500; }
+body[data-design="ledger"][data-layout="left"] .new-tab { height: 36px; padding: 0 12px; }
+
+/* Paper: words in a margin, the open one marked by a rule in the accent. */
+body[data-design="paper"][data-layout="left"] .toolbar { padding: calc(env(titlebar-area-y, 0px) + 12px) 12px 14px 14px; row-gap: 14px; }
+body[data-design="paper"][data-layout="left"] .tabstrip { padding: 0 12px 12px 14px; }
+body[data-design="paper"][data-layout="left"] .tab { height: 34px; padding: 0 10px 0 12px; }
+body[data-design="paper"][data-layout="left"] .tab:not(.active) { color: var(--text-dim); }
+body[data-design="paper"][data-layout="left"] .tab.active { background: transparent; }
+body[data-design="paper"][data-layout="left"] .new-tab { height: 34px; padding: 0 12px; }
+
+/* Grid: a column of 48px cells, rules between them, numbers down the side. */
+body[data-design="grid"][data-layout="left"] .tabstrip { padding: 0; border-right: 1px solid var(--border); }
+body[data-design="grid"][data-layout="left"] .toolbar {
+  padding: env(titlebar-area-y, 0px) 0 0;
+  row-gap: 0;
+  border-right: 1px solid var(--border);
+}
+body[data-design="grid"][data-layout="left"] .toolbar .icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 0;
+}
+body[data-design="grid"][data-layout="left"] .nav .icon-btn { border-right: 1px solid var(--border-soft); }
+body[data-design="grid"][data-layout="left"] #menu { border-left: 1px solid var(--border-soft); }
+body[data-design="grid"][data-layout="left"] .omnibox {
+  height: 40px;
+  border-width: 1px 0;
+  border-color: var(--border-soft);
+  border-radius: 0;
+}
+body[data-design="grid"][data-layout="left"] .tabs { gap: 0; }
+body[data-design="grid"][data-layout="left"] .tab {
+  height: 44px;
+  padding: 0 14px;
+  border-right: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+}
+body[data-design="grid"][data-layout="left"] .new-tab { height: 44px; margin: 0; padding: 0 14px; border-radius: 0; }
+body[data-design="grid"][data-layout="left"] .meter { font-family: var(--font-mono); text-transform: uppercase; }
