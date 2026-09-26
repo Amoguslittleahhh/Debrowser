@@ -17,7 +17,7 @@
 const path = require('path');
 const { paletteFor } = require('./palette');
 const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
-        shell, systemPreferences } = require('electron');
+        shell, systemPreferences, screen } = require('electron');
 const { INCOGNITO } = require('./incognito/mode');
 const { letterbox } = require('./incognito/fingerprint');
 
@@ -88,6 +88,7 @@ const CONTENT_RADIUS = 10;
  * pointer rather than lagging behind it.
  */
 const SIDEBAR_CLOSE_MS = 220;
+const SIDEBAR_OPEN_MS = 90;
 
 /** How long a detached strip takes to slide back out; see setSidebarOpen. */
 const DETACH_SLIDE_MS = 180;
@@ -316,6 +317,7 @@ class BrowserShell {
     this.crashView = null;
     this.suggestOpen = false;
     this.suggestSelected = -1;
+    setImmediate(() => this.releaseSidebar());
     /** Which page the open sheet is showing, or null. */
     this.sheetPage = null;
     /** The sheet whose close armed the reopen guard, and when. */
@@ -494,6 +496,27 @@ class BrowserShell {
   /** Attach a tab's view to the window. Called when a tab is realised. */
   attachTab(tab) {
     if (!tab.view) return;
+    // A tap on the page is leaving the strip. Touch sends no mouse-leave, so
+    // a strip brought out by a tap at the edge otherwise stayed over the page
+    // until the next tap landed back on the strip itself.
+    if (!tab.view.sidebarReleaseBound) {
+      tab.view.sidebarReleaseBound = true;
+      tab.view.webContents.on('focus', () => {
+        // Only when the pointer is really off the strip: choosing a tab in it
+        // also moves focus to the page, with the pointer still on the strip.
+        // A tap moves the system cursor to where it landed, so this holds for
+        // touch too.
+        if (!this.sidebarOpen || this.window.isDestroyed()) return;
+        const at = screen.getCursorScreenPoint();
+        const win = this.window.getContentBounds();
+        const b = this.chromeView.getBounds();
+        const x = at.x - win.x;
+        const y = at.y - win.y;
+        if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return;
+        this.sidebarPointerOver = false;
+        this.releaseSidebar();
+      });
+    }
     const children = this.window.contentView.children;
     // Insert below the chrome so the chrome always wins the z-order - except
     // while the chrome is itself underneath the page (a collapsed side strip,
@@ -794,6 +817,7 @@ class BrowserShell {
     const page = this.sheetPage;
     this.sheetView = null;
     this.sheetPage = null;
+    if (!replacing) setImmediate(() => this.releaseSidebar());
     if (blurred) {
       this.sheetClosedPage = page;
       this.sheetClosedAt = Date.now();
@@ -1327,7 +1351,10 @@ class BrowserShell {
       // Detached, the chrome's view is clear: collapsed it is an invisible
       // edge over the page rather than a painted stripe, and out it is a panel
       // that slides in over the page, which needs the page behind it.
-      this.chromeView.setBackgroundColor(this.prefs.get('sidebarDetached') === true ? '#00000000' : sheer);
+      // Down the side the view is clear and the page draws every surface
+      // itself: the strip that slides out over the page moves its own
+      // background with it, and an opaque view behind would stay put.
+      this.chromeView.setBackgroundColor(this.vertical() ? '#00000000' : sheer);
     } catch (err) {
       this.log(`transparent chrome unavailable: ${err.message}`);
     }
@@ -1569,7 +1596,10 @@ class BrowserShell {
       open: this.sidebarPinned() || this.sidebarOpen,
       floating: this.chromeFloats(),
       detached: this.detached(),
-      compact: this.chromeCompact()
+      compact: this.chromeCompact(),
+      // Where the page starts: everything left of it is the edge that opens
+      // the strip, so the chrome needs the number rather than a guess at it.
+      edge: this.chromeCompact() ? this.contentBounds().x : 0
     };
   }
 
@@ -1651,16 +1681,26 @@ class BrowserShell {
   /**
    * The pointer arrived at the edge, or left the sidebar.
    *
-   * Opening is immediate and closing waits, which is not symmetry for its own
-   * sake: arriving is a decision and leaving is usually just the pointer
-   * passing through on its way to the page.
+   * Opening waits a moment and closing a little longer, which is not symmetry
+   * for its own sake: arriving is a decision and leaving is usually just the
+   * pointer passing through on its way to the page. The short wait to open is
+   * the same idea from the other side - a pointer brushing the window's edge
+   * on its way somewhere else is not asking for the tabs.
    */
-  setSidebarOpen(open) {
+  setSidebarOpen(open, { now = false } = {}) {
+    this.sidebarPointerOver = open;
     if (!this.vertical() || this.sidebarPinned()) return;
     // The find bar is drawn inside this column, so while it is up the pointer
     // does not get to close the thing the bar is in.
     if (this.findOpen) return;
     clearTimeout(this.sidebarCloseTimer);
+    clearTimeout(this.sidebarOpenTimer);
+    if (open && !now && !this.sidebarOpen && !this.sidebarSliding) {
+      this.sidebarOpenTimer = setTimeout(() => {
+        if (this.sidebarPointerOver && !this.window.isDestroyed()) this.setSidebarOpen(true, { now: true });
+      }, SIDEBAR_OPEN_MS);
+      return;
+    }
     // The chrome is told its new shape at once rather than on the next state
     // broadcast: detached, opening turns it into a floating panel, and half a
     // second of a panel drawn as a column is visible.
@@ -1678,8 +1718,15 @@ class BrowserShell {
       this.publishSidebar();
       return;
     }
+    // Something the strip started is still going on: text half typed into its
+    // address bar, the suggestions under it, or a menu opened from it. The
+    // pointer leaves for all three - the menu and the list are other views -
+    // and closing then took the address bar away mid-word and left the menu
+    // or the list hanging with nothing to belong to. It closes when that ends
+    // (`releaseSidebar`), if the pointer has not come back.
+    if (this.sidebarHeld()) return;
     this.sidebarCloseTimer = setTimeout(() => {
-      if (!this.sidebarOpen || this.sidebarPinned()) return;
+      if (!this.sidebarOpen || this.sidebarPinned() || this.sidebarHeld()) return;
       const shut = () => {
         this.sidebarSliding = null;
         if (!this.sidebarOpen || this.sidebarPinned()) return;
@@ -1689,13 +1736,24 @@ class BrowserShell {
       };
       // Detached, the panel slides away before its view shrinks back to the
       // edge - unless motion is reduced, where it simply goes.
-      if (this.detached() && !this.reducedMotion()) {
+      if (!this.reducedMotion()) {
         this.toChrome('sidebar-slide', { out: true });
         this.sidebarSliding = setTimeout(shut, DETACH_SLIDE_MS);
       } else {
         shut();
       }
     }, SIDEBAR_CLOSE_MS);
+  }
+
+  /** Whether something the strip started should keep it out. */
+  sidebarHeld() {
+    return this.sidebarTyping === true || Boolean(this.sheetView) || this.suggestOpen === true;
+  }
+
+  /** What held the strip out has ended: let it go if the pointer is elsewhere. */
+  releaseSidebar() {
+    if (this.window.isDestroyed()) return;
+    if (this.sidebarOpen && !this.sidebarPointerOver && !this.sidebarHeld()) this.setSidebarOpen(false);
   }
 
   /**

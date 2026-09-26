@@ -2225,6 +2225,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'sidebar-hover':
         shell.setSidebarOpen(Boolean(payload?.over));
         break;
+      case 'sidebar-typing':
+        shell.sidebarTyping = Boolean(payload?.typing);
+        shell.releaseSidebar();
+        break;
 
       // The pin at the bottom of the strip.
       case 'toggle-sidebar-pin':

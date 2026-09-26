@@ -152,9 +152,12 @@ function reportHover(over) {
 
 // Collapsed, the chrome is the whole window under the page, so being over it
 // is not the signal: only the edge opens the strip, never the toolbar above.
-const EDGE = 12;
+// The edge is everything left of the page, as the window reports it. A fixed
+// 12px left the last few pixels before the page dead: a pointer that stopped
+// there, in plain sight of the strip's edge, opened nothing.
+let pageEdge = 18;
 const TOP_BAND = 40;
-const opens = (e) => document.body.dataset.compact !== 'true' || (e.clientX <= EDGE && e.clientY >= TOP_BAND);
+const opens = (e) => document.body.dataset.compact !== 'true' || (e.clientX < pageEdge && e.clientY >= TOP_BAND);
 document.addEventListener('mouseenter', (e) => reportHover(opens(e)));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside
@@ -216,7 +219,9 @@ function renderSidebar(sidebar) {
   const open = sidebar.open === true;
   if (document.body.dataset.sidebarOpen !== String(open)) {
     document.body.dataset.sidebarOpen = String(open);
+    document.body.classList.remove('sliding-out');
   }
+  if (sidebar.edge > 0) pageEdge = sidebar.edge;
   const compact = sidebar.compact === true;
   if (document.body.dataset.compact !== String(compact)) {
     document.body.dataset.compact = String(compact);
@@ -1295,8 +1300,8 @@ el.menu.addEventListener('click', () => {
   });
 });
 
-el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); });
-el.url.addEventListener('blur', () => { urlFocused = false; });
+el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); api.send('sidebar-typing', { typing: true }); });
+el.url.addEventListener('blur', () => { urlFocused = false; api.send('sidebar-typing', { typing: false }); });
 
 /** Preferences the strip reads for itself, from the preload's first copy and then each broadcast. */
 let chromePrefs = {};

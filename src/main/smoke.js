@@ -1976,7 +1976,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     };
     const shut = shell.contentBounds();
 
-    shell.setSidebarOpen(true);
+    shell.setSidebarOpen(true, { now: true });
     const openWide = chromeWidth();
     const whileOpen = shell.contentBounds();
 
@@ -2039,7 +2039,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.layout();
     const whole = shell.contentBounds();
     const edge = shell.chromeView.getBounds();
-    shell.setSidebarOpen(true);
+    shell.setSidebarOpen(true, { now: true });
     const panel = shell.chromeView.getBounds();
     const pageWhileOut = shell.contentBounds();
     check('detached, the page fills the window and the strip floats over it on demand',
