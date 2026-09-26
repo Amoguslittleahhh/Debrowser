@@ -203,6 +203,7 @@ function renderSidebar(sidebar) {
   if (!side) { document.body.dataset.compact = 'false'; return; }
 
   const pinned = sidebar.pinned === true;
+  if (document.body.dataset.pinned !== String(pinned)) document.body.dataset.pinned = String(pinned);
   if (el.pin.getAttribute('aria-pressed') !== String(pinned)) {
     el.pin.setAttribute('aria-pressed', String(pinned));
     el.pin.title = pinned ? 'Let the tab strip slide away' : 'Keep the tab strip open';

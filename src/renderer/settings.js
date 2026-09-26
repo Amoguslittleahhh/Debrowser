@@ -76,7 +76,7 @@ const SECTIONS = {
     {
       key: 'continueCard',
       label: 'Show recent pages on the new tab page',
-      hint: '"Continue with these tabs", a scroll below the search. Not in Legacy, and never in private windows.',
+      hint: '"Continue with these tabs", your last few pages under the search. Not in Legacy, and never in private windows.',
       type: 'checkbox',
       unavailable: (state) => (state.prefs.design === 'legacy' ? 'The legacy design shows your frequent sites instead.' : '')
     },
@@ -109,14 +109,6 @@ const SECTIONS = {
         { value: 'top', name: 'Across the top' },
         { value: 'left', name: 'Down the left' }
       ]
-    },
-    {
-      key: 'sidebarDetached',
-      label: 'Detach the side tabs',
-      hint: 'The page fills the window. Point at the left edge and the tabs float out over it; move away and they go.',
-      type: 'checkbox',
-      unavailable: (state) => (api.platform === 'win32' ? 'Not yet on Windows.'
-        : state.prefs.tabBarPosition !== 'left' ? 'Only with the tabs down the side.' : '')
     },
     {
       key: 'tabWidth',
@@ -1143,33 +1135,24 @@ function watchSections() {
    * The section being read is the last one whose heading has passed a line a
    * quarter of the way down the page.
    *
-   * Short sections at the end reach that line late or never - the page runs
-   * out of scroll first - so the last stretch of scrolling is shared between
-   * them: each gets an equal part of the distance after the section before
-   * them. A rule of "at the very end, the last one showing" gave
-   * Advanced a sliver between two sections and was mostly skipped over.
+   * Short sections at the end would reach that line late or never - the page
+   * runs out of scroll first - so the page is given room below the last
+   * section for its heading to get there. Sharing the last stretch of scroll
+   * between them instead, as this once did, named Advanced while the rows on
+   * screen were still Private windows'.
    */
   let queued = false;
   const mark = () => {
     queued = false;
     const shown = sections.filter((s) => !s.hidden);
     if (!shown.length) return;
-    const top = main.getBoundingClientRect().top;
-    const scroll = main.scrollTop;
-    const max = Math.max(0, main.scrollHeight - main.clientHeight);
     const line = main.clientHeight * 0.25;
-    // Where each heading crosses the line, in scroll offsets.
-    const at = shown.map((s) => s.getBoundingClientRect().top - top + scroll - line);
-    // "Late": reaching the line only in the last half-screen of scroll, or
-    // never. Such a heading gets there with the page all but ended.
-    const late = at.findIndex((v) => v > max - main.clientHeight * 0.5);
-    if (late > 0) {
-      const from = at[late - 1];
-      const steps = shown.length - late + 1;
-      for (let i = late; i < shown.length; i++) at[i] = from + ((max - from) * (i - late + 1)) / steps;
-    }
+    const last = shown[shown.length - 1];
+    const room = `${Math.max(0, Math.round(main.clientHeight - line - last.offsetHeight))}px`;
+    if (main.style.paddingBottom !== room) main.style.paddingBottom = room;
+    const top = main.getBoundingClientRect().top;
     let current = shown[0];
-    for (let i = 0; i < shown.length; i++) if (at[i] <= scroll + 1) current = shown[i];
+    for (const s of shown) if (s.getBoundingClientRect().top - top <= line + 1) current = s;
     markRail(current.dataset.section);
   };
   const soon = () => {

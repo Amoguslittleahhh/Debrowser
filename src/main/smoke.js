@@ -2033,27 +2033,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // edge over it, and pointing at the edge floats the strip out as a
     // rounded panel inset from the window - not a column beside the page.
     prefs.set('sidebarPinned', false);
-    if (process.platform === 'win32') {
-      check('detaching is refused on Windows', prefs.set('sidebarDetached', true) === false && !shell.detached());
-    } else {
-      prefs.set('sidebarDetached', true);
-      shell.applyWindowPrefs();
-      shell.sidebarOpen = false;
-      shell.layout();
-      const whole = shell.contentBounds();
-      const edge = shell.chromeView.getBounds();
-      shell.setSidebarOpen(true);
-      const panel = shell.chromeView.getBounds();
-      const pageWhileOut = shell.contentBounds();
-      check('detached, the page fills the window and the strip floats over it on demand',
-        whole.x === 0 && whole.y === 0 && whole.width === winW && edge.width === SIDEBAR_EDGE &&
-        panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
-        pageWhileOut.x === 0 && pageWhileOut.width === winW,
-        `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
-        `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
-      shell.sidebarOpen = false;
-      prefs.set('sidebarDetached', false);
-    }
+    prefs.set('sidebarDetached', true);
+    shell.applyWindowPrefs();
+    shell.sidebarOpen = false;
+    shell.layout();
+    const whole = shell.contentBounds();
+    const edge = shell.chromeView.getBounds();
+    shell.setSidebarOpen(true);
+    const panel = shell.chromeView.getBounds();
+    const pageWhileOut = shell.contentBounds();
+    check('detached, the page fills the window and the strip floats over it on demand',
+      whole.x === 0 && whole.y === 0 && whole.width === winW && edge.width === SIDEBAR_EDGE &&
+      panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
+      pageWhileOut.x === 0 && pageWhileOut.width === winW,
+      `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
+      `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
+    shell.sidebarOpen = false;
+    prefs.set('sidebarDetached', false);
 
     prefs.set('sidebarPinned', false);
     prefs.set('tabBarPosition', 'top');

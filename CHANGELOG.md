@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.3
+
+- **Settings, History, Downloads, Passwords and the Tor and warning pages follow your design,** not only its colours: Ledger's filled cards and soft chips, Paper's serif headings and ruled lists, Grid's square, numbered sections with the current one inverted. Legacy design keeps them as they were.
+- **The side strip is solid when it slides out over the page.** With translucency on, the page showed through it and the tabs sat on top of the page's own text.
+- **Detached side tabs are back on Windows.** The freeze blamed on them in 1.8.1 was the tab strip covering the window as a title bar, fixed in 1.8.2. The button at the foot of the strip detaches and reattaches them; the duplicate switch in Settings is gone.
+- **Settings' side list names the section you are reading.** Near the bottom it said Advanced while the rows on screen were still Private windows'; the page now has room for every heading to reach the top.
+- **No ring on a menu row, ever.** 1.8.1 hid it for the mouse; it still showed after touch or a key. The row's highlight is enough on its own.
+
 ## 1.8.2
 
 - **Windows: side tabs no longer freeze the window.** With the tabs down the side and the strip tucked away, the window took no clicks or hovers at all, only its own minimise, maximise and close buttons. The hidden strip counted as the window's title bar, and at that moment it covered the whole window, so Windows treated every click as the start of dragging the window. Only the toolbar across the top moves the window now. This affected every design, not only Legacy, and very likely 1.7 as well.

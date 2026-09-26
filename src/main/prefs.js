@@ -127,11 +127,7 @@ const SCHEMA = {
    * panel floating over the page, gone again when the pointer leaves. It
    * outranks the pin while it is on. Only with `tabBarPosition: 'left'`.
    */
-  // Not on Windows, for now: 1.8.0 shipped it there and a detached strip left
-  // the window taking no input at all but its own three buttons, surviving a
-  // reinstall because the setting did. Refusing `true` here also clears a
-  // profile that already saved it, so the window comes back on next start.
-  sidebarDetached: { def: false, ok: (v) => v === false || (v === true && process.platform !== 'win32') },
+  sidebarDetached: { def: false, ok: (v) => typeof v === 'boolean' },
 
   /**
    * Windows 11 only: let the OS paint its own blurred material behind the

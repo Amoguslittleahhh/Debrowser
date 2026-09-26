@@ -580,3 +580,79 @@ main { scrollbar-gutter: stable; }
 .passcode-form .note.error { color: var(--crit); }
 .passcode-form .note.error:empty { display: none; }
 
+
+/* ------------------------------------------------------------------ */
+/* Designs                                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The browser's own pages - Settings, History, Downloads, Passwords, the Tor
+ * and warning pages - in the selected design, not only its colours. Each takes
+ * the same idea its tab strip and new tab page do: Ledger's soft filled cards
+ * and chips, Paper's serif headings and ruled lists, Grid's square, numbered,
+ * inverted blocks. Legacy keeps everything above, unchanged.
+ */
+
+/* Ledger: no hairlines where a fill will do. */
+body[data-design="ledger"] header { border-bottom-color: transparent; }
+body[data-design="ledger"] .rail { border-right-color: transparent; }
+body[data-design="ledger"] .rail-item { border-radius: var(--radius); }
+body[data-design="ledger"] .rail-item.current {
+  background: var(--bg-raised);
+  box-shadow: none;
+  font-weight: var(--fw-medium, 500);
+}
+body[data-design="ledger"] h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+body[data-design="ledger"] .rows { border-color: transparent; border-radius: var(--radius-lg); }
+body[data-design="ledger"] header #q { border-radius: 12px; }
+body[data-design="ledger"] :is(select, input[type="text"], input[type="number"], textarea) { border-radius: 10px; }
+body[data-design="ledger"] .ghost-btn { border-radius: var(--radius); }
+
+/* Paper: a page of type. Serif headings, lists ruled rather than boxed. */
+body[data-design="paper"] :is(h1, h2) { font-family: var(--font-display); font-weight: 400; letter-spacing: 0; }
+body[data-design="paper"] h1 { font-size: 26px; }
+body[data-design="paper"] h2 { font-size: 22px; margin-bottom: var(--s2); }
+body[data-design="paper"] .rows {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+body[data-design="paper"] .row { background: transparent; padding-left: 2px; padding-right: 2px; }
+body[data-design="paper"] .row:hover { background: transparent; }
+body[data-design="paper"] .rail-item.current {
+  background: transparent;
+  box-shadow: inset 1.5px 0 0 var(--accent);
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+body[data-design="paper"] header #q {
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Grid: square blocks, numbered sections, the current one inverted. */
+body[data-design="grid"] main { counter-reset: section; }
+body[data-design="grid"] section { counter-increment: section; }
+body[data-design="grid"] h2 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+body[data-design="grid"] h2::before {
+  content: counter(section, decimal-leading-zero) "  ";
+  white-space: pre;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+body[data-design="grid"] .rows { border-color: var(--border); }
+body[data-design="grid"] .row + .row { border-top-color: var(--border); }
+body[data-design="grid"] .rail { border-right-color: var(--border); }
+body[data-design="grid"] .rail-item.current {
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: none;
+}
+body[data-design="grid"] header { border-bottom-color: var(--border); }

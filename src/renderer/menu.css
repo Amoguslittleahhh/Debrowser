@@ -95,16 +95,10 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
   color: var(--text);
   outline: none;
 }
-/* The pointer focuses the row it is over, and a scripted focus counts as
-   focus-visible, so theme.css's ring landed on every hovered row. The ring
-   below is the only one, and only while keys are in use. */
+/* No ring on a row, from theme.css or anywhere: the row's own highlight
+   already says where both the pointer and the keyboard are, and a ring on top
+   kept turning up on rows only pointed or touched at. */
 .item:focus-visible { box-shadow: none; }
-/* Pressed: a step deeper than hover, for the instant between press and act. */
-.item:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-/* The ring says where the keyboard is, so only while it is being used: an
-   item focused by the pointer passing over it counts as focus-visible in a
-   panel that has had no key or click of its own, and wore a box on hover. */
-body.keys .item:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .item:disabled { opacity: 0.38; }
 
 .item-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

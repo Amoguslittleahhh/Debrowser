@@ -1742,5 +1742,14 @@ body[data-design="grid"] .tab.active .tab-title::before {
   color: color-mix(in srgb, var(--bg) 55%, var(--text));
 }
 
-/* Detaching is refused on Windows for now (see prefs.js). */
-body[data-platform="win32"] #detach { display: none; }
+/*
+ * Unpinned and brought out, the strip lies over the page, so it is always
+ * opaque there: with translucency on, the page showed through it and the tabs
+ * floated over the page's own text with nothing behind them. The edge line
+ * says it is over the page, not part of it (anything outside the view would
+ * be clipped, so it is drawn inside).
+ */
+body[data-sidebar="true"][data-pinned="false"][data-sidebar-open="true"][data-detached="false"][data-floating="false"] {
+  background: var(--strip);
+  box-shadow: inset -1px 0 0 var(--border);
+}
