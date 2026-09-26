@@ -188,24 +188,24 @@ main {
 .brand, .continue { display: none; }
 .brand-dot { fill: var(--accent); }
 
-/* The mark, the field and the recent pages are one group, centred in the
-   window: the card is in view without a scroll, and on a short window the
-   group scrolls from its top rather than being cut off above it. */
+/* The mark and the field sit in the middle of the window; the recent pages
+   start just under them, not centred with them. The offset is half the
+   window less half the pair's height (mark 26 + gap 22 + field 58), never
+   negative, so a short window scrolls rather than cutting the mark off. */
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) {
-  display: flex;
-  flex-direction: column;
-  justify-content: safe center;
+  display: block;
   box-sizing: border-box;
-  padding: 32px 0;
+  padding: 0 0 32px;
   background: var(--bg-raised);
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
   box-sizing: border-box;
   width: min(680px, calc(100vw - 64px));
-  margin: 0 auto 32px;
+  margin: max(24px, calc(50vh - 53px)) auto 36px;
   padding: 0;
   text-align: left;
 }
+body[data-design="grid"] main { margin-top: max(24px, calc(50vh - 58px)); }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is(#wordmark, .tiles, .stat) {
   display: none;
 }
