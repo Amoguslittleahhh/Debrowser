@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.2
+
+- **Windows: side tabs no longer freeze the window.** With the tabs down the side and the strip tucked away, the window took no clicks or hovers at all, only its own minimise, maximise and close buttons. The hidden strip counted as the window's title bar, and at that moment it covered the whole window, so Windows treated every click as the start of dragging the window. Only the toolbar across the top moves the window now. This affected every design, not only Legacy, and very likely 1.7 as well.
+
 ## 1.8.1
 
 A fix for Windows, and four small ones from the first hours of 1.8.0.

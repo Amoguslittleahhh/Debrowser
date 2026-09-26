@@ -1992,6 +1992,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       whileOpen.x === shut.x && whileOpen.width === shut.width,
       `page at ${shut.x}px wide ${shut.width} -> ${whileOpen.x}px wide ${whileOpen.width}`);
 
+    // Collapsed, the strip is the whole window under the page. Windows
+    // hit-tests drag regions itself whatever view is on top, so a draggable
+    // strip that size made the entire window title bar: only the three window
+    // buttons took clicks (1.8.0). Only the toolbar band may drag.
+    shell.sidebarOpen = false;
+    shell.layout();
+    shell.publishSidebar?.();
+    await sleep(300);
+    const dragRegions = await shell.chromeView.webContents.executeJavaScript(`(() => {
+      const region = (e) => e && getComputedStyle(e).getPropertyValue('-webkit-app-region');
+      return [...document.querySelectorAll('body, body *')]
+        .filter((e) => region(e) === 'drag' && region(e.parentElement) !== 'drag')
+        .map((e) => { const r = e.getBoundingClientRect(); return [e.className, Math.round(r.width), Math.round(r.height)]; });
+    })()`);
+    check('collapsed down the side, only the toolbar band drags the window',
+      dragRegions.length > 0 && dragRegions.every(([, , h]) => h <= 48),
+      JSON.stringify(dragRegions));
+
     // Pinned, it takes its column back and the page gives up the width.
     prefs.set('sidebarPinned', true);
     shell.applyWindowPrefs();

@@ -1310,6 +1310,14 @@ body[data-sidebar="true"][data-sidebar-open="true"] .pin {
 body[data-sidebar="true"][data-compact="true"] {
   background: var(--bg);
 }
+/* Only the toolbar band drags the window here. The strip is the title bar and
+   so a drag region, and in this shape it is the size of the whole window -
+   under the page, but Windows hit-tests drag regions itself, whatever view is
+   on top, so the entire window was title bar: no click or hover reached the
+   page or the edge, and only the three window buttons worked. */
+body[data-sidebar="true"][data-compact="true"] .tabstrip { -webkit-app-region: no-drag; }
+body[data-sidebar="true"][data-compact="true"] .toolbar { -webkit-app-region: drag; }
+body[data-sidebar="true"][data-compact="true"] .toolbar > * { -webkit-app-region: no-drag; }
 body[data-sidebar="true"][data-compact="true"]::before {
   content: '';
   position: fixed;
@@ -1673,7 +1681,10 @@ body[data-design="grid"] .omnibox:has(#url:focus) { box-shadow: none; }
  * the page (the window leaves it transparent), there to be pointed at, not
  * seen - a painted stripe read as a stray line down the side of every page.
  */
+/* Not draggable either: on Windows a drag region never receives the hover
+   that brings the strip out. */
 body[data-detached="true"][data-floating="false"] { background: transparent; }
+body[data-detached="true"][data-floating="false"] .tabstrip { -webkit-app-region: no-drag; }
 body[data-detached="true"][data-floating="false"] > * { visibility: hidden; }
 
 /* Detached and out: a rounded panel over the page, the height of the window
