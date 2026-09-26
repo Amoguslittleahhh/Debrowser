@@ -235,6 +235,7 @@ function renderSidebar(sidebar) {
   const floating = sidebar.floating === true;
   if (document.body.dataset.floating !== String(floating)) {
     document.body.dataset.floating = String(floating);
+    document.body.classList.remove('sliding-out');
     reportChromeHeight();
   }
 }
@@ -1538,6 +1539,11 @@ api.onMessage((message) => {
     case 'focus-address':
       el.url.focus();
       el.url.select();
+      break;
+    // A detached panel slides away before the window takes it back to the
+    // edge (BrowserShell#setSidebarOpen), or comes back if the pointer does.
+    case 'sidebar-slide':
+      document.body.classList.toggle('sliding-out', message.out === true);
       break;
     case 'find-focus':
       showFind(true);

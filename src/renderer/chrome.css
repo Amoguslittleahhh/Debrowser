@@ -1669,27 +1669,49 @@ body[data-design="grid"] .omnibox:has(#url:focus) { box-shadow: none; }
 .pin.detach svg { transform: none !important; }
 
 /*
- * Detached and away: the page has the whole window and all that is left of
- * the strip is its ten-pixel edge, drawn as a grip so the edge reads as
- * something to point at rather than a stray line of colour.
+ * Detached and away: nothing is drawn. The view is a clear ten-pixel edge over
+ * the page (the window leaves it transparent), there to be pointed at, not
+ * seen - a painted stripe read as a stray line down the side of every page.
  */
-body[data-detached="true"][data-sidebar-open="false"] { background: var(--bg); }
-body[data-detached="true"][data-sidebar-open="false"]::after {
-  content: '';
-  position: fixed;
-  left: 3px;
-  top: calc(50% - 24px);
-  width: 4px;
-  height: 48px;
-  border-radius: 2px;
-  background: var(--text-dim);
-  opacity: 0.45;
-}
+body[data-detached="true"][data-floating="false"] { background: transparent; }
+body[data-detached="true"][data-floating="false"] > * { visibility: hidden; }
 
 /* Detached and out: a rounded panel over the page, the height of the window
-   less its margins - the window clips the view to the same corners. */
+   less its margins - the window clips the view to the same corners. It
+   slides in from the edge and back out to it; with reduced motion it is
+   simply there, and simply gone. */
 body[data-detached="true"][data-floating="true"] {
   box-shadow: none;
   border-radius: var(--radius-lg);
+  animation: detached-in 200ms cubic-bezier(0.2, 0, 0, 1);
+  /* The panel's surface is a layer inside the body rather than the body's own
+     background: a body's background is painted across the whole view whatever
+     transform the body has, so sliding it left a dark block where the panel
+     had not arrived yet. The layer moves with the body. */
+  background: transparent;
+  border-color: transparent;
+}
+body[data-detached="true"][data-floating="true"]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius-lg);
+  background: var(--strip);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
 }
 body[data-detached="true"][data-floating="true"] .tabstrip { flex: 1 1 auto; }
+body[data-detached="true"].sliding-out {
+  transform: translateX(calc(-100% - 12px));
+  transition: transform 180ms cubic-bezier(0.4, 0, 1, 1);
+}
+@keyframes detached-in {
+  from { transform: translateX(calc(-100% - 12px)); }
+  to   { transform: none; }
+}
+body.calm[data-detached="true"][data-floating="true"],
+body.calm[data-detached="true"].sliding-out { animation: none; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-detached="true"][data-floating="true"],
+  body[data-detached="true"].sliding-out { animation: none; transition: none; }
+}

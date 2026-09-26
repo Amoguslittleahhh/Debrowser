@@ -17,7 +17,7 @@
 const path = require('path');
 const { paletteFor } = require('./palette');
 const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
-        shell } = require('electron');
+        shell, systemPreferences } = require('electron');
 const { INCOGNITO } = require('./incognito/mode');
 const { letterbox } = require('./incognito/fingerprint');
 
@@ -88,6 +88,9 @@ const CONTENT_RADIUS = 10;
  * pointer rather than lagging behind it.
  */
 const SIDEBAR_CLOSE_MS = 220;
+
+/** How long a detached strip takes to slide back out; see setSidebarOpen. */
+const DETACH_SLIDE_MS = 180;
 
 /**
  * How much of the content area a docked inspector takes, and the least it may
@@ -1304,7 +1307,10 @@ class BrowserShell {
     const sheer = translucent ? '#00000000' : this.surface();
     try {
       this.window.setBackgroundColor(sheer);
-      this.chromeView.setBackgroundColor(sheer);
+      // Detached, the chrome's view is clear: collapsed it is an invisible
+      // edge over the page rather than a painted stripe, and out it is a panel
+      // that slides in over the page, which needs the page behind it.
+      this.chromeView.setBackgroundColor(this.prefs.get('sidebarDetached') === true ? '#00000000' : sheer);
     } catch (err) {
       this.log(`transparent chrome unavailable: ${err.message}`);
     }
@@ -1572,6 +1578,16 @@ class BrowserShell {
     if (this.chromeFloats()) this.layout();
   }
 
+  /** The browser's own "reduce motion", or the system's. */
+  reducedMotion() {
+    if (this.prefs && this.prefs.get('reduceMotion') === true) return true;
+    try {
+      return Boolean(systemPreferences.getAnimationSettings?.().prefersReducedMotion);
+    } catch {
+      return false;
+    }
+  }
+
   /** Is the sidebar held open, rather than sliding away when the pointer goes? */
   sidebarPinned() {
     // Detached outranks the pin: a strip held open would be a column again.
@@ -1628,6 +1644,13 @@ class BrowserShell {
     // broadcast: detached, opening turns it into a floating panel, and half a
     // second of a panel drawn as a column is visible.
     if (open) {
+      // Back before a detached panel finished sliding away: it slides back in
+      // from where it is, rather than vanishing and reappearing.
+      if (this.sidebarSliding) {
+        clearTimeout(this.sidebarSliding);
+        this.sidebarSliding = null;
+        this.toChrome('sidebar-slide', { out: false });
+      }
       if (this.sidebarOpen) return;
       this.sidebarOpen = true;
       this.layout();
@@ -1636,9 +1659,21 @@ class BrowserShell {
     }
     this.sidebarCloseTimer = setTimeout(() => {
       if (!this.sidebarOpen || this.sidebarPinned()) return;
-      this.sidebarOpen = false;
-      this.layout();
-      this.publishSidebar();
+      const shut = () => {
+        this.sidebarSliding = null;
+        if (!this.sidebarOpen || this.sidebarPinned()) return;
+        this.sidebarOpen = false;
+        this.layout();
+        this.publishSidebar();
+      };
+      // Detached, the panel slides away before its view shrinks back to the
+      // edge - unless motion is reduced, where it simply goes.
+      if (this.detached() && !this.reducedMotion()) {
+        this.toChrome('sidebar-slide', { out: true });
+        this.sidebarSliding = setTimeout(shut, DETACH_SLIDE_MS);
+      } else {
+        shut();
+      }
     }, SIDEBAR_CLOSE_MS);
   }
 
