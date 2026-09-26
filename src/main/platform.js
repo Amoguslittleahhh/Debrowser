@@ -154,7 +154,9 @@ const PROBE_TIMEOUT_MS = 400;
  * lands shows up as a summed total.
  */
 const PROBE_COLD_TIMEOUT_MS = 5000;
-const TRIM_TIMEOUT_MS = 2000;
+// Measured 0.2-0.6s for an ordinary renderer and 1.7-2.9s for a 1GB one; at
+// 2s the big ones timed out and were recorded as FROZEN while really paged out.
+const TRIM_TIMEOUT_MS = 5000;
 /**
  * What the *first* trim-helper answer may take, for the same reason the probe
  * has one: the spawn and, on Windows, a first-run scan of an unsigned binary.

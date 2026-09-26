@@ -367,10 +367,18 @@ function compressionStatus() {
     if (/zram/i.test(cols[0])) zramMB += mb;
   }
 
+  // zswap compresses in RAM in front of a disk swap, so pages trimmed onto it
+  // free memory at once, as zram's do; plain disk swap keeps a copy in RAM
+  // until something else needs the room.
+  let zswap = false;
+  try {
+    zswap = /^[Y1]/.test(fs.readFileSync('/sys/module/zswap/parameters/enabled', 'utf8'));
+  } catch { /* not built in */ }
+
   return {
     available: swapMB > 0,
     applicable: true,
-    compressor: swapMB === 0 ? null : (zramMB > 0 ? 'zram' : 'swap'),
+    compressor: swapMB === 0 ? null : (zramMB > 0 ? 'zram' : (zswap ? 'zswap' : 'swap')),
     swapMB: Math.round(swapMB),
     zramMB: Math.round(zramMB)
   };

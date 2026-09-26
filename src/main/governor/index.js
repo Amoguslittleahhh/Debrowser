@@ -136,6 +136,7 @@ class Governor {
     platform.trimCapability(this.log).then((cap) => {
       this.trimAvailable = cap.available;
       this.trimReason = cap.reason;
+      this.trimCompressor = cap.compression?.compressor ?? null;
       this.log(cap.available
         ? `hibernation available via ${cap.mechanism}`
         : `hibernation unavailable: ${cap.reason}`);
@@ -696,6 +697,12 @@ class Governor {
     if (!cfg.enabled || this.hibernationDisabled) return false;
     if (!this.trimAvailable) return false;
     if (idle < cfg.afterMs * accel) return false;
+
+    // Plain disk swap writes the pages out but keeps them in RAM until
+    // something else needs the room, so without pressure a trim frees next
+    // to nothing - measured 1-14MB of a 90MB trim - and the tab then wakes
+    // from disk, 0.7-1s when memory is tight. Only worth it under pressure.
+    if (this.trimCompressor === 'swap' && this.pressure === Pressure.NONE) return false;
 
     // A speculative page load must never be the reason a frame is dropped, and
     // neither must a syscall plus a resume stall.

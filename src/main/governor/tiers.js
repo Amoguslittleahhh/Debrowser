@@ -74,7 +74,7 @@ async function applyTier(tab, target, ctx) {
   const goingUp = tierRank(target) <= tierRank(current);
   const reached = goingUp
     ? await promote(tab, target, ctx)
-    : await demote(tab, target, ctx);
+    : await demote(tab, target, ctx).finally(() => { tab.freezing = false; });
 
   if (!reached || reached === current) return null;
 
@@ -103,6 +103,16 @@ async function promote(tab, target, ctx) {
   // what a platform needing a real undo would require, and getting it wrong
   // there means a restored tab that stays throttled.
   if (tab.tier === Tier.HIBERNATED) platform.untrimProcessMemory(tab.pid);
+
+  // A demotion that has frozen the page and is still waiting on the trim -
+  // 0.2-0.6s for an ordinary tab, nearly 3s for a 1GB one - has not recorded
+  // the tier yet, so the check below would pass over it and leave a stopped
+  // page on screen until the trim returned (measured 310ms). Thaw it now;
+  // the demotion sees it was overtaken and leaves it alone.
+  if (tab.freezing && tab.cdp) {
+    tab.freezing = false;
+    await tab.cdp.unfreeze();
+  }
 
   // Undo freezing before anything else: a stopped page cannot run the script
   // that would repaint it, so showing it first would flash stale content.
@@ -187,6 +197,7 @@ async function demote(tab, target, ctx) {
     // tick. A tab with no renderer is already holding nothing, so there is
     // nothing to freeze and COLD is the honest answer.
     const frozen = tab.cdp ? await tab.cdp.freeze() : false;
+    tab.freezing = frozen;
     // Shown while the freeze was in flight. The promotion that ran meanwhile
     // saw a tier below FROZEN and so did not unfreeze, which would leave the
     // page the user is now looking at stopped.
@@ -287,7 +298,8 @@ function superseded(tab, from) {
 /** Undo what a superseded demotion had done so far, and report no move. */
 async function backOut(tab, { frozen = false, trimmed = false } = {}) {
   if (trimmed) platform.untrimProcessMemory(tab.pid);
-  if (frozen) await tab.cdp?.unfreeze();
+  // Unless the promotion that overtook us has already thawed it.
+  if (frozen && tab.freezing) await tab.cdp?.unfreeze();
   return null;
 }
 
