@@ -122,6 +122,14 @@ const SCHEMA = {
   sidebarPinned: { def: false, ok: (v) => typeof v === 'boolean' },
 
   /**
+   * Detached: the page has the whole window - no column, no band across the
+   * top - and pointing at the left edge brings the tabs back as a rounded
+   * panel floating over the page, gone again when the pointer leaves. It
+   * outranks the pin while it is on. Only with `tabBarPosition: 'left'`.
+   */
+  sidebarDetached: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
    * Windows 11 only: let the OS paint its own blurred material behind the
    * window. Cheaper than doing it ourselves, because the compositor is already
    * blurring what is behind every other window on the system.

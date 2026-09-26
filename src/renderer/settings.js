@@ -111,6 +111,13 @@ const SECTIONS = {
       ]
     },
     {
+      key: 'sidebarDetached',
+      label: 'Detach the side tabs',
+      hint: 'The page fills the window. Point at the left edge and the tabs float out over it; move away and they go.',
+      type: 'checkbox',
+      unavailable: (state) => (state.prefs.tabBarPosition !== 'left' ? 'Only with the tabs down the side.' : '')
+    },
+    {
       key: 'tabWidth',
       label: 'Tab width',
       hint: 'Compact fits more tabs before they start shrinking.',

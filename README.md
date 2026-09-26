@@ -87,7 +87,7 @@ puts back the page's address. Local addresses (`localhost:3000`, `192.168.1.1`,
 **Designs.** Settings → Appearance → Design picks the look: **Ledger** (the default: sage by day, near-black green by night), **Paper** (warm paper, tabs as underlined words, a serif search), **Grid** (black and white, square, the tab in front inverted) or **Legacy**, the look Debrowser had until 1.8. Each works in light and dark, tabs across the top or down the side, and keeps your accent colour, tab bar colour and translucency. In every design but Legacy the new tab page shows the mark above a search field boxed like an address bar, and "Continue with these tabs" (your last few pages) right under it; its ⋮ menu hides it, and Settings brings it back. Private windows never show it.
 
 **Tabs.** Drag to reorder, across the top or down the side (Settings →
-Appearance). Right-click a tab to pin, mute, duplicate or close several at
+Appearance). Down the side they can be detached (the button at the foot of the strip): the page gets the whole window, and pointing at the left edge brings the tabs out as a floating panel. Right-click a tab to pin, mute, duplicate or close several at
 once. The speaker appears while a tab plays sound; click it to mute. Each start
 begins with a fresh tab unless you turn on "Reopen your tabs when you start"
 in Settings. A tab you haven't looked at in a while gives its memory back and

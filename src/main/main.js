@@ -2228,9 +2228,28 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // The pin at the bottom of the strip.
       case 'toggle-sidebar-pin':
-        prefs.set('sidebarPinned', !shell.sidebarPinned());
+        // Pinning a detached strip puts it back beside the page, held open.
+        if (prefs.get('sidebarDetached') === true) {
+          prefs.set('sidebarDetached', false);
+          prefs.set('sidebarPinned', true);
+        } else {
+          prefs.set('sidebarPinned', !shell.sidebarPinned());
+        }
         shell.applyWindowPrefs();
+        publish();
         break;
+
+      // Detach: the page takes the whole window and the strip floats over it
+      // when the pointer reaches the left edge. Pinning undoes it, since a
+      // strip held open is a column again.
+      case 'toggle-sidebar-detach': {
+        const detach = prefs.get('sidebarDetached') !== true;
+        prefs.set('sidebarDetached', detach);
+        if (detach) prefs.set('sidebarPinned', false);
+        shell.applyWindowPrefs();
+        publish();
+        break;
+      }
 
       // Ctrl+Shift+B. Through the preference rather than a flag in the chrome,
       // because showing the bar takes 34px from the page - the window has to

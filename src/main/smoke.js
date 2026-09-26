@@ -1958,7 +1958,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // reflowed every time the pointer brushed the window edge would be the most
   // distracting thing in the browser.
   {
-    const { SIDEBAR_WIDTH, CONTENT_GAP } = require('./window');
+    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, CONTENT_GAP } = require('./window');
     const chromeWidth = () => shell.chromeView.getBounds().width;
 
     prefs.set('tabBarPosition', 'left');
@@ -2010,6 +2010,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       pinned.y > 0 && pinned.x + pinned.width === winW - CONTENT_GAP &&
       pinned.y + pinned.height === winH - CONTENT_GAP,
       `${pinned.x},${pinned.y} ${pinned.width}x${pinned.height} in ${winW}x${winH}`);
+
+    // Detached: the page takes the whole window, the strip is a ten-pixel
+    // edge over it, and pointing at the edge floats the strip out as a
+    // rounded panel inset from the window - not a column beside the page.
+    prefs.set('sidebarPinned', false);
+    prefs.set('sidebarDetached', true);
+    shell.applyWindowPrefs();
+    shell.sidebarOpen = false;
+    shell.layout();
+    const whole = shell.contentBounds();
+    const edge = shell.chromeView.getBounds();
+    shell.setSidebarOpen(true);
+    const panel = shell.chromeView.getBounds();
+    const pageWhileOut = shell.contentBounds();
+    check('detached, the page fills the window and the strip floats over it on demand',
+      whole.x === 0 && whole.y === 0 && whole.width === winW && edge.width === SIDEBAR_EDGE &&
+      panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
+      pageWhileOut.x === 0 && pageWhileOut.width === winW,
+      `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
+      `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
+    shell.sidebarOpen = false;
+    prefs.set('sidebarDetached', false);
 
     prefs.set('sidebarPinned', false);
     prefs.set('tabBarPosition', 'top');

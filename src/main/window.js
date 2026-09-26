@@ -1325,8 +1325,10 @@ class BrowserShell {
     // it takes 34px from every tab's rectangle, and hiding it gives them back.
     if (this.laidOutVertical !== this.vertical() ||
         this.laidOutBookmarksBar !== this.bookmarksBarVisible() ||
-        this.laidOutPinned !== this.sidebarPinned()) {
+        this.laidOutPinned !== this.sidebarPinned() ||
+        this.laidOutDetached !== this.detached()) {
       const wasPinned = this.laidOutPinned;
+      this.laidOutDetached = this.detached();
       this.laidOutVertical = this.vertical();
       this.laidOutBookmarksBar = this.bookmarksBarVisible();
       this.laidOutPinned = this.sidebarPinned();
@@ -1506,7 +1508,16 @@ class BrowserShell {
    * page can simply have the room. See `chromeHidden`.
    */
   chromeFloats() {
-    return this.vertical() && this.fullScreen();
+    return this.vertical() && (this.fullScreen() || (this.detached() && this.sidebarOpen));
+  }
+
+  /**
+   * Down the side, detached: the page has the whole window and the strip is a
+   * panel that floats over it while the pointer wants it. Full screen already
+   * is this shape, so it does not count twice.
+   */
+  detached() {
+    return this.vertical() && !this.fullScreen() && this.prefs?.get('sidebarDetached') === true;
   }
 
   /**
@@ -1530,6 +1541,7 @@ class BrowserShell {
       pinned: this.sidebarPinned(),
       open: this.sidebarPinned() || this.sidebarOpen,
       floating: this.chromeFloats(),
+      detached: this.detached(),
       compact: this.chromeCompact()
     };
   }
@@ -1562,7 +1574,8 @@ class BrowserShell {
 
   /** Is the sidebar held open, rather than sliding away when the pointer goes? */
   sidebarPinned() {
-    return this.prefs ? this.prefs.get('sidebarPinned') === true : false;
+    // Detached outranks the pin: a strip held open would be a column again.
+    return this.prefs ? this.prefs.get('sidebarPinned') === true && this.prefs.get('sidebarDetached') !== true : false;
   }
 
   /**
@@ -1576,7 +1589,7 @@ class BrowserShell {
    * which still opens the strip.
    */
   chromeCompact() {
-    return this.vertical() && !this.fullScreen() && !this.sidebarPinned() && !this.sidebarOpen;
+    return this.vertical() && !this.fullScreen() && !this.sidebarPinned() && !this.sidebarOpen && !this.detached();
   }
 
   /** Put the chrome under the page, or back on top of it. */
@@ -1611,16 +1624,21 @@ class BrowserShell {
     // does not get to close the thing the bar is in.
     if (this.findOpen) return;
     clearTimeout(this.sidebarCloseTimer);
+    // The chrome is told its new shape at once rather than on the next state
+    // broadcast: detached, opening turns it into a floating panel, and half a
+    // second of a panel drawn as a column is visible.
     if (open) {
       if (this.sidebarOpen) return;
       this.sidebarOpen = true;
       this.layout();
+      this.publishSidebar();
       return;
     }
     this.sidebarCloseTimer = setTimeout(() => {
       if (!this.sidebarOpen || this.sidebarPinned()) return;
       this.sidebarOpen = false;
       this.layout();
+      this.publishSidebar();
     }, SIDEBAR_CLOSE_MS);
   }
 
@@ -1634,7 +1652,7 @@ class BrowserShell {
    * dark background as the strip.
    */
   cardInset() {
-    return this.vertical() && !this.fullScreen() ? CONTENT_GAP : 0;
+    return this.vertical() && !this.fullScreen() && !this.detached() ? CONTENT_GAP : 0;
   }
 
   contentArea() {
@@ -1648,7 +1666,7 @@ class BrowserShell {
     //
     // Except while the chrome is back for the find or address bar, where it is
     // a band again and the page moves down for it exactly as it always does.
-    if (this.fullScreen() && (this.vertical() || this.chromeHidden())) {
+    if ((this.fullScreen() && (this.vertical() || this.chromeHidden())) || this.detached()) {
       return { x: 0, y: 0, width: Math.max(0, width - panelWidth), height };
     }
 
@@ -1741,7 +1759,10 @@ class BrowserShell {
           x: FLOAT_GAP,
           y: FLOAT_GAP,
           width: this.sidebarWidth(),
-          height: Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
+          // Detached, it is the tab strip brought back, so it takes the height
+          // there is; full screen, it is as tall as its rows.
+          height: this.detached() ? room
+            : Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
         });
       } else if (this.chromeCompact()) {
         // Collapsed down the side: the chrome is the whole window, *under*
@@ -1766,7 +1787,7 @@ class BrowserShell {
 
     const bounds = this.contentBounds();
     // No card, and no corners, while full screen: the page is the window.
-    const radius = this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0;
+    const radius = this.vertical() && !this.fullScreen() && !this.detached() ? CONTENT_RADIUS : 0;
     // Applied on a change rather than every layout, which runs on every resize
     // and every tab switch.
     const reshape = this.laidOutCard !== radius;

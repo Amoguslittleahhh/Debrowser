@@ -32,13 +32,24 @@
       side, where there is a foot to put it at and something for it to do:
       across the top nothing slides, so nothing needs holding open.
     -->
-    <button class="pin" id="pin" type="button" aria-pressed="false"
-            title="Keep the tab strip open" aria-label="Keep the tab strip open">
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M6.5 2.5h3l-.4 4 2.4 2v1H4.5v-1l2.4-2z"/>
-        <path d="M8 9.5V13"/>
-      </svg>
-    </button>
+    <div class="strip-foot">
+      <button class="pin" id="pin" type="button" aria-pressed="false"
+              title="Keep the tab strip open" aria-label="Keep the tab strip open">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M6.5 2.5h3l-.4 4 2.4 2v1H4.5v-1l2.4-2z"/>
+          <path d="M8 9.5V13"/>
+        </svg>
+      </button>
+      <!-- Detach: the page takes the whole window, and the strip floats over
+           it as a rounded panel when the pointer reaches the left edge. -->
+      <button class="pin detach" id="detach" type="button" aria-pressed="false"
+              title="Detach: the page fills the window" aria-label="Detach: the page fills the window">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="2.5" y="3" width="11" height="10" rx="2"/>
+          <path d="M6 3v10"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
   <div class="toolbar">

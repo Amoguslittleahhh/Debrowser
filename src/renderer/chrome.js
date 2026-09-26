@@ -51,6 +51,7 @@ const el = {
   downloads: document.getElementById('downloads'),
   downloadsRing: document.getElementById('downloads-ring'),
   pin: document.getElementById('pin'),
+  detach: document.getElementById('detach'),
   omnibox: document.getElementById('omnibox'),
   findbar: document.getElementById('findbar'),
   findInput: document.getElementById('find-input'),
@@ -185,6 +186,7 @@ el.tabs.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 el.pin.addEventListener('click', () => api.send('toggle-sidebar-pin'));
+el.detach.addEventListener('click', () => api.send('toggle-sidebar-detach'));
 
 /**
  * Whether the strip is pinned, and whether it is currently out.
@@ -222,6 +224,14 @@ function renderSidebar(sidebar) {
   // Full screen: the strip is a panel drawn over the page rather than a column
   // beside it, so it stops filling its view and reports what it comes to
   // instead. See `reportChromeHeight`.
+  const detached = sidebar.detached === true;
+  if (document.body.dataset.detached !== String(detached)) {
+    document.body.dataset.detached = String(detached);
+    el.detach.setAttribute('aria-pressed', String(detached));
+    el.detach.title = detached ? 'Put the tab strip back beside the page' : 'Detach: the page fills the window';
+    el.detach.setAttribute('aria-label', el.detach.title);
+  }
+
   const floating = sidebar.floating === true;
   if (document.body.dataset.floating !== String(floating)) {
     document.body.dataset.floating = String(floating);

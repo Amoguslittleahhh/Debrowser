@@ -1659,3 +1659,37 @@ body[data-design="grid"] .tab.active .tab-close:hover {
 }
 body[data-design="grid"] .omnibox { border-color: transparent; background: var(--bg-input); }
 body[data-design="grid"] .omnibox:has(#url:focus) { box-shadow: none; }
+
+/* ---------------------------------------------------------------- */
+/* Detached strip                                                    */
+/* ---------------------------------------------------------------- */
+
+/* The pin and the detach button share the strip's foot. */
+.strip-foot { display: flex; flex: none; }
+.pin.detach svg { transform: none !important; }
+
+/*
+ * Detached and away: the page has the whole window and all that is left of
+ * the strip is its ten-pixel edge, drawn as a grip so the edge reads as
+ * something to point at rather than a stray line of colour.
+ */
+body[data-detached="true"][data-sidebar-open="false"] { background: var(--bg); }
+body[data-detached="true"][data-sidebar-open="false"]::after {
+  content: '';
+  position: fixed;
+  left: 3px;
+  top: calc(50% - 24px);
+  width: 4px;
+  height: 48px;
+  border-radius: 2px;
+  background: var(--text-dim);
+  opacity: 0.45;
+}
+
+/* Detached and out: a rounded panel over the page, the height of the window
+   less its margins - the window clips the view to the same corners. */
+body[data-detached="true"][data-floating="true"] {
+  box-shadow: none;
+  border-radius: var(--radius-lg);
+}
+body[data-detached="true"][data-floating="true"] .tabstrip { flex: 1 1 auto; }
