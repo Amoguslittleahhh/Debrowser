@@ -64,13 +64,13 @@ const SECTIONS = {
     {
       key: 'design',
       label: 'Design',
-      hint: 'Shapes and type. Your accent, tab bar colour and theme apply to every one. Legacy is the look Debrowser had until 1.8.',
+      hint: 'Shapes and type. Your accent, tab bar colour and theme apply to every one. Legacy design is the look Debrowser had up to 1.7.',
       type: 'select',
       options: [
         { value: 'ledger', name: 'Ledger' },
         { value: 'paper', name: 'Paper' },
         { value: 'grid', name: 'Grid' },
-        { value: 'legacy', name: 'Legacy' }
+        { value: 'legacy', name: 'Legacy design' }
       ]
     },
     {
@@ -78,7 +78,7 @@ const SECTIONS = {
       label: 'Show recent pages on the new tab page',
       hint: '"Continue with these tabs", a scroll below the search. Not in Legacy, and never in private windows.',
       type: 'checkbox',
-      unavailable: (state) => (state.prefs.design === 'legacy' ? 'Legacy shows your frequent sites instead.' : '')
+      unavailable: (state) => (state.prefs.design === 'legacy' ? 'The legacy design shows your frequent sites instead.' : '')
     },
     {
       key: 'theme',

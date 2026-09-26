@@ -45,6 +45,11 @@
     <form id="search" autocomplete="off">
       <input id="q" type="text" data-transient spellcheck="false" autocomplete="off"
              aria-label="Search or type a URL" placeholder="Search or type a URL">
+      <!-- Ledger's go button, in the accent. The other designs name the key
+           instead (see newtab.css); Enter works the same in all of them. -->
+      <button class="go" type="submit" aria-label="Go">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 8h12M9 3l5 5-5 5"/></svg>
+      </button>
     </form>
 
     <nav class="tiles" id="tiles" aria-label="Frequently visited"></nav>

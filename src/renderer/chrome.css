@@ -1715,3 +1715,18 @@ body.calm[data-detached="true"].sliding-out { animation: none; transition: none;
   body[data-detached="true"][data-floating="true"],
   body[data-detached="true"].sliding-out { animation: none; transition: none; }
 }
+
+/* Grid numbers its tabs, as its mockup does: the number is the tab's place in
+   the strip, set in the mono face before its title. */
+body[data-design="grid"] .tabs { counter-reset: tab; }
+body[data-design="grid"] .tab { counter-increment: tab; }
+body[data-design="grid"] .tab-title::before {
+  content: counter(tab);
+  margin-right: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+body[data-design="grid"] .tab.active .tab-title::before {
+  color: color-mix(in srgb, var(--bg) 55%, var(--text));
+}
