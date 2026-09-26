@@ -52,6 +52,20 @@ const BUDGET_MB = { min: 256, max: 65536 };
 const SCHEMA = {
   /* --- Personalisation ------------------------------------------- */
   theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
+
+  /**
+   * The look: shapes, neutrals and type. Colour stays the user's - the accent,
+   * the strip colour and its translucency apply on top of every design, and
+   * `theme` still picks light or dark within it.
+   *
+   * 'legacy' is how the browser looked up to 1.7, kept because a look someone
+   * is used to is not something an update should take away.
+   */
+  design:       { def: 'ledger', ok: (v) => ['ledger', 'paper', 'grid', 'legacy'].includes(v) },
+  // "Continue with these tabs" under the new tab page's search. Its own menu
+  // turns it off; Settings turns it back on. Never shown in a private window,
+  // which keeps no history for it to come from.
+  continueCard: { def: true, ok: (v) => typeof v === 'boolean' },
   // Sites whose new tab tile the user took away. History forgets itself; a
   // bookmark does not, so without this a forgotten tile filled back in from
   // the bookmarks on the next new tab.

@@ -167,7 +167,9 @@ const COMMANDS = new Set([
 
   // The new tab page's tiles.
   'top-sites',
-  'forget-site'
+  'forget-site',
+  'recent-pages',
+  'hide-continue-card'
 ]);
 
 /**

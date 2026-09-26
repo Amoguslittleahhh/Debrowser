@@ -279,6 +279,101 @@ body[data-theme="dark"] {
   --chip-bg-l: 24%;
 }
 
+/* ------------------------------------------------------------------ */
+/* Designs                                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A design is a set of neutrals, radii and faces - never a colour of its own.
+ * The accent, the strip colour and its translucency are the user's and apply
+ * on top of every design unchanged; `theme` still picks light or dark inside
+ * it. The palettes above are the Legacy design and stay exactly as they were.
+ *
+ * Each design is written three times for the same reason the Legacy palette
+ * is: dark by default, light when the system says so and nothing overrides it,
+ * and light when chosen outright. The selectors carry the design attribute, so
+ * they outrank the Legacy blocks they sit after.
+ *
+ * Faces are system faces, as everywhere else in this file: the chrome is alive
+ * for the life of the window and loads no fonts. `--font-display` is the one
+ * serif the new tab page and page titles use; `--font-mono` is Grid's labels.
+ */
+:root {
+  --font-display: "Iowan Old Style", Charter, "Bitstream Charter", "Source Serif Pro",
+                  "Noto Serif", Georgia, serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+}
+
+/* Ledger: sage and pine by light, near-black green by dark. Soft corners. */
+body[data-design="ledger"] {
+  color-scheme: dark;
+  --bg: #131514; --bg-raised: #1a1c1b; --bg-input: #212422;
+  --border: #2e322f; --border-soft: #222523;
+  --text: #e6e8e4; --text-dim: #8e948f;
+  --radius-sm: 6px; --radius: 8px; --radius-lg: 16px;
+}
+@media (prefers-color-scheme: light) {
+  body[data-design="ledger"]:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #e4e8e1; --bg-raised: #f7f8f5; --bg-input: #ffffff;
+    --border: #cdd3cb; --border-soft: #e1e5df;
+    --text: #1c2320; --text-dim: #5f6a64;
+  }
+}
+body[data-design="ledger"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #e4e8e1; --bg-raised: #f7f8f5; --bg-input: #ffffff;
+  --border: #cdd3cb; --border-soft: #e1e5df;
+  --text: #1c2320; --text-dim: #5f6a64;
+}
+
+/* Paper: warm paper by light, warm ink by dark. Barely rounded. */
+body[data-design="paper"] {
+  color-scheme: dark;
+  --bg: #1b1916; --bg-raised: #22201c; --bg-input: #2a2722;
+  --border: #3a3630; --border-soft: #2e2b26;
+  --text: #ede7da; --text-dim: #a39b8e;
+  --radius-sm: 3px; --radius: 4px; --radius-lg: 10px;
+}
+@media (prefers-color-scheme: light) {
+  body[data-design="paper"]:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4f1ea; --bg-raised: #fbfaf6; --bg-input: #ffffff;
+    --border: #d9d3c7; --border-soft: #e6e1d6;
+    --text: #1e1c19; --text-dim: #6e685e;
+  }
+}
+body[data-design="paper"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f1ea; --bg-raised: #fbfaf6; --bg-input: #ffffff;
+  --border: #d9d3c7; --border-soft: #e6e1d6;
+  --text: #1e1c19; --text-dim: #6e685e;
+}
+
+/* Grid: black and white, square, a neo-grotesque face. */
+body[data-design="grid"] {
+  color-scheme: dark;
+  --font-ui: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", "Nimbus Sans", sans-serif;
+  --bg: #0a0a0a; --bg-raised: #111111; --bg-input: #1a1a1a;
+  --border: #3a3a3a; --border-soft: #1f1f1f;
+  --text: #f2f2f2; --text-dim: #8c8c8c;
+  --radius-sm: 0px; --radius: 0px; --radius-lg: 0px; --radius-pill: 0px;
+}
+@media (prefers-color-scheme: light) {
+  body[data-design="grid"]:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #ffffff; --bg-raised: #ffffff; --bg-input: #f2f2f2;
+    --border: #cfcfcf; --border-soft: #ececec;
+    --text: #0f0f0f; --text-dim: #595959;
+  }
+}
+body[data-design="grid"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff; --bg-raised: #ffffff; --bg-input: #f2f2f2;
+  --border: #cfcfcf; --border-soft: #ececec;
+  --text: #0f0f0f; --text-dim: #595959;
+}
+
 /*
  * Anything defined in terms of another custom property belongs on <body>, not
  * on :root, and this is not a detail.

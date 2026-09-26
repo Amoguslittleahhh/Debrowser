@@ -15,7 +15,7 @@
  */
 
 const path = require('path');
-const { PALETTES } = require('./palette');
+const { paletteFor } = require('./palette');
 const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
         shell } = require('electron');
 const { INCOGNITO } = require('./incognito/mode');
@@ -1386,12 +1386,12 @@ class BrowserShell {
 
   /** The theme's surface colour - what the window shows where nothing is drawn. */
   surface() {
-    return (this.lightTheme() ? PALETTES.light : PALETTES.dark).bg;
+    return paletteFor(this.prefs ? this.prefs.get('design') : 'legacy', this.lightTheme()).bg;
   }
 
   /** The window buttons' own colour, which has to read against the strip. */
   symbolColour() {
-    return this.lightTheme() ? '#6b6559' : '#9b978e';
+    return paletteFor(this.prefs ? this.prefs.get('design') : 'legacy', this.lightTheme()).dim;
   }
 
   /* ---------------------------------------------------------------- */

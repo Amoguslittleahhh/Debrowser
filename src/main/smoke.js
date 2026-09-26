@@ -982,6 +982,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   {
     const planted = ['https://accounts.google.com/', 'https://developer.mozilla.org/'];
     for (const url of planted) bookmarks.add({ url, title: url });
+    // The tiles are Legacy's; every other design shows the continue card.
+    const designBefore = prefs.get('design');
+    runCommand('set-pref', { key: 'design', value: 'legacy' });
 
     const page = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
     await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
@@ -1010,6 +1013,75 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     tabs.close(page.id);
     for (const url of planted) bookmarks.remove(url);
+    runCommand('set-pref', { key: 'design', value: designBefore });
+  }
+
+  // Designs: each one reaches the chrome and the new tab page, draws the mark
+  // in the user's own accent, and shows "Continue with these tabs" from
+  // history - which Legacy does not, and which its own menu turns off.
+  {
+    const chrome = shell.chromeView.webContents;
+    const accentBefore = prefs.get('accent');
+    const designBefore = prefs.get('design');
+    runCommand('set-pref', { key: 'accent', value: '#b0306a' });
+    const planted = history.normalise({ url: 'https://continue.test/page', title: 'A page to come back to',
+      visitedAt: Date.now() - 5 * 60_000, visits: 1 });
+    history.items.unshift(planted);
+
+    const seen = {};
+    for (const design of ['ledger', 'paper', 'grid', 'legacy']) {
+      runCommand('set-pref', { key: 'design', value: design });
+      await waitFor(async () => (await chrome.executeJavaScript('document.body.dataset.design')) === design,
+        { timeoutMs: 5000 });
+      const page = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
+      await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+      const read = () => page.wc.executeJavaScript(`(() => {
+        const shown = (el) => el && getComputedStyle(el).display !== 'none' && !el.hidden;
+        return {
+          design: document.body.dataset.design,
+          chrome: null,
+          brand: shown(document.querySelector('.brand')),
+          tiles: shown(document.getElementById('tiles')),
+          card: shown(document.getElementById('continue')),
+          rows: document.querySelectorAll('#continue-list .continue-row').length,
+          dot: getComputedStyle(document.querySelector('.brand-dot')).fill
+        };
+      })()`).catch(() => null);
+      if (design !== 'legacy') await waitFor(async () => ((await read()) || {}).rows > 0, { timeoutMs: 5000 });
+      seen[design] = await read();
+      seen[design].chrome = await chrome.executeJavaScript('document.body.dataset.design');
+      tabs.close(page.id);
+    }
+    const fresh = ['ledger', 'paper', 'grid'];
+    check('every design reaches the chrome and the new tab page',
+      Object.entries(seen).every(([d, r]) => r && r.design === d && r.chrome === d),
+      Object.entries(seen).map(([d, r]) => `${d}: page=${r?.design} chrome=${r?.chrome}`).join(', '));
+    check('the new designs show the mark in the chosen accent, Legacy keeps its tiles',
+      fresh.every((d) => seen[d].brand && !seen[d].tiles && seen[d].dot === 'rgb(176, 48, 106)') &&
+      !seen.legacy.brand,
+      fresh.map((d) => `${d}: mark=${seen[d].brand} dot=${seen[d].dot}`).join(', ') +
+      `, legacy mark=${seen.legacy.brand}`);
+    check('"Continue with these tabs" lists recent pages in the new designs and not in Legacy',
+      fresh.every((d) => seen[d].card && seen[d].rows === 1) && !seen.legacy.card,
+      fresh.map((d) => `${d}: ${seen[d].rows} row(s)`).join(', ') + `, legacy card=${seen.legacy.card}`);
+
+    // Its menu's "Hide this card" turns it off for good, until Settings.
+    runCommand('set-pref', { key: 'design', value: 'ledger' });
+    const page = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    await waitFor(async () => (await page.wc.executeJavaScript(
+      "document.querySelectorAll('#continue-list .continue-row').length").catch(() => 0)) > 0, { timeoutMs: 5000 });
+    await page.wc.executeJavaScript(`document.getElementById('continue-more').click();
+      document.getElementById('continue-hide').click();`);
+    const off = await waitFor(() => prefs.get('continueCard') === false, { timeoutMs: 3000 });
+    tabs.close(page.id);
+    check('the card\'s own menu hides it, and the preference remembers',
+      off, `continueCard=${prefs.get('continueCard')}`);
+
+    runCommand('set-pref', { key: 'continueCard', value: true });
+    history.items = history.items.filter((e) => e !== planted);
+    runCommand('set-pref', { key: 'accent', value: accentBefore });
+    runCommand('set-pref', { key: 'design', value: designBefore });
   }
 
   const webUrl = pageUrl('idle.html');

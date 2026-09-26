@@ -111,13 +111,89 @@ async function loadTiles() {
 
 loadTiles();
 
+/* ------------------------------------------------------------------ */
+/* Continue with these tabs                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The pages you were last on, a scroll below the search - every design but
+ * Legacy. Straight from the browser's history, newest first, so a private
+ * window, which keeps none, gets nothing and the card stays hidden.
+ */
+const card = document.getElementById('continue');
+const cardList = document.getElementById('continue-list');
+const cardPop = document.getElementById('continue-pop');
+const cardMore = document.getElementById('continue-more');
+
+function ago(at) {
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+  if (hours < 48) return 'Yesterday';
+  return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+function continueRow(item) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'continue-row';
+  row.title = item.url;
+  const text = document.createElement('span');
+  text.className = 'continue-text';
+  const title = document.createElement('span');
+  title.className = 'continue-title';
+  title.textContent = item.title || siteOf(item.url);
+  const meta = document.createElement('span');
+  meta.className = 'continue-meta';
+  meta.textContent = `${siteOf(item.url)} · ${ago(item.visitedAt)}`;
+  text.append(title, meta);
+  row.append(siteChip(item.url, { icon: item.icon }), text);
+  row.addEventListener('click', (event) => {
+    if (event.ctrlKey || event.metaKey) api.send('new-tab', { url: item.url });
+    else api.send('navigate', { url: item.url });
+  });
+  row.addEventListener('auxclick', (event) => {
+    if (event.button === 1) api.send('new-tab', { url: item.url });
+  });
+  return row;
+}
+
+async function loadContinue() {
+  const res = await api.request('recent-pages', { limit: 4 });
+  const items = (res && res.items) || [];
+  card.hidden = items.length === 0;
+  cardList.replaceChildren(...items.map(continueRow));
+}
+
+function closeCardMenu() {
+  cardPop.hidden = true;
+  cardMore.setAttribute('aria-expanded', 'false');
+}
+cardMore.addEventListener('click', () => {
+  cardPop.hidden = !cardPop.hidden;
+  cardMore.setAttribute('aria-expanded', String(!cardPop.hidden));
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.continue-menu')) closeCardMenu();
+});
+document.getElementById('continue-hide').addEventListener('click', async () => {
+  closeCardMenu();
+  card.hidden = true;
+  await api.request('hide-continue-card');
+});
+document.getElementById('continue-all').addEventListener('click', () => api.send('open-history'));
+
+loadContinue();
+
 // A spare new tab page is loaded before anyone asks for it (prewarm.js), so
 // what it showed may be a little old by the time it is: brought up to date as
 // it is shown. And it gets the keyboard, as a freshly loaded one does.
 let tilesAt = Date.now();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
-  if (Date.now() - tilesAt > 1000) { tilesAt = Date.now(); loadTiles(); }
+  if (Date.now() - tilesAt > 1000) { tilesAt = Date.now(); loadTiles(); loadContinue(); }
 });
 window.addEventListener('focus', () => {
   if (document.activeElement === document.body) q.focus();

@@ -933,7 +933,7 @@ function main() {
     shell.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
     // What the main process paints - an error page, the surface behind a tab -
     // takes the window's palette and accent, as our own pages do.
-    palette.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent') }));
+    palette.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent'), design: prefs.get('design') }));
 
     shell.window.on('close', (event) => {
       if (shouldAskToClose()) {
@@ -2048,7 +2048,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         }
         // What the main process painted in the old palette: error pages, and
         // the surface behind our own pages.
-        if (payload.key === 'theme' || payload.key === 'accent') {
+        if (payload.key === 'theme' || payload.key === 'accent' || payload.key === 'design') {
           for (const tab of tabs.all()) {
             if (!tab.isLive) continue;
             if (tab.failed) tab.redrawError();
@@ -2479,7 +2479,7 @@ const CHROME_REQUESTS = new Set([
  * have fifteen of, and it is one navigation away from being a website, so its
  * surface is the smallest of any page here.
  */
-const NEWTAB_REQUESTS = new Set(['top-sites', 'forget-site']);
+const NEWTAB_REQUESTS = new Set(['top-sites', 'forget-site', 'recent-pages', 'hide-continue-card']);
 
 /**
  * What the history page may ask for - its own list, and nothing else.
@@ -2527,7 +2527,7 @@ const PAGE_POLICY = new Map([
     requests: new Set([...VAULT_RECORD_REQUESTS, 'vault-status', 'vault-lock', 'presence-capability'])
   }],
   ['newtab', {
-    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab']),
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'open-history']),
     requests: NEWTAB_REQUESTS
   }],
   ['history', {
@@ -2599,6 +2599,27 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
       // thing to forget when the user clears their history.
       case 'top-sites':
         return { items: topSites(history, bookmarks, Number(payload?.limit) || 8, prefs.get('hiddenTiles')) };
+
+      // "Continue with these tabs": the last pages visited that are not open
+      // now, newest first. Nothing when the card is off, and nothing in a
+      // private window, which has no history to give.
+      case 'recent-pages': {
+        if (!history || !prefs.get('continueCard')) return { items: [] };
+        const open = new Set(tabs.all().map((t) => t.url));
+        const limit = Math.min(Math.max(Number(payload?.limit) || 4, 1), 12);
+        const items = [];
+        for (const e of history.entries()) {
+          if (!/^https?:/i.test(e.url) || open.has(e.url)) continue;
+          items.push({ url: e.url, title: e.title || '', visitedAt: e.visitedAt, icon: e.icon || null });
+          if (items.length >= limit) break;
+        }
+        return { items };
+      }
+
+      case 'hide-continue-card':
+        // Settings hears of it on the next state broadcast, like any change.
+        prefs.set('continueCard', false);
+        return true;
 
       // Removing a tile removes the site from history, which is the only
       // honest thing it can mean - a tile that came back tomorrow because the

@@ -175,3 +175,138 @@ main {
 
 /* A forgotten tile: gone from sight, its place kept. */
 .tile.gone { opacity: 0; visibility: hidden; transition: opacity var(--fast) var(--ease), visibility 0s linear var(--fast); }
+
+/* ------------------------------------------------------------------ */
+/* Designs                                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Every design but Legacy draws this page the same way: the mark and a large
+ * search line in the first screen, "Continue with these tabs" a scroll below.
+ * Legacy is everything above, untouched - its wordmark, tiles and memory line.
+ */
+.brand, .continue { display: none; }
+.brand-dot { fill: var(--accent); }
+
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) {
+  display: block;
+  background: var(--bg-raised);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 64px));
+  min-height: calc(100vh - 72px);
+  margin: 0 auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: left;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is(#wordmark, .tiles, .stat) {
+  display: none;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  color: var(--text);
+}
+.brand-name { font-size: 20px; font-weight: 600; letter-spacing: -0.03em; }
+
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #q {
+  height: auto;
+  padding: 0 2px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--text);
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--font-display);
+  font-size: 40px;
+  box-shadow: none;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #q:focus {
+  border-bottom-color: var(--accent);
+}
+
+/* Paper: the serif is the voice, the rule is quiet. */
+body[data-design="paper"] .brand-name { font-family: var(--font-display); font-size: 24px; font-weight: 400; letter-spacing: 0; }
+body[data-design="paper"] #q { font-size: 56px; border-bottom-color: var(--border); }
+
+/* Grid: the field is the headline; the name is a label. */
+body[data-design="grid"] .brand-mark rect { rx: 4; }
+body[data-design="grid"] .brand-name {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 400;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+body[data-design="grid"] #q {
+  font-family: var(--font-ui);
+  font-weight: 800;
+  font-size: 72px;
+  letter-spacing: -0.04em;
+  padding: 0;
+  border-bottom: 0;
+}
+
+/* Continue with these tabs */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .continue:not([hidden]) {
+  display: block;
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 64px));
+  margin: 0 auto 72px;
+  padding: 6px 8px 12px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--text) 4%, var(--bg-raised));
+}
+.continue-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px; }
+.continue-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.continue-menu { position: relative; }
+.continue-more {
+  width: 32px; height: 32px; border: 0; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--text-dim);
+}
+.continue-more:hover { background: var(--wash-soft); color: var(--text); }
+.continue-pop {
+  position: absolute; right: 0; top: 36px; z-index: 2;
+  padding: 4px; border-radius: var(--radius);
+  background: var(--bg-input); border: 1px solid var(--border);
+}
+.continue-pop button {
+  display: block; white-space: nowrap; padding: 8px 12px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); font: inherit; font-size: var(--fs-small); text-align: left;
+}
+.continue-pop button:hover { background: var(--wash); }
+.continue-row {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  padding: 9px 12px; border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--text); font: inherit; text-align: left;
+}
+.continue-row:hover { background: var(--wash-soft); }
+.continue-row .chip, .continue-row .site-icon { flex: none; }
+.continue-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.continue-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.continue-meta { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.continue-all {
+  margin: 6px 12px 0; padding: 4px 0; border: 0; background: transparent;
+  color: var(--accent); font: inherit; font-size: 13px; font-weight: 600;
+}
+.continue-all:hover { text-decoration: underline; }
+
+body[data-design="paper"] .continue-head h2 { font-family: var(--font-display); font-size: 21px; font-weight: 400; }
+body[data-design="paper"] .continue:not([hidden]) { border: 1px solid var(--border-soft); }
+
+body[data-design="grid"] .continue:not([hidden]) {
+  padding: 0; background: transparent; border: 1px solid var(--text);
+}
+body[data-design="grid"] .continue-head { padding: 6px 6px 6px 16px; border-bottom: 1px solid var(--text); }
+body[data-design="grid"] .continue-head h2 {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase;
+}
+body[data-design="grid"] .continue-row { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); }
+body[data-design="grid"] .continue-meta { font-family: var(--font-mono); font-size: 11px; }
+body[data-design="grid"] .continue-all {
+  margin: 0; padding: 14px 16px; font-family: var(--font-mono); font-size: 11px; font-weight: 400;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}

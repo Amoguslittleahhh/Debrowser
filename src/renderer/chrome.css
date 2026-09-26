@@ -1602,3 +1602,60 @@ body[data-floating="true"] .toolbar {
   .tab.active .tab-icon { display: none; }
   .tab.active .tab-close { margin-inline: auto; }
 }
+
+/* ---------------------------------------------------------------- */
+/* Designs                                                           */
+/* ---------------------------------------------------------------- */
+
+/*
+ * What each design changes about the strip and the address bar. Colours are
+ * not here: the neutrals come from theme.css and the accent, strip colour and
+ * translucency from the user, so every rule below is shape only. Legacy is the
+ * rules above, untouched.
+ */
+
+/* Ledger: the tab in front is a soft chip; no separators, no accent bar. */
+body[data-design="ledger"] .tab { border-radius: var(--radius); }
+body[data-design="ledger"] .tab::after,
+body[data-design="ledger"] .tab.active::before { display: none; }
+body[data-design="ledger"] .tab.active { background: var(--bg-raised); }
+body[data-design="ledger"] .omnibox { border-radius: var(--radius); }
+
+/* Paper: tabs are words. The one in front is underlined in the accent, a
+   sleeping one is set in italic serif. The address bar is a ruled line. */
+body[data-design="paper"] .tab { border-radius: 0; }
+body[data-design="paper"] .tab::after { display: none; }
+body[data-design="paper"] .tab:hover,
+body[data-design="paper"] .tab.active { background: transparent; }
+body[data-design="paper"] .tab.active::before {
+  top: auto; bottom: 5px; left: 11px; right: 11px; height: 1.5px; border-radius: 0;
+}
+body[data-design="paper"][data-layout="left"] .tab.active::before {
+  top: 9px; bottom: 9px; left: 0; right: auto; width: 1.5px; height: auto;
+}
+body[data-design="paper"] .tab:has(.tier[data-tier="discarded"]) .tab-title {
+  font-family: var(--font-display);
+  font-style: italic;
+}
+body[data-design="paper"] .omnibox,
+body[data-design="paper"] .omnibox:hover,
+body[data-design="paper"] .omnibox:has(#url:focus) {
+  border-radius: 0;
+  border-width: 0 0 1px;
+  background: transparent;
+  box-shadow: none;
+}
+body[data-design="paper"] .omnibox:has(#url:focus) { border-bottom-color: var(--accent); }
+
+/* Grid: square cells with a rule between them; the tab in front is inverted. */
+body[data-design="grid"] .tab { border-radius: 0; border-right: 1px solid var(--border-soft); }
+body[data-design="grid"] .tab::after,
+body[data-design="grid"] .tab.active::before { display: none; }
+body[data-design="grid"] .tab.active { background: var(--text); color: var(--bg); }
+body[data-design="grid"] .tab.active .tab-close { color: var(--bg); }
+body[data-design="grid"] .tab.active .tab-close:hover {
+  background-color: color-mix(in srgb, var(--bg) 22%, transparent);
+  color: var(--bg);
+}
+body[data-design="grid"] .omnibox { border-color: transparent; background: var(--bg-input); }
+body[data-design="grid"] .omnibox:has(#url:focus) { box-shadow: none; }

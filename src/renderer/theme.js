@@ -324,6 +324,7 @@ function applyThemePrefs(prefs) {
 
   const flags = {
     theme: prefs.theme,
+    design: prefs.design || 'legacy',
     tabs: prefs.tabWidth,
     // Which way the chrome is laid out. The main process has already given the
     // view the matching rectangle; this is the stylesheet's half of the same
