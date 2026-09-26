@@ -188,19 +188,22 @@ main {
 .brand, .continue { display: none; }
 .brand-dot { fill: var(--accent); }
 
+/* The mark, the field and the recent pages are one group, centred in the
+   window: the card is in view without a scroll, and on a short window the
+   group scrolls from its top rather than being cut off above it. */
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  box-sizing: border-box;
+  padding: 32px 0;
   background: var(--bg-raised);
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
   box-sizing: border-box;
   width: min(680px, calc(100vw - 64px));
-  min-height: calc(100vh - 72px);
-  margin: 0 auto;
+  margin: 0 auto 32px;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   text-align: left;
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is(#wordmark, .tiles, .stat) {
@@ -209,6 +212,7 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .brand {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   margin-bottom: 22px;
   color: var(--text);
@@ -286,7 +290,7 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .co
   display: block;
   box-sizing: border-box;
   width: min(680px, calc(100vw - 64px));
-  margin: 0 auto 72px;
+  margin: 0 auto;
   padding: 6px 8px 12px;
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--text) 4%, var(--bg-raised));

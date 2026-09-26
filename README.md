@@ -84,7 +84,7 @@ always what Enter will do. Esc puts back what you typed, and pressing it again
 puts back the page's address. Local addresses (`localhost:3000`, `192.168.1.1`,
 `printer.local`) open over `http://` without a detour.
 
-**Designs.** Settings → Appearance → Design picks the look: **Ledger** (the default: sage by day, near-black green by night), **Paper** (warm paper, tabs as underlined words, a serif search), **Grid** (black and white, square, the tab in front inverted) or **Legacy**, the look Debrowser had until 1.8. Each works in light and dark, tabs across the top or down the side, and keeps your accent colour, tab bar colour and translucency. In every design but Legacy the new tab page shows the mark above a search field boxed like an address bar, and "Continue with these tabs" (your last few pages) a scroll below it; its ⋮ menu hides it, and Settings brings it back. Private windows never show it.
+**Designs.** Settings → Appearance → Design picks the look: **Ledger** (the default: sage by day, near-black green by night), **Paper** (warm paper, tabs as underlined words, a serif search), **Grid** (black and white, square, the tab in front inverted) or **Legacy**, the look Debrowser had until 1.8. Each works in light and dark, tabs across the top or down the side, and keeps your accent colour, tab bar colour and translucency. In every design but Legacy the new tab page shows the mark above a search field boxed like an address bar, and "Continue with these tabs" (your last few pages) right under it; its ⋮ menu hides it, and Settings brings it back. Private windows never show it.
 
 **Tabs.** Drag to reorder, across the top or down the side (Settings →
 Appearance). Right-click a tab to pin, mute, duplicate or close several at
