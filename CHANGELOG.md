@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.8.0
 
-From the first day of using 1.7.0 on Windows.
+A new look with the old one kept, a lock on saved passwords, faster tabs, and fixes from the first day of using 1.7.0 on Windows.
 
 - **Passwords have a page of their own, behind a lock.** `debrowser://passwords` (also in the menu) lists saved sign-ins and cards, with Show, Copy, Delete, Fill and Add a card. It opens locked: Windows Hello or Touch ID unlocks it where the computer has one, a passcode always does, and it locks itself after five minutes without use. Settings no longer shows saved passwords at all.
 - **Saved passwords are off until you set a passcode** (Settings → Passwords and payment). Without one nothing is offered, saved or filled. The passcode is stored only as a salted scrypt hash, changing or removing it needs the current one, and wrong guesses cost more each time. Removing it deletes everything saved, so nobody can set a new passcode and read the old passwords.
