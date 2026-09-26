@@ -2010,6 +2010,92 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       dragRegions.length > 0 && dragRegions.every(([, , h]) => h <= 48),
       JSON.stringify(dragRegions));
 
+    // How the strip behaves under a real pointer, through the chrome's own
+    // hover reporting rather than calls into the window: that path is where
+    // the edge, the pause before opening and the hold all live.
+    {
+      const inChrome = (code) => shell.chromeView.webContents.executeJavaScript(code);
+      const at = (x, y) => inChrome(`document.dispatchEvent(new MouseEvent('mousemove', { clientX: ${x}, clientY: ${y} })); 1`);
+      const leave = () => inChrome(`document.dispatchEvent(new MouseEvent('mouseleave')); 1`);
+      const settle = () => sleep(650);   // past the close delay and the slide
+      const reset = async () => {
+        await leave();
+        shell.sidebarTyping = false;
+        shell.sidebarOpen = false;
+        shell.layout();
+        shell.publishSidebar();
+        await sleep(250);
+      };
+      await reset();
+      const pageLeft = shell.contentBounds().x;
+
+      // The last pixel before the page opens it, not only the first twelve.
+      await at(pageLeft - 1, 300);
+      await sleep(250);
+      const byGutter = shell.sidebarOpen;
+      await leave();
+      await sleep(300);   // the close delay, then partway into the slide
+      const slid = await inChrome(`document.body.classList.contains('sliding-out')`);
+      await settle();
+      check('the whole margin left of the page opens the side strip, and it slides away',
+        byGutter && slid === !shell.reducedMotion() && !shell.sidebarOpen,
+        `opened from x=${pageLeft - 1}: ${byGutter}, sliding out: ${slid}, closed: ${!shell.sidebarOpen}`);
+
+      // A pointer brushing the edge on its way elsewhere does not open it.
+      await reset();
+      await at(pageLeft - 1, 300);
+      await sleep(20);
+      await at(pageLeft + 80, 300);
+      await sleep(250);
+      check('brushing past the edge does not throw the strip open', !shell.sidebarOpen);
+
+      // Typing in its address bar holds it out; leaving the field lets it go.
+      await reset();
+      await at(pageLeft - 1, 300);
+      await sleep(250);
+      shell.chromeView.webContents.focus();
+      await inChrome(`document.getElementById('url').focus(); 1`);
+      await sleep(80);
+      await leave();
+      await settle();
+      const heldTyping = shell.sidebarOpen;
+      await inChrome(`document.getElementById('url').blur(); 1`);
+      await settle();
+      check('the strip stays out while its address bar is typed in, and goes after',
+        heldTyping && !shell.sidebarOpen, `held: ${heldTyping}, then closed: ${!shell.sidebarOpen}`);
+
+      // A menu opened from it holds it the same way.
+      await reset();
+      await at(pageLeft - 1, 300);
+      await sleep(250);
+      shell.openSheet('menu', { x: 200, y: 40, right: 230 });
+      await leave();
+      await settle();
+      const heldMenu = shell.sidebarOpen;
+      shell.closeSheet();
+      await settle();
+      check('a menu opened from the strip keeps it out until the menu closes',
+        heldMenu && !shell.sidebarOpen, `held: ${heldMenu}, then closed: ${!shell.sidebarOpen}`);
+
+      // A tap on the page - focus there with the cursor off the strip - puts
+      // it away, with no mouse-leave to say so.
+      await reset();
+      await at(pageLeft - 1, 300);
+      await sleep(250);
+      const cursor = require('electron').screen.getCursorScreenPoint();
+      const win = shell.window.getContentBounds();
+      const cursorOff = cursor.x - win.x >= shell.chromeView.getBounds().width || cursor.y < win.y;
+      // As a tap does: the strip is tapped first, so it has focus, and the
+      // next tap lands on the page.
+      shell.chromeView.webContents.focus();
+      await sleep(50);
+      tabs.activeTab().view.webContents.focus();
+      await settle();
+      check('focus moving to the page with the pointer elsewhere puts the strip away',
+        !cursorOff || !shell.sidebarOpen, `cursor ${cursor.x},${cursor.y}; open: ${shell.sidebarOpen}`);
+      await reset();
+    }
+
     // Pinned, it takes its column back and the page gives up the width.
     prefs.set('sidebarPinned', true);
     shell.applyWindowPrefs();

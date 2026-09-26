@@ -1345,7 +1345,8 @@ class BrowserShell {
     // the window buttons in a dark box of their own. Tinted like the strip, it
     // is one surface with it.
     const opacity = this.prefs.get('windowOpacity');
-    const windowBg = translucent && this.vertical() ? withAlpha(this.stripColour(), opacity, 'argb') : sheer;
+    const windowBg = !translucent || !this.vertical() ? sheer
+      : this.seeThrough() ? withAlpha(this.stripColour(), opacity, 'argb') : this.stripColour();
     try {
       this.window.setBackgroundColor(windowBg);
       // Detached, the chrome's view is clear: collapsed it is an invisible
@@ -1406,7 +1407,7 @@ class BrowserShell {
       try {
         // Tinted to match when translucent, rather than an opaque box sitting
         // on a see-through band.
-        const translucent = this.prefs.get('windowOpacity') < 1;
+        const translucent = this.prefs.get('windowOpacity') < 1 && this.seeThrough();
         const color = translucent ? withAlpha(strip, this.prefs.get('windowOpacity'), 'rgba') : strip;
         this.window.setTitleBarOverlay({ color, symbolColor: this.symbolColour(), height: 40 });
       } catch { /* no overlay on this platform */ }
@@ -1743,6 +1744,15 @@ class BrowserShell {
         shut();
       }
     }, SIDEBAR_CLOSE_MS);
+  }
+
+  /**
+   * Whether there is a window material to see through to. Without one - Linux
+   * has none - a see-through window background is blended with black, and a
+   * tint meant to match the strip came out a shade darker than it.
+   */
+  seeThrough() {
+    return process.platform !== 'linux' && typeof this.window.setBackgroundMaterial === 'function';
   }
 
   /** Whether something the strip started should keep it out. */
