@@ -497,6 +497,10 @@ function revealSection() {
   setTimeout(() => section.classList.remove('landed'), 1400);
 }
 
+// Asked for a section while already open - the passwords page's "Set a
+// passcode", the menu's Bookmarks: the browser changes the fragment in place.
+window.addEventListener('hashchange', () => { if (built) revealSection(); });
+
 function buildRow(spec) {
   const row = document.createElement('div');
   row.className = 'row';

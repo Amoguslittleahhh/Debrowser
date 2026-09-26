@@ -3144,12 +3144,19 @@ function openInternalPage(tabs, url) {
     // After the activation, not before: a page left in the background may be
     // frozen, and navigating a stopped renderer is the same hazard as sending
     // it IPC. The activation is what thaws it.
+    //
+    // Pointed at the section in place, not reloaded: a change of fragment
+    // alone is not a navigation that rebuilds the page, and asking for the
+    // section the address already names changed nothing at all - so the
+    // passwords page's "Set a passcode" landed on Appearance. Clearing the
+    // fragment and setting it again always fires `hashchange`, which the page
+    // answers by scrolling there.
     const section = hashOf(url);
-    const reload = section && hashOf(existing.url) !== section;
     tabs.activate(existing.id).then(() => {
-      if (reload && existing.isLive && !isStopped(existing.tier)) {
-        existing.wc.loadURL(url).catch(() => {});
-      }
+      if (!section || !existing.isLive || isStopped(existing.tier)) return;
+      existing.wc.executeJavaScript(
+        `history.replaceState(null, '', location.pathname); location.hash = ${JSON.stringify(section)};`
+      ).catch(() => {});
     }).catch(() => {});
     return existing;
   }

@@ -5,6 +5,7 @@
 - **Tucked-away tabs work like Zen's compact mode, in every design.** The toolbar stays across the top and never moves; nothing is drawn at the window's edge, so the page has the same slim margin on every side. Point at the left edge and the tabs slide out as a panel of their own below the toolbar, over the page, and slide back when you move away. Find, with the tabs tucked away, is a row under the toolbar.
 - **Translucency works with the tabs down the side again.** The toolbar and the margins round the page show the window material; the tab panel, which lies over the page, stays solid.
 - **Tabs across the top are built on Chrome's layout in every design,** with each design's own hand on it. The open tab takes the toolbar's colour and runs straight into it, curving out at its feet; the others sit on the window colour with a thin line between them; the toolbar and bookmarks bar are one surface. Ledger rounds it all generously, Paper sets the titles in its serif with a rule in your accent along the open tab, and Grid keeps square numbered cells with a bar across the open one.
+- **"Set a passcode in Settings" goes to the passcode.** With Settings already open it switched to that tab and left it on Appearance. The same fix covers the menu's Bookmarks and every other link to a section of an open Settings.
 - **No glowing line down the left edge.** It took room from the page for a hint that pointing at the edge now gives anyway.
 
 ## 1.8.5
