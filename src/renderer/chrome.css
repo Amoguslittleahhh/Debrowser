@@ -1730,3 +1730,6 @@ body[data-design="grid"] .tab-title::before {
 body[data-design="grid"] .tab.active .tab-title::before {
   color: color-mix(in srgb, var(--bg) 55%, var(--text));
 }
+
+/* Detaching is refused on Windows for now (see prefs.js). */
+body[data-platform="win32"] #detach { display: none; }

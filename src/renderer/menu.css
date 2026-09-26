@@ -95,6 +95,10 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
   color: var(--text);
   outline: none;
 }
+/* The pointer focuses the row it is over, and a scripted focus counts as
+   focus-visible, so theme.css's ring landed on every hovered row. The ring
+   below is the only one, and only while keys are in use. */
+.item:focus-visible { box-shadow: none; }
 /* Pressed: a step deeper than hover, for the instant between press and act. */
 .item:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 /* The ring says where the keyboard is, so only while it is being used: an

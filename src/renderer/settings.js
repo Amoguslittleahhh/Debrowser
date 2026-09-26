@@ -115,7 +115,8 @@ const SECTIONS = {
       label: 'Detach the side tabs',
       hint: 'The page fills the window. Point at the left edge and the tabs float out over it; move away and they go.',
       type: 'checkbox',
-      unavailable: (state) => (state.prefs.tabBarPosition !== 'left' ? 'Only with the tabs down the side.' : '')
+      unavailable: (state) => (api.platform === 'win32' ? 'Not yet on Windows.'
+        : state.prefs.tabBarPosition !== 'left' ? 'Only with the tabs down the side.' : '')
     },
     {
       key: 'tabWidth',

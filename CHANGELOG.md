@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.1
+
+A fix for Windows, and four small ones from the first hours of 1.8.0.
+
+- **Windows: detached side tabs are off for now.** With them on, the window took no clicks or keys at all, only its own minimise, maximise and close buttons, and reinstalling did not help because the setting was kept. This version clears that setting when it starts, so the browser opens normally again with the tabs down the side. The option returns on Windows once it works there; Linux and macOS keep it.
+- **The new tab page fits in the window.** The search field stays in the middle when there is room; when "Continue with these tabs" would fall below the bottom edge, everything moves up just enough to show it, and the page no longer scrolls for nothing.
+- **A bigger app icon on Windows.** Every Windows size now fills its square, as other apps' icons do, instead of keeping the margin macOS asks for.
+- **No ring round a menu row you point at.** The ring shows only while you use the keyboard.
+- **Where to set up saved passwords:** Settings → Passwords and payment → Set a passcode, or the menu's Passwords page, which has a button that goes there. Windows Hello or Touch ID then unlocks it wherever the computer has one.
+
 ## 1.8.0
 
 A new look with the old one kept, a lock on saved passwords, faster tabs, and fixes from the first day of using 1.7.0 on Windows.
@@ -14,7 +24,7 @@ A new look with the old one kept, a lock on saved passwords, faster tabs, and fi
 - **No white flash when a menu or panel opens on Windows.** A panel now starts one pixel big and grows once it has drawn.
 - **"Save link as…" and "Save image as…" work.** They always ask where to save, as their names say; they used to drop the file in Downloads without a word unless Settings asked for a dialog. An image is fetched with its page as the referrer, as the page itself would, so sites that refuse hotlinked images give it up; and images that live in the page itself (`data:` and `blob:` addresses), which did nothing before, are saved too.
 - **Three new designs, and the old look kept as Legacy.** Settings → Appearance → Design: **Ledger** (the new default), **Paper** or **Grid**, each in light and dark and with tabs across the top or down the side; **Legacy design** is the look up to 1.7, unchanged. Every design keeps your accent colour, tab bar colour and translucency. The new tab page in the new designs shows Debrowser's mark (one tab awake in a frame, the dot in your accent) above a search field boxed like an address bar, centred in the window, and "Continue with these tabs", your last few pages, just below; its ⋮ menu hides the card and Settings brings it back. Private windows never show it, since they keep no history.
-- **A new app icon:** the same mark, one tab awake in a frame, drawn again for small sizes so it still reads at 16 pixels in the Windows taskbar. `node tools/make-icon.js` under Electron regenerates `build/icon.png`, `.ico` and `.svg`.
+- **A new app icon:** the same mark, one tab awake in a frame, drawn again for small sizes so it still reads at 16 pixels in the Windows taskbar.
 - **Grid numbers its tabs** (01, 02, …) and **Ledger's search field has a go button** in your accent. Back, Forward and Reload are in every design, top or side tabs.
 - **Detached side tabs.** With the tabs down the side, the new button at the foot of the strip (or Settings → Appearance → "Detach the side tabs") gives the page the whole window: no column, no band across the top. Point at the left edge and the tabs slide out over the page as a rounded panel, inset from the window's edges; move away and they slide back. Nothing is drawn at the edge while they are away, and with reduced motion (the system's or the browser's own) they appear and go without sliding. The pin next to it puts the strip back beside the page.
 - **Faster new tabs, links and typed addresses.** Ctrl+T shows a new tab page that is already loaded and drawn, in about 30 ms instead of 58. Resting the pointer on a link, or pressing the button down, fetches that page before the click lands, so on a server that takes 150 ms a click opens it in 54–117 ms instead of about 205. Typing an address you have visited before, or a search, opens the connection before you press Enter. Nothing is requested before you ask for it except the one link you are pointing at, none of it happens in a private window, and "Preload pages you point at" in Settings turns the fetching and the early connections off. Startup reaches the first painted tab about 30 ms sooner (median 373 → 342 ms): the spare new tab and a hibernation check no longer start while the first tab is still loading. `npm run speed` measures all of it.

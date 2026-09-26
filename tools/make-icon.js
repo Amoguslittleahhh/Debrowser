@@ -18,16 +18,19 @@ const FRAME = '#F4F1EA';
 const DOT = '#F2B27A';
 
 /** The icon as SVG at `size` px. */
-function svg(size) {
+function svg(size, windows = false) {
   const small = size <= 48;
-  // Tile inset (the macOS grid leaves ~10% round a 1024 icon; small sizes use
-  // nearly all of their pixels), its corner, and the mark's weight.
-  const inset = small ? size * 0.03 : size * 0.098;
+  // Tile inset, its corner, and the mark's weight. The macOS grid leaves ~10%
+  // round a 1024 icon; Windows draws taskbar and desktop icons edge to edge,
+  // and the same margin there read as a noticeably smaller icon than its
+  // neighbours, so every Windows size uses nearly all of its pixels.
+  const full = small || windows;
+  const inset = full ? size * 0.03 : size * 0.098;
   const tile = size - inset * 2;
   const radius = tile * (small ? 0.2 : 0.225);
   const stroke = small ? 8 : 5;
   const dot = small ? 8.5 : 6.5;
-  const scale = (tile * (small ? 0.82 : 0.66)) / 64;
+  const scale = (tile * (small ? 0.82 : windows ? 0.76 : 0.66)) / 64;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
   <rect x="${inset}" y="${inset}" width="${tile}" height="${tile}" rx="${radius}" fill="${TILE}"/>
   <g transform="translate(${size / 2} ${size / 2}) scale(${scale}) translate(-32 -32)">
@@ -37,8 +40,8 @@ function svg(size) {
 </svg>`;
 }
 
-async function render(win, size) {
-  const html = `<!doctype html><html style="background:transparent;overflow:hidden"><body style="margin:0;background:transparent;overflow:hidden">${svg(size).replace('<svg ', '<svg style="display:block" ')}</body></html>`;
+async function render(win, size, windows = false) {
+  const html = `<!doctype html><html style="background:transparent;overflow:hidden"><body style="margin:0;background:transparent;overflow:hidden">${svg(size, windows).replace('<svg ', '<svg style="display:block" ')}</body></html>`;
   win.setContentSize(size, size);
   await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   await new Promise((r) => setTimeout(r, 120));
@@ -79,7 +82,7 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(OUT, 'icon.svg'), svg(1024));
   const sizes = [16, 24, 32, 48, 64, 128, 256];
   const images = [];
-  for (const size of sizes) images.push({ size, png: await render(win, size) });
+  for (const size of sizes) images.push({ size, png: await render(win, size, true) });
   fs.writeFileSync(path.join(OUT, 'icon.ico'), ico(images));
   console.log(`wrote build/icon.png, build/icon.svg, build/icon.ico (${sizes.join(', ')})`);
   app.exit(0);

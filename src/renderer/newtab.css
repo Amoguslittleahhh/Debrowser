@@ -195,17 +195,23 @@ main {
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) {
   display: block;
   box-sizing: border-box;
+  /* As tall as its content: at 100% the field's top margin, which collapses
+     through the body, came on top of the full height and always scrolled. */
+  height: auto;
   padding: 0 0 32px;
   background: var(--bg-raised);
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
   box-sizing: border-box;
   width: min(680px, calc(100vw - 64px));
-  margin: max(24px, calc(50vh - 53px)) auto 36px;
+  /* The field centred in the window, unless that pushes the card below the
+     fold: then everything rises just enough to fit, down to 24px from the top.
+     --fit is main's own height, kept by newtab.js. */
+  margin: max(24px, min(calc(50vh - 53px), calc(100vh - var(--fit, 0px) - 36px))) auto 36px;
   padding: 0;
   text-align: left;
 }
-body[data-design="grid"] main { margin-top: max(24px, calc(50vh - 58px)); }
+body[data-design="grid"] main { margin-top: max(24px, min(calc(50vh - 58px), calc(100vh - var(--fit, 0px) - 36px))); }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is(#wordmark, .tiles, .stat) {
   display: none;
 }

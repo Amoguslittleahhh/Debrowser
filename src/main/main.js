@@ -2245,6 +2245,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'toggle-sidebar-detach': {
         const detach = prefs.get('sidebarDetached') !== true;
         prefs.set('sidebarDetached', detach);
+        if (prefs.get('sidebarDetached') !== detach) break;   // refused here (Windows)
         if (detach) prefs.set('sidebarPinned', false);
         shell.applyWindowPrefs();
         publish();

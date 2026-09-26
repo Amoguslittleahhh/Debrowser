@@ -165,6 +165,7 @@ async function loadContinue() {
   const items = (res && res.items) || [];
   card.hidden = items.length === 0;
   cardList.replaceChildren(...items.map(continueRow));
+  fitCard();
 }
 
 function closeCardMenu() {
@@ -181,11 +182,22 @@ document.addEventListener('click', (event) => {
 document.getElementById('continue-hide').addEventListener('click', async () => {
   closeCardMenu();
   card.hidden = true;
+  fitCard();
   await api.request('hide-continue-card');
 });
 document.getElementById('continue-all').addEventListener('click', () => api.send('open-history'));
 
 loadContinue();
+
+// What newtab.css needs to lift the field when the card would not fit below
+// it: the height from the top of the field's block to the bottom of the card.
+// Called when the card fills or goes, and when the block itself resizes.
+const mainEl = document.querySelector('main');
+function fitCard() {
+  const end = card.hidden ? mainEl.offsetTop + mainEl.offsetHeight : card.offsetTop + card.offsetHeight;
+  document.body.style.setProperty('--fit', `${end - mainEl.offsetTop}px`);
+}
+new ResizeObserver(fitCard).observe(mainEl);
 
 // A spare new tab page is loaded before anyone asks for it (prewarm.js), so
 // what it showed may be a little old by the time it is: brought up to date as
