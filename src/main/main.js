@@ -2357,7 +2357,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
     if (!pageMay(senderPage(tabs, shell, event.sender), 'commands', command)) return;
-    runCommand(command, payload ?? null, event.sender);
+    runCommand(command, shell ? shell.fromStrip(event.sender, payload ?? null) : payload ?? null, event.sender);
   });
 
   /*

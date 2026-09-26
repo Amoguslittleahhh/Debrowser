@@ -1863,22 +1863,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const was = prefs.get('tabBarPosition');
       prefs.set('tabBarPosition', 'left');
       shell.applyWindowPrefs();
-      // Out: a 240px column over the page. In: the whole window, under it.
-      const state = () => (shell.chromeBehind ? 'under the page' : `${shell.chromeView.getBounds().width}px column`);
-      const collapsed = state();
-
+      // Tucked away, the bar is a row under the toolbar: the page moves down
+      // for it, and the toolbar - where the bar is drawn - stays in view.
+      const pageTop = () => shell.contentBounds().y;
+      const before = pageTop();
       runCommand('find-open', null);
-      const out = state();
-
+      const during = pageTop();
+      const stillBand = shell.chromeBehind && !shell.sidebarOpen;
       runCommand('find-close', null);
-      const backIn = state();
+      const after = pageTop();
 
       prefs.set('tabBarPosition', was);
       shell.applyWindowPrefs();
 
-      check('opening find brings the side strip out, and closing it lets go',
-        collapsed === 'under the page' && out === '240px column' && backIn === collapsed,
-        `strip ${collapsed} -> ${out} -> ${backIn}`);
+      check('with the tabs tucked away, find is a row under the toolbar and the page makes room',
+        during > before && after === before && stillBand,
+        `page top ${before} -> ${during} -> ${after}, toolbar kept: ${stillBand}`);
     }
     check('a search reports how many matches it found',
       Boolean(result) && result.matches > 0,
@@ -1977,17 +1977,19 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const shut = shell.contentBounds();
 
     shell.setSidebarOpen(true, { now: true });
-    const openWide = chromeWidth();
+    const stripOut = shell.stripView && shell.stripView.getVisible() ? shell.stripView.getBounds() : null;
+    const stillUnder = shell.chromeBehind && chromeWidth() === shell.window.getContentBounds().width;
     const whileOpen = shell.contentBounds();
 
     // At rest the chrome is the whole window *under* the page: the page covers
-    // all of it but the toolbar band across the top and the edge, so the
-    // window keeps its controls while the strip is away. Open, it is the
-    // strip's column, on top.
-    check('the side strip is an edge, under a toolbar that stays, until the pointer reaches it',
+    // all of it but the toolbar band across the top, so the window keeps its
+    // controls while the tabs are away. Out, the tabs are a panel of their own
+    // below that toolbar, over the page, and the toolbar has not moved.
+    check('tucked away, the toolbar stays and the tabs come out as a panel below it',
       edgeRest.behind && edgeRest.width === shell.window.getContentBounds().width &&
-        edgeRest.pageAbove && openWide === SIDEBAR_WIDTH && !shell.chromeBehind,
-      `at rest ${JSON.stringify(edgeRest)}, ${openWide}px open`);
+        edgeRest.pageAbove && stillUnder && Boolean(stripOut) && stripOut.width === SIDEBAR_WIDTH &&
+        stripOut.y === shut.y && stripOut.x > 0,
+      `at rest ${JSON.stringify(edgeRest)}, panel ${JSON.stringify(stripOut)}, toolbar kept: ${stillUnder}`);
     check('sliding it out does not move the page',
       whileOpen.x === shut.x && whileOpen.width === shut.width,
       `page at ${shut.x}px wide ${shut.width} -> ${whileOpen.x}px wide ${whileOpen.width}`);

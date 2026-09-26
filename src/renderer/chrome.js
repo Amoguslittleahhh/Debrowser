@@ -18,6 +18,12 @@ const api = window.debrowser;
 // out once without the gutter and then reflowed with it.
 if (api && api.platform) document.body.dataset.platform = api.platform;
 
+// The same page serves as the floating tab panel of the tucked-away layout,
+// loaded with ?role=strip: only its tab list shows, over the page, below a
+// toolbar that the main chrome keeps drawing across the top. See window.js.
+const ROLE = new URLSearchParams(location.search).get('role') || 'chrome';
+if (ROLE === 'strip') document.body.dataset.role = 'strip';
+
 /**
  * How long the pointer must rest on a tab before its renderer is rebuilt
  * speculatively. Long enough that sweeping across the strip costs nothing,
@@ -157,7 +163,8 @@ function reportHover(over) {
 // there, in plain sight of the strip's edge, opened nothing.
 let pageEdge = 18;
 const TOP_BAND = 40;
-const opens = (e) => document.body.dataset.compact !== 'true' || (e.clientX < pageEdge && e.clientY >= TOP_BAND);
+const opens = (e) => ROLE === 'strip' || document.body.dataset.compact !== 'true' ||
+  (e.clientX < pageEdge && e.clientY >= TOP_BAND);
 document.addEventListener('mouseenter', (e) => reportHover(opens(e)));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside
@@ -222,7 +229,8 @@ function renderSidebar(sidebar) {
     document.body.classList.remove('sliding-out');
   }
   if (sidebar.edge > 0) pageEdge = sidebar.edge;
-  const compact = sidebar.compact === true;
+  // The panel is never the compact band; it is the thing the band opens.
+  const compact = ROLE !== 'strip' && sidebar.compact === true;
   if (document.body.dataset.compact !== String(compact)) {
     document.body.dataset.compact = String(compact);
   }

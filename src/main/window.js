@@ -510,7 +510,7 @@ class BrowserShell {
         if (!this.sidebarOpen || this.window.isDestroyed()) return;
         const at = screen.getCursorScreenPoint();
         const win = this.window.getContentBounds();
-        const b = this.chromeView.getBounds();
+        const b = (this.chromeCompact() && this.stripView ? this.stripView : this.chromeView).getBounds();
         const x = at.x - win.x;
         const y = at.y - win.y;
         if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return;
@@ -1534,7 +1534,9 @@ class BrowserShell {
     // layout here would be the caller knowing something the mechanism already
     // knows.
     clearTimeout(this.sidebarCloseTimer);
-    this.sidebarOpen = want;
+    // Tucked away, the bar is a row under the toolbar (contentArea makes room
+    // for it); the tabs stay where they are.
+    if (!this.chromeCompact()) this.sidebarOpen = want;
     this.layout();
     this.toChrome(want ? 'find-focus' : 'find-closed');
   }
@@ -1542,6 +1544,11 @@ class BrowserShell {
   /** A one-off message to the chrome, for the things that are not state. */
   toChrome(kind, payload = null) {
     send(this.chromeView, 'debrowser:ui', { kind, ...(payload || {}) });
+    // The panel has only tabs to draw; it needs to know its own shape, when
+    // to slide away, and when a drag it started has ended.
+    if (kind === 'sidebar' || kind === 'sidebar-slide' || kind === 'pointer-released') {
+      send(this.stripView, 'debrowser:ui', { kind, ...(payload || {}) });
+    }
   }
 
   /** Put the keyboard back in the chrome - for Ctrl+L, and for the find bar. */
@@ -1663,7 +1670,9 @@ class BrowserShell {
    * which still opens the strip.
    */
   chromeCompact() {
-    return this.vertical() && !this.fullScreen() && !this.sidebarPinned() && !this.sidebarOpen && !this.detached();
+    // Whether or not the tabs are out: they come out as their own panel (the
+    // strip view, `layoutStrip`), so the toolbar across the top never moves.
+    return this.vertical() && !this.fullScreen() && !this.sidebarPinned() && !this.detached();
   }
 
   /** Put the chrome under the page, or back on top of it. */
@@ -1699,7 +1708,7 @@ class BrowserShell {
     if (!this.vertical() || this.sidebarPinned()) return;
     // The find bar is drawn inside this column, so while it is up the pointer
     // does not get to close the thing the bar is in.
-    if (this.findOpen) return;
+    if (this.findOpen && !this.chromeCompact()) return;
     clearTimeout(this.sidebarCloseTimer);
     clearTimeout(this.sidebarOpenTimer);
     if (open && !now && !this.sidebarOpen && !this.sidebarSliding) {
@@ -1762,6 +1771,76 @@ class BrowserShell {
   }
 
   /**
+   * The tabs, brought out while they are tucked away: a panel of their own
+   * below the toolbar, inset from the page's edges, over the page - Zen's
+   * compact mode. Its own view because the toolbar has to stay where it is,
+   * and the main chrome, which draws it, is the whole window under the page;
+   * a view is one rectangle and cannot be both. Created the first time it is
+   * wanted and kept, hidden, after.
+   */
+  layoutStrip() {
+    const want = this.chromeCompact() && this.sidebarOpen;
+    if (!want) {
+      if (this.stripView) this.stripView.setVisible(false);
+      return;
+    }
+    const view = this.ensureStrip();
+    const area = this.contentArea();
+    view.setBounds({ x: CONTENT_GAP, y: area.y, width: SIDEBAR_WIDTH, height: area.height });
+    // Grid is square; every other design floats a rounded panel.
+    const radius = this.prefs.get('design') === 'grid' ? 0 : FLOAT_RADIUS;
+    if (this.laidOutStripRadius !== radius) {
+      this.laidOutStripRadius = radius;
+      setRadius(view, radius);
+    }
+    const root = this.window.contentView;
+    if (root.children[root.children.length - 1] !== view) {
+      root.removeChildView(view);
+      root.addChildView(view);
+    }
+    view.setVisible(true);
+  }
+
+  ensureStrip() {
+    if (this.stripView) return this.stripView;
+    const view = new WebContentsView({
+      webPreferences: {
+        preload: CHROME_PRELOAD,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false,
+        transparent: true,
+        additionalArguments: preloadArgs(this.prefs)
+      }
+    });
+    try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+    this.bindShortcuts(view.webContents);
+    view.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'), { query: { role: 'strip' } }).catch(() => {});
+    view.webContents.on('did-finish-load', () => {
+      if (this.lastState) send(view, 'debrowser:state', this.lastState);
+    });
+    this.window.contentView.addChildView(view);
+    view.setVisible(false);
+    this.stripView = view;
+    return view;
+  }
+
+  /** A command from the panel speaks in its own coordinates; the window's are wanted. */
+  fromStrip(sender, payload) {
+    const view = this.stripView;
+    if (!view || !sender || !payload || typeof payload !== 'object') return payload;
+    const wc = view.webContents;
+    if (!wc || wc.isDestroyed() || wc.id !== sender.id) return payload;
+    const { x, y } = view.getBounds();
+    const out = { ...payload };
+    if (Number.isFinite(out.x)) out.x += x;
+    if (Number.isFinite(out.y)) out.y += y;
+    if (Number.isFinite(out.right)) out.right += x;
+    return out;
+  }
+
+  /**
    * Whether translucency is in force in the layout the window is in now.
    *
    * Not down the side while the strip slides over the page - tucked away or
@@ -1772,7 +1851,7 @@ class BrowserShell {
    */
   translucentNow() {
     if (!(this.prefs.get('windowOpacity') < 1)) return false;
-    return !this.vertical() || this.sidebarPinned();
+    return !this.vertical() || !this.detached();
   }
 
   /**
@@ -1833,13 +1912,17 @@ class BrowserShell {
       // sidebar slides out over the page rather than pushing it: a page that
       // reflowed every time the pointer touched the window edge would be the
       // most distracting thing in the browser.
+      // Tucked away, nothing is drawn at the edge: the page has the same
+      // margin on every side, and the find bar, when it is up, is a row under
+      // the toolbar that the page moves down for.
       const gap = this.cardInset();
-      const left = (this.sidebarPinned() ? SIDEBAR_WIDTH : SIDEBAR_EDGE) + gap;
+      const left = this.sidebarPinned() ? SIDEBAR_WIDTH + gap : gap;
+      const top = SIDEBAR_TOP_BAND + gap + (this.chromeCompact() && this.findOpen ? FIND_BAR_HEIGHT : 0);
       return {
         x: left,
-        y: SIDEBAR_TOP_BAND + gap,
+        y: top,
         width: Math.max(0, width - left - gap - panelWidth),
-        height: Math.max(0, height - SIDEBAR_TOP_BAND - gap * 2)
+        height: Math.max(0, height - top - gap)
       };
     }
 
@@ -1942,6 +2025,7 @@ class BrowserShell {
       this.laidOutChromeRadius = chromeRadius;
       setRadius(this.chromeView, chromeRadius);
     }
+    this.layoutStrip();
 
     const bounds = this.contentBounds();
     // No card, and no corners, while full screen: the page is the window.
@@ -1998,7 +2082,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
+    for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }
@@ -2037,7 +2121,9 @@ class BrowserShell {
     this.showCrashed(Boolean(this.tabs.activeTab()?.crashed));
     // Null in the ordinary browser, which is how every view tells the two apart.
     full.incognito = this.incognito ? this.incognito() : null;
+    this.lastState = full;
     send(this.chromeView, 'debrowser:state', full);
+    send(this.stripView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
     // And the sheet, while one is up. The menu takes its preferences off the
     // `menu-model` reply and would not need this; the downloads flyout has no
@@ -2071,6 +2157,7 @@ class BrowserShell {
   }
 
   destroy() {
+    try { this.stripView?.webContents.close(); } catch { /* gone */ }
     this.closeSheet();
     this.togglePanel(false);
     if (!this.window.isDestroyed()) this.window.destroy();

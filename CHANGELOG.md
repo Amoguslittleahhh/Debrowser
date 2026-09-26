@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Tucked-away tabs work like Zen's compact mode, in every design.** The toolbar stays across the top and never moves; nothing is drawn at the window's edge, so the page has the same slim margin on every side. Point at the left edge and the tabs slide out as a panel of their own below the toolbar, over the page, and slide back when you move away. Find, with the tabs tucked away, is a row under the toolbar.
+- **Translucency works with the tabs down the side again.** The toolbar and the margins round the page show the window material; the tab panel, which lies over the page, stays solid.
+- **No glowing line down the left edge.** It took room from the page for a hint that pointing at the edge now gives anyway.
+
 ## 1.8.5
 
 - **Translucency comes back after a restart.** Windows ignored the window material when it was set before the window was on screen, so the glass appeared only after changing the setting and was gone on the next start. It is set again once the window is showing, and after it is maximised or restored.
