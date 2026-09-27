@@ -551,6 +551,8 @@ class Tab {
 
     wc.on('did-navigate', (_e, url) => {
       this.url = url;
+      // A new document has asked for no protected video yet.
+      this.drmNeeded = false;
       this.httpFallback = null;
       this.failed = false;
       this.rebuiltFrom = null;
@@ -1083,6 +1085,8 @@ class Tab {
       muted: this.muted,
       loading: this.loading,
       crashed: this.crashed,
+      // The page asked for DRM video this browser cannot play; see probe-preload.js.
+      drm: Boolean(this.drmNeeded),
       // The page did not load: no padlock, whatever the scheme says.
       failed: Boolean(this.failed),
       pinned: this.pinned,

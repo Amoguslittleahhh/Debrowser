@@ -118,6 +118,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   check('all tabs load and get renderer processes', allLoaded,
     `pids: ${opened.map((t) => t.pid).join(', ')}`);
 
+  // Protected video: this build has no Widevine, so the page is refused it
+  // exactly as before, and the browser offers to open it elsewhere - while
+  // Clear Key, which is not DRM, raises nothing.
+  {
+    // Loopback, because EME exists only in a secure context.
+    const local = new URL(pageUrl('idle.html'));
+    local.hostname = '127.0.0.1';
+    await home.wc.loadURL(local.href).catch(() => {});
+    const ask = (system) => home.wc.executeJavaScript(`navigator.requestMediaKeySystemAccess('${system}',
+      [{ initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }] }])
+      .then(() => 'granted', (e) => e.name)`);
+    const clear = await ask('org.w3.clearkey');
+    await sleep(300);
+    const quietForClearKey = !home.drmNeeded;
+    const widevine = await ask('com.widevine.alpha');
+    const flagged = await waitFor(() => home.drmNeeded === true, { timeoutMs: 3000 });
+    const native = await home.wc.executeJavaScript('String(navigator.requestMediaKeySystemAccess).includes("[native code]")');
+    check('a page refused DRM video is noticed, and the page sees the untouched refusal',
+      clear === 'granted' && quietForClearKey && widevine === 'NotSupportedError' && flagged && native &&
+      home.toJSON().drm === true,
+      `clear key ${clear}, widevine ${widevine}, flagged ${flagged}, native-looking ${native}`);
+    await home.wc.loadURL(pageUrl('idle.html')).catch(() => {});
+    check('a new page clears the protected-video notice', !home.drmNeeded);
+  }
+
   await sleep(1500);
   await settledSample(governor);
 

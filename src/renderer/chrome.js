@@ -45,6 +45,7 @@ const el = {
   star: document.getElementById('star'),
   privatePill: document.getElementById('private'),
   onion: document.getElementById('onion'),
+  drm: document.getElementById('drm'),
   slowJs: document.getElementById('slow-js'),
   privateText: document.getElementById('private-text'),
   bookmarks: document.getElementById('bookmarks'),
@@ -1107,6 +1108,7 @@ function renderToolbar(state) {
     if (moved || (!urlEdited && el.url.value !== addressText(active.url))) setAddress(active.url, failed);
   }
   if (active) lastActiveId = active.id;
+  el.drm.hidden = !active?.drm;
 
   // A website away from the default size says so, and one press puts it back.
   // Not for our own pages: Settings opens a notch larger on purpose.
@@ -1640,6 +1642,7 @@ function renderPrivate(incognito) {
 }
 
 el.onion.addEventListener('click', () => api.send('open-onion'));
+el.drm.addEventListener('click', () => api.send('open-drm-elsewhere'));
 el.slowJs.addEventListener('click', () => api.send('dismiss-slow-js'));
 el.privatePill.addEventListener('click', () => api.send('navigate', { url: 'debrowser://tor' }));
 

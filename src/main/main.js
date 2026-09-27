@@ -1596,6 +1596,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // The onion address the tab's site offered, opened in the same tab.
       // Taken from what the site sent, never from the renderer's payload.
+      // Protected video, handed to a browser that can play it. The address is
+      // the tab's own, never the renderer's payload, and only http(s).
+      case 'open-drm-elsewhere': {
+        if (INCOGNITO || !active || !active.isLive || !active.drmNeeded) break;
+        const url = active.wc.getURL();
+        if (/^https?:\/\//i.test(url)) openInOtherBrowser(url, log);
+        break;
+      }
+
       case 'open-onion': {
         if (!INCOGNITO || !active || !active.isLive) break;
         const onion = policy.onionFor(active.wc.id);
@@ -3213,6 +3222,29 @@ function fillSavedLogin(tab, credentials, prefs, log, vault = null) {
  * settings window is: a second Settings tab is never what the user meant, and
  * two of them can disagree about what the current preferences are.
  */
+/**
+ * Open a page in a browser that can play DRM video.
+ *
+ * The system's default browser, unless that is Debrowser itself - which would
+ * hand the page straight back. Then the one every system has: Edge on Windows,
+ * Safari on macOS (FairPlay, which the streaming sites also serve).
+ */
+function openInOtherBrowser(url, log) {
+  const fail = (err) => log(`could not open ${url} elsewhere: ${err.message}`);
+  let weAreDefault = false;
+  try { weAreDefault = app.isDefaultProtocolClient('https'); } catch { /* unknown: assume not */ }
+  if (!weAreDefault) { electronShell.openExternal(url).catch(fail); return; }
+  if (process.platform === 'win32') {
+    electronShell.openExternal(`microsoft-edge:${url}`).catch(fail);
+  } else if (process.platform === 'darwin') {
+    const child = require('child_process').spawn('open', ['-a', 'Safari', url], { stdio: 'ignore', detached: true });
+    child.on('error', fail);
+    child.unref();
+  } else {
+    electronShell.openExternal(url).catch(fail);
+  }
+}
+
 function openInternalPage(tabs, url) {
   // Matched by page name, not by URL string. Once the page has loaded, the tab
   // reports the URL Chromium normalised it to - `debrowser://settings/`, with a

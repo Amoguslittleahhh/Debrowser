@@ -713,3 +713,46 @@ if (!process.argv.includes('--debrowser-private') && window === window.top &&
     if (event.button === 0) prefetch(linkOf(event.target));
   }, { capture: true, passive: true });
 }
+
+/*
+ * Protected video.
+ *
+ * This build of Electron has no Widevine, so a site that plays DRM video -
+ * Netflix, Disney+, Prime Video, Spotify - is refused the key system and shows
+ * its own error. The browser cannot fix that from here without shipping a
+ * third-party Electron, so it says so instead, and offers to open the page in
+ * a browser that can play it. `requestMediaKeySystemAccess` is watched, not
+ * changed: the page gets exactly the answer it would have got, and the
+ * browser hears only which key system was refused.
+ *
+ * Not in private windows, where there is nowhere to send the page that would
+ * not leave Tor.
+ */
+if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol)) {
+  const { contextBridge } = require('electron');
+  let told = false;
+  const tell = (system) => {
+    if (told) return;
+    told = true;
+    ipcRenderer.send('debrowser:drm-needed', String(system).slice(0, 64));
+  };
+  try {
+    contextBridge.executeInMainWorld({
+      func: (report) => {
+        const proto = window.Navigator.prototype;
+        const original = proto.requestMediaKeySystemAccess;
+        if (typeof original !== 'function') return;
+        proto.requestMediaKeySystemAccess = new Proxy(original, {
+          apply(target, self, args) {
+            const result = Reflect.apply(target, self, args);
+            const system = String(args[0] || '');
+            // Clear Key is not DRM, and it works here.
+            if (system !== 'org.w3.clearkey') result.catch(() => report(system));
+            return result;
+          }
+        });
+      },
+      args: [tell]
+    });
+  } catch { /* an older bridge: no notice, and nothing else changes */ }
+}

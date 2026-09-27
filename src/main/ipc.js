@@ -28,6 +28,14 @@ class IpcHub {
   }
 
   wire() {
+    // A page was refused protected video. Private windows never send it.
+    ipcMain.on('debrowser:drm-needed', (event) => {
+      const tab = this.tabForWebContents(event.sender.id);
+      if (!tab || tab.drmNeeded) return;
+      tab.drmNeeded = true;
+      tab.emit('updated');
+    });
+
     ipcMain.on('debrowser:probe', (event, payload) => {
       const tab = this.tabForWebContents(event.sender.id);
       if (!tab) return;

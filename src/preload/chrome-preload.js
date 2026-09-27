@@ -40,6 +40,7 @@ const COMMANDS = new Set([
   'allow-http',
   'new-circuit',
   'open-onion',
+  'open-drm-elsewhere',
   'dismiss-slow-js',
   'panic',
   'fingerprint-expected',
