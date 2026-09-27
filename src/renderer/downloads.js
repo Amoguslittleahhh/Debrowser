@@ -264,13 +264,21 @@ window.addEventListener('keydown', (event) => {
 
 /** Whether this is a private window's downloads page, from the state broadcast. */
 let privateWindow = false;
+/** How many downloads there are and how many run, as last broadcast. */
+let seenSummary = '';
 api.onState((state) => {
   applyThemePrefs(state.prefs);
-  if (Boolean(state.incognito) !== privateWindow) {
+  // A download started elsewhere, or one finishing, shows up here: the page
+  // only polls while something runs, so with nothing running it never
+  // noticed a new one until it was reloaded.
+  const summary = state.downloads ? `${state.downloads.count}/${state.downloads.active}` : '';
+  if (Boolean(state.incognito) !== privateWindow || summary !== seenSummary) {
     privateWindow = Boolean(state.incognito);
+    seenSummary = summary;
     load();
   }
 });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 
 // A half-written search keeps this page off the reclaim ladder; see theme.js.
 watchTransientInput(api);

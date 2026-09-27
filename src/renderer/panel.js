@@ -440,6 +440,15 @@ el.budgetInput.addEventListener('change', () => {
   api.send('set-budget', { mb: budgetSent });
 });
 
+// Dragged away and back to where it started, the slider fires no `change`,
+// so nothing was sent and nothing ever let it follow the setting again. Let
+// go without a change, it follows again at once.
+const letGo = () => setTimeout(() => {
+  if (budgetPinnedByUser && budgetSent === null) budgetPinnedByUser = false;
+}, 0);
+el.budgetInput.addEventListener('pointerup', letGo);
+el.budgetInput.addEventListener('blur', letGo);
+
 api.onState((state) => {
   applyThemePrefs(state.prefs);
   render(state);

@@ -86,7 +86,10 @@ function tile(item) {
   forget.setAttribute('aria-label', `Forget ${host}`);
   forget.addEventListener('click', async (event) => {
     event.stopPropagation();
-    await api.request('forget-site', { url: item.url });
+    const res = await api.request('forget-site', { url: item.url });
+    // Refused - a private window keeps no history to forget from - is not
+    // gone: fading it anyway showed a tile that came back on the next new tab.
+    if (!res) return;
     // Faded where it stands, keeping its place in the grid until the next new
     // tab: removing it slid every tile after it sideways under the pointer
     // and re-centred the page.

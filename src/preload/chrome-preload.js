@@ -52,7 +52,6 @@ const COMMANDS = new Set([
   'reload',
   'stop',
   'toggle-panel',
-  'set-profile',
   'set-budget',
   'discard-tab',
   'move-tab',

@@ -170,7 +170,7 @@ main {
   transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.tile:hover .tile-forget { opacity: 1; }
+.tile:hover .tile-forget, .tile:focus-within .tile-forget { opacity: 1; }
 .tile-forget:hover { color: var(--crit); }
 
 /* A forgotten tile: gone from sight, its place kept. */

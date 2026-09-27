@@ -23,7 +23,11 @@ window.addEventListener('keydown', (event) => {
   }
   const step = SCROLL[event.key];
   if (step === undefined) return;
-  const by = Math.abs(step) < 1 ? step * groups.clientHeight * (event.shiftKey ? -1 : 1) : step;
+  // Space on a focused button presses it - the Close button.
+  if (event.key === ' ' && event.target.closest && event.target.closest('button')) return;
+  // Shift turns Space around, as on a page; Shift+PageUp is still up.
+  const back = event.key === ' ' && event.shiftKey ? -1 : 1;
+  const by = Math.abs(step) < 1 ? step * groups.clientHeight * back : step;
   groups.scrollBy({ top: by });
   event.preventDefault();
 });

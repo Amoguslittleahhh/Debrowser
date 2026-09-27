@@ -123,6 +123,8 @@ function setStar(on) {
   starred = on;
   el.star.classList.toggle('on', Boolean(on));
   el.star.title = on ? 'Remove bookmark' : 'Bookmark this page (Ctrl+D)';
+  el.star.setAttribute('aria-label', 'Bookmark this page');
+  el.star.setAttribute('aria-pressed', String(Boolean(on)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -206,7 +208,9 @@ function renderSidebar(sidebar) {
   if (el.pin.getAttribute('aria-pressed') !== String(pinned)) {
     el.pin.setAttribute('aria-pressed', String(pinned));
     el.pin.title = pinned ? 'Tuck the tabs away: they come out from the left edge' : 'Keep the tabs beside the page';
-    el.pin.setAttribute('aria-label', el.pin.title);
+    // The label stays "Keep the tabs beside the page" (chrome.html) and the
+    // pressed state says whether they are: a label that turned into the
+    // opposite action beside aria-pressed announced two contradicting things.
   }
   // The contents are faded out rather than removed while the strip is a
   // ten-pixel edge: at that width they would be a column of clipped glyphs,
@@ -669,6 +673,11 @@ document.getElementById('tabstrip').addEventListener('mouseleave', releaseTabWid
 function createTabElement(id) {
   const root = document.createElement('div');
   root.className = 'tab';
+  // Its entrance plays once. Moved in the DOM - a drag dropping it somewhere
+  // new - the animation would start again and the tab blink out and back.
+  root.addEventListener('animationend', (e) => {
+    if (e.animationName === 'tab-in') root.classList.add('entered');
+  }, { once: true });
   root.dataset.id = String(id);
 
   const tier = document.createElement('span');
@@ -1127,6 +1136,9 @@ function renderToolbar(state) {
     const paths = el.reloadIcon.querySelectorAll('path');
     RELOAD_PATHS[shows].forEach((d, i) => paths[i].setAttribute('d', d));
     el.reload.title = shows === 'stop' ? 'Stop' : 'Reload (Ctrl+R)';
+    // The label too: a screen reader went on announcing "Reload" for a
+    // button that stops the load.
+    el.reload.setAttribute('aria-label', shows === 'stop' ? 'Stop' : 'Reload');
     reloadShows = shows;
   }
 }

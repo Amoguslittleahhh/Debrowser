@@ -136,6 +136,8 @@ function row(entry) {
           (!day.nextElementSibling || day.nextElementSibling.classList.contains('day'))) {
         day.remove();
       }
+      // The last one gone: drawn again, so the empty note says so.
+      if (!el.list.querySelector('.visit')) { load(); return; }
       refreshCount();
     }
   });
@@ -183,7 +185,8 @@ async function load() {
 /** Kept separate from `load` so deleting one row does not redraw the list. */
 async function refreshCount() {
   const res = await api.request('list-history', { query: el.query.value, limit: 1 });
-  if (res) showCount(res.total, null);
+  // Still "300 of 1200" when only part of the list is drawn, not "1200 pages".
+  if (res) showCount(res.total, el.list.querySelectorAll('.visit').length);
 }
 
 function showCount(total, shown) {

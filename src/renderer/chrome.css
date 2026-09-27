@@ -194,6 +194,9 @@ body[data-layout="left"] .tabs {
    rather than strobing each tab it crosses. */
 .tab:hover { transition-duration: var(--instant); }
 
+/* In place: a tab moved by a drag is re-inserted, which would replay this. */
+.tab.entered { animation: none; }
+
 @keyframes tab-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
@@ -274,7 +277,8 @@ body[data-layout="left"] .tabs {
 body[data-strip-tone="dark"] .tab:not(.active),
 body[data-strip-tone="dark"] .new-tab,
 body[data-strip-tone="dark"] .bookmarks,
-body[data-strip-tone="dark"] .pin {
+body[data-strip-tone="dark"] .pin,
+body[data-strip-tone="dark"][data-layout="left"] .toolbar > :is(.nav, .icon-btn, .meter) {
   --text: #eae7e0;
   --text-dim: #aaa69c;
   --border: #3a3a34;
@@ -282,7 +286,10 @@ body[data-strip-tone="dark"] .pin {
 body[data-strip-tone="light"] .tab:not(.active),
 body[data-strip-tone="light"] .new-tab,
 body[data-strip-tone="light"] .bookmarks,
-body[data-strip-tone="light"] .pin {
+body[data-strip-tone="light"] .pin,
+/* Down the side the toolbar sits on the strip too, not on the palette: its
+   buttons and meter were the theme's dim ink on a dark strip, barely there. */
+body[data-strip-tone="light"][data-layout="left"] .toolbar > :is(.nav, .icon-btn, .meter) {
   --text: #201f1c;
   --text-dim: #4f4a41;
   --border: #cfc9bd;
@@ -941,6 +948,10 @@ body[data-layout="left"] .star { order: 2; margin-left: auto; }
    leftmost control was a download arrow that is hidden most of the time. */
 body[data-layout="left"] .icon-btn.downloads { order: 3; }
 body[data-layout="left"] #menu { order: 4; }
+/* And the private window's own controls fell into it a third time: the Private
+   pill and ".onion" sat above the back button. They go under the address bar,
+   which is what they describe. */
+body[data-layout="left"] :is(.private-pill, #onion, #slow-js) { order: 7; }
 
 /*
  * The meter gets the column's full width here, rather than being squeezed onto
@@ -1553,7 +1564,9 @@ body[data-floating="true"] .toolbar {
   .tab:not(.active) .tab-close { display: none; }
 }
 @container tab (max-width: 45px) {
-  .tab.active .tab-icon { display: none; }
+  /* Not a pinned tab: it has no close button to show instead, and hiding its
+     icon left the active one an empty slot. */
+  .tab.active:not(.pinned) .tab-icon { display: none; }
   .tab.active .tab-close { margin-inline: auto; }
 }
 

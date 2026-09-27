@@ -27,6 +27,21 @@
 - **The browser can't unload the tab you just clicked** while it is still coming back.
 - **The task manager** in full screen starts level with the page, and opened with Ctrl+M while the menu is up it no longer covers the menu.
 - **Smaller fixes:** a click made while a menu was fading now arrives as a full click, not a press with no release; a failed "Restart to update" no longer turns off the close-tabs question; "Copy image" and "Inspect" act on the tab the menu was opened on; typing `www.` in the address bar completes; memory figures on macOS say "unknown" rather than 0 where they aren't measured; and a few timers, listeners and helper restarts that built up over a long session no longer do.
+- **The tab in front, pinned across the top, shows its icon** instead of an empty slot.
+- **A dragged tab settles into place** instead of blinking out and fading back in where it was dropped.
+- **In a private window with tabs down the side,** the Private and ".onion" buttons sit under the address bar instead of above the back button.
+- **The side panel's buttons are readable on a dark strip colour in the light theme.**
+- **Settings:** pressing Enter on Cancel while editing a bookmark cancels instead of saving; removing a bookmark no longer throws away what was typed into "Add a bookmark"; and Escape on a list or slider no longer shows an old value for a moment.
+- **The passwords page clears a shown password when it locks itself,** not only when locked by hand.
+- **The menu's zoom Reset** goes back to your default zoom and is greyed out there, rather than assuming 100%.
+- **The downloads page shows new downloads** without being reloaded.
+- **The site panel's zoom row lines up** with the rows above it.
+- **In the shortcuts sheet,** Shift+Page Up and Shift+Page Down scroll the right way and Space presses the focused Close button.
+- **The task manager's budget slider** follows the setting again after being dragged back to where it started.
+- **Buttons that appear on hover also appear on keyboard focus** in history, the new tab page and the task manager.
+- **History:** deleting the last entry shows the empty-list note, and the count keeps saying "300 of 1,200 pages" after a delete.
+- **Forgetting a new-tab tile in a private window** no longer pretends to work.
+- **Screen readers** hear Stop when the reload button stops a load, whether the page is bookmarked, the private connection's actual state, and one steady label on the side-panel button.
 - **Private windows:**
   - Their pages are no longer trimmed to the pagefile or swap under memory pressure; that path skipped the rule that turns trimming off for them.
   - Typing an address into a tab the browser had unloaded now waits for the fingerprint shield before the site loads, and no longer loads the old address over the new one.

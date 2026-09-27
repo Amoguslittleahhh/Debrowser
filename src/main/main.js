@@ -3458,6 +3458,8 @@ function menuModel({ tabs, shell }) {
     ...(INCOGNITO ? [] : [{ id: 'open-passwords', label: 'Passwords', icon: 'key' }]),
     { kind: 'separator' },
     { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live,
+      // What Reset goes back to: the default zoom, which need not be 100%.
+      reset: Math.round((shell.prefs?.get('defaultZoom') || 1) * 100),
       // The ends of the ladder, so − and + can say when there is no further.
       min: Math.round(ZOOM_STEPS[0] * 100), max: Math.round(ZOOM_STEPS[ZOOM_STEPS.length - 1] * 100) },
     {

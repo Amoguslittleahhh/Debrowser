@@ -135,7 +135,7 @@ function zoomRow(item) {
   reset.type = 'button';
   reset.textContent = 'Reset';
   reset.dataset.zoom = 'reset';
-  reset.disabled = item.enabled === false || item.value === 100;
+  reset.disabled = item.enabled === false || item.value === (item.reset ?? 100);
   reset.addEventListener('click', () => step('reset'));
 
   const out = document.createElement('button');

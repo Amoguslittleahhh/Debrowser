@@ -801,7 +801,10 @@ window.addEventListener('keydown', (event) => {
   // search box has its own Escape, and is the exception.
   const t = event.target;
   if (t && t.id !== 'q' && t.matches && t.matches('input, select, textarea')) {
-    if (valueOnFocus.has(t)) t.value = valueOnFocus.get(t);
+    // Typed fields only. A list or a slider saves as it changes, so putting
+    // back its old value showed a choice that was no longer the setting.
+    const typed = t.matches('textarea, input:not([type="range"]):not([type="checkbox"]):not([type="radio"])');
+    if (typed && valueOnFocus.has(t)) t.value = valueOnFocus.get(t);
     t.blur();
     return;
   }
@@ -1356,7 +1359,10 @@ async function renderBookmarks() {
   const state = document.getElementById('bookmark-state');
   if (!host || !actions) return;
 
-  actions.replaceChildren(
+  // Built once. This runs again after every add, edit and remove, and
+  // rebuilding threw away whatever was half-typed into the Add form - and,
+  // with it gone, left the page reporting unsaved input it no longer had.
+  if (!actions.childElementCount) actions.replaceChildren(
     // First, because adding one by hand is the thing a bookmarks page is for.
     // Importing is a once-a-year operation and sat above it until now.
     bookmarkForm(),
@@ -1597,7 +1603,9 @@ function bookmarkForm(item = null) {
   // Escape is Cancel, and handled: the page's own Escape would otherwise put
   // back the value the field had on focus, undoing the Clear.
   row.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') { event.preventDefault(); save.click(); }
+    // From the fields only: Enter on a focused button is that button's own
+    // press, and taking it for Save saved the edit someone Tabbed to Cancel.
+    if (event.key === 'Enter' && event.target.tagName === 'INPUT') { event.preventDefault(); save.click(); }
     else if (event.key === 'Escape') { event.preventDefault(); cancel.click(); }
   });
 

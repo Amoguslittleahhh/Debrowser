@@ -94,6 +94,7 @@ section { padding: var(--s3) var(--s4) var(--s3); }
 
 .note {
   margin: var(--s2) 0 0;
+  padding: 0;                /* menu.css's is for the menu */
   font-size: var(--fs-small);
   color: var(--text-dim);
 }
@@ -105,6 +106,10 @@ section { padding: var(--s3) var(--s4) var(--s3); }
   min-height: 30px;
   margin-top: var(--s1);
 }
+/* menu.css is loaded here too, and its menu zoom row - `.zoom`, indented to
+   the menu's icon column - put this panel's zoom row 36px to the right of the
+   rows above it. */
+.row.zoom { height: auto; padding: 0; }
 .row .value { flex: 1; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 .foot {

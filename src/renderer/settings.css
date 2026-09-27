@@ -421,14 +421,6 @@ input[type="range"] {
 .ghost-btn:disabled,
 .ghost-btn:disabled:hover { opacity: 0.45; background: transparent; border-color: var(--border); cursor: default; }
 
-/* A revealed secret is selectable - the point of showing one is usually to
-   copy it - and wraps rather than stretching the row off the page. */
-#credential-list .row-hint {
-  user-select: text;
-  cursor: text;
-  word-break: break-all;
-}
-
 .note {
   max-width: 840px;
   margin: var(--s3) 2px 0;
@@ -455,16 +447,6 @@ h2 + .note { margin: 0 2px var(--s4); }
 }
 .update-foot .note { flex: 1; margin-top: 0; }
 .update-foot .ghost-btn { flex: none; }
-
-/*
- * A slider's track is thin by design, and a thin track is a thin target. The
- * padding grows the element the pointer has to find without changing the line
- * it draws, so the control looks identical and is twice as easy to grab.
- */
-input[type="range"] {
-  padding: 8px 0;
-  box-sizing: content-box;
-}
 
 /*
  * The section a deep link asked for.
@@ -503,11 +485,6 @@ section.landed .rows {
 /* A form is one row taller than the rows around it; the buttons stay with the
    fields rather than drifting to the middle of that extra height. */
 .bookmark-form .row-control { align-self: center; }
-
-/* The end-of-page sentinel the rail watches. Zero height, no room taken: it
-   exists so "the bottom is in view" is an observation like any other rather
-   than a scroll handler. */
-.rail-end { height: 0; }
 
 /* A setting that does nothing here says so, and looks it. */
 .row.unavailable .row-label { color: var(--text-dim); }

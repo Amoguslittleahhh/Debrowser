@@ -54,7 +54,9 @@ async function refresh() {
   }
   if (!status.configured) { show('off'); return; }
   if (!status.unlocked) {
-    if (el.locked.hidden) show('locked');
+    // Locked by time as well as by the button: a password shown before the
+    // vault locked itself stayed in the page, hidden, until the next unlock.
+    if (el.locked.hidden) { clearLists(); show('locked'); }
     await offerPresence();
     waitNote(status.waitMs);
     return;
