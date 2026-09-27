@@ -25,6 +25,10 @@ and are worth knowing rather than rediscovering:
 
 ## Releases
 
+Release only when the owner says to. Fixes, however urgent, go under
+`## Unreleased` in `CHANGELOG.md` and wait there, so a release carries a batch
+rather than one small fix each.
+
 Every release credits the owner and the bot side by side, in the body:
 
 ```
