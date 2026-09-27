@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.0
 
 - **Tabs down the side work like Zen.** Everything lives in the side panel: back, forward, reload, the bookmark star, the menu, the address bar, the tabs and the memory meter (click it for the task manager). The button at the foot of the panel switches between keeping it beside the page and tucking it away; tucked away, the page fills the whole window and the full panel, toolbar and all, slides out over it when you point at the left edge. The strip across the top that held half a toolbar is gone, and so is the separate detach button — tucking the panel away is detaching it.
 - **Side tabs start beside the page,** as Zen starts, rather than tucked away.
