@@ -91,7 +91,7 @@ const SIDEBAR_CLOSE_MS = 220;
 const SIDEBAR_OPEN_MS = 90;
 
 /** How long a detached strip takes to slide back out; see setSidebarOpen. */
-const DETACH_SLIDE_MS = 180;
+const DETACH_SLIDE_MS = 200;   // chrome.css, .sliding-out
 
 /**
  * How much of the content area a docked inspector takes, and the least it may
@@ -1704,6 +1704,48 @@ class BrowserShell {
     return this.prefs ? this.prefs.get('sidebarPinned') === true : false;
   }
 
+  /**
+   * The left edge, watched from here as well as by the chrome's own hover.
+   *
+   * On Windows the outer pixels of a frameless window are its resize border:
+   * the system hit-tests them itself, and the page underneath never hears the
+   * pointer. A pointer pushed against the screen's edge - the natural way to
+   * reach it - stopped there, so the strip opened on some tries and not
+   * others. While the strip is tucked away and the window has the keyboard,
+   * the cursor's position is read a few times a second instead, which no
+   * border can hide.
+   */
+  watchEdge() {
+    const want = this.detached() && !this.sidebarOpen && !this.window.isDestroyed() &&
+      this.window.isVisible() && !this.window.isMinimized();
+    if (!want) {
+      clearInterval(this.edgeTimer);
+      this.edgeTimer = null;
+      this.edgeHeld = false;
+      return;
+    }
+    if (this.edgeTimer) return;
+    this.edgeTimer = setInterval(() => {
+      if (this.window.isDestroyed() || !this.detached() || this.sidebarOpen) { this.watchEdge(); return; }
+      if (!this.window.isFocused()) return;
+      const at = screen.getCursorScreenPoint();
+      const b = this.window.getContentBounds();
+      const inside = at.y >= b.y && at.y < b.y + b.height && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_EDGE;
+      if (inside && !this.edgeHeld) {
+        this.edgeHeld = true;
+        this.setSidebarOpen(true);
+      } else if (!inside && this.edgeHeld) {
+        this.edgeHeld = false;
+        // Left before the pause ran out: a brush past the edge, not a visit.
+        if (!this.sidebarOpen) {
+          clearTimeout(this.sidebarOpenTimer);
+          this.sidebarPointerOver = false;
+        }
+      }
+    }, 50);
+    this.edgeTimer.unref?.();
+  }
+
   /** How much width the chrome occupies in sidebar mode, right now. */
   sidebarWidth() {
     if (!this.vertical()) return 0;
@@ -1835,7 +1877,7 @@ class BrowserShell {
    * dark background as the strip.
    */
   cardInset() {
-    return this.vertical() && !this.fullScreen() && !this.detached() ? CONTENT_GAP : 0;
+    return this.vertical() && !this.fullScreen() ? CONTENT_GAP : 0;
   }
 
   contentArea() {
@@ -1849,8 +1891,19 @@ class BrowserShell {
     //
     // Except while the chrome is back for the find or address bar, where it is
     // a band again and the page moves down for it exactly as it always does.
-    if ((this.fullScreen() && (this.vertical() || this.chromeHidden())) || this.detached()) {
+    if (this.fullScreen() && (this.vertical() || this.chromeHidden())) {
       return { x: 0, y: 0, width: Math.max(0, width - panelWidth), height };
+    }
+    // Tucked away, as Zen's compact mode: the page is a card with the same
+    // small margin on every side, not a sheet run to the window's edges - and
+    // the margin on the left is where the pointer finds the strip.
+    if (this.detached()) {
+      const gap = CONTENT_GAP;
+      return {
+        x: gap, y: gap,
+        width: Math.max(0, width - gap * 2 - panelWidth),
+        height: Math.max(0, height - gap * 2)
+      };
     }
 
     if (this.vertical()) {
@@ -1915,6 +1968,7 @@ class BrowserShell {
     // Belt and braces: a zero or negative client area is not a layout, it is a
     // transient state to sit out.
     if (width <= 0 || height <= 0) return;
+    this.watchEdge();
 
     // An inspector whose page has gone - crashed, or discarded out from under
     // it - is a dead view holding a share of the window. Dropped here rather
@@ -1963,7 +2017,7 @@ class BrowserShell {
 
     const bounds = this.contentBounds();
     // No card, and no corners, while full screen: the page is the window.
-    const radius = this.vertical() && !this.fullScreen() && !this.detached() ? CONTENT_RADIUS : 0;
+    const radius = this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0;
     // Applied on a change rather than every layout, which runs on every resize
     // and every tab switch.
     const reshape = this.laidOutCard !== radius;
@@ -2104,6 +2158,8 @@ class BrowserShell {
   }
 
   destroy() {
+    clearInterval(this.edgeTimer);
+    this.edgeTimer = null;
     this.closeSheet();
     this.togglePanel(false);
     if (!this.window.isDestroyed()) this.window.destroy();

@@ -2010,10 +2010,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // and the strip - toolbar, address bar, tabs - floats over it as a panel
     // when the pointer reaches the left edge. Nothing stays behind across the
     // top: the old band there held half a toolbar and lost the rest.
-    check('tucked away, the page fills the window and the whole strip floats over it on demand',
-      whole.x === 0 && whole.y === 0 && whole.width === winW && edge.width === SIDEBAR_EDGE &&
+    check('tucked away, the page is a card with a margin all round and the whole strip floats over it on demand',
+      whole.x === CONTENT_GAP && whole.y === CONTENT_GAP && whole.width === winW - CONTENT_GAP * 2 &&
+      edge.width === SIDEBAR_EDGE && edge.width > CONTENT_GAP &&
       panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
-      pageWhileOut.x === 0 && pageWhileOut.width === winW,
+      pageWhileOut.x === whole.x && pageWhileOut.width === whole.width,
       `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
       `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
     // Until the chrome has drawn itself as the floating panel, not a fixed wait:

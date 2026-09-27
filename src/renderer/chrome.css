@@ -1652,7 +1652,8 @@ body[data-detached="true"][data-floating="false"] > * { visibility: hidden; }
 body[data-detached="true"][data-floating="true"] {
   box-shadow: none;
   border-radius: var(--radius-lg);
-  animation: detached-in 200ms cubic-bezier(0.2, 0, 0, 1);
+  /* A longer, softer arrival than a snap: out fast, settling gently. */
+  animation: detached-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
   /* The panel's surface is a layer inside the body rather than the body's own
      background: a body's background is painted across the whole view whatever
      transform the body has, so sliding it left a dark block where the panel
@@ -1667,16 +1668,20 @@ body[data-detached="true"][data-floating="true"]::before {
   z-index: -1;
   border-radius: var(--radius-lg);
   background: var(--strip);
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  /* A border you can see: the panel lies over a page that is often the same
+     dark, and a hairline in a tint of the accent vanished into it. */
+  border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent);
 }
 body[data-detached="true"][data-floating="true"] .tabstrip { flex: 1 1 auto; }
 body[data-detached="true"].sliding-out {
   transform: translateX(calc(-100% - 12px));
-  transition: transform 180ms cubic-bezier(0.4, 0, 1, 1);
+  opacity: 0.4;
+  transition: transform 200ms cubic-bezier(0.5, 0, 0.75, 0), opacity 200ms ease-in;
 }
 @keyframes detached-in {
-  from { transform: translateX(calc(-100% - 12px)); }
-  to   { transform: none; }
+  from { transform: translateX(calc(-100% - 12px)); opacity: 0.4; }
+  to   { transform: none; opacity: 1; }
 }
 body.calm[data-detached="true"][data-floating="true"],
 body.calm[data-detached="true"].sliding-out { animation: none; transition: none; }

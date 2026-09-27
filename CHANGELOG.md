@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The tucked-away side panel opens every time you push the pointer to the left edge.** On Windows the outer pixels of the window belong to its resize border, which the page never hears, so a pointer stopped against the screen edge often opened nothing; the browser now watches the pointer itself.
+- **Tucked away, the page keeps a margin and rounded corners** instead of running to the window's edges, as in Zen's compact mode.
+- **The side panel slides in and out more smoothly** and has a border you can see against a dark page.
+
 ## 1.9.0
 
 - **Tabs down the side work like Zen.** Everything lives in the side panel: back, forward, reload, the bookmark star, the menu, the address bar, the tabs and the memory meter (click it for the task manager). The button at the foot of the panel switches between keeping it beside the page and tucking it away; tucked away, the page fills the whole window and the full panel, toolbar and all, slides out over it when you point at the left edge. The strip across the top that held half a toolbar is gone, and so is the separate detach button — tucking the panel away is detaching it.
