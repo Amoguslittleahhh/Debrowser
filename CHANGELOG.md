@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.8.6
+
+Zen's compact mode for tabs down the side, Chrome's layout for tabs across the top, each in every design's own hand.
 
 - **Tucked-away tabs work like Zen's compact mode, in every design.** The toolbar stays across the top and never moves; nothing is drawn at the window's edge, so the page has the same slim margin on every side. Point at the left edge and the tabs slide out as a panel of their own below the toolbar, over the page, and slide back when you move away. Find, with the tabs tucked away, is a row under the toolbar.
 - **Translucency works with the tabs down the side again.** The toolbar and the margins round the page show the window material; the tab panel, which lies over the page, stays solid.
