@@ -1961,3 +1961,49 @@ body[data-design="grid"]:not([data-layout="left"]) .tab.active .tab-close { colo
    whatever reaches past its first and last tab, and a curve cut off on one
    side is a notch. */
 :is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tabs { padding: 0 var(--foot); }
+
+/*
+ * Paper, across the top: folder tabs, not Ledger's lifted chips. Drawn in ink
+ * rather than filled: a ruled line runs along the top of the toolbar, and the
+ * open tab is a sheet with slanted sides outlined in the same hairline, open at
+ * the bottom where it stands on the rule - with the accent along its top edge.
+ * The others are titles only, set in italic, the way a label is written on a
+ * folder. No feet: a folder tab has corners, not curves.
+ */
+body[data-design="paper"]:not([data-layout="left"]) .toolbar { border-top: 1px solid var(--border); }
+body[data-design="paper"]:not([data-layout="left"]) .tab {
+  isolation: isolate;
+  height: 32px;
+  margin-bottom: -1px;          /* over the rule, so the open sheet can break it */
+  padding: 0 14px 0 16px;
+  border-radius: 0;
+  background: transparent;
+}
+body[data-design="paper"]:not([data-layout="left"]) .tab:hover:not(.active) { background: transparent; }
+body[data-design="paper"]:not([data-layout="left"]) .tab:not(.active) .tab-title { font-style: italic; color: var(--text-dim); }
+body[data-design="paper"]:not([data-layout="left"]) .tab:hover:not(.active) .tab-title { color: var(--text); }
+body[data-design="paper"]:not([data-layout="left"]) .tab.active {
+  background: transparent;
+  box-shadow: none;
+}
+body[data-design="paper"]:not([data-layout="left"]) .tab.active::before {
+  content: '';
+  display: block;
+  position: absolute;
+  inset: 0 0 0 0;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: auto;
+  z-index: -1;
+  border: 1px solid var(--border);
+  border-top: 1.5px solid var(--accent);
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
+  background: var(--bar);
+  transform: perspective(48px) rotateX(4deg);
+  transform-origin: 50% 100%;
+}
+body[data-design="paper"]:not([data-layout="left"]) .tab.active::after { display: none; }
+body[data-design="paper"]:not([data-layout="left"]) .tabs { padding: 0 6px; }
+body[data-design="paper"]:not([data-layout="left"]) .tab + .tab::after { top: 11px; bottom: 11px; }

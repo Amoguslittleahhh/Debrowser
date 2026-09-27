@@ -6,6 +6,8 @@
 - **Translucency works with the tabs down the side again.** The toolbar and the margins round the page show the window material; the tab panel, which lies over the page, stays solid.
 - **Tabs across the top are built on Chrome's layout in every design,** with each design's own hand on it. The open tab takes the toolbar's colour and runs straight into it, curving out at its feet; the others sit on the window colour with a thin line between them; the toolbar and bookmarks bar are one surface. Ledger rounds it all generously, Paper sets the titles in its serif with a rule in your accent along the open tab, and Grid keeps square numbered cells with a bar across the open one.
 - **"Set a passcode in Settings" goes to the passcode.** With Settings already open it switched to that tab and left it on Appearance. The same fix covers the menu's Bookmarks and every other link to a section of an open Settings.
+- **The translucency slider reads the right way round.** It showed opacity under a label saying translucency, so dragging towards 100% took the translucency away; it now runs from Off to 60% more see-through. It no longer jumps back under the pointer while being dragged, and it is drawn in the design rather than the system's chunky slider.
+- **Paper's tabs across the top are folder tabs,** not Ledger's with a serif: the open tab is a sheet with slanted sides outlined in a hairline, the accent along its top edge, standing on a ruled line that runs along the toolbar; the others are titles in italic, like labels written on a folder.
 - **No glowing line down the left edge.** It took room from the page for a hint that pointing at the edge now gives anyway.
 
 ## 1.8.5

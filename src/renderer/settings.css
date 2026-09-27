@@ -655,3 +655,38 @@ body[data-design="grid"] .rail-item.current {
   box-shadow: none;
 }
 body[data-design="grid"] header { border-bottom-color: var(--border); }
+
+/*
+ * The slider, drawn rather than left to the system: a slim track filled in the
+ * accent up to the thumb, and a plain round thumb - the native one was a large
+ * green knob on a thick bar, the only control on the page that looked borrowed.
+ * Each design's corners apply, so Grid's is square.
+ */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  --fill: 0%;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill, 999px);
+  background: linear-gradient(90deg, var(--accent) var(--fill), color-mix(in srgb, var(--text) 16%, transparent) var(--fill));
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: var(--radius-pill, 50%);
+  background: var(--bg-raised);
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform var(--fast) var(--ease);
+}
+input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.15); }
+input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--ring); }
+input[type="range"]:disabled { opacity: 0.4; }

@@ -132,10 +132,15 @@ const SECTIONS = {
       hint: 'The strip alone, never pages. Needs a window material behind it.',
       unavailable: () => (api.platform === 'linux' ? 'Needs Windows or macOS: Linux has no window material to show through.' : ''),
       type: 'range',
-      min: 0.4,
-      max: 1,
+      // Shown as translucency, which is what the row is called, not as the
+      // opacity the preference stores: at 100% on the old scale the strip was
+      // solid, so dragging towards "more" took translucency away.
+      min: 0,
+      max: 0.6,
       step: 0.02,
-      format: (v) => `${Math.round(v * 100)}%`
+      toSlider: (opacity) => Math.round((1 - opacity) * 100) / 100,
+      fromSlider: (amount) => Math.round((1 - amount) * 100) / 100,
+      format: (v) => (v <= 0 ? 'Off' : `${Math.round(v * 100)}%`)
     },
     {
       key: 'backgroundMaterial',
@@ -656,16 +661,32 @@ function buildControl(spec) {
        * this browser is about. The trailing `change` is what stores the value
        * the user actually stopped on, whichever side of the window it lands.
        */
+      const toSlider = spec.toSlider || ((v) => v);
+      const fromSlider = spec.fromSlider || ((v) => v);
+      // The filled part of the track, which the stylesheet draws.
+      const fill = () => {
+        const span = Number(input.max) - Number(input.min);
+        input.style.setProperty('--fill', `${span ? ((Number(input.value) - Number(input.min)) / span) * 100 : 0}%`);
+      };
+      // Held from press to release, whatever has focus: a drag with the mouse
+      // or a finger does not always focus the slider, and the broadcast of the
+      // last saved value then pulled the thumb back under the pointer.
+      let held = false;
+      input.addEventListener('pointerdown', () => { held = true; });
+      window.addEventListener('pointerup', () => { held = false; });
+      window.addEventListener('pointercancel', () => { held = false; });
+
       let sentAt = 0;
       let pending = null;
       const push = () => {
         pending = null;
         sentAt = Date.now();
-        save(spec.key, Number(input.value));
+        save(spec.key, fromSlider(Number(input.value)));
       };
 
       input.addEventListener('input', () => {
         show(Number(input.value));
+        fill();
         if (pending) return;
         const wait = Math.max(0, LIVE_SET_MS - (Date.now() - sentAt));
         pending = setTimeout(push, wait);
@@ -681,13 +702,14 @@ function buildControl(spec) {
         node: wrap,
         input,
         write(value) {
-          const v = Number(value);
+          const v = toSlider(Number(value));
           // Neither the thumb nor its label while it is being dragged: the
           // broadcast carries the last *saved* value, and the label jumped
           // back to it on every tick.
-          if (document.activeElement === input) return;
+          if (held || document.activeElement === input) return;
           input.value = String(v);
           show(v);
+          fill();
         }
       };
     }
