@@ -69,16 +69,18 @@ class Vault {
     return null;
   }
 
+  /** Disk first: a failed write must not leave a passcode only memory knows. */
   write(record) {
-    this.record = record;
-    if (!this.file) return;
-    if (!record) {
-      try { fs.unlinkSync(this.file); } catch { /* already gone */ }
-      return;
+    if (this.file) {
+      if (!record) {
+        try { fs.unlinkSync(this.file); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+      } else {
+        const tmp = `${this.file}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
+        fs.renameSync(tmp, this.file);
+      }
     }
-    const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
-    fs.renameSync(tmp, this.file);
+    this.record = record;
   }
 
   /** Whether a passcode is set, which is whether the feature is on at all. */
@@ -129,6 +131,21 @@ class Vault {
 
   /** Whether `passcode` is the one set, with the cost of guessing applied. */
   async check(passcode) {
+    // One guess at a time. The wait is checked before the slow hash and the
+    // failure counted after it, so guesses sent together all got past the
+    // wait before any of them counted.
+    const before = this.checking || Promise.resolve();
+    let done;
+    this.checking = new Promise((resolve) => { done = resolve; });
+    await before;
+    try {
+      return await this.checkOne(passcode);
+    } finally {
+      done();
+    }
+  }
+
+  async checkOne(passcode) {
     if (!this.configured()) return { ok: false };
     const wait = this.blockedUntil - this.now();
     if (wait > 0) return { ok: false, waitMs: wait };

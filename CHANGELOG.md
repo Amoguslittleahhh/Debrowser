@@ -6,6 +6,25 @@
 - **Side tabs start beside the page,** as Zen starts, rather than tucked away.
 - **The menu works over the side tabs on Windows.** Opened from the three dots with the tabs beside the page, it took no clicks and its highlight lagged behind the pointer: the side panel drags the window, and Windows gave every press on the menu above it to the window instead. The address bar's suggestions had the same problem. Nothing under an open menu or the suggestions drags the window now.
 - **Switching from side tabs back to the top no longer leaves the tab strip invisible** when the side panel was tucked away.
+- **Websites can no longer open the browser's own pages or files.** A page's `window.open` could open Settings or the passwords page with the browser's command bridge attached, or a `file://` address — which on Windows makes the computer send your sign-in hash to whoever runs that address, around Tor in a private window. Pages now open only web addresses; the browser's own pages still open from the browser's own pages.
+- **The passcode can't be sidestepped by deleting its file.** Setting a first passcode now clears anything left from an old one, so removing the passcode file and choosing a new passcode no longer reveals the passwords saved under the old one. Guesses sent all at once also wait their turn for the wrong-passcode delay.
+- **A password offered for saving belongs to the page that sent it.** A site leaving for another could submit a form on its way out and have its password offered for saving under the next site's name.
+- **A damaged bookmarks, history, site-permissions or passwords file is kept, not overwritten.** The browser still starts with an empty list, but the old file is renamed aside (`….corrupt-<time>`) instead of being replaced by the next change. A passwords file another program had locked is read again later rather than written over.
+- **Deleting a saved password that fails to save no longer hides it until the next restart,** where it came back and was filled in again.
+- **Running the test suite no longer touches your profile.** It used to delete saved passwords and cards, reverse the bookmarks bar and change settings in the profile of whoever ran it; it now runs in a temporary profile of its own.
+- **The Intune installer includes Tor and the network tripwire,** without which its private windows could not connect.
+- **Private windows:**
+  - Their pages are no longer trimmed to the pagefile or swap under memory pressure; that path skipped the rule that turns trimming off for them.
+  - Typing an address into a tab the browser had unloaded now waits for the fingerprint shield before the site loads, and no longer loads the old address over the new one.
+  - Bridges that can't be used — mistyped custom lines, or missing built-in ones — now stop Tor from connecting instead of quietly connecting without bridges.
+  - The tripwire says when its helper has stopped answering, instead of reporting itself as watching.
+  - Pages can no longer tell they are in Debrowser from a `__debrowser` global.
+  - Addresses like `http://[::ffff:127.0.0.1]/` are blocked with the rest of the local network.
+  - The "Not private" page for a site with no secure version works again: its Continue and Go back buttons did nothing.
+  - A private window kept ready no longer restarts Tor every few seconds while the computer is idle.
+  - Turning off "keep Tor state" deletes the saved state straight away, including with the Linux launcher, which never deleted it.
+  - On Linux, crash dumps are off even when the network sandbox can't be set up, and a sandbox that fails part way no longer leaves the window unable to connect.
+  - Photos from phones lose the extra pictures and data stored after the image, which carried their own location.
 
 ## 1.8.7
 

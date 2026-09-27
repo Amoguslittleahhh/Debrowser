@@ -92,7 +92,12 @@ function torrcLines({ mode = 'auto', custom = '' } = {}, bundle) {
     ? parseCustom(custom).good
     : (BUILT_IN[mode] || BUILT_IN.auto)
       .flatMap((t) => ((config && config.bridges && config.bridges[t]) || []).map((line) => ({ transport: t, line })));
-  if (!bridges.length) return [];
+  // Bridges asked for and none usable - every custom line mistyped, or the
+  // built-in list missing from the bundle - is a refusal to connect, never a
+  // quiet fall back to plain Tor. Someone who chose bridges chose them so the
+  // network would not see a Tor connection. `UseBridges` with no `Bridge` line
+  // is a configuration Tor itself will not start with.
+  if (!bridges.length) return ['UseBridges 1'];
 
   const exe = process.platform === 'win32' ? '.exe' : '';
   const plugin = `pluggable_transports${path.sep}lyrebird${exe}`;

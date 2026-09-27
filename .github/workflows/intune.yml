@@ -67,6 +67,16 @@ jobs:
       - name: Build the measurement helper
         run: npm run build:memprobe
 
+      # Private windows need both, exactly as the normal Windows build ships
+      # them. electron-builder only warns when a file it was told to copy is
+      # missing, so without these two steps the Intune installer went out with
+      # private windows that could not start Tor and had no tripwire.
+      - name: Build the incognito tripwire
+        run: npm run build:netwatch
+
+      - name: Fetch and verify Tor
+        run: node tools/fetch-tor.js
+
       # The same gate the normal Windows build passes. An Intune deployment is
       # the hardest place to notice a broken browser and the slowest to roll
       # back, so it is the last place to skip the suite.
@@ -169,6 +179,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
+          # The commit that was built, not the default branch's head.
+          target_commitish: ${{ github.sha }}
           draft: ${{ github.event.inputs.draft == 'true' }}
           prerelease: true
           body_path: RELEASE_NOTES.md

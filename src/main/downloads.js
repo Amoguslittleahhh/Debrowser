@@ -431,7 +431,30 @@ class Download {
       this.requests.add(req);
       const done = () => this.requests.delete(req);
 
+      // With `redirect: 'manual'` Electron reports a redirect here, not as a
+      // 3xx response, and cancels it unless `followRedirect()` is called in
+      // this handler - so every download that redirected (a release link, a
+      // "latest" URL) failed with "Redirect was cancelled". It is followed as
+      // a new request of ours, so the headers and the redirect limit below
+      // apply to every hop.
+      let redirected = false;
+      req.on('redirect', (_status, _method, location) => {
+        redirected = true;
+        done();
+        try { req.abort(); } catch { /* already finished */ }
+        if (redirectsLeft <= 0) { reject(new Error('too many redirects')); return; }
+        let next;
+        try {
+          next = new URL(location, url).href;
+        } catch {
+          reject(new Error('the server redirected somewhere unparseable'));
+          return;
+        }
+        this.request(next, headers, redirectsLeft - 1).then(resolve, reject);
+      });
+
       req.on('response', (res) => {
+        if (redirected) return;
         done();
         const location = header(res.headers, 'location');
         if (res.statusCode >= 300 && res.statusCode < 400 && location) {
@@ -450,7 +473,8 @@ class Download {
         res.finalUrl = url;
         resolve(res);
       });
-      req.on('error', (err) => { done(); reject(err); });
+      req.on('error', (err) => { done(); if (!redirected) reject(err); });
+      req.on('abort', () => { if (!redirected) { done(); reject(new Error('cancelled')); } });
       req.end();
     });
   }

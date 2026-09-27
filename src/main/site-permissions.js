@@ -21,6 +21,7 @@
  */
 
 const fs = require('fs');
+const { setAside } = require('./set-aside');
 const path = require('path');
 const { originOf } = require('./credentials');
 
@@ -74,7 +75,10 @@ class SitePermissions {
     try {
       parsed = JSON.parse(fs.readFileSync(this.file, 'utf8'));
     } catch (err) {
-      if (err.code !== 'ENOENT') this.log(`site permissions: ${this.file} unreadable, starting empty (${err.message})`);
+      if (err.code !== 'ENOENT') {
+        this.log(`site permissions: ${this.file} unreadable, starting empty (${err.message})`);
+        if (err instanceof SyntaxError) setAside(this.file, this.log);
+      }
       return;
     }
     if (!parsed || typeof parsed !== 'object') return;
@@ -84,7 +88,7 @@ class SitePermissions {
       if (originOf(origin) !== origin || !entry || typeof entry !== 'object') continue;
       const clean = {};
       for (const [kind, value] of Object.entries(entry)) {
-        if (kind in KINDS && (value === 'allow' || value === 'block')) clean[kind] = value;
+        if (Object.hasOwn(KINDS, kind) && (value === 'allow' || value === 'block')) clean[kind] = value;
       }
       if (Object.keys(clean).length) this.sites.set(origin, clean);
     }
@@ -113,7 +117,7 @@ class SitePermissions {
 
   /** Remember an answer; `null` forgets it, so the site asks again. */
   set(origin, kind, value) {
-    if (!originOf(origin) || !(kind in KINDS)) return;
+    if (!originOf(origin) || !Object.hasOwn(KINDS, kind)) return;
     const entry = { ...(this.sites.get(origin) || {}) };
     if (value === 'allow' || value === 'block') entry[kind] = value;
     else delete entry[kind];

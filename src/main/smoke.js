@@ -2731,6 +2731,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `settings got ${JSON.stringify(settingsList)}, page got ${JSON.stringify(offList)}`);
 
     const set = await ask(settingsTab, 'vault-set', { passcode: 'smoke-passcode' });
+    // What was there before the first passcode was saved under one that is
+    // gone - vault.json deleted - and a new passcode must not open it.
+    check('a first passcode does not open records left from an old one',
+      set && set.ok && credentials.records.login.length === 0,
+      `records after the first passcode: ${credentials.records.login.length}`);
+    credentials.records.login.push({ origin: 'https://vault.test', username: 'me', password: 'hunter2-secret' });
     const lockedList = await ask(pwTab, 'list-credentials');
     const wrong = await ask(pwTab, 'vault-unlock', { method: 'passcode', passcode: 'not-it' });
     const right = await ask(pwTab, 'vault-unlock', { method: 'passcode', passcode: 'smoke-passcode' });
@@ -2752,6 +2758,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     tabs.close(pwTab.id);
     tabs.close(settingsTab.id);
+  }
+
+  // A website's window.open reaches only the web: not our own pages, which
+  // would open with the command bridge, and not file://, which on Windows
+  // hands a remote host the user's sign-in hash.
+  {
+    const site = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => site.isLive && !site.loading, { timeoutMs: 8000 });
+    const before = tabs.all().length;
+    await site.wc.executeJavaScript(
+      "window.open('debrowser://passwords'); window.open('file:///etc/passwd'); window.open('javascript:1'); 1",
+      true).catch(() => {});
+    await sleep(400);
+    const after = tabs.all().length;
+    await site.wc.executeJavaScript("window.open('https://example.test/'); 1", true).catch(() => {});
+    await sleep(400);
+    const web = tabs.all().length;
+    check('a website can open web pages in new tabs, but not the browser\'s own pages or files',
+      after === before && web === before + 1, `tabs ${before} -> ${after} -> ${web}`);
+    for (const extra of tabs.all().slice(before)) tabs.close(extra.id);
+    tabs.close(site.id);
+
+    const { isLocalHost } = require('./incognito/policy');
+    check('private windows treat IPv4-mapped IPv6 as the local network in every spelling',
+      isLocalHost('[::ffff:7f00:1]') && isLocalHost('::ffff:c0a8:101') && !isLocalHost('::ffff:808:808'));
   }
 
   // From the hands-on audit: the fixes most likely to regress.

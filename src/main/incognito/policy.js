@@ -47,6 +47,14 @@ function isLocalHost(hostname) {
     if (host === '::1' || host === '::') return true;
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(host);
     if (mapped) return isLocalHost(mapped[1]);
+    // The same address as the URL parser writes it: [::ffff:127.0.0.1]
+    // becomes [::ffff:7f00:1], which the dotted pattern above never saw.
+    const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+    if (hex) {
+      const hi = parseInt(hex[1], 16);
+      const lo = parseInt(hex[2], 16);
+      return isLocalHost(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
     return /^f[cd][0-9a-f]{2}:/.test(host) ||      // unique local, fc00::/7
            /^fe[89ab][0-9a-f]:/.test(host);        // link-local, fe80::/10
   }

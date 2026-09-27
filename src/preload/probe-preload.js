@@ -25,7 +25,7 @@
  *    end of the file: private windows only, files dropped or pasted in.
  */
 
-const { ipcRenderer, contextBridge } = require('electron');
+const { ipcRenderer } = require('electron');
 
 /**
  * Sampling interval. Chromium throttles this to roughly once a minute once the
@@ -538,8 +538,6 @@ ipcRenderer.on('debrowser:payment-fill', (_event, record) => {
     setValue(pick('cc-exp'), record.expiry);
   } catch { /* nothing fillable here */ }
 });
-
-contextBridge.exposeInMainWorld('__debrowser', Object.freeze({ version: 1 }));
 
 /* ------------------------------------------------------------------ */
 /* Private windows: files dropped or pasted into a page                 */

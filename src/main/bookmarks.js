@@ -36,6 +36,7 @@
  */
 
 const fs = require('fs');
+const { setAside } = require('./set-aside');
 const path = require('path');
 const os = require('os');
 const { app } = require('electron');
@@ -126,9 +127,10 @@ class Bookmarks {
       parsed = JSON.parse(raw);
     } catch (err) {
       // Same posture as prefs: a corrupt file must not stop the browser. It is
-      // kept rather than overwritten, because it is the user's data and a
-      // failed parse here is more likely our bug than their editing.
+      // moved aside rather than overwritten by the next save, because it is
+      // the user's data and a failed parse is more likely our bug than theirs.
       this.log(`bookmarks: ${this.file} is not valid JSON, starting empty (${err.message})`);
+      setAside(this.file, this.log);
       return;
     }
 

@@ -9,6 +9,7 @@
  */
 
 const { ipcMain } = require('electron');
+const { originOf } = require('./credentials');
 
 const VALID_DEMANDS = new Set(['idle', 'light', 'heavy']);
 
@@ -130,6 +131,13 @@ class IpcHub {
       const tab = this.tabForWebContents(event.sender.id);
       if (!tab || tab.internal) return;
       if (!payload || typeof payload !== 'object') return;
+      // And only while the frame that sent it is still the page the tab
+      // shows. A page leaving for another site can submit on its way out, and
+      // its message can land after the tab's URL has moved on - offering to
+      // save the leaving page's password under the arriving page's origin.
+      let frameUrl = null;
+      try { frameUrl = event.senderFrame && event.senderFrame.url; } catch { /* frame gone */ }
+      if (!frameUrl || originOf(frameUrl) !== originOf(tab.url)) return;
       if (typeof payload.password !== 'string' || !payload.password) return;
 
       // One below each limit, not exactly it: the store's validators are

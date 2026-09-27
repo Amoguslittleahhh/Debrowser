@@ -30,6 +30,7 @@
  */
 
 const fs = require('fs');
+const { setAside } = require('./set-aside');
 const path = require('path');
 const { app } = require('electron');
 
@@ -133,6 +134,7 @@ class History {
       parsed = JSON.parse(raw);
     } catch (err) {
       this.log(`history: ${this.file} is not valid JSON, starting empty (${err.message})`);
+      setAside(this.file, this.log);
       return;
     }
 

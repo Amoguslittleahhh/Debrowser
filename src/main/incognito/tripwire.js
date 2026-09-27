@@ -141,7 +141,21 @@ class Tripwire {
       this.busy = true;
       try {
         const result = await this.check();
-        if (result.ok && result.count > 0) {
+        // A helper that stops answering is a tripwire that sees nothing, and
+        // it has to say so rather than keep reporting itself as watching. On
+        // macOS it is the only protection there is.
+        if (!result.ok) {
+          this.misses = (this.misses || 0) + 1;
+          if (this.misses === 3) {
+            this.caps = { available: false, mechanism: null,
+              reason: this.helper.reason || 'the helper stopped answering' };
+            console.error(`[debrowser] tripwire: ${this.caps.reason}; no longer watching`);
+          }
+          return;
+        }
+        if (this.misses >= 3) this.caps = null;   // answering again: asked afresh
+        this.misses = 0;
+        if (result.count > 0) {
           this.tripped = true;
           this.stop();
           this.onTrip(result.violations, result.pids);

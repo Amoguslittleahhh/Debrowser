@@ -143,7 +143,10 @@ class Updater {
   canWriteInstallDir() {
     const fs = require('fs');
     const path = require('path');
-    const dir = path.dirname(app.getPath('exe'));
+    // An AppImage runs from a read-only mount (/tmp/.mount_*), so its exe's
+    // directory never takes a write and every AppImage looked "installed for
+    // all users". What the update replaces is the .AppImage file itself.
+    const dir = path.dirname(process.env.APPIMAGE || app.getPath('exe'));
     const probe = path.join(dir, `.debrowser-write-test-${process.pid}`);
     try {
       fs.writeFileSync(probe, '');

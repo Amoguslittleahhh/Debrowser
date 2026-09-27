@@ -59,6 +59,35 @@ const { SitePermissions, PermissionAsks } = require('./site-permissions');
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
 /*
+ * Tests and benchmarks never touch the real profile.
+ *
+ * The smoke suite removes every saved password, rewrites the bookmarks and
+ * leaves settings changed; run from a checkout or an installed build it did
+ * that to the profile of whoever ran it. It gets a directory of its own,
+ * removed when it exits, and hands it to the private windows it starts through
+ * the environment, so they read the same one.
+ */
+if (!process.env.DEBROWSER_TEST_PROFILE &&
+    (SMOKE_TEST || ['--speed-test', '--bench-test'].some((flag) => process.argv.includes(flag)))) {
+  const tmp = require('os').tmpdir();
+  // `exit` is not emitted when a run ends in app.exit, so earlier runs'
+  // directories are swept here too.
+  for (const name of fs.readdirSync(tmp)) {
+    if (!name.startsWith('debrowser-test-')) continue;
+    const old = path.join(tmp, name);
+    try {
+      if (Date.now() - fs.statSync(old).mtimeMs > 6 * 3600_000) fs.rmSync(old, { recursive: true, force: true });
+    } catch { /* in use, or gone */ }
+  }
+  const dir = fs.mkdtempSync(path.join(tmp, 'debrowser-test-'));
+  process.env.DEBROWSER_TEST_PROFILE = dir;
+  process.on('exit', () => {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* the OS will */ }
+  });
+}
+if (process.env.DEBROWSER_TEST_PROFILE) app.setPath('userData', process.env.DEBROWSER_TEST_PROFILE);
+
+/*
  * Incognito decides where the profile lives, so it runs before anything reads
  * `userData`. A profile directory that is not provably ours alone is a refusal
  * to start, never a repair: see incognito/mode.js.
@@ -343,13 +372,14 @@ if (!app.requestSingleInstanceLock()) {
       // the OS keystore, which on Linux is not reachable earlier. A Tor the
       // launcher started had its state put in place before it ran.
       app.whenReady().then(() => {
-        if (!tor.attached) {
-          if (earlyPrefs.get('incognitoKeepTorState')) {
-            torState.restore(incognitoCtx.normalUserData, path.join(tor.dir, 'data'), log);
-          } else {
-            torState.forget(incognitoCtx.normalUserData);
-          }
+        const keep = earlyPrefs.get('incognitoKeepTorState');
+        if (!tor.attached && keep) {
+          torState.restore(incognitoCtx.normalUserData, path.join(tor.dir, 'data'), log);
         }
+        // Off means no file, however Tor was started: under the Linux launcher
+        // it was never deleted at all, and a sealed guard and consensus in the
+        // ordinary profile is evidence of Tor use.
+        if (!keep) torState.forget(incognitoCtx.normalUserData);
         tor.start();
       });
 
@@ -692,6 +722,14 @@ function main() {
         // synchronously, because the event has to be.
         tab.wc.on('will-prevent-unload', (event) => {
           if (!shell || shell.window.isDestroyed()) return;
+          // Only for the tab in front, or one the user is closing. A tab out
+          // of sight that navigates itself in a loop would otherwise block the
+          // whole browser behind a modal about a page nobody can see; it just
+          // stays where it is, which is what "Stay" would have done.
+          if (tab.id !== tabs.activeId && !tab.closing) {
+            tab.reconcileUrl();
+            return;
+          }
           const leave = dialog.showMessageBoxSync(shell.window, {
             type: 'question',
             buttons: ['Leave', 'Stay'],
@@ -742,8 +780,16 @@ function main() {
         // A question the page asked while it was in the background.
         if (permissionAsks && permissionAsks.has(tab) && shell) shell.toChrome('site-ask');
         break;
+      // A page's `window.open`, or a link out of one of our pages. The same
+      // test as the menu's "Open link in new tab", and our own pages only
+      // from our own pages: a website that opened debrowser://passwords got it
+      // with the command bridge, and file://host/share had Windows hand the
+      // user's sign-in hash to that host - outside Tor, in a private window.
       case 'open-tab':
-        if (tabs && payload?.url) openLinkTab(tabs, prefs, tab, payload.url);
+        if (tabs && payload?.url && openableUrl(payload.url) &&
+            (!pages.isInternal(payload.url) || pages.isInternal(tab.url))) {
+          openLinkTab(tabs, prefs, tab, payload.url);
+        }
         break;
       case 'visited':
         if (history && payload?.url && history.record({ url: payload.url, title: tab.title })) {
@@ -989,6 +1035,10 @@ function main() {
       const idleMinutes = prefs.get('incognitoIdleWipeMinutes');
       if (idleMinutes > 0) {
         setInterval(() => {
+          // Not while kept ready and never shown: there is nothing to wipe,
+          // and the browser that owns it starts a new one the moment this one
+          // goes - so an idle computer restarted Tor every few seconds.
+          if (shell && shell.held) return;
           if (powerMonitor.getSystemIdleTime() >= idleMinutes * 60) panic(`idle for ${idleMinutes} minutes`);
         }, 15_000).unref();
       }
@@ -1554,7 +1604,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const url = String(payload?.url || '');
         if (!policy.allowHttp(url)) break;
         const tab = tabs.all().find((t) => t.isLive && t.wc === sender) || active;
-        if (tab && tab.isLive) tab.wc.loadURL(url).catch(() => {});
+        // A website never goes into the renderer built for our page.
+        if (tab && tab.isLive) tab.rebuildFor(url);
         break;
       }
 
@@ -1629,12 +1680,17 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
         const tab = payload?.id ? tabs.byId(payload.id) : active;
         if (!tab) break;
-        if (!tab.isLive) tab.realise();
         // https was a guess - the user typed no scheme - so a site that turns
         // out not to speak it is tried again over http rather than left as an
         // error page. Never in a private window, which has its own rule: the
         // plain version is only loaded after the user is told what it costs.
         const fallback = !INCOGNITO && classifyAddress(payload?.url) === 'host' ? target : null;
+        // No renderer: the new one loads the address itself (Tab#realise).
+        if (!tab.isLive) {
+          tab.httpFallback = fallback;
+          tab.realise({ navigateTo: target });
+          break;
+        }
         // A renderer built for one of our pages never carries a website.
         // Before `url` changes: the rebuild remembers the page it left, to go
         // back to if the site never commits (a download link, or Esc).
@@ -1651,6 +1707,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'back':
         if (active?.isLive && active.wc.navigationHistory.canGoBack()) active.wc.navigationHistory.goBack();
+        // The plain-HTTP question has a renderer of its own and so no history:
+        // back is the page the tab showed before it.
+        else if (active?.isLive && pages.pageName(active.url) === 'insecure' && active.insecureReturn) {
+          active.rebuildFor(active.insecureReturn);
+        }
         break;
 
       case 'forward':
@@ -1659,6 +1720,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'reload':
         if (active?.isLive) active.wc.reload();
+        else if (active && !active.crashed) active.realise();   // unloaded: reloading is building it
         break;
 
       case 'stop':
@@ -2045,6 +2107,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // Open pages follow a new default at once, bar the sites zoomed by hand.
         if (payload.key === 'defaultZoom') {
           for (const tab of tabs.all()) if (tab.isLive) siteZoom.apply(tab.wc);
+        }
+        // Turned off: the kept state goes now, not when a private window next
+        // opens - it may never open again.
+        if (payload.key === 'incognitoKeepTorState' && payload.value === false && !INCOGNITO) {
+          torState.forget(app.getPath('userData'));
         }
         // What the main process painted in the old palette: error pages, and
         // the surface behind our own pages.
@@ -2942,8 +3009,18 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         vault.lock();
         return true;
 
-      case 'vault-set':
-        return vault.setPasscode(payload?.passcode, payload?.current ?? null);
+      case 'vault-set': {
+        // A first passcode starts from nothing. Records can only exist under a
+        // passcode, so any found now were saved under one that has since gone
+        // - vault.json deleted - and setting a new one must not open them.
+        const first = !vault.configured();
+        const result = await vault.setPasscode(payload?.passcode, payload?.current ?? null);
+        if (result.ok && first) {
+          const dropped = credentials.clear();
+          if (dropped) log('credentials', `new passcode with no old one; ${dropped} orphaned item(s) deleted`);
+        }
+        return result;
+      }
 
       case 'vault-remove': {
         const result = await vault.removePasscode(payload?.current);

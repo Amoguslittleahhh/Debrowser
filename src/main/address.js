@@ -29,13 +29,23 @@ function classifyAddress(input) {
   // like: "how to reach printer.local" is a question, not an address. A space
   // later in a path (`github.com/a b`) is still an address.
   if (/\s/.test(host)) return null;
+  // `user@example.com` is an email address to search for, not a sign-in to
+  // example.com - and `google.com@evil.com` would have loaded evil.com.
+  if (host.includes('@')) return null;
+  // A port past 65535 is no address at all, in any of the forms below.
+  const port = /:(\d+)$/.exec(host);
+  if (port && Number(port[1]) > 65535) return null;
   // A bare name with a port only when the port is a plausible one - two to
   // five digits, at most 65535 - so "note:3" is searched for.
   const bareNamePort = /^[a-z0-9-]+:(\d{2,5})$/i.exec(host);
   if (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host) || /^\[[0-9a-f:.]+\](:\d+)?$/i.test(host) ||
       /^localhost(:\d+)?$/i.test(host) || /^[a-z0-9.-]+\.(local|lan|internal|home\.arpa)(:\d+)?$/i.test(host) ||
       (bareNamePort && Number(bareNamePort[1]) <= 65535)) return 'local';
-  if (/^[^\s/?#]+\.[^\s/?#]{2,}([/?#]|$)/.test(text)) return 'host';
+  // A name with a dot whose last part is a word, not a number: `3.14` and
+  // `1.25` are searches, which the URL parser would otherwise read as the IP
+  // addresses 3.0.0.14 and 1.0.0.25.
+  if (/^[^\s/?#]+\.[^\s/?#]{2,}([/?#]|$)/.test(text) &&
+      /\.[^\d\s.:/?#][^\s.:/?#]*(:\d+)?$/.test(host)) return 'host';
   return null;
 }
 

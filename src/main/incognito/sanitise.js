@@ -49,18 +49,34 @@ function stripJpeg(buf) {
     const len = buf.readUInt16BE(i + 2);
     if (len < 2 || i + 2 + len > buf.length) return null;
     const segment = buf.subarray(i, i + 2 + len);
-    const drop = marker === 0xe1 || marker === 0xed || marker === 0xfe ||
+    // APP2 is kept for its colour profile, but not when it is the MPF index
+    // of further pictures stored after this one - which are dropped below.
+    const mpf = marker === 0xe2 && segment.subarray(4, 8).toString('latin1') === 'MPF\u0000';
+    const drop = mpf || marker === 0xe1 || marker === 0xed || marker === 0xfe ||
       (marker >= 0xe3 && marker <= 0xef && marker !== 0xee);
     if (drop) removed.push(jpegName(marker, segment));
     else parts.push(segment);
     i += 2 + len;
   }
-  parts.push(buf.subarray(i));
+  // The image ends at its end-of-image marker. Phones store more after it -
+  // the extra pictures an MPF index points at, a Samsung trailer, a Motion
+  // Photo's whole MP4 - each with its own Exif and location, and copying
+  // "everything from the start of scan on" copied those too. Inside the
+  // compressed data 0xFF is always followed by 0x00 or a restart marker, so
+  // the first FF D9 is the end of this image.
+  const end = buf.indexOf(Buffer.from([0xff, 0xd9]), i);
+  if (end === -1) {
+    parts.push(buf.subarray(i));
+  } else {
+    parts.push(buf.subarray(i, end + 2));
+    if (end + 2 < buf.length) removed.push('data after the image');
+  }
   return { data: Buffer.concat(parts), removed };
 }
 
 function jpegName(marker, segment) {
   if (marker === 0xfe) return 'comment';
+  if (marker === 0xe2) return 'MPF';
   if (marker === 0xed) return 'IPTC';
   if (marker === 0xe1) {
     const id = segment.subarray(4, 10).toString('latin1');

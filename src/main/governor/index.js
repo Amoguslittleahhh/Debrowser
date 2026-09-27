@@ -586,7 +586,12 @@ class Governor {
 
   /** One step further down, respecting every protection. */
   nextTierDown(tab, discardAllowed) {
-    const ceiling = this.clampToProtections(tab, Tier.DISCARDED, { discardAllowed });
+    let ceiling = this.clampToProtections(tab, Tier.DISCARDED, { discardAllowed });
+    // HIBERNATED is a trim, and a trim is only allowed where `shouldHibernate`
+    // would allow it: private windows turn it off so a page's memory never
+    // reaches the pagefile, and this path reached it anyway under pressure.
+    // Nor FROZEN on the way to it, which costs memory rather than saving any.
+    if (ceiling === Tier.HIBERNATED && !this.hibernationUsable()) ceiling = Tier.COLD;
     const currentRank = tierRank(tab.tier);
     const ceilingRank = tierRank(ceiling);
     if (ceilingRank <= currentRank) return null;
@@ -600,6 +605,11 @@ class Governor {
     // pressure the full reclaim is what is needed, so go straight there.
     if (isStopped(next) && ceiling === Tier.DISCARDED) next = Tier.DISCARDED;
     return next;
+  }
+
+  /** Whether a trim may happen at all, before any per-tab question. */
+  hibernationUsable() {
+    return Boolean(this.cfg.hibernate.enabled && !this.hibernationDisabled && this.trimAvailable);
   }
 
   /* ---------------------------------------------------------------- */

@@ -41,6 +41,7 @@
  */
 
 const fs = require('fs');
+const { setAside } = require('./set-aside');
 const path = require('path');
 const crypto = require('crypto');
 const { app, safeStorage } = require('electron');
@@ -267,16 +268,25 @@ class Credentials {
     this.loaded = true;
     if (!this.loadKey()) return;
 
+    // What could not be read is never written over. A file another program
+    // held open (EBUSY, EACCES) is read again next time rather than replaced by
+    // the one record saved in the meantime; one that parsed but held records
+    // this key cannot open is moved aside before the next save.
+    this.unreadable = new Set();
+    this.damaged = new Set();
     for (const [kind, name] of Object.entries(KINDS)) {
       const file = path.join(this.dir, name);
       let raw;
       try {
         raw = JSON.parse(fs.readFileSync(file, 'utf8'));
       } catch (err) {
-        if (err.code !== 'ENOENT') this.log(`credentials: ${name} unreadable: ${err.message}`);
+        if (err.code === 'ENOENT') continue;
+        this.log(`credentials: ${name} unreadable: ${err.message}`);
+        if (err instanceof SyntaxError) this.damaged.add(kind);
+        else this.unreadable.add(kind);
         continue;
       }
-      if (!Array.isArray(raw)) continue;
+      if (!Array.isArray(raw)) { this.damaged.add(kind); continue; }
 
       const opened = [];
       for (const sealed of raw) {
@@ -285,14 +295,26 @@ class Credentials {
         // Shape is re-checked here because the file is exactly what an attacker
         // would edit, and a "password" that is an object reaches page code.
         if (record && validate(kind, record)) opened.push(record);
-        else this.log(`credentials: dropped an unreadable ${kind} record`);
+        else {
+          this.log(`credentials: dropped an unreadable ${kind} record`);
+          this.damaged.add(kind);
+        }
       }
       this.records[kind] = opened;
     }
+    if (this.unreadable.size) this.loaded = false;
   }
 
   save(kind) {
     if (!this.key) return false;
+    if (this.unreadable?.has(kind)) {
+      this.log(`credentials: not saving ${kind} over a file that could not be read`);
+      return false;
+    }
+    if (this.damaged?.has(kind)) {
+      setAside(path.join(this.dir, KINDS[kind]), (line) => this.log(`credentials: ${line}`));
+      this.damaged.delete(kind);
+    }
     try {
       this.writeFile(
         path.join(this.dir, KINDS[kind]),
@@ -353,7 +375,11 @@ class Credentials {
       ? list.filter((r) => `${r.origin}\u0000${r.username}` !== id)
       : list.filter((r) => r.label !== id);
     if (this.records[kind].length === before) return false;
-    return this.save(kind);
+    // As in `put`: a delete the disk refused must not vanish from the list
+    // only to come back, and be filled in again, after a restart.
+    if (this.save(kind)) return true;
+    this.records[kind] = list;
+    return false;
   }
 
   /**

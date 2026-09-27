@@ -64,6 +64,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static int write_file(const char *path, const char *text) {
@@ -142,7 +143,58 @@ static int loopback_up(void) {
     return rc;
 }
 
+/* Enter a user and network namespace with loopback up; the reason it could
+   not, or "" when it could. */
+static void enter_namespace(uid_t uid, gid_t gid, char *why, size_t len) {
+    why[0] = 0;
+    if (unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0) {
+        snprintf(why, len, "unavailable:unshare-%s", strerror(errno));
+        return;
+    }
+    char map[64];
+    snprintf(map, sizeof map, "%u %u 1\n", (unsigned)uid, (unsigned)uid);
+    write_file("/proc/self/setgroups", "deny\n");
+    if (write_file("/proc/self/uid_map", map) != 0) { snprintf(why, len, "unavailable:uid-map"); return; }
+    snprintf(map, sizeof map, "%u %u 1\n", (unsigned)gid, (unsigned)gid);
+    if (write_file("/proc/self/gid_map", map) != 0) { snprintf(why, len, "unavailable:gid-map"); return; }
+    if (loopback_up() != 0) snprintf(why, len, "unavailable:loopback-%s", strerror(errno));
+}
+
+/*
+ * Try the namespace in a child first. Once this process has unshared there is
+ * no way back out, so a failure part way - the maps refused, loopback down -
+ * used to leave the browser in a network with no route at all while telling
+ * it to run its own Tor: a private window that could never connect.
+ */
+static void probe_namespace(uid_t uid, gid_t gid, char *why, size_t len) {
+    int fds[2];
+    if (pipe(fds) != 0) { snprintf(why, len, "unavailable:pipe"); return; }
+    pid_t pid = fork();
+    if (pid < 0) { close(fds[0]); close(fds[1]); snprintf(why, len, "unavailable:fork"); return; }
+    if (pid == 0) {
+        close(fds[0]);
+        char reason[96];
+        enter_namespace(uid, gid, reason, sizeof reason);
+        ssize_t n = write(fds[1], reason, strlen(reason) + 1);
+        (void)n;
+        _exit(0);
+    }
+    close(fds[1]);
+    why[0] = 0;
+    ssize_t n = read(fds[0], why, len - 1);
+    close(fds[0]);
+    waitpid(pid, NULL, 0);
+    if (n <= 0) snprintf(why, len, "unavailable:probe");
+    else why[n] = 0;
+}
+
 int main(int argc, char **argv) {
+    /* No core files, for this process and everything it starts - on every
+       path, including the ones below that run the browser without the wall:
+       a crash in a private window must not write its memory to disk. */
+    struct rlimit none = { 0, 0 };
+    setrlimit(RLIMIT_CORE, &none);
+
     int sep = 0;
     for (int i = 1; i < argc; i++) if (strcmp(argv[i], "--") == 0) { sep = i; break; }
     if (sep != 4 || sep + 1 >= argc) {
@@ -202,35 +254,23 @@ int main(int argc, char **argv) {
         return 127;
     }
 
-    /* 2. The namespace. */
+    /* 2. The namespace, and 3. loopback - tried in a child first. */
     char why[96] = "";
-    if (unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0) {
-        snprintf(why, sizeof why, "unavailable:unshare-%s", strerror(errno));
-    } else {
-        char map[64];
-        snprintf(map, sizeof map, "%u %u 1\n", (unsigned)uid, (unsigned)uid);
-        write_file("/proc/self/setgroups", "deny\n");
-        if (write_file("/proc/self/uid_map", map) != 0) snprintf(why, sizeof why, "unavailable:uid-map");
-        snprintf(map, sizeof map, "%u %u 1\n", (unsigned)gid, (unsigned)gid);
-        if (!why[0] && write_file("/proc/self/gid_map", map) != 0) snprintf(why, sizeof why, "unavailable:gid-map");
-        /* 3. Loopback. */
-        if (!why[0] && loopback_up() != 0) snprintf(why, sizeof why, "unavailable:loopback-%s", strerror(errno));
-    }
+    probe_namespace(uid, gid, why, sizeof why);
+    if (!why[0]) enter_namespace(uid, gid, why, sizeof why);
 
     if (why[0]) {
         /* No wall. Tor started outside is not reachable the way the browser
-           expects in this case, so it goes; the browser runs its own. */
+           expects in this case, so it goes - and is waited for, rather than
+           left a zombie child of the browser - and the browser runs its own. */
         kill(tor_pid, SIGTERM);
+        waitpid(tor_pid, NULL, 0);
         setenv("DEBROWSER_KILL_SWITCH", why, 1);
         execv(browser[0], browser);
         return 127;
     }
 
-    /* 4. No core files, for this process and everything it starts. */
-    struct rlimit none = { 0, 0 };
-    setrlimit(RLIMIT_CORE, &none);
-
-    /* 5. The browser, in place - same pid, so s-<pid> is its session directory. */
+    /* 4. The browser, in place - same pid, so s-<pid> is its session directory. */
     char tor_pid_text[32];
     snprintf(tor_pid_text, sizeof tor_pid_text, "%d", (int)tor_pid);
     setenv("DEBROWSER_KILL_SWITCH", "namespace", 1);

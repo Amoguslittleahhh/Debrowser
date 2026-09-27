@@ -383,6 +383,7 @@ class Tab {
     // Where it came from, in case nothing commits - a download link typed
     // into the new tab page leaves the new renderer with no page at all.
     this.rebuiltFrom = this.internal ? this.url : null;
+    this.insecureReturn = null;
     this.emit('rebuild');
     this.teardownView();
     this.suspendedState = null;
@@ -423,8 +424,16 @@ class Tab {
     this.emit('updated');
   }
 
-  realise() {
+  /**
+   * Build the renderer. `navigateTo` is an address typed into a tab that had
+   * none: it is loaded by the same path the tab's own page would be, after
+   * the private window's shield is up, rather than by the caller straight
+   * after this returns - which loaded the site before its overrides existed,
+   * and then had this load the old address over it.
+   */
+  realise({ navigateTo = null } = {}) {
     if (this.isLive) return;
+    if (navigateTo) this.url = navigateTo;
     this.realisedInternal = this.internal;
     this.view = createTabView({ session: this.session, url: this.url });
 
@@ -445,8 +454,10 @@ class Tab {
     const target = this.url;
     const load = () => {
       this.url = target;
+      // Back still leads where it led: the history comes back first, and the
+      // new address is loaded on top of it.
       const restored = this.restoreNavigation();
-      if (!restored) {
+      if (!restored || navigateTo) {
         // A rejection here usually just means the navigation was superseded -
         // by our own error page, or by the user typing somewhere else - so it
         // is logged, briefly, rather than surfaced.
@@ -617,7 +628,17 @@ class Tab {
       if (INCOGNITO) {
         const plain = require('../incognito/policy').upgradeFailed(validatedURL, errorCode);
         if (plain) {
-          this.wc.loadURL(`${pages.INSECURE_URL}?url=${encodeURIComponent(plain)}`).catch(() => {});
+          // In a renderer of its own: this one was built for the website and
+          // has no `window.debrowser`, so the page's Continue and Go back did
+          // nothing at all. Go back returns to what this renderer last showed.
+          let before = '';
+          try { before = this.wc.getURL(); } catch { /* going */ }
+          const page = `${pages.INSECURE_URL}?url=${encodeURIComponent(plain)}`;
+          setImmediate(() => {
+            if (this.closed) return;
+            this.rebuildFor(page);
+            this.insecureReturn = before && !pages.isInternal(before) ? before : null;
+          });
           return;
         }
       }
@@ -644,6 +665,10 @@ class Tab {
         this.captureNavigation();
         this.teardownView();
         this.tier = Tier.DISCARDED;
+        // The tab in front comes straight back. Left discarded it showed bare
+        // window background, and Reload - which needs a live page - did
+        // nothing; only clicking the tab in the strip rebuilt it.
+        if (this.visible) setImmediate(() => { if (!this.closed && !this.isLive) this.realise(); });
       } else {
         this.crashed = true;
       }
