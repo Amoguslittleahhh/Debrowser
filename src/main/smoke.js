@@ -2016,7 +2016,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       pageWhileOut.x === 0 && pageWhileOut.width === winW,
       `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
       `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
-    await sleep(300);
+    // Until the chrome has drawn itself as the floating panel, not a fixed wait:
+    // a slow Windows runner read it while it was still the collapsed edge.
+    const drawnOut = () => shell.chromeView.webContents.executeJavaScript(
+      'document.body.dataset.floating === "true" && innerWidth > 200').catch(() => false);
+    for (let i = 0; i < 30 && !(await drawnOut()); i++) await sleep(100);
     const controls = await shell.chromeView.webContents.executeJavaScript(`['back', 'url', 'star', 'menu']
       .filter((id) => { const r = document.getElementById(id).getBoundingClientRect(); return r.width > 0 && r.right <= innerWidth; })`);
     // The meter is left out: it is off in Settings on some machines, and a
@@ -2176,7 +2180,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       await sleep(400);
       shell.openSheet('menu', { x: 200, y: 40, right: 230 });
       await waitFor(() => shell.sheetView && shell.sheetDrawn, { timeoutMs: 5000 });
-      await sleep(500);
+      // The strip has to have dropped its drag regions, and the OS to have
+      // been told, before a real click can reach the menu over it.
+      const overlaid = () => shell.chromeView.webContents.executeJavaScript('document.body.dataset.overlay === "true"').catch(() => false);
+      for (let i = 0; i < 30 && !(await overlaid()); i++) await sleep(100);
+      await sleep(800);
       const item = await shell.sheetView.webContents.executeJavaScript(`(() => {
         const b = [...document.querySelectorAll('button.item')].find((e) => /Keyboard shortcuts/.test(e.textContent));
         if (!b) return null;
@@ -2196,8 +2204,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
           `[W.U]::SetCursorPos(${at.x}, ${at.y}) | Out-Null; Start-Sleep -Milliseconds 150;`,
           '[W.U]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [W.U]::mouse_event(4,0,0,0,0)'
         ].join(' ');
-        const run = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 20_000 });
-        const opened = await waitFor(() => shell.sheetPage === 'shortcuts', { timeoutMs: 3000 });
+        let run = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 20_000 });
+        let opened = await waitFor(() => shell.sheetPage === 'shortcuts', { timeoutMs: 3000 });
+        // Once more: a first click on a window Windows has not yet let come to
+        // the front can be spent on bringing it forward. That is not the bug
+        // this is about - a click eaten by a drag region never arrives at all,
+        // however many times it is made.
+        if (!opened && shell.sheetPage === 'menu') {
+          run = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 20_000 });
+          opened = await waitFor(() => shell.sheetPage === 'shortcuts', { timeoutMs: 3000 });
+        }
         clicked = `${opened ? 'opened' : `still ${shell.sheetPage}`} at ${at.x},${at.y}` +
           `${overStrip ? ' over the strip' : ' (not over the strip)'}${run.status ? `; powershell ${run.status} ${run.stderr}` : ''}`;
       }
