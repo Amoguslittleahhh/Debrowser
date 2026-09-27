@@ -327,19 +327,22 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   // which ports the pages and the decoys arrived on.
   let camo = null;
   if (camouflage) {
-    const firedBefore = camouflage.fired;
+    // Decisions, not completed decoys: a decoy decided on while camouflage
+    // was on can finish setting up after it is switched off, and was counted
+    // as one fired while off (the Windows runner, 1.8.6).
+    const firedBefore = camouflage.requested;
     camouflage.enabled = true;
     for (const host of ['cam1', 'cam2']) {
       const t = tabs.create({ url: url(host, 'idle.html') });
       await waitFor(() => t.isLive && !t.loading && /idle/.test(t.url), 15_000);
       await sleep(2000);
     }
-    const firedWhileOn = camouflage.fired - firedBefore;
+    const firedWhileOn = camouflage.requested - firedBefore;
     camouflage.enabled = false;
     const t3 = tabs.create({ url: url('cam3', 'idle.html') });
     await waitFor(() => t3.isLive && !t3.loading && /idle/.test(t3.url), 15_000);
     await sleep(1500);
-    camo = { firedWhileOn, firedWhileOff: camouflage.fired - firedBefore - firedWhileOn };
+    camo = { firedWhileOn, firedWhileOff: camouflage.requested - firedBefore - firedWhileOn };
   }
   step('camouflage', camo);
 

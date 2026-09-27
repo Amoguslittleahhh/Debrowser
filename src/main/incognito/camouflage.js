@@ -70,12 +70,17 @@ class Camouflage {
     this.view = null;
     this.timer = null;
     this.fired = 0;
+    // Decoys decided on, counted when the decision is made rather than when
+    // the decoy's session is ready: that takes a storage clear, which on a
+    // slow machine finishes after the setting has changed again.
+    this.requested = 0;
     this.ses = null;
   }
 
   /** A real page started loading in `tab`. */
   onNavigation(tab, url) {
     if (!this.enabled || !/^https?:/.test(String(url))) return;
+    this.requested += 1;
     this.fire(tab).catch((err) => this.log('camouflage', `decoy failed: ${err.message}`));
   }
 
