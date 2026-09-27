@@ -244,6 +244,8 @@ function block(tab, why) {
  */
 async function shield(tab, load) {
   const wc = tab.wc;
+  // The overrides live in this debugger session; see CdpSession#detach.
+  if (tab.cdp) tab.cdp.keepAttached = true;
   if (!metadata) {
     // The first private tab reads the engine's own client hints, once, from a
     // page of ours - a secure context, which about:blank is not.
@@ -262,8 +264,18 @@ async function shield(tab, load) {
     watched.add(wc);
     wc.debugger.on('detach', () => {
       if (released.has(wc) || wc.isDestroyed()) return;
+      // The real values are readable from this moment, so the page goes
+      // first: to a blank document at once, then back to where it was once
+      // everything is covered again. It kept running while they were being
+      // put back, and read the real timezone, locale and screen meanwhile.
+      const was = wc.getURL();
+      wc.loadURL('about:blank').catch(() => {});
       apply(tab).then((ok) => {
-        if (!ok) block(tab, 'Its protection against being recognised was switched off, and could not be switched back on.');
+        if (!ok) {
+          block(tab, 'Its protection against being recognised was switched off, and could not be switched back on.');
+          return;
+        }
+        if (was && was !== 'about:blank' && !wc.isDestroyed()) wc.loadURL(was).catch(() => {});
       });
     });
   }

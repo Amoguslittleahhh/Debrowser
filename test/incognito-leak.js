@@ -514,6 +514,13 @@ async function main() {
   check('the startup self-check ran and found nothing',
     Boolean(f.audit) && !f.audit.error && f.audit.checked > 0 && f.audit.problems.length === 0,
     JSON.stringify(f.audit));
+  const L = f.layers || {};
+  check('the time zone and locale are held by the page override and by the process, each on its own',
+    Boolean(L.moved && L.back) && L.moved.tz === 'Asia/Tokyo' && L.moved.locale === 'fr-FR' &&
+      L.back.tz === 'UTC' && L.back.locale === 'en-US' && L.envTz === 'UTC',
+    JSON.stringify(L));
+  check('switching tabs never takes a private tab\'s overrides away, even for a moment',
+    f.keptOnSwitch === true, `kept: ${f.keptOnSwitch}`);
   check('taking the debugger away does not take the overrides with it',
     f.reattached === true && f.afterDetach && f.afterDetach.screen === f.afterDetach.viewport,
     `reattached ${f.reattached}; after: ${JSON.stringify(f.afterDetach)}`);

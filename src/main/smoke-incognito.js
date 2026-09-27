@@ -218,6 +218,33 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   await waitFor(() => fp2.isLive && !fp2.loading && /idle/.test(fp2.url), 15_000);
   const otherTabPrint = fp2.isLive ? await within(fp2.wc.executeJavaScript(PRINTS), 8000, null) : null;
   const audited = await waitFor(() => shell.incognito().fingerprint, 15_000);
+  // Each layer that fixes the time zone and locale, on its own. Both say UTC
+  // and en-US, so a page reading those proved nothing about either: here the
+  // page override is moved away and back, which shows it is what the page
+  // reads, and the process environment is read directly.
+  let layers = null;
+  if (fpTab.isLive && fpTab.cdp) {
+    const read = () => within(fpTab.wc.executeJavaScript(
+      '({ tz: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: Intl.DateTimeFormat().resolvedOptions().locale })'), 5000, null);
+    await fpTab.cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'Asia/Tokyo' });
+    await fpTab.cdp.send('Emulation.setLocaleOverride', { locale: 'fr-FR' });
+    const moved = await read();
+    await fpTab.cdp.send('Emulation.setTimezoneOverride', { timezoneId: 'UTC' });
+    await fpTab.cdp.send('Emulation.setLocaleOverride', { locale: 'en-US' });
+    const back = await read();
+    layers = { moved, back, envTz: process.env.TZ, envLang: process.env.LANGUAGE };
+  }
+  // Bringing a tab to the front must not take its overrides away: the
+  // governor detached the debugger from every tab it made active, and with
+  // it went the timezone, locale and screen until they were put back.
+  let detaches = 0;
+  const countDrop = () => { detaches++; };
+  if (fpTab.isLive) fpTab.wc.debugger.on('detach', countDrop);
+  await tabs.activate(fp2.id);
+  await tabs.activate(fpTab.id);
+  await sleep(600);
+  if (fpTab.isLive) fpTab.wc.debugger.removeListener('detach', countDrop);
+  const keptOnSwitch = fpTab.isLive && detaches === 0 && fpTab.wc.debugger.isAttached();
   // Take the debugger away, the way the user's DevTools could: the overrides
   // must come back by themselves. Judged by the screen, the one override the
   // process environment does not also provide (TZ and the locale are set for
@@ -236,7 +263,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     expected: fp.expected(), surfaces,
     bounds: { width: bounds.width, height: bounds.height },
     audit: audited ? shell.incognito().fingerprint : null,
-    afterDetach, reattached: fpTab.isLive && fpTab.wc.debugger.isAttached(), otherTabPrint
+    afterDetach, reattached: fpTab.isLive && fpTab.wc.debugger.isAttached(), otherTabPrint, keptOnSwitch, layers
   });
 
   // Uploads. A photo carrying GPS coordinates, picked for a file input: the

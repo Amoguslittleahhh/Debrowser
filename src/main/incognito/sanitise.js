@@ -6,7 +6,7 @@
  * A photo from a phone carries where it was taken (GPS), when, on what
  * device, often the owner's name - in metadata the page it is uploaded to can
  * read, and that usually survives to wherever the site publishes it. Private
- * windows strip it from every JPEG, PNG and WebP picked for upload before the
+ * windows strip it from every JPEG, PNG, WebP, HEIC and AVIF picked for upload before the
  * page is handed the file.
  *
  * Only metadata is removed: the compressed image data is copied byte for byte,
@@ -147,8 +147,129 @@ function stripWebp(buf) {
  * The file's metadata removed, or null for a format this does not handle -
  * which is then passed on unchanged, and said so.
  */
+/**
+ * HEIC and AVIF - what iPhones and many Android phones save - are ISO media
+ * files: boxes, with the metadata stored as items of their own. The `meta`
+ * box lists the items (`iinf`) and where each one's bytes are (`iloc`); the
+ * Exif item holds the GPS block, and XMP is an item of type `mime`.
+ *
+ * Their bytes are overwritten with zeros where they lie, rather than cut out:
+ * every other item's position is an absolute offset into the file, and
+ * removing bytes would move the image itself out from under its own index.
+ * Readers then find an Exif item that says nothing. Anything this cannot
+ * parse is refused (null), as for the other formats.
+ */
+function stripHeif(buf) {
+  if (buf.length < 16 || buf.toString('latin1', 4, 8) !== 'ftyp') return null;
+  const brands = buf.toString('latin1', 8, Math.min(buf.length, 8 + buf.readUInt32BE(0)));
+  if (!/heic|heix|hevc|mif1|msf1|avif|avis/.test(brands)) return null;
+
+  // [start, end) of each box's content, walking one level.
+  const boxes = (from, to) => {
+    const out = [];
+    let i = from;
+    while (i + 8 <= to) {
+      let size = buf.readUInt32BE(i);
+      const type = buf.toString('latin1', i + 4, i + 8);
+      let head = 8;
+      if (size === 1) {
+        if (i + 16 > to) return null;
+        size = Number(buf.readBigUInt64BE(i + 8));
+        head = 16;
+      } else if (size === 0) {
+        size = to - i;
+      }
+      if (size < head || i + size > to) return null;
+      out.push({ type, start: i + head, end: i + size });
+      i += size;
+    }
+    return out;
+  };
+  const top = boxes(0, buf.length);
+  const meta = top && top.find((b) => b.type === 'meta');
+  if (!meta) return null;
+  const inner = boxes(meta.start + 4, meta.end);          // FullBox: version and flags first
+  if (!inner) return null;
+  const iinf = inner.find((b) => b.type === 'iinf');
+  const iloc = inner.find((b) => b.type === 'iloc');
+  const idat = inner.find((b) => b.type === 'idat');
+  if (!iinf || !iloc) return null;
+
+  // Which items are metadata.
+  const wanted = new Map();                                // item id -> name
+  const infVersion = buf[iinf.start];
+  const entries = boxes(iinf.start + 4 + (infVersion === 0 ? 2 : 4), iinf.end);
+  if (!entries) return null;
+  for (const e of entries) {
+    if (e.type !== 'infe') continue;
+    const v = buf[e.start];
+    if (v < 2) continue;                                   // pre-2 entries carry no item type
+    let p = e.start + 4;
+    const id = v === 2 ? buf.readUInt16BE(p) : buf.readUInt32BE(p);
+    p += (v === 2 ? 2 : 4) + 2;                            // item id, protection index
+    const type = buf.toString('latin1', p, p + 4);
+    p += 4;
+    const name = buf.toString('latin1', p, buf.indexOf(0, p) === -1 ? p : buf.indexOf(0, p));
+    if (type === 'Exif') wanted.set(id, 'Exif');
+    else if (type === 'mime') {
+      // The item name comes first; the content type is the next string.
+      const at = buf.indexOf(0, p) + 1;
+      const contentType = at > 0 ? buf.toString('latin1', at, Math.max(at, buf.indexOf(0, at))) : '';
+      if (/xmp|rdf\+xml/i.test(contentType) || /xmp/i.test(name)) wanted.set(id, 'XMP');
+    }
+  }
+  if (!wanted.size) return { data: buf, removed: [] };
+
+  // Where their bytes are.
+  const out = Buffer.from(buf);
+  const removed = new Set();
+  const v = buf[iloc.start];
+  let p = iloc.start + 4;
+  const offsetSize = buf[p] >> 4;
+  const lengthSize = buf[p] & 15;
+  const baseSize = buf[p + 1] >> 4;
+  const indexSize = v === 1 || v === 2 ? buf[p + 1] & 15 : 0;
+  p += 2;
+  const read = (n) => {
+    let value = 0;
+    for (let k = 0; k < n; k++) value = value * 256 + buf[p + k];
+    p += n;
+    return value;
+  };
+  const count = v < 2 ? read(2) : read(4);
+  for (let item = 0; item < count; item++) {
+    if (p > iloc.end) return null;
+    const id = v < 2 ? read(2) : read(4);
+    const method = v === 1 || v === 2 ? read(2) & 15 : 0;
+    read(2);                                               // data reference index
+    const base = read(baseSize);
+    const extents = read(2);
+    for (let x = 0; x < extents; x++) {
+      if (indexSize) read(indexSize);
+      const offset = read(offsetSize);
+      const length = read(lengthSize);
+      if (!wanted.has(id)) continue;
+      const origin = method === 0 ? 0 : method === 1 && idat ? idat.start : -1;
+      if (origin < 0) continue;                            // stored by reference: nothing here to clear
+      const from = origin + base + offset;
+      const to = length ? from + length : (method === 1 ? idat.end : buf.length);
+      if (from < 0 || to > buf.length || from > to) return null;
+      out.fill(0, from, to);
+      // An Exif item left as zeros reads as a damaged file to some readers
+      // (Pillow refuses it outright), and an upload that fails to parse is
+      // an upload that fails. The first extent gets a valid, empty one: no
+      // offset to skip, a TIFF header, an index with no entries.
+      if (wanted.get(id) === 'Exif' && !removed.has('Exif') && to - from >= 18) {
+        Buffer.from([0, 0, 0, 0, 0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0]).copy(out, from);
+      }
+      removed.add(wanted.get(id));
+    }
+  }
+  return { data: out, removed: [...removed] };
+}
+
 function stripImage(buf) {
-  return stripJpeg(buf) || stripPng(buf) || stripWebp(buf);
+  return stripJpeg(buf) || stripPng(buf) || stripWebp(buf) || stripHeif(buf);
 }
 
 /* ------------------------------------------------------------------ */
@@ -336,6 +457,7 @@ function safeCopyName(file) {
 }
 
 module.exports = {
-  stripJpeg, stripPng, stripWebp, stripImage, interceptUploads, cleanCopy,
+  stripJpeg,
+  stripHeif, stripPng, stripWebp, stripImage, interceptUploads, cleanCopy,
   countPages, flattenPdf, safeCopyName
 };

@@ -75,7 +75,15 @@ class CdpSession {
     return true;
   }
 
-  detach() {
+  /**
+   * `keepAttached` is a private tab's: its timezone, locale, screen and user
+   * agent overrides live in this session and end with it - measured, a detach
+   * puts the real values back at once - so the governor's tidy-up detach, on
+   * every tab brought to the front, uncovered the page until they were put
+   * back. Only the tab going away detaches it (`force`).
+   */
+  detach({ force = false } = {}) {
+    if (this.keepAttached && !force) return;
     if (!this.attached) return;
     try {
       this.wc.debugger.detach();

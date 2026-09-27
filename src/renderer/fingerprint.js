@@ -51,7 +51,22 @@ const withTimeout = (p, ms = 4000) => Promise.race([p, new Promise((r) => setTim
 async function pageOnly() {
   const canvas = document.createElement('canvas');
   const devices = navigator.mediaDevices ? await navigator.mediaDevices.enumerateDevices().catch(() => []) : [];
+  // A same-origin blank frame, which a site can create to reach prototypes the
+  // page's own script never touched. Measured: the overrides reach it, as they
+  // reach every new document; this says so on every run.
+  const holder = document.createElement('iframe');
+  holder.hidden = true;
+  document.body.append(holder);
+  const fn = holder.contentWindow.navigator;
+  const frame = {
+    memory: fn.deviceMemory,
+    cores: fn.hardwareConcurrency,
+    present: ['gpu', 'getBattery', 'connection', 'keyboard', 'usb', 'hid', 'serial', 'bluetooth']
+      .filter((p) => p in fn).join(', ') || 'none'
+  };
+  holder.remove();
   return {
+    frame,
     screen: `${window.screen.width}×${window.screen.height}`,
     viewport: `${window.innerWidth}×${window.innerHeight}`,
     webgl: Boolean(canvas.getContext('webgl') || canvas.getContext('webgl2')),
@@ -86,6 +101,9 @@ function compare(expected, surfaces, page) {
       add(surface, 'CPU architecture (client hints)', 'x86', r.architecture);
     }
   }
+  add('blank frame', 'Memory', expected.memory, page.frame.memory);
+  add('blank frame', 'CPU cores', expected.cores, page.frame.cores);
+  add('blank frame', 'Hardware and settings APIs present', 'none', page.frame.present);
   add('page', 'Screen equals the page', page.viewport, page.screen);
   add('page', 'WebGL', false, page.webgl);
   add('page', 'Gamepads', 0, page.gamepads);

@@ -2161,6 +2161,50 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         before > 0 && during === 0 && after === before, `drag regions ${before} -> ${during} -> ${after}`);
     }
 
+    // The same, with the real cursor, where the operating system can be asked
+    // to click: Windows. Only real input goes through the hit test that ate
+    // the clicks - sendInputEvent is delivered straight to the view - so this
+    // is the check that sees the 1.8.7 bug, and it runs on the Windows build.
+    if (process.platform === 'win32') {
+      const { screen } = require('electron');
+      const { spawnSync } = require('child_process');
+      shell.window.show();
+      shell.window.focus();
+      shell.window.setAlwaysOnTop(true);
+      await sleep(400);
+      shell.openSheet('menu', { x: 200, y: 40, right: 230 });
+      await waitFor(() => shell.sheetView && shell.sheetDrawn, { timeoutMs: 5000 });
+      await sleep(500);
+      const item = await shell.sheetView.webContents.executeJavaScript(`(() => {
+        const b = [...document.querySelectorAll('button.item')].find((e) => /Keyboard shortcuts/.test(e.textContent));
+        if (!b) return null;
+        const r = b.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`).catch(() => null);
+      let clicked = 'no item';
+      if (item) {
+        const win = shell.window.getContentBounds();
+        const sheet = shell.sheetView.getBounds();
+        const at = screen.dipToScreenPoint({ x: Math.round(win.x + sheet.x + item.x), y: Math.round(win.y + sheet.y + item.y) });
+        const overStrip = win.x + sheet.x + item.x < win.x + shell.chromeView.getBounds().width;
+        const ps = [
+          'Add-Type -Namespace W -Name U -MemberDefinition \'',
+          '[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);',
+          '[DllImport("user32.dll")] public static extern void mouse_event(int f, int x, int y, int d, int e);\';',
+          `[W.U]::SetCursorPos(${at.x}, ${at.y}) | Out-Null; Start-Sleep -Milliseconds 150;`,
+          '[W.U]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [W.U]::mouse_event(4,0,0,0,0)'
+        ].join(' ');
+        const run = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 20_000 });
+        const opened = await waitFor(() => shell.sheetPage === 'shortcuts', { timeoutMs: 3000 });
+        clicked = `${opened ? 'opened' : `still ${shell.sheetPage}`} at ${at.x},${at.y}` +
+          `${overStrip ? ' over the strip' : ' (not over the strip)'}${run.status ? `; powershell ${run.status} ${run.stderr}` : ''}`;
+      }
+      shell.closeSheet();
+      shell.window.setAlwaysOnTop(false);
+      check('on Windows, a real click on a menu item over the side strip reaches the menu',
+        /^opened .* over the strip/.test(clicked), clicked);
+    }
+
     // And the page is a card rather than something fused to the strip, which
     // is the other half of what was asked for: edge to edge, the browser's own
     // pages carry the same dark background as the strip and read as one
@@ -2820,6 +2864,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const { isLocalHost } = require('./incognito/policy');
     check('private windows treat IPv4-mapped IPv6 as the local network in every spelling',
       isLocalHost('[::ffff:7f00:1]') && isLocalHost('::ffff:c0a8:101') && !isLocalHost('::ffff:808:808'));
+  }
+
+  // An iPhone photo: HEIC, with its location and owner stored as items of
+  // their own. Private windows sent it as it was; its GPS block and XMP are
+  // now blanked in place, and nothing else in the file moves.
+  {
+    const { stripImage } = require('./incognito/sanitise');
+    const photo = fs.readFileSync(path.join(__dirname, '..', '..', 'test', 'pages', 'gps.heic'));
+    const clean = stripImage(photo);
+    const text = clean ? clean.data.toString('latin1') : '';
+    check('a HEIC photo loses its location and owner and keeps its image data',
+      Boolean(clean) && clean.removed.includes('Exif') && clean.removed.includes('XMP') &&
+        clean.data.length === photo.length && !text.includes('SECRET-OWNER') && !text.includes('PhoneMaker'),
+      clean ? `removed ${clean.removed.join(', ')}` : 'not recognised');
+  }
+
+  // The Windows Hello prompt's message goes into a PowerShell script. Nothing
+  // in it may reach PowerShell as code: no $(...), no backtick, no quote of
+  // either kind that could close the string.
+  {
+    const { windowsPromptScript } = require('./presence');
+    const script = windowsPromptScript(1234, 'Unlock $(Start-Process calc) `whoami` "x" \u201csmart\u201d \u2019');
+    const line = script.split('\n').find((l) => l.includes('[DebrowserHello]::Verify')) || '';
+    check('the Windows Hello prompt text cannot run as PowerShell',
+      !/\$\(Start|`|\u201c|\u201d|\u2019/.test(line) && (line.match(/"/g) || []).length === 2, line.trim());
   }
 
   // From the hands-on audit: the fixes most likely to regress.

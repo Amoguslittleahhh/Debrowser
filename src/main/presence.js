@@ -342,4 +342,4 @@ function reset() {
   cachedCapability = null;
 }
 
-module.exports = { capability, verify, reset };
+module.exports = { capability, verify, reset, windowsPromptScript };

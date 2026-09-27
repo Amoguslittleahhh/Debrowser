@@ -349,9 +349,17 @@ if (!app.requestSingleInstanceLock()) {
         ctx: incognitoCtx,
         log,
         onStatus: (status) => {
-          // Another program had the port. Pick again and restart; the
-          // command-line proxy keeps the old port, where nothing listens now,
-          // so anything that only it reaches fails closed.
+          // Another program had a port. Pick again and restart - unless the
+          // port is the one the command line points at, which cannot move:
+          // requests only it reaches would go to that other program. Then
+          // the window does not connect, and says so (see mode.movePort).
+          const taken = /Could not bind to [^:]*:(\d+)/.exec(status.warning || '');
+          if (status.state === 'failed' && taken && Number(taken[1]) === incognitoCtx.commandLinePort) {
+            tor.stop?.();
+            tor.set?.({ state: 'failed', warning: 'Another program is using the port this private window was set up with. Close it and open a new private window.' });
+            onIncognitoChange();
+            return;
+          }
           if (status.state === 'failed' && /Could not bind/.test(status.warning || '') && moves < 3) {
             moves++;
             incognito.movePort(incognitoCtx, incognitoSessions);
@@ -1720,7 +1728,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       }
 
       case 'back':
-        if (active?.isLive && active.wc.navigationHistory.canGoBack()) active.wc.navigationHistory.goBack();
+        if (active?.isLive && active.wc.navigationHistory.canGoBack()) active.goInHistory(-1);
         // The plain-HTTP question has a renderer of its own and so no history:
         // back is the page the tab showed before it.
         else if (active?.isLive && pages.pageName(active.url) === 'insecure' && active.insecureReturn) {
@@ -1729,7 +1737,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'forward':
-        if (active?.isLive && active.wc.navigationHistory.canGoForward()) active.wc.navigationHistory.goForward();
+        if (active?.isLive && active.wc.navigationHistory.canGoForward()) active.goInHistory(1);
         break;
 
       case 'reload':

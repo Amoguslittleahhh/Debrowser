@@ -288,6 +288,7 @@ static int self_test(void) {
 /* Linux                                                                */
 /* ------------------------------------------------------------------ */
 #include <dirent.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #define PLATFORM_NAME "linux"
@@ -296,6 +297,9 @@ static int self_test(void) {
 #define MAX_INODES 4096
 static unsigned long inodes[MAX_INODES];
 static int ninodes;
+/* Set when a list was longer than its array: what did not fit went unchecked,
+   and a check that saw only part of the sockets must not say it saw them all. */
+static int truncated;
 
 static int cmp_ul(const void *a, const void *b) {
     unsigned long x = *(const unsigned long *)a, y = *(const unsigned long *)b;
@@ -320,6 +324,8 @@ static int collect_inodes(unsigned long pid) {
         unsigned long ino;
         if (sscanf(target, "socket:[%lu]", &ino) == 1) inodes[ninodes++] = ino;
     }
+    /* Full, with entries left: sockets past the limit would go unseen. */
+    if (ninodes == MAX_INODES && readdir(d) != NULL) truncated = 1;
     closedir(d);
     qsort(inodes, (size_t)ninodes, sizeof(inodes[0]), cmp_ul);
     return 1;
@@ -371,7 +377,8 @@ static void load_table(unsigned long pid, const char *name, const char *proto, i
     if (!f) return;
     char line[512];
     if (!fgets(line, sizeof line, f)) { fclose(f); return; }   /* header */
-    while (fgets(line, sizeof line, f) && nrows < MAX_ROWS) {
+    while (fgets(line, sizeof line, f)) {
+        if (nrows == MAX_ROWS) { truncated = 1; break; }
         char la[40], ra[40];
         struct row *r = &rows[nrows];
         if (sscanf(line, " %*d: %39[0-9A-Fa-f]:%x %39[0-9A-Fa-f]:%x %x %*s %*s %*s %*u %*u %lu",
@@ -407,22 +414,38 @@ static void judge_row(unsigned long pid, const struct row *r) {
     consider(pid, r->proto, l, r->lport, rr, r->rport, loop, connected);
 }
 
+/* Which network namespace a process is in, or 0 when it cannot be told. */
+static unsigned long netns_of(unsigned long pid) {
+    char file[64];
+    struct stat st;
+    snprintf(file, sizeof file, "/proc/%lu/ns/net", pid);
+    return stat(file, &st) == 0 ? (unsigned long)st.st_ino : 0;
+}
+
 static int scan(void) {
     int unreadable = 0;
     nrows = 0;
-    int loaded = 0;
+    truncated = 0;
+    /* Each network namespace's tables once. Most of the browser shares one,
+       but a sandboxed renderer can have its own - and reading the tables of
+       whichever process came first stood in for all of them, so with that
+       renderer listed first every other socket went unseen. */
+    unsigned long seen_ns[16];
+    int nseen = 0;
     for (int i = 0; i < npids; i++) {
         int got = collect_inodes(pids[i]);
         if (got < 0) { unreadable++; continue; }
         if (got == 0 || ninodes == 0) continue;
-        if (!loaded) {
-            /* The first live process's view of the namespace stands for all. */
+        unsigned long ns = netns_of(pids[i]);
+        int known = 0;
+        for (int k = 0; k < nseen; k++) if (seen_ns[k] == ns) known = 1;
+        if (!known) {
+            if (nseen < 16) seen_ns[nseen++] = ns;
             load_table(pids[i], "tcp", "tcp", 0, 1);
             load_table(pids[i], "tcp6", "tcp6", 1, 1);
             load_table(pids[i], "udp", "udp", 0, 0);
             load_table(pids[i], "udp6", "udp6", 1, 0);
             qsort(rows, (size_t)nrows, sizeof(rows[0]), cmp_row);
-            loaded = 1;
         }
         /* Walk this process's socket inodes against the sorted rows. */
         for (int k = 0; k < ninodes; k++) {
@@ -435,7 +458,7 @@ static int scan(void) {
             for (; hit < rows + nrows && hit->inode == key.inode; hit++) judge_row(pids[i], hit);
         }
     }
-    return unreadable;
+    return unreadable + truncated;
 }
 
 static int self_test(void) {

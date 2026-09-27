@@ -721,6 +721,27 @@ class Tab {
     });
   }
 
+  /**
+   * Back or Forward by `delta`. From a renderer built for one of our pages
+   * into a website, the site gets a renderer of its own instead: history does
+   * not fire `will-navigate`, so the confinement never saw it, and a restored
+   * Settings tab whose history held a site went back to that site with
+   * `window.debrowser` in the page.
+   */
+  goInHistory(delta) {
+    if (!this.isLive) return;
+    const nav = this.wc.navigationHistory;
+    const can = delta < 0 ? nav.canGoBack() : nav.canGoForward();
+    if (!can) return;
+    const entry = nav.getEntryAtIndex(nav.getActiveIndex() + delta);
+    const url = entry && entry.url;
+    if (this.realisedInternal && url && !pages.isInternal(url) && !/^(about|data|blob):/i.test(url)) {
+      this.rebuildFor(url);
+      return;
+    }
+    if (delta < 0) nav.goBack(); else nav.goForward();
+  }
+
   /** Bring `url` back to the committed address, if a navigation left it elsewhere. */
   reconcileUrl() {
     if (!this.isLive) return;
@@ -786,7 +807,7 @@ class Tab {
   teardownView() {
     if (INCOGNITO && this.wc) fingerprint.release(this.wc);
     if (this.cdp) {
-      this.cdp.detach();
+      this.cdp.detach({ force: true });
       this.cdp = null;
     }
     if (this.view) {

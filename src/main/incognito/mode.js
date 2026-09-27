@@ -181,9 +181,12 @@ function sessionWithSlot(electronSession, partition, slot) {
  * Move to another port, for when Tor could not bind the one picked.
  *
  * The command-line proxy cannot change after startup and keeps pointing at the
- * old port, where nothing now listens - so a context that only the command
- * line reaches fails closed rather than going direct. Every session this
- * process has seen is repointed.
+ * old port - so only a move away from some other port of the pool is safe,
+ * where nothing then listens on the command line's port and a context that
+ * only the command line reaches fails closed. When the command line's own
+ * port is the one another program holds, that program would be sent those
+ * contexts' requests, hostnames and all; main.js refuses to move then.
+ * Every session this process has seen is repointed.
  */
 function movePort(ctx, sessions) {
   const base = pickPort();
@@ -384,6 +387,8 @@ function prepare(app) {
     poolPorts,
     proxyPort: port,
     proxyRules: `socks5://127.0.0.1:${port}`,
+    /** The port the command line points at, which no later move can change. */
+    commandLinePort: port,
     jsLevel: readJsLevel(normalUserData),
     /** Whether installed fonts are hidden from pages; see fonts.js. */
     fonts: fontLimit

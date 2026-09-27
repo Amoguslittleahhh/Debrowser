@@ -50,10 +50,17 @@ const STALL_MS = 45_000;
  * does (the browser is then in a namespace that cannot reach a TCP port
  * outside it). `owner` is the browser's pid: Tor exits when it does.
  */
+/** The pool slot site icons are fetched through; see circuits.js. */
+const ICON_SLOT = 1;
+
 function baseConfig({ dir, socks, control, controlFile = null, owner, extra = [] }) {
   return [
     // One line per port of the pool: each is its own isolation boundary.
-    ...[].concat(socks).map((s) => `SocksPort ${s}`),
+    // Slot 1 carries every tab's site icons (circuits.js), so on its own it
+    // put one exit in sight of the icons of every site open in every tab -
+    // linking the tabs the pool keeps apart. It isolates by destination
+    // instead: each site's icon goes over a circuit of that site's own.
+    ...[].concat(socks).map((s, i) => `SocksPort ${s}${i === ICON_SLOT ? ' IsolateDestAddr' : ''}`),
     // Loopback or a Unix socket, authenticated with a cookie only this user
     // can read.
     `ControlPort ${control}`,

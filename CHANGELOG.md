@@ -54,6 +54,12 @@
   - Turning off "keep Tor state" deletes the saved state straight away, including with the Linux launcher, which never deleted it.
   - On Linux, crash dumps are off even when the network sandbox can't be set up, and a sandbox that fails part way no longer leaves the window unable to connect.
   - Photos from phones lose the extra pictures and data stored after the image, which carried their own location.
+  - Switching to a private tab no longer drops its time zone, locale and screen overrides for a moment; if its protection is ever cut, the page is taken off screen until it is back.
+  - Site icons go over a separate Tor circuit per site, so no single exit sees the icons of every tab.
+  - If another program holds the port a private window was set up with, it refuses to connect instead of sending anything to that program.
+  - HEIC and AVIF photos (iPhone and many Android phones) lose their location and owner before upload.
+  - On Linux the tripwire watches every network namespace the browser uses.
+  - Going Back from one of the browser's own pages into a website loads the site in its own process.
   - Pasting from a spreadsheet — which copies text and a picture together — pastes the text again; only the text was dropped when the picture was cleaned.
   - A site's `<link rel=icon>` can no longer point the browser at an address on your local network.
 
