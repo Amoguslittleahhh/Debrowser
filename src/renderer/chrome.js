@@ -1539,6 +1539,11 @@ api.onMessage((message) => {
     case 'sidebar-slide':
       document.body.classList.toggle('sliding-out', message.out === true);
       break;
+    // A menu or the suggestions lie over the chrome: see
+    // BrowserShell#syncOverlay.
+    case 'overlay':
+      document.body.dataset.overlay = String(message.open === true);
+      break;
     case 'find-focus':
       showFind(true);
       break;

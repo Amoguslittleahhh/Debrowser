@@ -1902,3 +1902,9 @@ body[data-design="paper"]:not([data-layout="left"]) .tab.active::before {
 body[data-design="paper"]:not([data-layout="left"]) .tab.active::after { display: none; }
 body[data-design="paper"]:not([data-layout="left"]) .tabs { padding: 0 6px; }
 body[data-design="paper"]:not([data-layout="left"]) .tab + .tab::after { top: 11px; bottom: 11px; }
+
+/* While a menu or the suggestions lie over the chrome, nothing in it drags the
+   window: Windows hit-tests drag regions whatever view is on top, so the menu
+   over the side strip took no clicks at all (window.js, syncOverlay). */
+body[data-overlay="true"],
+body[data-overlay="true"] * { -webkit-app-region: no-drag !important; }

@@ -714,6 +714,7 @@ class BrowserShell {
     });
     this.sheetView = sheetView;
     this.sheetPage = page;
+    this.syncOverlay();
 
     // The view is window-sized; only the menu itself is painted. Anything the
     // page leaves untouched has to show what is behind it, or this covers the
@@ -810,12 +811,28 @@ class BrowserShell {
    *   a click on the backdrop - must *not* arm it, or a menu closed with
    *   Escape would make the button dead for the next quarter second.
    */
+  /**
+   * Tell the chrome whether a menu or the suggestions are over it.
+   *
+   * Windows hit-tests the chrome's drag regions itself, whatever view is on
+   * top, so a menu opened over the side strip - which is title bar, and drags
+   * the window - took no clicks and no hover: every press on it went to
+   * moving the window. While something lies over the chrome it drags nothing.
+   */
+  syncOverlay() {
+    const open = Boolean(this.sheetView) || this.suggestOpen === true;
+    if (this.overlayOpen === open) return;
+    this.overlayOpen = open;
+    this.toChrome('overlay', { open });
+  }
+
   closeSheet({ blurred = false, replacing = false } = {}) {
     if (!this.sheetView) return;
     const view = this.sheetView;
     const page = this.sheetPage;
     this.sheetView = null;
     this.sheetPage = null;
+    if (!replacing) this.syncOverlay();
     if (!replacing) setImmediate(() => this.releaseSidebar());
     if (blurred) {
       this.sheetClosedPage = page;
@@ -966,6 +983,7 @@ class BrowserShell {
     this.placeSuggestions();
     const wasOpen = this.suggestOpen;
     this.suggestOpen = true;
+    if (!wasOpen) this.syncOverlay();
     this.suggestReady.then(() => {
       if (!this.suggestView || !this.suggestOpen) return;
       send(this.suggestView, 'debrowser:ui', { kind: 'suggest-items', items, selected: this.suggestSelected ?? -1 });
@@ -1000,6 +1018,7 @@ class BrowserShell {
     if (!this.suggestView || !this.suggestOpen) return;
     this.suggestOpen = false;
     this.suggestSelected = -1;
+    this.syncOverlay();
     this.suggestView.setVisible(false);
     send(this.suggestView, 'debrowser:ui', { kind: 'suggest-reset' });
     clearTimeout(this.suggestCloseTimer);
@@ -1012,6 +1031,7 @@ class BrowserShell {
     if (!view) return;
     this.suggestView = null;
     this.suggestOpen = false;
+    this.syncOverlay();
     try {
       this.window.contentView.removeChildView(view);
       view.webContents.close();

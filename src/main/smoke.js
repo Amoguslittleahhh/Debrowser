@@ -2105,6 +2105,25 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       pinned.width < whole.width,
       `page starts at ${pinned.x}px, ${whole.width} -> ${pinned.width} wide`);
 
+    // A menu opened over the pinned strip must take its clicks. The strip is
+    // title bar, and Windows hit-tests drag regions whatever view is on top,
+    // so in 1.8.7 every press on the menu moved the window instead.
+    {
+      const drags = () => shell.chromeView.webContents.executeJavaScript(`[...document.querySelectorAll('body, body *')]
+        .filter((e) => getComputedStyle(e).getPropertyValue('-webkit-app-region') === 'drag').length`);
+      // The chrome restyles for the pinned column a moment after the pin.
+      let before = 0;
+      for (let i = 0; i < 20 && !(before = await drags()); i++) await sleep(100);
+      shell.openSheet('menu', { x: 200, y: 40, right: 230 });
+      await sleep(200);
+      const during = await drags();
+      shell.closeSheet();
+      await sleep(200);
+      const after = await drags();
+      check('with a menu open over the side strip, the strip stops dragging the window',
+        before > 0 && during === 0 && after === before, `drag regions ${before} -> ${during} -> ${after}`);
+    }
+
     // And the page is a card rather than something fused to the strip, which
     // is the other half of what was asked for: edge to edge, the browser's own
     // pages carry the same dark background as the strip and read as one
