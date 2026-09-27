@@ -51,8 +51,12 @@ jobs:
       # Same script the release workflow uses, so a republished body is
       # byte-identical to what a fresh release of that version would have said.
       - name: Build the release body
+        # Through the environment, not pasted into the script: an input
+        # holding a quote or $(...) would have run as shell.
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          python3 .github/scripts/release-notes.py "${{ inputs.version }}" > RELEASE_NOTES.md
+          python3 .github/scripts/release-notes.py "$VERSION" > RELEASE_NOTES.md
           echo "--- release body ---"
           cat RELEASE_NOTES.md
 

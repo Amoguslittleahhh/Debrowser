@@ -358,13 +358,17 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   console.log('\n7. Discard and restore round trip\n');
 
   governor.cfg.memoryBudgetMB = 4096; // relieve pressure
-  const victim = tabs.all().find((t) => t !== home && t !== form) || heavy;
+  // A live one: the section above ran at a 1MB budget and usually left the
+  // first candidate discarded already, and "a discarded tab releases its
+  // renderer" then passed whether or not the discard below did anything.
+  const victim = tabs.all().find((t) => t !== home && t !== form && t.isLive) || heavy;
   const victimUrl = victim.url;
 
+  const wasLive = victim.isLive;
   await governor.enforceManualDiscard(victim);
   const isDiscarded = victim.tier === Tier.DISCARDED;
   check('a discarded tab releases its renderer entirely',
-    isDiscarded && !victim.isLive && victim.rssMB === 0,
+    wasLive && isDiscarded && !victim.isLive && victim.rssMB === 0,
     isDiscarded ? 'renderer destroyed, 0MB' : `tier=${victim.tier}`);
 
   await tabs.activate(victim.id);
@@ -760,7 +764,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   check('a tab discarded by the cap reopens normally', cameBack,
     `url=${revived.url}`);
 
-  /* ---------------------------------------------------------------- */
+  // The small cap was for this section. Left on, every later check that
+  // opens tabs ran under a three-renderer cap and could have its tab discarded
+  // part way - a check that failed differently from run to run.
+  governor.cfg.maxLiveTabs = 0;
+  governor.cfg.minLifetimeMs = 1000;
+
   /* ---------------------------------------------------------------- */
   console.log('\n12. Settings and preferences\n');
 
@@ -1132,15 +1141,18 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // a new tab. `loadURL` does not fire `will-navigate`, which is why the checks
   // above could not see it - this one drives a real link click.
   const tabsBeforeClick = tabs.all().length;
+  const linkTarget = pageUrl('form.html');
   await fresh.wc.executeJavaScript(`
     const a = document.createElement('a');
-    a.href = ${JSON.stringify(pageUrl('form.html'))};
+    a.href = ${JSON.stringify(linkTarget)};
     document.body.appendChild(a);
     a.click();
   `).catch(() => {});
-  await sleep(600);
+  // Arrived, too - not only "no new tab", which a click cancelled outright, or
+  // a script that threw, also satisfied.
+  const arrived = await waitFor(() => fresh.url === linkTarget && !fresh.loading, { timeoutMs: 4000 });
   check('a link on a website navigates in place rather than opening a tab',
-    tabs.all().length === tabsBeforeClick,
+    arrived && tabs.all().length === tabsBeforeClick,
     `${tabs.all().length} tabs (was ${tabsBeforeClick}); url=${fresh.url.slice(0, 44)}`);
 
   tabs.close(fresh.id);
@@ -2020,11 +2032,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const dragRegions = await shell.chromeView.webContents.executeJavaScript(`(() => {
       const region = (e) => e && getComputedStyle(e).getPropertyValue('-webkit-app-region');
       return [...document.querySelectorAll('body, body *')]
-        .filter((e) => region(e) === 'drag' && region(e.parentElement) !== 'drag')
+        .filter((e) => region(e) === 'drag' && region(e.parentElement) !== 'drag' &&
+          getComputedStyle(e).visibility !== 'hidden')
         .map((e) => { const r = e.getBoundingClientRect(); return [e.className, Math.round(r.width), Math.round(r.height)]; });
     })()`);
+    // Asserted, not just printed: the edge is the strip's view, and nothing in
+    // it that drags may reach past it.
     check('collapsed down the side, nothing over the page drags the window',
-      shell.chromeView.getBounds().width === SIDEBAR_EDGE,
+      shell.chromeView.getBounds().width === SIDEBAR_EDGE && dragRegions.every(([, w]) => w <= SIDEBAR_EDGE),
       JSON.stringify(dragRegions));
 
     // How the strip behaves under a real pointer, through the chrome's own
@@ -2099,17 +2114,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       await reset();
       await at(pageLeft - 1, 300);
       await sleep(250);
-      const cursor = require('electron').screen.getCursorScreenPoint();
+      // The cursor placed over the page, not wherever the display server left
+      // it: on the strip, the check passed without testing anything.
+      const { screen } = require('electron');
+      const realCursor = screen.getCursorScreenPoint;
       const win = shell.window.getContentBounds();
-      const cursorOff = cursor.x - win.x >= shell.chromeView.getBounds().width || cursor.y < win.y;
+      const cursor = { x: win.x + win.width - 100, y: win.y + 300 };
+      screen.getCursorScreenPoint = () => cursor;
       // As a tap does: the strip is tapped first, so it has focus, and the
       // next tap lands on the page.
       shell.chromeView.webContents.focus();
       await sleep(50);
       tabs.activeTab().view.webContents.focus();
       await settle();
+      screen.getCursorScreenPoint = realCursor;
       check('focus moving to the page with the pointer elsewhere puts the strip away',
-        !cursorOff || !shell.sidebarOpen, `cursor ${cursor.x},${cursor.y}; open: ${shell.sidebarOpen}`);
+        !shell.sidebarOpen, `cursor ${cursor.x},${cursor.y}; open: ${shell.sidebarOpen}`);
       await reset();
     }
 
@@ -3495,9 +3515,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   const { Updater } = require('./updater');
   const updateCap = new Updater({ log: () => {} }).capability();
+  // Only asked of a build run from source: the suite also ships in packaged
+  // builds (electron-builder.yml), where updates are exactly what should work.
   check('updates are inert outside a packaged build, and say why',
-    updateCap.available === false && typeof updateCap.reason === 'string' && updateCap.reason.length > 0,
-    updateCap.reason || 'no reason given');
+    app.isPackaged || (updateCap.available === false && typeof updateCap.reason === 'string' && updateCap.reason.length > 0),
+    app.isPackaged ? 'packaged build: not applicable' : (updateCap.reason || 'no reason given'));
 
   // "Never asked" and "asked, nothing new" are different answers, and Settings
   // renders the second as "Up to date." Reporting the second before the first

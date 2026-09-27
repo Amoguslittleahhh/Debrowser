@@ -18,8 +18,11 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-const R = '/home/user/Debrowser/src/renderer';
-const OUT = '/tmp/claude-0/ui';
+// Relative to this file, so it runs from any checkout; screenshots go where
+// SHOOT_OUT says, or a directory under the system's temp folder.
+const R = path.join(__dirname, '..', 'src', 'renderer');
+const OUT = process.env.SHOOT_OUT || path.join(require('os').tmpdir(), 'debrowser-shots');
+fs.mkdirSync(OUT, { recursive: true });
 
 const TABS = [
   { id: 1, title: 'Release v1.4.0 · Amoguslittleahhh/Debrowser', url: 'https://github.com/x', visible: true,  tier: 'active', rssMB: 96, loading: false, favicon: null, audible: false, boosted: false },
@@ -248,7 +251,7 @@ app.whenReady().then(async () => {
       show: false, width: shot.w, height: shot.h, frame: false,
       backgroundColor: STATE.prefs.theme === 'light' ? '#f3f1ec' : '#161614',
       webPreferences: {
-        preload: path.join(OUT, 'stub-preload.js'),
+        preload: path.join(__dirname, 'stub-preload.js'),
         contextIsolation: true, sandbox: false,
         additionalArguments: [`--state=${JSON.stringify(STATE)}`, `--answers=${JSON.stringify(ANSWERS)}`]
       }

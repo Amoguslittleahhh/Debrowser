@@ -150,17 +150,26 @@ async function main() {
   const lineAt = args.indexOf('--bridge-line');
   const results = [];
   if (all || args.includes('--direct')) results.push(await check('plain Tor', []));
+  // A bridge check with no bridge in it is a plain-Tor check that says it
+  // tested bridges: with the bundle's list missing, these passed on plain Tor.
+  const withBridges = async (label, lines) => {
+    if (!lines.some((l) => l.startsWith('Bridge '))) {
+      console.log(`  FAIL  ${label}: no bridge lines - is pt_config.json in the bundle?`);
+      return { isTor: false };
+    }
+    return check(label, lines);
+  };
   if (all || args.includes('--bridges')) {
-    results.push(await check('the default: built-in Snowflake', bridges.torrcLines({ mode: 'auto' }, bundleDir())));
+    results.push(await withBridges('the default: built-in Snowflake', bridges.torrcLines({ mode: 'auto' }, bundleDir())));
   }
   // Each built-in transport on its own, so a failure says which one.
   for (const transport of ['obfs4', 'snowflake']) {
     if (!args.includes(`--${transport}`)) continue;
-    results.push(await check(`built-in ${transport} bridges only`, bridges.torrcLines({ mode: transport }, bundleDir())));
+    results.push(await withBridges(`built-in ${transport} bridges only`, bridges.torrcLines({ mode: transport }, bundleDir())));
   }
   if (lineAt >= 0) {
     const lines = bridges.torrcLines({ mode: 'custom', custom: args[lineAt + 1] || '' }, bundleDir());
-    if (!lines.length) {
+    if (!lines.some((l) => l.startsWith('Bridge '))) {
       console.log('  FAIL  your own bridge: the line was not accepted');
       results.push({ isTor: false });
     } else {

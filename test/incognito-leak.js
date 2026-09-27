@@ -148,7 +148,6 @@ function canaryListeners(ip) {
 /* Reading Chromium's network log                                      */
 /* ------------------------------------------------------------------ */
 
-const isLiteral = (host) => /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
 const hostOf = (text) => String(text).replace(/^[a-z]+:\/\//i, '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
 
 /**

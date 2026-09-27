@@ -29,7 +29,12 @@
 
 module.exports = [
   {
-    files: ['src/**/*.js', 'tools/*.js', 'bench/*.js'],
+    files: ['src/**/*.js', 'tools/*.js', 'bench/**/*.js', 'test/*.js'],
+    // Not the renderer and preload scripts, which have their own block below.
+    // Flat config merges the globals of every block a file matches, so these
+    // Node names (Buffer, __dirname, fetch...) counted as defined in sandboxed
+    // pages too - and no-undef could not catch the very mistake it is for.
+    ignores: ['src/renderer/**', 'src/preload/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',

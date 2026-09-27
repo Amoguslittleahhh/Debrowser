@@ -45,7 +45,11 @@ jobs:
         run: node test/real-tor.js --direct --bridges --obfs4 --snowflake
       - name: Make a bridge with the bridge kit
         timeout-minutes: 8
-        run: sudo bash tools/bridge-kit/setup-bridge.sh --port 8443 | tee kit.txt
+        # pipefail: through `tee` the kit's own exit status was lost, and a
+        # failed kit surfaced as the next step running with no bridge line.
+        run: |
+          set -o pipefail
+          sudo bash tools/bridge-kit/setup-bridge.sh --port 8443 | tee kit.txt
       - name: Connect through that bridge
         timeout-minutes: 10
         run: |
