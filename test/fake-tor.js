@@ -23,7 +23,7 @@ const torrc = fs.readFileSync(process.argv[process.argv.indexOf('-f') + 1], 'utf
 const value = (key) => (new RegExp(`^${key} (.+)$`, 'm').exec(torrc) || [])[1];
 
 // Every SocksPort line, as the real Tor would open them - one per slot.
-const sockets = [...torrc.matchAll(/^SocksPort unix:(.+)$/gm)].map((m) => m[1]);
+const sockets = [...torrc.matchAll(/^SocksPort unix:(\S+)/gm)].map((m) => m[1]);
 const cookie = value('CookieAuthFile');
 const owner = Number(value('__OwningControllerProcess'));
 fs.writeFileSync(cookie, Buffer.alloc(32, 7), { mode: 0o600 });
