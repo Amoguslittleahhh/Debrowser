@@ -1991,7 +1991,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // reflowed every time the pointer brushed the window edge would be the most
   // distracting thing in the browser.
   {
-    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, CONTENT_GAP } = require('./window');
+    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP } = require('./window');
     const chromeWidth = () => shell.chromeView.getBounds().width;
 
     prefs.set('tabBarPosition', 'left');
@@ -2006,16 +2006,17 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.setSidebarOpen(true, { now: true });
     const panel = shell.chromeView.getBounds();
     const pageWhileOut = shell.contentBounds();
-    // Zen's compact mode with a single toolbar: the page has the whole window,
-    // and the strip - toolbar, address bar, tabs - floats over it as a panel
-    // when the pointer reaches the left edge. Nothing stays behind across the
-    // top: the old band there held half a toolbar and lost the rest.
-    check('tucked away, the page is a card with a margin all round and the whole strip floats over it on demand',
-      whole.x === CONTENT_GAP && whole.y === CONTENT_GAP && whole.width === winW - CONTENT_GAP * 2 &&
-      edge.width === SIDEBAR_EDGE && edge.width > CONTENT_GAP &&
+    // Zen's compact mode: the page is a card under a slim toolbar across the
+    // top - which is also where the window buttons are, so they no longer sit
+    // over the page - and the strip floats over it as a panel when the pointer
+    // reaches the left edge.
+    check('tucked away, the page is a card under a toolbar band and the whole strip floats over it on demand',
+      whole.x === CONTENT_GAP && whole.y === SIDEBAR_TOP_BAND && whole.width === winW - CONTENT_GAP * 2 &&
+      whole.y + whole.height === winH - CONTENT_GAP &&
+      edge.x === 0 && edge.y === 0 && edge.width === winW && edge.height === SIDEBAR_TOP_BAND &&
       panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
       pageWhileOut.x === whole.x && pageWhileOut.width === whole.width,
-      `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
+      `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, band ${edge.width}x${edge.height}, ` +
       `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
     // Until the chrome has drawn itself as the floating panel, not a fixed wait:
     // a slow Windows runner read it while it was still the collapsed edge.
@@ -2029,9 +2030,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('out, the strip carries the whole toolbar: back, address bar, star and menu',
       controls.length === 4, controls.join(', '));
 
-    // Collapsed, the strip is a ten-pixel edge over the page. Windows
-    // hit-tests drag regions itself whatever view is on top, so a drag region
-    // wider than that would take clicks meant for the page (1.8.0).
+    // Collapsed, the chrome is the band above the page. Windows hit-tests drag
+    // regions itself whatever view is on top, so a drag region reaching below
+    // it would take clicks meant for the page (1.8.0).
     shell.sidebarOpen = false;
     shell.layout();
     shell.publishSidebar?.();
@@ -2045,8 +2046,13 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     })()`);
     // Asserted, not just printed: the edge is the strip's view, and nothing in
     // it that drags may reach past it.
+    const band = await shell.chromeView.webContents.executeJavaScript(`['band-tabs', 'back', 'url', 'star', 'menu']
+      .filter((id) => { const r = document.getElementById(id).getBoundingClientRect(); return r.width > 0 && r.bottom <= ${SIDEBAR_TOP_BAND}; })`);
+    check('tucked away, the band carries tabs, back, address bar, star and menu',
+      band.length === 5, band.join(', '));
     check('collapsed down the side, nothing over the page drags the window',
-      shell.chromeView.getBounds().width === SIDEBAR_EDGE && dragRegions.every(([, w]) => w <= SIDEBAR_EDGE),
+      shell.chromeView.getBounds().height === SIDEBAR_TOP_BAND &&
+      dragRegions.every(([, , h]) => h <= SIDEBAR_TOP_BAND),
       JSON.stringify(dragRegions));
 
     // How the strip behaves under a real pointer, through the chrome's own
@@ -2079,6 +2085,21 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       check('the left edge opens the side strip, and it slides away',
         byGutter && slid === !shell.reducedMotion() && !shell.sidebarOpen,
         `opened from x=${pageLeft - 1}: ${byGutter}, sliding out: ${slid}, closed: ${!shell.sidebarOpen}`);
+
+      // The band is a toolbar: the pointer on it does not open the strip,
+      // except on the tabs button at its left.
+      await reset();
+      await at(600, 20);
+      await sleep(300);
+      const byBand = shell.sidebarOpen;
+      await reset();
+      await inChrome(`document.getElementById('band-tabs').dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 30, clientY: 20 })); 1`);
+      await sleep(250);
+      const byButton = shell.sidebarOpen;
+      await leave();
+      await settle();
+      check('the band does not open the strip, its tabs button does',
+        !byBand && byButton, `band: ${byBand}, button: ${byButton}`);
 
       // A pointer brushing the edge on its way elsewhere does not open it.
       await reset();
@@ -2156,6 +2177,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const drags = () => shell.chromeView.webContents.executeJavaScript(`[...document.querySelectorAll('body, body *')]
         .filter((e) => getComputedStyle(e).getPropertyValue('-webkit-app-region') === 'drag').length`);
       // The chrome restyles for the pinned column a moment after the pin.
+      const restyled = () => shell.chromeView.webContents.executeJavaScript(
+        'document.body.dataset.pinned === "true" && document.body.dataset.band !== "true"');
+      for (let i = 0; i < 20 && !(await restyled()); i++) await sleep(100);
       let before = 0;
       for (let i = 0; i < 20 && !(before = await drags()); i++) await sleep(100);
       shell.openSheet('menu', { x: 200, y: 40, right: 230 });

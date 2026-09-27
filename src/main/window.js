@@ -1639,6 +1639,15 @@ class BrowserShell {
   }
 
   /**
+   * Tucked away in a window: a slim bar across the top holds the toolbar while
+   * the strip is in, so the window buttons sit over that bar rather than over
+   * the page's own top-right corner - where sites keep their account menus.
+   */
+  band() {
+    return this.detached() && !this.fullScreen();
+  }
+
+  /**
    * Full screen, across the top: no chrome at all.
    *
    * Except while something in it is being used. The find bar lives in the
@@ -1659,7 +1668,8 @@ class BrowserShell {
       pinned: this.sidebarPinned(),
       open: this.sidebarPinned() || this.sidebarOpen,
       floating: this.chromeFloats(),
-      detached: this.detached()
+      detached: this.detached(),
+      band: this.band()
     };
   }
 
@@ -1730,7 +1740,8 @@ class BrowserShell {
       if (!this.window.isFocused()) return;
       const at = screen.getCursorScreenPoint();
       const b = this.window.getContentBounds();
-      const inside = at.y >= b.y && at.y < b.y + b.height && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_EDGE;
+      const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
+      const inside = at.y >= top && at.y < b.y + b.height && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_EDGE;
       if (inside && !this.edgeHeld) {
         this.edgeHeld = true;
         this.setSidebarOpen(true);
@@ -1899,10 +1910,11 @@ class BrowserShell {
     // the margin on the left is where the pointer finds the strip.
     if (this.detached()) {
       const gap = CONTENT_GAP;
+      const top = this.band() ? SIDEBAR_TOP_BAND : gap;
       return {
-        x: gap, y: gap,
+        x: gap, y: top,
         width: Math.max(0, width - gap * 2 - panelWidth),
-        height: Math.max(0, height - gap * 2)
+        height: Math.max(0, height - top - gap)
       };
     }
 
@@ -2001,7 +2013,9 @@ class BrowserShell {
             : Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
         });
       } else {
-        this.chromeView.setBounds(this.vertical()
+        this.chromeView.setBounds(this.band()
+          ? { x: 0, y: 0, width, height: SIDEBAR_TOP_BAND }
+          : this.vertical()
           ? { x: 0, y: 0, width: this.sidebarWidth(), height }
           : { x: 0, y: 0, width, height: this.chromeHeight() });
       }
@@ -2177,5 +2191,5 @@ function send(view, channel, payload) {
 
 module.exports = {
   BrowserShell, CHROME_HEIGHT, BOOKMARKS_BAR_HEIGHT, PANEL_WIDTH,
-  SIDEBAR_WIDTH, SIDEBAR_EDGE, CONTENT_GAP
+  SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP
 };

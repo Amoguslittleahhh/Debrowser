@@ -5,6 +5,7 @@
 - **The tucked-away side panel opens every time you push the pointer to the left edge.** On Windows the outer pixels of the window belong to its resize border, which the page never hears, so a pointer stopped against the screen edge often opened nothing; the browser now watches the pointer itself.
 - **Tucked away, the page keeps a margin and rounded corners** instead of running to the window's edges, as in Zen's compact mode.
 - **The side panel slides in and out more smoothly** and has a border you can see against a dark page.
+- **Tucked away, a slim toolbar runs across the top** with a tabs button (showing how many are open), back, forward, reload, the address bar, the bookmark star, the memory meter and the menu. The page starts below it, so the window's minimise, maximise and close buttons no longer cover the page's top-right corner.
 
 ## 1.9.0
 

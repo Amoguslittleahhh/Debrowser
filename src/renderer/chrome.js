@@ -51,6 +51,8 @@ const el = {
   downloads: document.getElementById('downloads'),
   downloadsRing: document.getElementById('downloads-ring'),
   pin: document.getElementById('pin'),
+  bandTabs: document.getElementById('band-tabs'),
+  bandCount: document.getElementById('band-count'),
   omnibox: document.getElementById('omnibox'),
   findbar: document.getElementById('findbar'),
   findInput: document.getElementById('find-input'),
@@ -151,12 +153,19 @@ function reportHover(over) {
   api.send('sidebar-hover', { over });
 }
 
-document.addEventListener('mouseenter', () => reportHover(true));
+// In the bar across the top only the tabs button, and the edge it sits on,
+// bring the strip out: the rest of the bar is a toolbar, used all day.
+function pointerWantsStrip(event) {
+  if (document.body.dataset.band !== 'true') return true;
+  return event.clientX < 10 || Boolean(event.target.closest?.('#band-tabs'));
+}
+
+document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event)));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside
 // - which is what happens when the strip slides out from under it - does not
 // fire `mouseenter`.
-document.addEventListener('mousemove', () => reportHover(true));
+document.addEventListener('mousemove', (event) => reportHover(pointerWantsStrip(event)));
 
 /*
  * The wheel over the tab strip moves the strip.
@@ -200,6 +209,7 @@ function renderSidebar(sidebar) {
   if (!side) {
     document.body.dataset.detached = 'false';
     document.body.dataset.floating = 'false';
+    document.body.dataset.band = 'false';
     return;
   }
 
@@ -236,6 +246,9 @@ function renderSidebar(sidebar) {
     document.body.classList.remove('sliding-out');
     reportChromeHeight();
   }
+
+  const band = detached && !floating && sidebar.band === true;
+  if (document.body.dataset.band !== String(band)) document.body.dataset.band = String(band);
 }
 
 /**
@@ -1637,6 +1650,8 @@ api.onState((state) => {
   if (document.body.dataset.layout === 'left') releaseTabWidths();
   if (state.prefs) el.bookmarks.dataset.opensIn = state.prefs.bookmarkOpensIn || 'new-tab';
   renderTabs(state.tabs);
+  el.bandCount.textContent = String(state.tabs.length);
+  el.bandTabs.title = `${state.tabs.length} tab${state.tabs.length === 1 ? '' : 's'} – show them`;
   // Bookmarks changed somewhere else - Settings, an import - so the star's
   // cached answer for this page is no longer one.
   if (state.bookmarksRevision !== starRevision) {
