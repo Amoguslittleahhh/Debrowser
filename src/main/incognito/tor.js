@@ -289,7 +289,11 @@ class Tor {
       // and Tor's own last complaint usually names the reason.
       const message = text.replace(/^.*\[(warn|err)\]\s*/, '');
       if (!/running Tor as root|GeoIP/i.test(message)) this.status.warning = message;
-      if (/Could not bind to/.test(message)) this.set({ state: 'failed', warning: message });
+      // Once: Tor logs a taken port several times, and each report moved the
+      // port and restarted Tor again, using up every move on one collision.
+      if (/Could not bind to/.test(message) && this.status.state !== 'failed') {
+        this.set({ state: 'failed', warning: message });
+      }
     }
     this.log('tor', text);
   }
@@ -332,7 +336,9 @@ class Tor {
   armStall() {
     clearTimeout(this.stallTimer);
     this.stallTimer = setTimeout(() => {
-      if (this.status.state === 'ready' || !this.child) return;
+      // A Tor the Linux launcher started is ours to watch too, though not our
+      // child: without it the "no progress" warning, and its Retry, never came.
+      if (this.status.state === 'ready' || (!this.child && !this.attached)) return;
       this.set({
         warning: this.status.warning ||
           `No progress for ${Math.round(STALL_MS / 1000)} seconds at ${this.status.progress}% - ` +

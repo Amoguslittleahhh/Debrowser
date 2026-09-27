@@ -281,6 +281,8 @@ async function discard(tab, ctx) {
     return frozen ? Tier.FROZEN : tab.tier;
   }
 
+  // A stopped tab skipped the capture above and with it the check after it.
+  if (superseded(tab, from)) return null;
   tab.teardownView();
   return Tier.DISCARDED;
 }
@@ -292,7 +294,7 @@ async function discard(tab, ctx) {
  * from the step reports the tab as unmoved, which is what it should be.
  */
 function superseded(tab, from) {
-  return tab.visible || tab.tier !== from;
+  return tab.visible || tab.activating === true || tab.tier !== from;
 }
 
 /** Undo what a superseded demotion had done so far, and report no move. */

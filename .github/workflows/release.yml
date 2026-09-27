@@ -402,14 +402,18 @@ jobs:
       # to read - what changed in the version they are about to download - was
       # buried under the history of the ones they already have.
       #
-      # Takes the first `## ` section and drops its heading, since the release
-      # is already titled with its version.
+      # Takes this version's `## ` section - the one package.json names, not
+      # merely the first: with fixes waiting under `## Unreleased` at the top,
+      # the first section is not this release's - and drops its heading, since
+      # the release is already titled with its version. A version with no
+      # section fails here, before anything is published.
       # Both the body and its attribution footer come from one script, shared
       # with the workflow that republishes notes for an already-published
       # release. Two copies of this would drift.
       - name: Build the release body
         run: |
-          python3 .github/scripts/release-notes.py > RELEASE_NOTES.md
+          version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          python3 .github/scripts/release-notes.py "$version" > RELEASE_NOTES.md
           echo "--- release body ---"
           cat RELEASE_NOTES.md
 

@@ -453,12 +453,26 @@ function main() {
    * name on disk. Per session, because incognito has one per tab.
    */
   const takeDownloads = (ses) => {
+    // Pages this session sent something other than a GET to, briefly. Our
+    // manager fetches by URL alone, so a form post that answers with a file -
+    // an "Export CSV" button, a statement download - came back as a GET, and
+    // the error or sign-in page it got was saved under the file's name.
+    // Those stay with Chromium, which still has the request it made.
+    const posted = new Map();
+    ses.webRequest.onSendHeaders({ urls: ['http://*/*', 'https://*/*'] }, (details) => {
+      if (details.method === 'GET' || details.method === 'HEAD') return;
+      if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return;
+      posted.set(details.url, Date.now());
+      if (posted.size > 64) posted.delete(posted.keys().next().value);
+    });
     ses.on('will-download', (event, item) => {
       const url = item.getURL();
       // Only what a download can mean. A blob: or data: URL has no server to
       // ask for ranges and nothing for our manager to fetch, so Chromium keeps
       // those - taking them over would break them to no purpose.
       if (!/^https?:/i.test(url) || !downloads) return;
+      const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : [url];
+      if (chain.some((u) => Date.now() - (posted.get(u) || 0) < 60_000)) return;
       event.preventDefault();
       downloads.start(url, { session: ses });
     });
@@ -531,7 +545,7 @@ function main() {
         tab.wc.stop();
         return;
       }
-      const hit = shortcuts.match(input);
+      const hit = shortcuts.match(input, { incognito: INCOGNITO });
       if (!hit || (only && !only.has(hit.command))) return;
       // On a website, a key the page may want for itself goes to the page
       // first. See `awaitPageKey`.
@@ -1738,6 +1752,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // the keystroke usually arrives while a page holds the keyboard, and
         // focusing an input in a renderer that does not have focus does
         // nothing visible at all.
+        shell.bringSidebarOut();
         shell.focusChrome();
         shell.toChrome('focus-address');
         break;
@@ -1878,7 +1893,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // link takes.
       case 'save-link': {
         const url = String(payload?.url || '');
-        if (!active?.isLive) break;
+        if (!active?.isLive || (context.model?.tabId && context.model.tabId !== active.id)) break;
         const downloads = getDownloads();
         if (/^https?:/i.test(url) && downloads) {
           // Asking where, with the page as referrer - except from a private
@@ -1915,15 +1930,18 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // Opens the inspector on the element that was right-clicked. The dock is
       // ours, so the inspector has to exist before it can be pointed at a node.
       // The image under the pointer, onto the clipboard as a picture.
+      // The menu's coordinates belong to the tab it was opened on; switched
+      // away since, they would copy or inspect a spot on another page.
       case 'copy-image': {
-        const at = context.model?.params;
+        const at = context.model?.tabId === active?.id ? context.model.params : null;
         if (active?.isLive && at) active.wc.copyImageAt(Math.round(at.x || 0), Math.round(at.y || 0));
         break;
       }
 
       case 'inspect': {
         if (!active?.isLive) break;
-        const { x, y } = context.model?.params || payload || {};
+        const own = context.model?.tabId === active.id ? context.model.params : null;
+        const { x, y } = own || payload || {};
         if (!active.devToolsOpen) toggleDevTools(active, shell, log);
         active.wc.inspectElement(Math.round(Number(x) || 0), Math.round(Number(y) || 0));
         break;
@@ -2022,7 +2040,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // The user already chose to restart; the tabs come back with the session.
         if (quitState) quitState.confirmed = true;
         if (prewarm) prewarm.drop();
-        if (shell.updater) shell.updater.install();
+        // An install that did not start leaves the browser running, and the
+        // close-tabs question has to be there again for it.
+        if (!(shell.updater && shell.updater.install()) && quitState) quitState.confirmed = false;
         break;
 
       case 'open-settings':

@@ -50,10 +50,12 @@ const TABLE = [
   { command: 'new-tab', mod: true, key: 't' },
   { command: 'new-incognito-window', mod: true, shift: true, key: 'n' },
   // Private windows only; the same keys Tor Browser uses.
-  { command: 'new-circuit', mod: true, shift: true, key: 'l' },
-  { command: 'new-identity', mod: true, shift: true, key: 'u' },
+  // Matched only there: in the ordinary browser they do nothing, and taking
+  // them anyway stole Ctrl+Shift+L and Ctrl+Shift+U from every web app.
+  { command: 'new-circuit', mod: true, shift: true, key: 'l', privateOnly: true },
+  { command: 'new-identity', mod: true, shift: true, key: 'u', privateOnly: true },
   // The panic key: the private window, Tor and every file gone at once.
-  { command: 'panic', mod: true, shift: true, key: 'delete' },
+  { command: 'panic', mod: true, shift: true, key: 'delete', privateOnly: true },
   { command: 'close-tab', mod: true, key: 'w' },
   { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
   { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'tab' },
@@ -139,7 +141,7 @@ for (const entry of TABLE) {
  * @param {Electron.Input} input
  * @returns {{command: string, payload: object|null}|null}
  */
-function match(input) {
+function match(input, { incognito = false } = {}) {
   if (!input || input.type !== 'keyDown') return null;
 
   // Cmd on a Mac, Ctrl everywhere else. Never both: `Ctrl+T` on macOS is a
@@ -151,17 +153,32 @@ function match(input) {
   const other = IS_MAC ? Boolean(input.control) : Boolean(input.meta);
   if (other) return null;
 
-  const key = String(input.key || '').toLowerCase();
   const shift = Boolean(input.shift);
   const alt = Boolean(input.alt);
+  const find = (key) => {
+    for (const entry of TABLE) {
+      if (entry.privateOnly && !incognito) continue;
+      if (Boolean(entry.mod) !== mod) continue;
+      if (entry.shift !== 'any' && Boolean(entry.shift) !== shift) continue;
+      if (Boolean(entry.alt) !== alt) continue;
+      if (!entry.keys.includes(key)) continue;
+      return { command: entry.command, payload: entry.payload || null, pageFirst: Boolean(entry.pageFirst) };
+    }
+    return null;
+  };
 
-  for (const entry of TABLE) {
-    if (Boolean(entry.mod) !== mod) continue;
-    if (entry.shift !== 'any' && Boolean(entry.shift) !== shift) continue;
-    if (Boolean(entry.alt) !== alt) continue;
-    if (!entry.keys.includes(key)) continue;
-    return { command: entry.command, payload: entry.payload || null, pageFirst: Boolean(entry.pageFirst) };
-  }
+  // The character first, as the layout produces it - Ctrl+Z is where the Z
+  // is. Then the physical key, as Chromium does, for what that misses: on a
+  // Cyrillic or Greek layout Ctrl+T produces a letter that is not t, and on
+  // AZERTY the digit row produces &, é, " unshifted, so Ctrl+1 was dead.
+  const key = String(input.key || '').toLowerCase();
+  const hit = find(key);
+  if (hit) return hit;
+  const code = String(input.code || '');
+  const digit = /^Digit(\d)$/.exec(code);
+  if (digit) return find(digit[1]);
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter && !/^[\x20-\x7e]$/.test(key)) return find(letter[1].toLowerCase());
   return null;
 }
 

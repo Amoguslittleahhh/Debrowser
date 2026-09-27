@@ -205,6 +205,9 @@ class Governor {
       if (!tab.isLive || !tab.cdp) continue;
       if (isStopped(tab.tier)) continue;   // stopped: cannot answer, and re-attaching undoes the point
       if (tab.boosted) continue; // never add CDP traffic to an animating tab
+      // Nor to the page in front: measuring re-attaches the debugger and turns
+      // on Performance, the instrumentation tiers.js detaches from it.
+      if (tab.visible) continue;
 
       // Two consumers want this reading, and it costs a CDP round trip, so it
       // is taken once here for both: attribution needs a per-tab heap only when
@@ -552,14 +555,17 @@ class Governor {
         this.stats.discards += 1;
         overBy -= before;              // the whole renderer is gone
         this.stats.reclaimedMB += before;
-      } else {
-        if (next === Tier.FROZEN) this.stats.freezes += 1;
-        // A cold/frozen trim typically returns a meaningful fraction of the
-        // page's heap. Estimate conservatively so we do not over-reclaim on
-        // the strength of an optimistic guess; the next tick measures reality.
+      } else if (next === Tier.HIBERNATED) {
+        // A trim returns a real fraction of the page's memory. Estimated
+        // conservatively; the next tick measures what it actually was.
         const estimate = Math.max(0, (before - this.cfg.tabFloorMB) * 0.35);
         overBy -= estimate;
         this.stats.reclaimedMB += estimate;
+      } else if (next === Tier.FROZEN) {
+        // COLD and FROZEN free nothing - freezing costs memory, by this file's
+        // own measurement - so they are steps on the way, not savings. Booking
+        // savings for them ended the pass before anything was reclaimed.
+        this.stats.freezes += 1;
       }
     }
   }
@@ -813,6 +819,7 @@ class Governor {
   /** Tabs that should be left entirely alone this tick. */
   shouldSkip(tab) {
     if (!tab.isLive) return true;
+    if (tab.activating) return true;                    // being brought to the front
     if (tab.loading) return true;                       // never interrupt a load
     if (tab.crashed) return true;
     if (tab.boosted) return true;

@@ -122,7 +122,7 @@ class Metrics {
       // drifted upward for as long as the misses continued.
       if (!m) return;
       this.probed.set(pid, {
-        pssMB: m.pssBytes / MB, privateMB: m.privateBytes / MB, at: Date.now()
+        pssMB: m.pssBytes / MB, privateMB: m.privateBytes == null ? null : m.privateBytes / MB, at: Date.now()
       });
     })).catch(() => { /* a failed probe simply leaves the fallback in place */ })
       .finally(() => { this.probing = false; });

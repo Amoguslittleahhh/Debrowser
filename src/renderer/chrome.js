@@ -1336,6 +1336,8 @@ let urlEdited = false;
 let suggestions = [];
 let selected = -1;
 let asked = 0;
+/** A question sent that has not been answered yet: the list may be up. */
+let pendingAsk = false;
 let listOpen = false;
 
 function anchor() {
@@ -1344,11 +1346,16 @@ function anchor() {
 }
 
 function closeList() {
-  if (!listOpen && !suggestions.length) return;
+  // An answer still in flight is stale either way. The main process shows
+  // the list when it answers, not when this side accepts the answer, so a
+  // question asked and not yet answered still has to be told to hide: Enter
+  // or Escape before the reply left the list over the new page.
+  asked += 1;
+  if (!listOpen && !suggestions.length && !pendingAsk) return;
+  pendingAsk = false;
   listOpen = false;
   suggestions = [];
   selected = -1;
-  asked += 1;               // an answer still in flight is now stale
   api.send('suggest-hide');
 }
 
@@ -1367,10 +1374,12 @@ el.url.addEventListener('input', async () => {
   if (!typed.trim()) { closeList(); return; }
 
   const ask = ++asked;
+  pendingAsk = true;
   // Whether this keystroke will be completed in place, so the list marks as
   // Enter's the row Enter will really take.
   const complete = completing && chromePrefs.inlineAutocomplete !== false && typed.length >= 2;
   const res = await api.request('suggest', { text: typed, anchor: anchor(), complete });
+  if (ask === asked) pendingAsk = false;
   // Dropped unless the field still says what was asked about: the answer
   // crosses a process boundary, and typing does not stop while it is in flight.
   if (ask !== asked || el.url.value !== typed || !res) return;

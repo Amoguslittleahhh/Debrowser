@@ -565,7 +565,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     let afterMB = afterDetail ? afterDetail.privateMB : null;
     if (afterMB == null) {
       const probed = await platform.measureProcess(big.pid).catch(() => null);
-      if (probed) afterMB = probed.privateBytes / (1024 * 1024);
+      if (probed && probed.privateBytes != null) afterMB = probed.privateBytes / (1024 * 1024);
     }
     const reclaimed = afterMB == null ? 0 : privateBefore - afterMB;
     check('hibernating actually removes memory from the renderer',
@@ -1889,6 +1889,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       result ? `${result.matches} match(es), on ${result.activeMatchOrdinal}` : 'no result arrived');
 
     tabs.close(target.id);
+  }
+
+  // A download behind a redirect - a release link, a "latest" URL. Every one
+  // of them failed: Electron cancels a manual redirect unless it is followed
+  // inside its own event, and the manager only looked for a 3xx response.
+  {
+    const { DownloadManager } = require('./downloads');
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-dl-'));
+    const manager = new DownloadManager({ dir, session: session.fromPartition(BROWSING_PARTITION) });
+    const target = new URL(pageUrl('idle.html'));
+    const item = manager.start(`${target.origin}/redirect/idle.html`);
+    const done = await waitFor(() => item.state === 'done' || item.state === 'failed', { timeoutMs: 8000 });
+    const saved = done && item.state === 'done' && item.file && fs.existsSync(item.file) &&
+      fs.readFileSync(item.file, 'utf8').includes('<');
+    check('a download that redirects is followed and saved',
+      Boolean(saved), `state ${item.state}${item.error ? `: ${item.error}` : ''}`);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 
   // The downloads page.

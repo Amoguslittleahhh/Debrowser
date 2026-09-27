@@ -276,6 +276,10 @@ class TabManager {
     const stop = this.latency.start('switch');
 
     this.activeId = id;
+    // Chosen, but not visible until `onPresent` returns - which can be a thaw
+    // of up to two seconds. The governor reads this so a tick in that window
+    // does not tear down the tab the user just picked (tiers.js, superseded).
+    tab.activating = true;
     // Bypass the admission queue: the user is waiting on this one.
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
@@ -293,6 +297,8 @@ class TabManager {
       await this.onPresent(tab);
     } catch (err) {
       this.log(`present failed for tab ${tab.id}: ${err.message}`);
+    } finally {
+      tab.activating = false;
     }
 
     // The user may have switched away again while we were promoting. The sample
@@ -348,7 +354,14 @@ class TabManager {
       if (current && current.isLive) this.onUncover();
     };
     wc.once('did-stop-loading', done);
-    wc.once('did-fail-load', done);
+    // The page's own failure, not a subframe's: a blocked tracker iframe took
+    // the placeholder down before the page it covers had loaded.
+    const failed = (_e, _code, _desc, _url, isMainFrame) => {
+      if (!isMainFrame) return;
+      wc.removeListener('did-fail-load', failed);
+      done();
+    };
+    wc.on('did-fail-load', failed);
     wc.once('render-process-gone', done);
   }
 

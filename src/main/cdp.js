@@ -62,10 +62,16 @@ class CdpSession {
         return false;
       }
     }
-    this.wc.debugger.once('detach', () => {
-      this.attached = false;
-      this.enabledDomains.clear();
-    });
+    // Once per session object, not per attach: a detach we make ourselves
+    // does not emit the event, so a listener per attach piled up on every
+    // freeze and thaw.
+    if (!this.watchingDetach) {
+      this.watchingDetach = true;
+      this.wc.debugger.on('detach', () => {
+        this.attached = false;
+        this.enabledDomains.clear();
+      });
+    }
     return true;
   }
 

@@ -262,18 +262,21 @@ function systemMemory() {
  * this figure by roughly 3x - see ../memory.js.
  */
 async function measure(app, samples = 8, gapMs = 250) {
-  let total = 0;
+  // The highest of the samples, which is what callers report as the peak;
+  // each sample used to overwrite the last, so it was simply the final one.
+  let peak = 0;
   for (let i = 0; i < samples; i++) {
     const metrics = app.getAppMetrics();
-    total = metrics.reduce(
+    let total = metrics.reduce(
       (sum, p) => sum + footprintMB(p.pid, (p.memory?.workingSetSize || 0) / 1024), 0);
     // getAppMetrics is not the whole browser: it omits Chromium's zygotes, and
     // they are fixed overhead, so leaving them out understates every figure by
     // a constant ~29MB. Measured, see memory.js.
     total += unreportedProcessesMB(new Set(metrics.map((p) => p.pid))).mb;
+    peak = Math.max(peak, total);
     await sleep(gapMs);
   }
-  return Math.round(total);
+  return Math.round(peak);
 }
 
 module.exports = { runBench };

@@ -98,6 +98,11 @@ function parse(raw) {
 function remember(raw) {
   const url = parse(raw);
   if (!url) return false;
+  // Not an address on this machine or its network. A page chooses what its
+  // <link rel=icon> says, and the browser then fetched it from the main
+  // process - a GET to the user's router on any website's say-so. A local
+  // site's own icon still loads through the default paths below.
+  if (require('./incognito/policy').isLocalHost(url.hostname)) return false;
   if (seen.has(url.href)) return true;
   if (seen.size >= MAX_REMEMBERED) {
     const oldest = seen.values().next().value;

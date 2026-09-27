@@ -207,7 +207,11 @@ function windowsPromptScript(hwnd, message) {
   // Only a quote can break out of the C# string literal, and the message is
   // ours rather than the user's - but it is escaped anyway, because "this
   // string is always ours" is the assumption that stops being true later.
-  const safeMessage = String(message).replace(/["\\]/g, '').slice(0, 200);
+  // Letters, digits and plain punctuation only. It sits inside a PowerShell
+  // string, where $(), the backtick and "smart" quotes all have meaning;
+  // stripping " and \ alone left those. Latent - the one caller passes a
+  // constant - but a message is not a place to allow code.
+  const safeMessage = String(message).replace(/[^\p{L}\p{N} .,:;!?()'-]/gu, '').replace(/'/g, '').slice(0, 200);
   return `
 ${winrtPrelude('VERIFY')}
 try {

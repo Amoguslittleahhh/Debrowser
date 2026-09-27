@@ -889,19 +889,25 @@ class BrowserShell {
   passPointerThrough(input) {
     if (this.window.isDestroyed()) return;
     const views = [...this.window.contentView.children].reverse();
+    // Views that can take input only: the restore placeholder is a picture
+    // with no page behind it, and the press was dropped on it.
     const target = views.find((v) => {
       const b = v.getBounds();
-      return v.getVisible?.() !== false && input.x >= b.x && input.y >= b.y &&
-        input.x < b.x + b.width && input.y < b.y + b.height;
+      return v.webContents && !v.webContents.isDestroyed() && v.getVisible?.() !== false &&
+        input.x >= b.x && input.y >= b.y && input.x < b.x + b.width && input.y < b.y + b.height;
     });
-    if (!target || !target.webContents || target.webContents.isDestroyed()) return;
+    if (!target) return;
     const b = target.getBounds();
+    const at = {
+      x: input.x - b.x, y: input.y - b.y,
+      button: input.button || 'left', clickCount: input.clickCount || 1, modifiers: input.modifiers || []
+    };
     try {
       target.webContents.focus();
-      target.webContents.sendInputEvent({
-        type: 'mouseDown', x: input.x - b.x, y: input.y - b.y,
-        button: input.button || 'left', clickCount: input.clickCount || 1, modifiers: input.modifiers || []
-      });
+      target.webContents.sendInputEvent({ type: 'mouseDown', ...at });
+      // And its release: the real one went to the view that has just gone, so
+      // the page got a press with no click, and a button stayed held down.
+      target.webContents.sendInputEvent({ type: 'mouseUp', ...at });
     } catch { /* the view went too */ }
   }
 
@@ -1263,7 +1269,11 @@ class BrowserShell {
           additionalArguments: preloadArgs(this.prefs)
         }
       });
-      this.window.contentView.addChildView(this.panelView);
+      // Below an open menu, not over it: Ctrl+M with the menu open put the
+      // menu underneath the panel.
+      const root = this.window.contentView;
+      const sheet = this.sheetView ? root.children.indexOf(this.sheetView) : -1;
+      root.addChildView(this.panelView, sheet === -1 ? undefined : sheet);
       this.bindShortcuts(this.panelView.webContents);
       this.panelView.webContents.loadFile(path.join(RENDERER_DIR, 'panel.html'));
     } else if (this.panelView) {
@@ -1552,9 +1562,34 @@ class BrowserShell {
     // layout here would be the caller knowing something the mechanism already
     // knows.
     clearTimeout(this.sidebarCloseTimer);
-    this.sidebarOpen = want;
+    // Closing leaves the strip out if the pointer is on it - snapping it shut
+    // under the pointer was the bar closing the thing being pointed at.
+    this.sidebarOpen = want || this.sidebarPinned() || this.sidebarPointerOver === true || this.sidebarHeld();
     this.layout();
+    // Told now, not on the next state broadcast: tucked away, the chrome did
+    // not know it was out, so the bar stayed hidden, the focus below found
+    // nothing to focus, and the first keys typed went nowhere.
+    this.publishSidebar();
     this.toChrome(want ? 'find-focus' : 'find-closed');
+  }
+
+  /**
+   * Out for the keyboard - Ctrl+L, F6 - wherever the pointer is. The address
+   * bar lives in the strip, so with the strip tucked away focusing it focused
+   * nothing. Typing in it holds the strip out; leaving the field lets it go.
+   */
+  bringSidebarOut() {
+    if (!this.vertical() || this.sidebarPinned() || this.sidebarOpen) return;
+    clearTimeout(this.sidebarCloseTimer);
+    clearTimeout(this.sidebarOpenTimer);
+    if (this.sidebarSliding) {
+      clearTimeout(this.sidebarSliding);
+      this.sidebarSliding = null;
+      this.toChrome('sidebar-slide', { out: false });
+    }
+    this.sidebarOpen = true;
+    this.layout();
+    this.publishSidebar();
   }
 
   /** A one-off message to the chrome, for the things that are not state. */
@@ -1587,7 +1622,10 @@ class BrowserShell {
    * page can simply have the room. See `chromeHidden`.
    */
   chromeFloats() {
-    return this.vertical() && (this.fullScreen() || (this.detached() && this.sidebarOpen));
+    // Unpinned, only while it is out; collapsed it is the edge at x=0, full
+    // screen or not. It was laid out as a floating ten-pixel panel ten pixels
+    // in, so a pointer pushed to the screen edge landed on the page instead.
+    return this.vertical() && (this.detached() ? this.sidebarOpen : this.fullScreen());
   }
 
   /**
@@ -1597,7 +1635,7 @@ class BrowserShell {
    * shape, so it does not count twice.
    */
   detached() {
-    return this.vertical() && !this.fullScreen() && !this.sidebarPinned();
+    return this.vertical() && !this.sidebarPinned();
   }
 
   /**
@@ -1950,12 +1988,24 @@ class BrowserShell {
       // it, which is switch to another tab and come back.
       this.devToolsView.setVisible(Boolean(dock));
       if (dock) this.devToolsView.setBounds(dock);
+      // Tucked away, the strip floats over the page, and a dock across the
+      // bottom covered its lower part - and the edge that opens it. The strip
+      // goes just above the inspector; anything above that stays above.
+      const root = this.window.contentView;
+      const at = root.children.indexOf(this.devToolsView);
+      if (dock && this.detached() && at > root.children.indexOf(this.chromeView)) {
+        root.removeChildView(this.chromeView);
+        root.addChildView(this.chromeView, root.children.indexOf(this.devToolsView) + 1);
+      }
     }
 
     if (this.panelView) {
       // Sits beside the content, so it starts below whatever the content
       // starts below - the top band in sidebar mode, the chrome otherwise.
-      const top = this.vertical() ? SIDEBAR_TOP_BAND : this.chromeHeight();
+      // In full screen there is no chrome, and no window buttons, above it:
+      // it starts at the top, level with the page, not 84px down.
+      const top = this.fullScreen() && (this.vertical() || this.chromeHidden()) ? 0
+        : (this.vertical() ? SIDEBAR_TOP_BAND : this.chromeHeight());
       this.panelView.setBounds({
         x: width - PANEL_WIDTH,
         y: top,

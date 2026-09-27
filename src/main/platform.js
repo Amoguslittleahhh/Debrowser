@@ -518,7 +518,9 @@ class MeasureHelper extends HelperProcess {
       this.noteFailure('nonsense');
       return null;
     }
-    return { pssBytes, privateBytes: Number.isFinite(privateBytes) ? privateBytes : 0 };
+    // Zero is the probe's "not measured" (macOS has no private figure), and
+    // is kept as null so nothing downstream reads it as a measured nothing.
+    return { pssBytes, privateBytes: Number.isFinite(privateBytes) && privateBytes > 0 ? privateBytes : null };
   }
 
   /**
@@ -805,7 +807,7 @@ function chromiumSwitches(cfg, incognito = null) {
     // Security-relevant: see `siteIsolation` in config.js. Cross-site subframes
     // stop getting their own processes, and Chromium no longer guarantees that
     // two sites never share an address space.
-    disabledFeatures.push('site-per-process', 'IsolateOrigins');
+    disabledFeatures.push('SitePerProcess', 'IsolateOrigins');   // the feature's name, not the switch's
     switches.push(['disable-site-isolation-trials']);
   }
 

@@ -98,6 +98,7 @@ class HelperProcess {
 
     try {
       this.child = spawn(this.binary, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+      this.warmed = false;
     } catch (err) {
       this.reason = `could not start helper: ${err.message}`;
       return false;
@@ -141,14 +142,18 @@ class HelperProcess {
     this.child.on('exit', (code, signal) => {
       const how = signal ? `signal ${signal}` : `code ${code}`;
       this.child = null;
-      this.settle(HELPER_GONE);
-      if (this.stopped) return;      // we asked it to go
-      if (this.restarts++ === 0) {
-        this.log(`${this.name} helper exited (${how}); restarting once`);
-        this.start();
-      } else {
+      // Decided before the queue is settled: settling sends the next queued
+      // request, which started a new helper even after this one had exited
+      // "repeatedly".
+      const again = !this.stopped && this.restarts++ === 0;
+      if (!this.stopped && !again) {
         this.reason = `helper exited repeatedly (${how})`;
         this.log(`${this.name} ${this.reason}`);
+      }
+      this.settle(HELPER_GONE);
+      if (again) {
+        this.log(`${this.name} helper exited (${how}); restarting once`);
+        this.start();
       }
     });
 
@@ -190,7 +195,9 @@ class HelperProcess {
   }
 
   settle(line) {
-    if (line !== null) this.warmed = true;
+    // An answer, not the news that the helper died: a respawned helper is
+    // cold again and gets the cold timeout.
+    if (line !== null && line !== HELPER_GONE) this.warmed = true;
     const waiting = this.pending;
     this.pending = null;
     if (waiting) {

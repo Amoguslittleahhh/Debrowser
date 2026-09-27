@@ -71,6 +71,12 @@ function start() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       if ((req.url || '').startsWith('/challenge')) { challenge(req, res, challenges); return; }
+      // A redirect to a fixture, as a download link to "latest" is.
+      if ((req.url || '').startsWith('/redirect/')) {
+        res.writeHead(302, { Location: `/${path.basename(req.url.slice('/redirect/'.length))}` });
+        res.end();
+        return;
+      }
       // What the browser told the site about itself, for the fingerprint check.
       if (req.url === '/headers') {
         const told = Object.fromEntries(Object.entries(req.headers)

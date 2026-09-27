@@ -105,7 +105,8 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
   const typed = String(text || '').trim();
   if (!typed) return { items: [], inline: null, inlineUrl: null };
   const lower = typed.toLowerCase();
-  const words = lower.split(/\s+/).filter(Boolean);
+  // `www.` is not part of what an address is matched on (see `stem`).
+  const words = lower.replace(/^www\./, '').split(/\s+/).filter(Boolean);
 
   // How much each address has been used, whichever list it comes from: a
   // bookmark visited every day should outrank one saved and never opened.
@@ -114,7 +115,10 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
     const days = Math.max(0, (now - (h.visitedAt || 0)) / 86_400_000);
     const frequency = Math.min(Math.log2((h.visits || 1) + 1) * 30, 150);
     const recency = Math.max(0, 60 - days * 2);
-    usage.set(prepare(h).key, frequency + recency);
+    // http and https copies of a page share a key; the better-used one
+    // counts, not whichever the newest-first list happened to reach last.
+    const key = prepare(h).key;
+    usage.set(key, Math.max(usage.get(key) || 0, frequency + recency));
   }
 
   const seen = new Map();   // one row per address; the better kind of row wins
@@ -142,14 +146,19 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
   let inline = null;
   let inlineUrl = null;
   if (!/\s/.test(typed)) {
-    const hits = ranked.filter((c) => stem(c.url).toLowerCase().startsWith(lower));
+    // Against the address as it would be typed, with and without `www.`:
+    // `stem` drops it, so typing `www.git` never completed.
+    const full = (c) => c.url.replace(/^https?:\/\//i, '').toLowerCase();
+    const hits = ranked.filter((c) => stem(c.url).toLowerCase().startsWith(lower) ||
+      (lower.startsWith('www.') && full(c).startsWith(lower)));
     hits.sort((a, b) => b.score - a.score || stem(a.url).length - stem(b.url).length);
     if (hits.length) {
       inlineUrl = hits[0].url;
       // A site's front page completes as `github.com`, as its row reads, not
       // `github.com/`; the full address is kept for Enter.
-      inline = stem(inlineUrl).replace(/^([^/]+)\/$/, '$1');
-      if (inline.length < typed.length) inline = stem(inlineUrl);
+      const base = lower.startsWith('www.') ? inlineUrl.replace(/^https?:\/\//i, '') : stem(inlineUrl);
+      inline = base.replace(/^([^/]+)\/$/, '$1');
+      if (inline.length < typed.length) inline = base;
     }
   }
 

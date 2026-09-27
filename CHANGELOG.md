@@ -13,6 +13,20 @@
 - **Deleting a saved password that fails to save no longer hides it until the next restart,** where it came back and was filled in again.
 - **Running the test suite no longer touches your profile.** It used to delete saved passwords and cards, reverse the bookmarks bar and change settings in the profile of whoever ran it; it now runs in a temporary profile of its own.
 - **The Intune installer includes Tor and the network tripwire,** without which its private windows could not connect.
+- **Downloads that redirect work.** Every download behind a redirect — a GitHub release link, a "latest" address, "Save link as" on either — failed with "Redirect was cancelled".
+- **A file downloaded from a form is the right file.** An "Export" or "Download statement" button that posts a form and answers with a file was fetched again as a plain request, and the error or sign-in page that came back was saved under the file's name. Those downloads now go through Chromium's own path, which still has the original request. A download the server refuses (404, 403) now fails at once instead of opening a save dialog first.
+- **Typing `3.14`, `1.25` or an email address searches for it,** instead of opening `https://3.14` (which the browser reads as an IP address) or treating `user@example.com` as a sign-in to example.com — which also meant `google.com@evil.com` opened evil.com. Addresses with a port above 65535 are searched for too.
+- **The AppImage can update itself again.** It runs from a read-only mount, so it always looked "installed for all users" and never offered updates.
+- **A tab in the background can no longer freeze the browser** by asking "Leave this page?" over and over; only the tab in front, or one you are closing, gets to ask.
+- **A tab whose page ran out of memory comes straight back** instead of showing an empty window that Reload couldn't fix.
+- **Ctrl+Shift+L and Ctrl+Shift+U work in web apps again,** such as Google Docs; they were taken by the private window's circuit keys, which do nothing in a normal window.
+- **Shortcuts work on other keyboard layouts.** On Cyrillic or Greek layouts Ctrl+T, Ctrl+W and the rest did nothing, and on AZERTY Ctrl+1–9 did nothing; they now fall back to the key's position, as Chrome does.
+- **With the side tabs tucked away:** Ctrl+F and Ctrl+L bring the panel out, so find and the address bar can be typed into; closing find no longer snaps the panel shut under the pointer; in full screen the edge that opens the panel is at the screen's edge rather than ten pixels in; and DevTools docked at the bottom no longer covers the panel.
+- **The address suggestions no longer get stuck over the page** when Enter or Escape is pressed before they arrive.
+- **Link prefetching keeps working on single-page sites** after their first page change.
+- **The browser can't unload the tab you just clicked** while it is still coming back.
+- **The task manager** in full screen starts level with the page, and opened with Ctrl+M while the menu is up it no longer covers the menu.
+- **Smaller fixes:** a click made while a menu was fading now arrives as a full click, not a press with no release; a failed "Restart to update" no longer turns off the close-tabs question; "Copy image" and "Inspect" act on the tab the menu was opened on; typing `www.` in the address bar completes; memory figures on macOS say "unknown" rather than 0 where they aren't measured; and a few timers, listeners and helper restarts that built up over a long session no longer do.
 - **Private windows:**
   - Their pages are no longer trimmed to the pagefile or swap under memory pressure; that path skipped the rule that turns trimming off for them.
   - Typing an address into a tab the browser had unloaded now waits for the fingerprint shield before the site loads, and no longer loads the old address over the new one.
@@ -25,6 +39,8 @@
   - Turning off "keep Tor state" deletes the saved state straight away, including with the Linux launcher, which never deleted it.
   - On Linux, crash dumps are off even when the network sandbox can't be set up, and a sandbox that fails part way no longer leaves the window unable to connect.
   - Photos from phones lose the extra pictures and data stored after the image, which carried their own location.
+  - Pasting from a spreadsheet — which copies text and a picture together — pastes the text again; only the text was dropped when the picture was cleaned.
+  - A site's `<link rel=icon>` can no longer point the browser at an address on your local network.
 
 ## 1.8.7
 

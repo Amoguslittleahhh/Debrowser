@@ -243,6 +243,13 @@ class Download {
    */
   async probe() {
     const res = await this.request(this.url, { Range: 'bytes=0-0' }, MAX_REDIRECTS);
+    // Refused outright is a failed download, said now: carrying on opened a
+    // save dialog and made a file for a 404, or called a 403 a refused range.
+    // 416 is an empty file's answer to a range of one byte, not a refusal.
+    if (res.statusCode >= 400 && res.statusCode !== 416) {
+      res.destroy?.();
+      throw new Error(`the server answered ${res.statusCode}`);
+    }
     const headers = res.headers || {};
 
     const contentRange = header(headers, 'content-range');
@@ -555,6 +562,10 @@ class DownloadManager {
       onChange: () => this.onChange(this.list())
     });
     this.items.set(item.id, item);
+    // The list is sorted and sent on every progress report, so finished ones
+    // beyond the most recent hundred go - oldest first, never a running one.
+    const finished = [...this.items.values()].filter((d) => d.state === 'done' || d.state === 'failed' || d.cancelled);
+    for (const old of finished.slice(0, Math.max(0, finished.length - 100))) this.items.delete(old.id);
     item.start();
     return item;
   }

@@ -45,7 +45,8 @@ Appended by the "Extract this version's notes" step in
 `.github/workflows/release.yml`, so it cannot be forgotten on a release.
 
 The release body is that version's notes and nothing else — the step takes the
-first `## ` section of `CHANGELOG.md` and drops its heading. Publishing the
+`## ` section of `CHANGELOG.md` for the version in `package.json` and drops its
+heading, so rename `## Unreleased` to the version before releasing. Publishing the
 whole changelog means every download page repeats the notes for versions the
 reader already has, burying the one thing they came to read.
 

@@ -589,10 +589,23 @@ if (process.argv.includes('--debrowser-private')) {
       if (ours.has(event)) return;
       const list = filesOf(event);
       if (!list || !list.length) return;
+      // What came with the files - a spreadsheet's cells are copied as text
+      // and as a picture of them - goes along too. The event handed on used to
+      // carry the cleaned files alone, and a synthetic paste inserts nothing
+      // by itself, so pasting such cells into a text field pasted nothing.
+      const source = event.clipboardData || event.dataTransfer;
+      const strings = {};
+      for (const kind of ['text/plain', 'text/html', 'text/uri-list']) {
+        const value = source && source.getData(kind);
+        if (value) strings[kind] = value;
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       const target = event.target;
       cleanFiles(list).then((clean) => {
+        for (const [kind, value] of Object.entries(strings)) {
+          try { clean.setData(kind, value); } catch { /* read-only list */ }
+        }
         if (type === 'drop' && target instanceof HTMLInputElement && target.type === 'file') {
           target.files = clean.files;
           target.dispatchEvent(new Event('input', { bubbles: true }));
@@ -602,6 +615,14 @@ if (process.argv.includes('--debrowser-private')) {
         const again = remake(event, clean);
         ours.add(again);
         target.dispatchEvent(again);
+        // Unhandled and into something editable: what a real paste would
+        // have done with the text.
+        const editable = target && (target.isContentEditable ||
+          target.tagName === 'TEXTAREA' ||
+          (target instanceof HTMLInputElement && !['file', 'checkbox', 'radio', 'button', 'submit'].includes(target.type)));
+        if (type === 'paste' && !again.defaultPrevented && editable && strings['text/plain']) {
+          document.execCommand('insertText', false, strings['text/plain']);
+        }
       }).catch(() => { /* not cleaned: not delivered */ });
     }, true);
   };
@@ -637,7 +658,17 @@ if (!process.argv.includes('--debrowser-private') && window === window.top &&
   // navigation it was meant to speed up - measured, it then made a click that
   // came too fast for it slower, 362 ms against 206. So none is added after.
   let leaving = false;
-  if (window.navigation) window.navigation.addEventListener('navigate', (e) => { if (!e.hashChange) leaving = true; });
+  // Leaving means a new document. A single-page app's pushState fires
+  // `navigate` too, same-document, and counting it as leaving stopped every
+  // prefetch on the site for good after its first route change; a same-page
+  // route change starts the per-page allowance again instead.
+  if (window.navigation) {
+    window.navigation.addEventListener('navigate', (e) => {
+      if (e.hashChange || e.downloadRequest) return;
+      if (e.destination && e.destination.sameDocument) asked.clear();
+      else leaving = true;
+    });
+  }
   window.addEventListener('pageshow', () => { leaving = false; });
 
   // A <meta> content security policy the response headers did not carry:
