@@ -1604,7 +1604,7 @@ class BrowserShell {
 
   /** What the chrome needs to know about its own shape. */
   sidebarState() {
-    if (!this.vertical()) return null;
+    if (!this.vertical() || this.window.isDestroyed()) return null;
     return {
       pinned: this.sidebarPinned(),
       open: this.sidebarPinned() || this.sidebarOpen,
@@ -2098,6 +2098,9 @@ class BrowserShell {
    * under the old theme.
    */
   publish(state) {
+    // Queued updates can land after the window has closed (quitting, or an
+    // update installing): there is nothing left to paint.
+    if (this.window.isDestroyed()) return;
     const full = this.prefs
       ? { ...state, prefs: this.prefs.all(), searchEngines: this.prefs.engines() }
       : { ...state };

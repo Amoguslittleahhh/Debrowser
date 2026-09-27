@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.7
+
+- **No more "Object has been destroyed" error when the browser closes.** An update to the tabs that was already on its way when the window closed — as it does when an update installs — tried to measure the closed window and showed a main-process error. The install itself was never affected.
+
 ## 1.8.6
 
 Zen's compact mode for tabs down the side, Chrome's layout for tabs across the top, each in every design's own hand.
