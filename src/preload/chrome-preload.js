@@ -109,7 +109,6 @@ const COMMANDS = new Set([
   'chrome-size',
   'bookmarks-overflow',
   'toggle-sidebar-pin',
-  'toggle-sidebar-detach',
   'toggle-bookmarks-bar',
   'list-bookmarks',
   // The address bar's list of suggestions.

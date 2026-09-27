@@ -510,7 +510,7 @@ class BrowserShell {
         if (!this.sidebarOpen || this.window.isDestroyed()) return;
         const at = screen.getCursorScreenPoint();
         const win = this.window.getContentBounds();
-        const b = (this.chromeCompact() && this.stripView ? this.stripView : this.chromeView).getBounds();
+        const b = this.chromeView.getBounds();
         const x = at.x - win.x;
         const y = at.y - win.y;
         if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return;
@@ -519,11 +519,9 @@ class BrowserShell {
       });
     }
     const children = this.window.contentView.children;
-    // Insert below the chrome so the chrome always wins the z-order - except
-    // while the chrome is itself underneath the page (a collapsed side strip,
-    // see chromeCompact), where the page goes just above it.
+    // Insert below the chrome so the chrome always wins the z-order.
     if (!children.includes(tab.view)) {
-      this.window.contentView.addChildView(tab.view, this.chromeBehind ? 1 : 0);
+      this.window.contentView.addChildView(tab.view, 0);
     }
 
     // Bounds are re-asserted on every present, not only on the first.
@@ -591,7 +589,7 @@ class BrowserShell {
         // live and clickable while a page is restoring behind them.
         const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
         this.window.contentView.addChildView(this.placeholderView,
-          chromeIndex === -1 || this.chromeBehind ? undefined : chromeIndex);
+          chromeIndex === -1 ? undefined : chromeIndex);
       }
       this.placeholderView.setImage(image);
       this.placeholderView.setBounds(this.contentBounds());
@@ -1065,7 +1063,7 @@ class BrowserShell {
       setRadius(view, this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0);
       // Above the tabs, below the chrome, as the restore placeholder is.
       const chromeIndex = this.window.contentView.children.indexOf(this.chromeView);
-      this.window.contentView.addChildView(view, chromeIndex === -1 || this.chromeBehind ? undefined : chromeIndex);
+      this.window.contentView.addChildView(view, chromeIndex === -1 ? undefined : chromeIndex);
       this.crashView = view;
     }
     this.crashView.setBounds(this.contentBounds());
@@ -1534,9 +1532,7 @@ class BrowserShell {
     // layout here would be the caller knowing something the mechanism already
     // knows.
     clearTimeout(this.sidebarCloseTimer);
-    // Tucked away, the bar is a row under the toolbar (contentArea makes room
-    // for it); the tabs stay where they are.
-    if (!this.chromeCompact()) this.sidebarOpen = want;
+    this.sidebarOpen = want;
     this.layout();
     this.toChrome(want ? 'find-focus' : 'find-closed');
   }
@@ -1544,11 +1540,6 @@ class BrowserShell {
   /** A one-off message to the chrome, for the things that are not state. */
   toChrome(kind, payload = null) {
     send(this.chromeView, 'debrowser:ui', { kind, ...(payload || {}) });
-    // The panel has only tabs to draw; it needs to know its own shape, when
-    // to slide away, and when a drag it started has ended.
-    if (kind === 'sidebar' || kind === 'sidebar-slide' || kind === 'pointer-released') {
-      send(this.stripView, 'debrowser:ui', { kind, ...(payload || {}) });
-    }
   }
 
   /** Put the keyboard back in the chrome - for Ctrl+L, and for the find bar. */
@@ -1580,12 +1571,13 @@ class BrowserShell {
   }
 
   /**
-   * Down the side, detached: the page has the whole window and the strip is a
-   * panel that floats over it while the pointer wants it. Full screen already
-   * is this shape, so it does not count twice.
+   * Down the side, not pinned: the page has the whole window and the strip -
+   * toolbar, address bar and tabs together - floats over it while the pointer
+   * wants it. Zen's compact mode, single toolbar. Full screen already is this
+   * shape, so it does not count twice.
    */
   detached() {
-    return this.vertical() && !this.fullScreen() && this.prefs?.get('sidebarDetached') === true;
+    return this.vertical() && !this.fullScreen() && !this.sidebarPinned();
   }
 
   /**
@@ -1609,11 +1601,7 @@ class BrowserShell {
       pinned: this.sidebarPinned(),
       open: this.sidebarPinned() || this.sidebarOpen,
       floating: this.chromeFloats(),
-      detached: this.detached(),
-      compact: this.chromeCompact(),
-      // Where the page starts: everything left of it is the edge that opens
-      // the strip, so the chrome needs the number rather than a guess at it.
-      edge: this.chromeCompact() ? this.contentBounds().x : 0
+      detached: this.detached()
     };
   }
 
@@ -1655,37 +1643,7 @@ class BrowserShell {
 
   /** Is the sidebar held open, rather than sliding away when the pointer goes? */
   sidebarPinned() {
-    // Detached outranks the pin: a strip held open would be a column again.
-    return this.prefs ? this.prefs.get('sidebarPinned') === true && this.prefs.get('sidebarDetached') !== true : false;
-  }
-
-  /**
-   * The side strip collapsed to its edge.
-   *
-   * It used to be a ten-pixel column holding the whole chrome, toolbar and
-   * all, so collapsing it took the address bar, back and the menu with it -
-   * the window had no controls until the pointer found the edge. Now the
-   * chrome covers the window underneath the page: the page covers everything
-   * but the band across the top, where a toolbar is drawn, and the edge,
-   * which still opens the strip.
-   */
-  chromeCompact() {
-    // Whether or not the tabs are out: they come out as their own panel (the
-    // strip view, `layoutStrip`), so the toolbar across the top never moves.
-    return this.vertical() && !this.fullScreen() && !this.sidebarPinned() && !this.detached();
-  }
-
-  /** Put the chrome under the page, or back on top of it. */
-  setChromeBehind(behind) {
-    if (this.chromeBehind === behind) return;
-    this.chromeBehind = behind;
-    // Removed and added again: adding a child that is already there, with an
-    // index, left it where it was - measured, the chrome stayed on top and
-    // covered the page.
-    const root = this.window.contentView;
-    root.removeChildView(this.chromeView);
-    if (behind) root.addChildView(this.chromeView, 0);
-    else root.addChildView(this.chromeView);
+    return this.prefs ? this.prefs.get('sidebarPinned') === true : false;
   }
 
   /** How much width the chrome occupies in sidebar mode, right now. */
@@ -1708,7 +1666,7 @@ class BrowserShell {
     if (!this.vertical() || this.sidebarPinned()) return;
     // The find bar is drawn inside this column, so while it is up the pointer
     // does not get to close the thing the bar is in.
-    if (this.findOpen && !this.chromeCompact()) return;
+    if (this.findOpen) return;
     clearTimeout(this.sidebarCloseTimer);
     clearTimeout(this.sidebarOpenTimer);
     if (open && !now && !this.sidebarOpen && !this.sidebarSliding) {
@@ -1768,76 +1726,6 @@ class BrowserShell {
    */
   seeThrough() {
     return process.platform !== 'linux' && typeof this.window.setBackgroundMaterial === 'function';
-  }
-
-  /**
-   * The tabs, brought out while they are tucked away: a panel of their own
-   * below the toolbar, inset from the page's edges, over the page - Zen's
-   * compact mode. Its own view because the toolbar has to stay where it is,
-   * and the main chrome, which draws it, is the whole window under the page;
-   * a view is one rectangle and cannot be both. Created the first time it is
-   * wanted and kept, hidden, after.
-   */
-  layoutStrip() {
-    const want = this.chromeCompact() && this.sidebarOpen;
-    if (!want) {
-      if (this.stripView) this.stripView.setVisible(false);
-      return;
-    }
-    const view = this.ensureStrip();
-    const area = this.contentArea();
-    view.setBounds({ x: CONTENT_GAP, y: area.y, width: SIDEBAR_WIDTH, height: area.height });
-    // Grid is square; every other design floats a rounded panel.
-    const radius = this.prefs.get('design') === 'grid' ? 0 : FLOAT_RADIUS;
-    if (this.laidOutStripRadius !== radius) {
-      this.laidOutStripRadius = radius;
-      setRadius(view, radius);
-    }
-    const root = this.window.contentView;
-    if (root.children[root.children.length - 1] !== view) {
-      root.removeChildView(view);
-      root.addChildView(view);
-    }
-    view.setVisible(true);
-  }
-
-  ensureStrip() {
-    if (this.stripView) return this.stripView;
-    const view = new WebContentsView({
-      webPreferences: {
-        preload: CHROME_PRELOAD,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        backgroundThrottling: false,
-        transparent: true,
-        additionalArguments: preloadArgs(this.prefs)
-      }
-    });
-    try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
-    this.bindShortcuts(view.webContents);
-    view.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'), { query: { role: 'strip' } }).catch(() => {});
-    view.webContents.on('did-finish-load', () => {
-      if (this.lastState) send(view, 'debrowser:state', this.lastState);
-    });
-    this.window.contentView.addChildView(view);
-    view.setVisible(false);
-    this.stripView = view;
-    return view;
-  }
-
-  /** A command from the panel speaks in its own coordinates; the window's are wanted. */
-  fromStrip(sender, payload) {
-    const view = this.stripView;
-    if (!view || !sender || !payload || typeof payload !== 'object') return payload;
-    const wc = view.webContents;
-    if (!wc || wc.isDestroyed() || wc.id !== sender.id) return payload;
-    const { x, y } = view.getBounds();
-    const out = { ...payload };
-    if (Number.isFinite(out.x)) out.x += x;
-    if (Number.isFinite(out.y)) out.y += y;
-    if (Number.isFinite(out.right)) out.right += x;
-    return out;
   }
 
   /**
@@ -1908,16 +1796,11 @@ class BrowserShell {
     }
 
     if (this.vertical()) {
-      // Measured from the *pinned* width, not the current one. An unpinned
-      // sidebar slides out over the page rather than pushing it: a page that
-      // reflowed every time the pointer touched the window edge would be the
-      // most distracting thing in the browser.
-      // Tucked away, nothing is drawn at the edge: the page has the same
-      // margin on every side, and the find bar, when it is up, is a row under
-      // the toolbar that the page moves down for.
+      // Pinned - unpinned is detached, handled above: the strip is a column
+      // beside the page, and the band above the page is the title bar.
       const gap = this.cardInset();
-      const left = this.sidebarPinned() ? SIDEBAR_WIDTH + gap : gap;
-      const top = SIDEBAR_TOP_BAND + gap + (this.chromeCompact() && this.findOpen ? FIND_BAR_HEIGHT : 0);
+      const left = SIDEBAR_WIDTH + gap;
+      const top = SIDEBAR_TOP_BAND + gap;
       return {
         x: left,
         y: top,
@@ -2005,18 +1888,12 @@ class BrowserShell {
           height: this.detached() ? room
             : Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
         });
-      } else if (this.chromeCompact()) {
-        // Collapsed down the side: the chrome is the whole window, *under*
-        // the page (see setChromeBehind), so what shows of it is the band
-        // across the top - where it draws a toolbar - and the edge.
-        this.chromeView.setBounds({ x: 0, y: 0, width, height });
       } else {
         this.chromeView.setBounds(this.vertical()
           ? { x: 0, y: 0, width: this.sidebarWidth(), height }
           : { x: 0, y: 0, width, height: this.chromeHeight() });
       }
     }
-    this.setChromeBehind(!hidden && this.chromeCompact());
     // Rounded only while it floats. A panel over a page needs corners; a column
     // against the window's own edge does not, and rounding one would leave four
     // notches of window background at the screen's corners.
@@ -2025,7 +1902,6 @@ class BrowserShell {
       this.laidOutChromeRadius = chromeRadius;
       setRadius(this.chromeView, chromeRadius);
     }
-    this.layoutStrip();
 
     const bounds = this.contentBounds();
     // No card, and no corners, while full screen: the page is the window.
@@ -2082,7 +1958,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
+    for (const view of [this.chromeView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }
@@ -2124,9 +2000,7 @@ class BrowserShell {
     this.showCrashed(Boolean(this.tabs.activeTab()?.crashed));
     // Null in the ordinary browser, which is how every view tells the two apart.
     full.incognito = this.incognito ? this.incognito() : null;
-    this.lastState = full;
     send(this.chromeView, 'debrowser:state', full);
-    send(this.stripView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
     // And the sheet, while one is up. The menu takes its preferences off the
     // `menu-model` reply and would not need this; the downloads flyout has no
@@ -2160,7 +2034,6 @@ class BrowserShell {
   }
 
   destroy() {
-    try { this.stripView?.webContents.close(); } catch { /* gone */ }
     this.closeSheet();
     this.togglePanel(false);
     if (!this.window.isDestroyed()) this.window.destroy();

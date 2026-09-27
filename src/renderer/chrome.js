@@ -18,12 +18,6 @@ const api = window.debrowser;
 // out once without the gutter and then reflowed with it.
 if (api && api.platform) document.body.dataset.platform = api.platform;
 
-// The same page serves as the floating tab panel of the tucked-away layout,
-// loaded with ?role=strip: only its tab list shows, over the page, below a
-// toolbar that the main chrome keeps drawing across the top. See window.js.
-const ROLE = new URLSearchParams(location.search).get('role') || 'chrome';
-if (ROLE === 'strip') document.body.dataset.role = 'strip';
-
 /**
  * How long the pointer must rest on a tab before its renderer is rebuilt
  * speculatively. Long enough that sweeping across the strip costs nothing,
@@ -57,7 +51,6 @@ const el = {
   downloads: document.getElementById('downloads'),
   downloadsRing: document.getElementById('downloads-ring'),
   pin: document.getElementById('pin'),
-  detach: document.getElementById('detach'),
   omnibox: document.getElementById('omnibox'),
   findbar: document.getElementById('findbar'),
   findInput: document.getElementById('find-input'),
@@ -156,21 +149,12 @@ function reportHover(over) {
   api.send('sidebar-hover', { over });
 }
 
-// Collapsed, the chrome is the whole window under the page, so being over it
-// is not the signal: only the edge opens the strip, never the toolbar above.
-// The edge is everything left of the page, as the window reports it. A fixed
-// 12px left the last few pixels before the page dead: a pointer that stopped
-// there, in plain sight of the strip's edge, opened nothing.
-let pageEdge = 18;
-const TOP_BAND = 40;
-const opens = (e) => ROLE === 'strip' || document.body.dataset.compact !== 'true' ||
-  (e.clientX < pageEdge && e.clientY >= TOP_BAND);
-document.addEventListener('mouseenter', (e) => reportHover(opens(e)));
+document.addEventListener('mouseenter', () => reportHover(true));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside
 // - which is what happens when the strip slides out from under it - does not
 // fire `mouseenter`.
-document.addEventListener('mousemove', (e) => reportHover(opens(e)));
+document.addEventListener('mousemove', () => reportHover(true));
 
 /*
  * The wheel over the tab strip moves the strip.
@@ -196,7 +180,6 @@ el.tabs.addEventListener('wheel', (event) => {
 }, { passive: false });
 
 el.pin.addEventListener('click', () => api.send('toggle-sidebar-pin'));
-el.detach.addEventListener('click', () => api.send('toggle-sidebar-detach'));
 
 /**
  * Whether the strip is pinned, and whether it is currently out.
@@ -210,13 +193,19 @@ function renderSidebar(sidebar) {
   if (document.body.dataset.sidebar !== String(side)) {
     document.body.dataset.sidebar = String(side);
   }
-  if (!side) { document.body.dataset.compact = 'false'; return; }
+  // Across the top none of the side's shapes apply, and a body still marked
+  // detached from the side would hide the strip.
+  if (!side) {
+    document.body.dataset.detached = 'false';
+    document.body.dataset.floating = 'false';
+    return;
+  }
 
   const pinned = sidebar.pinned === true;
   if (document.body.dataset.pinned !== String(pinned)) document.body.dataset.pinned = String(pinned);
   if (el.pin.getAttribute('aria-pressed') !== String(pinned)) {
     el.pin.setAttribute('aria-pressed', String(pinned));
-    el.pin.title = pinned ? 'Let the tab strip slide away' : 'Keep the tab strip open';
+    el.pin.title = pinned ? 'Tuck the tabs away: they come out from the left edge' : 'Keep the tabs beside the page';
     el.pin.setAttribute('aria-label', el.pin.title);
   }
   // The contents are faded out rather than removed while the strip is a
@@ -228,12 +217,6 @@ function renderSidebar(sidebar) {
     document.body.dataset.sidebarOpen = String(open);
     document.body.classList.remove('sliding-out');
   }
-  if (sidebar.edge > 0) pageEdge = sidebar.edge;
-  // The panel is never the compact band; it is the thing the band opens.
-  const compact = ROLE !== 'strip' && sidebar.compact === true;
-  if (document.body.dataset.compact !== String(compact)) {
-    document.body.dataset.compact = String(compact);
-  }
 
   // Full screen: the strip is a panel drawn over the page rather than a column
   // beside it, so it stops filling its view and reports what it comes to
@@ -241,9 +224,6 @@ function renderSidebar(sidebar) {
   const detached = sidebar.detached === true;
   if (document.body.dataset.detached !== String(detached)) {
     document.body.dataset.detached = String(detached);
-    el.detach.setAttribute('aria-pressed', String(detached));
-    el.detach.title = detached ? 'Put the tab strip back beside the page' : 'Detach: the page fills the window';
-    el.detach.setAttribute('aria-label', el.detach.title);
   }
 
   const floating = sidebar.floating === true;

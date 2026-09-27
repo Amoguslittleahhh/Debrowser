@@ -1300,52 +1300,6 @@ body[data-sidebar="true"][data-sidebar-open="true"] .pin {
   transition: opacity 140ms ease 40ms, visibility 0s;
 }
 
-/*
- * Collapsed, the chrome is the whole window under the page (window.js,
- * chromeCompact). What shows is the band across the top and the left edge:
- * the band carries a toolbar - back, forward, reload, the address bar, the
- * menu - so the window never loses its controls, and the edge keeps the
- * gradient that says the strip is there. The rest is under the page.
- */
-body[data-sidebar="true"][data-compact="true"] {
-  background: var(--bg);
-}
-/* Only the toolbar band drags the window here. The strip is the title bar and
-   so a drag region, and in this shape it is the size of the whole window -
-   under the page, but Windows hit-tests drag regions itself, whatever view is
-   on top, so the entire window was title bar: no click or hover reached the
-   page or the edge, and only the three window buttons worked. */
-body[data-sidebar="true"][data-compact="true"] .tabstrip { -webkit-app-region: no-drag; }
-body[data-sidebar="true"][data-compact="true"] .toolbar { -webkit-app-region: drag; }
-body[data-sidebar="true"][data-compact="true"] .toolbar > * { -webkit-app-region: no-drag; }
-/* No line at the edge: the page takes the room, and the edge is found by
-   pointing at it, as in Zen. */
-body[data-sidebar="true"][data-compact="true"] .toolbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 40px;
-  flex-wrap: nowrap;
-  align-items: center;
-  padding: 0 8px;
-  padding-left: calc(env(titlebar-area-x, 0px) + 8px);
-  padding-right: max(
-    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px),
-    var(--caption-right, 0px)
-  );
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  transition: none;
-}
-body[data-sidebar="true"][data-compact="true"] .omnibox {
-  order: 2;
-  flex: 1 1 auto;
-  max-width: 760px;
-  height: 28px;
-}
-body[data-sidebar="true"][data-compact="true"] .meter { display: none; }
 
 /*
  * The pin, at the foot of the strip.
@@ -1376,13 +1330,12 @@ body[data-layout="left"] .pin { display: grid; }
 
 .pin:hover { background: var(--wash-soft); color: var(--text); }
 
-/* Pinned reads as pressed: the accent, and the pin upright rather than tilted.
-   A toggle that looks identical in both states is a toggle nobody trusts. */
+/* Pinned reads as pressed. A toggle that looks identical in both states is a
+   toggle nobody trusts. */
 .pin[aria-pressed="true"] {
   background: var(--wash);
   color: var(--accent);
 }
-.pin[aria-pressed="false"] svg { transform: rotate(-35deg); }
 
 .pin svg {
   width: var(--icon);
@@ -1665,9 +1618,8 @@ body[data-design="grid"] .omnibox:has(#url:focus) { box-shadow: none; }
 /* Detached strip                                                    */
 /* ---------------------------------------------------------------- */
 
-/* The pin and the detach button share the strip's foot. */
+/* The strip's foot, where the pin sits. */
 .strip-foot { display: flex; flex: none; }
-.pin.detach svg { transform: none !important; }
 
 /*
  * Detached and away: nothing is drawn. The view is a clear ten-pixel edge over
@@ -1736,64 +1688,12 @@ body[data-design="grid"] .tab.active .tab-title::before {
 }
 
 /*
- * The floating tab panel (role=strip): its own view, below the toolbar that
- * the main chrome keeps across the top, inset from the page's edges - Zen's
- * compact mode. Only the tab list shows. Opaque, because what is behind it is
- * the page. It slides in from the edge and back; with reduced motion it is
- * simply there. Never a drag region: it floats over a page, and on Windows a
- * drag region anywhere swallows the clicks under it.
- */
-body[data-role="strip"] { height: 100vh; box-sizing: border-box; padding: 0; overflow: hidden; background: transparent; -webkit-app-region: no-drag; }
-body[data-role="strip"] :is(.toolbar, .bookmarks, .findbar, .progress) { display: none !important; }
-body[data-role="strip"] .tabstrip {
-  flex: 1 1 auto;
-  box-sizing: border-box;
-  min-height: 0;
-  height: 100%;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--strip);
-  -webkit-app-region: no-drag;
-}
-body[data-role="strip"][data-sidebar-open="true"] .tabstrip { animation: strip-in 200ms cubic-bezier(0.2, 0, 0, 1); }
-body[data-role="strip"].sliding-out .tabstrip {
-  transform: translateX(calc(-100% - 12px));
-  transition: transform 180ms cubic-bezier(0.4, 0, 1, 1);
-}
-@keyframes strip-in {
-  from { transform: translateX(calc(-100% - 12px)); }
-  to   { transform: none; }
-}
-body.calm[data-role="strip"] .tabstrip { animation: none !important; transition: none !important; }
-@media (prefers-reduced-motion: reduce) {
-  body[data-role="strip"] .tabstrip { animation: none !important; transition: none !important; }
-}
-
-/* Find, with the tabs tucked away: a row under the toolbar, across the page,
-   as it is with tabs across the top. The window moves the page down for it. */
-body[data-sidebar="true"][data-compact="true"] .findbar {
-  position: fixed;
-  top: 40px;
-  left: 8px;
-  right: 8px;
-  height: 30px;
-  margin: 0;
-  flex-wrap: nowrap;
-  border-radius: var(--radius);
-}
-body[data-sidebar="true"][data-compact="true"] #find-input { flex: 1 1 auto; }
-
-/*
  * Translucent, down the side: the window behind is tinted with the strip's own
- * colour and translucency (window.js), so the strip and the compact band stop
- * painting their own on top of it - a second coat made the column denser than
- * the band beside it. The strip brought out over a page keeps its opaque rule
- * above, which is more specific.
+ * colour and translucency (window.js), so the strip stops painting its own on
+ * top of it - a second coat made the column denser than the band beside it.
  */
 body[data-layout="left"][data-translucent="on"],
-body[data-layout="left"][data-translucent="on"] .tabstrip,
-body[data-sidebar="true"][data-translucent="on"][data-compact="true"] { background: transparent; }
+body[data-layout="left"][data-translucent="on"] .tabstrip { background: transparent; }
 
 /*
  * Designs, down the side: the strip each design was drawn with, not Legacy's
@@ -1859,11 +1759,6 @@ body[data-design="grid"][data-layout="left"] .tab {
 }
 body[data-design="grid"][data-layout="left"] .new-tab { height: 44px; margin: 0; padding: 0 14px; border-radius: 0; }
 body[data-design="grid"][data-layout="left"] .meter { font-family: var(--font-mono); text-transform: uppercase; }
-
-/* Tucked away, the main chrome is only the toolbar: its own tab list, under
-   the page, must not show through the band beside the toolbar. The tabs are
-   the panel's to draw. */
-body[data-sidebar="true"][data-compact="true"]:not([data-role="strip"]) :is(.tabstrip, .bookmarks) { display: none; }
 
 /* ------------------------------------------------------------------ */
 /* Designs, across the top: Chrome's shape, each design's own hand      */

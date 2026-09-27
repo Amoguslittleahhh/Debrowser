@@ -110,24 +110,15 @@ const SCHEMA = {
   /**
    * Whether the side strip stays out, or slides away when the pointer leaves.
    *
-   * Off by default, which is the Zen behaviour and the point of putting the
-   * strip down the side at all: the page gets the whole window, and the tabs
-   * are a pointer-flick away rather than a permanent 240px tax. Pinning is
-   * there for anyone who would rather see them all the time, and the button
-   * that does it sits at the bottom of the strip.
+   * On by default, as Zen starts: a column beside the page, toolbar and tabs
+   * together. Off is Zen's compact mode - the page gets the whole window and
+   * the strip, toolbar and all, floats over it from the left edge. The button
+   * that switches sits at the bottom of the strip.
    *
    * Only meaningful with `tabBarPosition: 'left'`. Across the top there is
    * nothing to slide.
    */
-  sidebarPinned: { def: false, ok: (v) => typeof v === 'boolean' },
-
-  /**
-   * Detached: the page has the whole window - no column, no band across the
-   * top - and pointing at the left edge brings the tabs back as a rounded
-   * panel floating over the page, gone again when the pointer leaves. It
-   * outranks the pin while it is on. Only with `tabBarPosition: 'left'`.
-   */
-  sidebarDetached: { def: false, ok: (v) => typeof v === 'boolean' },
+  sidebarPinned: { def: true, ok: (v) => typeof v === 'boolean' },
 
   /**
    * Windows 11 only: let the OS paint its own blurred material behind the

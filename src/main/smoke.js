@@ -1860,25 +1860,29 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // find bar opened from the keyboard was laid out off the side of the
     // window - visible to nobody and typeable into by nobody.
     {
+      const { SIDEBAR_WIDTH } = require('./window');
       const was = prefs.get('tabBarPosition');
+      const wasPinned = prefs.get('sidebarPinned');
+      prefs.set('sidebarPinned', false);
       prefs.set('tabBarPosition', 'left');
       shell.applyWindowPrefs();
-      // Tucked away, the bar is a row under the toolbar: the page moves down
-      // for it, and the toolbar - where the bar is drawn - stays in view.
-      const pageTop = () => shell.contentBounds().y;
-      const before = pageTop();
+      // Tucked away, the bar is drawn in the strip, so the strip comes out
+      // for it, over the page, and goes again when the bar closes.
+      const page = () => JSON.stringify(shell.contentBounds());
+      const before = page();
       runCommand('find-open', null);
-      const during = pageTop();
-      const stillBand = shell.chromeBehind && !shell.sidebarOpen;
+      const out = shell.sidebarOpen && shell.chromeView.getBounds().width === SIDEBAR_WIDTH;
+      const during = page();
       runCommand('find-close', null);
-      const after = pageTop();
+      const gone = !shell.sidebarOpen;
 
       prefs.set('tabBarPosition', was);
+      prefs.set('sidebarPinned', wasPinned);
       shell.applyWindowPrefs();
 
-      check('with the tabs tucked away, find is a row under the toolbar and the page makes room',
-        during > before && after === before && stillBand,
-        `page top ${before} -> ${during} -> ${after}, toolbar kept: ${stillBand}`);
+      check('with the tabs tucked away, find brings the strip out over the page and puts it back',
+        out && gone && during === before,
+        `out: ${out}, back: ${gone}, page ${before} -> ${during}`);
     }
     check('a search reports how many matches it found',
       Boolean(result) && result.matches > 0,
@@ -1964,40 +1968,34 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     prefs.set('tabBarPosition', 'left');
     prefs.set('sidebarPinned', false);
     shell.applyWindowPrefs();
+    shell.sidebarOpen = false;
     shell.layout();
 
-    const restKids = shell.window.contentView.children;
-    const restTab = tabs.activeTab();
-    const edgeRest = {
-      behind: shell.chromeBehind === true,
-      width: chromeWidth(),
-      pageAbove: Boolean(restTab && restTab.view) &&
-        restKids.indexOf(restTab.view) > restKids.indexOf(shell.chromeView)
-    };
-    const shut = shell.contentBounds();
-
+    const { width: winW, height: winH } = shell.window.getContentBounds();
+    const whole = shell.contentBounds();
+    const edge = shell.chromeView.getBounds();
     shell.setSidebarOpen(true, { now: true });
-    const stripOut = shell.stripView && shell.stripView.getVisible() ? shell.stripView.getBounds() : null;
-    const stillUnder = shell.chromeBehind && chromeWidth() === shell.window.getContentBounds().width;
-    const whileOpen = shell.contentBounds();
+    const panel = shell.chromeView.getBounds();
+    const pageWhileOut = shell.contentBounds();
+    // Zen's compact mode with a single toolbar: the page has the whole window,
+    // and the strip - toolbar, address bar, tabs - floats over it as a panel
+    // when the pointer reaches the left edge. Nothing stays behind across the
+    // top: the old band there held half a toolbar and lost the rest.
+    check('tucked away, the page fills the window and the whole strip floats over it on demand',
+      whole.x === 0 && whole.y === 0 && whole.width === winW && edge.width === SIDEBAR_EDGE &&
+      panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
+      pageWhileOut.x === 0 && pageWhileOut.width === winW,
+      `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
+      `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
+    await sleep(300);
+    const controls = await shell.chromeView.webContents.executeJavaScript(`['back', 'url', 'star', 'menu', 'meter']
+      .filter((id) => { const r = document.getElementById(id).getBoundingClientRect(); return r.width > 0 && r.right <= innerWidth; })`);
+    check('out, the strip carries the whole toolbar: back, address bar, star, menu and memory',
+      controls.length === 5, controls.join(', '));
 
-    // At rest the chrome is the whole window *under* the page: the page covers
-    // all of it but the toolbar band across the top, so the window keeps its
-    // controls while the tabs are away. Out, the tabs are a panel of their own
-    // below that toolbar, over the page, and the toolbar has not moved.
-    check('tucked away, the toolbar stays and the tabs come out as a panel below it',
-      edgeRest.behind && edgeRest.width === shell.window.getContentBounds().width &&
-        edgeRest.pageAbove && stillUnder && Boolean(stripOut) && stripOut.width === SIDEBAR_WIDTH &&
-        stripOut.y === shut.y && stripOut.x > 0,
-      `at rest ${JSON.stringify(edgeRest)}, panel ${JSON.stringify(stripOut)}, toolbar kept: ${stillUnder}`);
-    check('sliding it out does not move the page',
-      whileOpen.x === shut.x && whileOpen.width === shut.width,
-      `page at ${shut.x}px wide ${shut.width} -> ${whileOpen.x}px wide ${whileOpen.width}`);
-
-    // Collapsed, the strip is the whole window under the page. Windows
-    // hit-tests drag regions itself whatever view is on top, so a draggable
-    // strip that size made the entire window title bar: only the three window
-    // buttons took clicks (1.8.0). Only the toolbar band may drag.
+    // Collapsed, the strip is a ten-pixel edge over the page. Windows
+    // hit-tests drag regions itself whatever view is on top, so a drag region
+    // wider than that would take clicks meant for the page (1.8.0).
     shell.sidebarOpen = false;
     shell.layout();
     shell.publishSidebar?.();
@@ -2008,8 +2006,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         .filter((e) => region(e) === 'drag' && region(e.parentElement) !== 'drag')
         .map((e) => { const r = e.getBoundingClientRect(); return [e.className, Math.round(r.width), Math.round(r.height)]; });
     })()`);
-    check('collapsed down the side, only the toolbar band drags the window',
-      dragRegions.length > 0 && dragRegions.every(([, , h]) => h <= 48),
+    check('collapsed down the side, nothing over the page drags the window',
+      shell.chromeView.getBounds().width === SIDEBAR_EDGE,
       JSON.stringify(dragRegions));
 
     // How the strip behaves under a real pointer, through the chrome's own
@@ -2029,9 +2027,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         await sleep(250);
       };
       await reset();
-      const pageLeft = shell.contentBounds().x;
+      const pageLeft = SIDEBAR_EDGE;
 
-      // The last pixel before the page opens it, not only the first twelve.
+      // The edge opens it.
       await at(pageLeft - 1, 300);
       await sleep(250);
       const byGutter = shell.sidebarOpen;
@@ -2039,7 +2037,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       await sleep(300);   // the close delay, then partway into the slide
       const slid = await inChrome(`document.body.classList.contains('sliding-out')`);
       await settle();
-      check('the whole margin left of the page opens the side strip, and it slides away',
+      check('the left edge opens the side strip, and it slides away',
         byGutter && slid === !shell.reducedMotion() && !shell.sidebarOpen,
         `opened from x=${pageLeft - 1}: ${byGutter}, sliding out: ${slid}, closed: ${!shell.sidebarOpen}`);
 
@@ -2047,7 +2045,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       await reset();
       await at(pageLeft - 1, 300);
       await sleep(20);
-      await at(pageLeft + 80, 300);
+      await leave();
       await sleep(250);
       check('brushing past the edge does not throw the strip open', !shell.sidebarOpen);
 
@@ -2104,40 +2102,17 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const pinned = shell.contentBounds();
     check('pinning it gives the strip its column and the page the rest',
       chromeWidth() === SIDEBAR_WIDTH && pinned.x === SIDEBAR_WIDTH + CONTENT_GAP &&
-      pinned.width < shut.width,
-      `page starts at ${pinned.x}px, ${shut.width} -> ${pinned.width} wide`);
+      pinned.width < whole.width,
+      `page starts at ${pinned.x}px, ${whole.width} -> ${pinned.width} wide`);
 
     // And the page is a card rather than something fused to the strip, which
     // is the other half of what was asked for: edge to edge, the browser's own
     // pages carry the same dark background as the strip and read as one
     // surface with it.
-    const { width: winW, height: winH } = shell.window.getContentBounds();
     check('the page is inset as a card in sidebar mode',
       pinned.y > 0 && pinned.x + pinned.width === winW - CONTENT_GAP &&
       pinned.y + pinned.height === winH - CONTENT_GAP,
       `${pinned.x},${pinned.y} ${pinned.width}x${pinned.height} in ${winW}x${winH}`);
-
-    // Detached: the page takes the whole window, the strip is a ten-pixel
-    // edge over it, and pointing at the edge floats the strip out as a
-    // rounded panel inset from the window - not a column beside the page.
-    prefs.set('sidebarPinned', false);
-    prefs.set('sidebarDetached', true);
-    shell.applyWindowPrefs();
-    shell.sidebarOpen = false;
-    shell.layout();
-    const whole = shell.contentBounds();
-    const edge = shell.chromeView.getBounds();
-    shell.setSidebarOpen(true, { now: true });
-    const panel = shell.chromeView.getBounds();
-    const pageWhileOut = shell.contentBounds();
-    check('detached, the page fills the window and the strip floats over it on demand',
-      whole.x === 0 && whole.y === 0 && whole.width === winW && edge.width === SIDEBAR_EDGE &&
-      panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
-      pageWhileOut.x === 0 && pageWhileOut.width === winW,
-      `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, edge ${edge.width}px, ` +
-      `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
-    shell.sidebarOpen = false;
-    prefs.set('sidebarDetached', false);
 
     prefs.set('sidebarPinned', false);
     prefs.set('tabBarPosition', 'top');
@@ -3521,6 +3496,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // over the page. Measured through the real shell rather than by recomputing
   // the arithmetic here, which would only prove this test can add up.
   const topBounds = shell.contentBounds();
+  prefs.set('sidebarPinned', true);
   prefs.set('tabBarPosition', 'left');
   shell.applyWindowPrefs();
   const sideBounds = shell.contentBounds();

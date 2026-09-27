@@ -2230,30 +2230,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         shell.releaseSidebar();
         break;
 
-      // The pin at the bottom of the strip.
+      // The button at the foot of the strip: beside the page, or tucked away
+      // and floating over it from the left edge.
       case 'toggle-sidebar-pin':
-        // Pinning a detached strip puts it back beside the page, held open.
-        if (prefs.get('sidebarDetached') === true) {
-          prefs.set('sidebarDetached', false);
-          prefs.set('sidebarPinned', true);
-        } else {
-          prefs.set('sidebarPinned', !shell.sidebarPinned());
-        }
+        prefs.set('sidebarPinned', !shell.sidebarPinned());
         shell.applyWindowPrefs();
         publish();
         break;
-
-      // Detach: the page takes the whole window and the strip floats over it
-      // when the pointer reaches the left edge. Pinning undoes it, since a
-      // strip held open is a column again.
-      case 'toggle-sidebar-detach': {
-        const detach = prefs.get('sidebarDetached') !== true;
-        prefs.set('sidebarDetached', detach);
-        if (detach) prefs.set('sidebarPinned', false);
-        shell.applyWindowPrefs();
-        publish();
-        break;
-      }
 
       // Ctrl+Shift+B. Through the preference rather than a flag in the chrome,
       // because showing the bar takes 34px from the page - the window has to
@@ -2357,7 +2340,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
     if (!pageMay(senderPage(tabs, shell, event.sender), 'commands', command)) return;
-    runCommand(command, shell ? shell.fromStrip(event.sender, payload ?? null) : payload ?? null, event.sender);
+    runCommand(command, payload ?? null, event.sender);
   });
 
   /*

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Tabs down the side work like Zen.** Everything lives in the side panel: back, forward, reload, the bookmark star, the menu, the address bar, the tabs and the memory meter (click it for the task manager). The button at the foot of the panel switches between keeping it beside the page and tucking it away; tucked away, the page fills the whole window and the full panel, toolbar and all, slides out over it when you point at the left edge. The strip across the top that held half a toolbar is gone, and so is the separate detach button — tucking the panel away is detaching it.
+- **Side tabs start beside the page,** as Zen starts, rather than tucked away.
+- **Switching from side tabs back to the top no longer leaves the tab strip invisible** when the side panel was tucked away.
+
 ## 1.8.7
 
 - **No more "Object has been destroyed" error when the browser closes.** An update to the tabs that was already on its way when the window closed — as it does when an update installs — tried to measure the closed window and showed a main-process error. The install itself was never affected.
