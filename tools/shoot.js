@@ -166,6 +166,8 @@ const SHOTS = [
   // the band still there and the panel under it over the page.
   { name: 'band', file: 'chrome.html', w: 1280, h: 40, side: true, band: true },
   { name: 'band-open', file: 'chrome.html', w: 1280, h: 720, side: true, band: true, open: true },
+  // The tab list's own view, which is what is under the band while it is out.
+  { name: 'band-strip', file: 'chrome.html', w: 252, h: 680, side: true, band: true, open: true, role: 'strip' },
   { name: 'settings', file: 'settings.html', w: 1280, h: 860 },
   // The same page, scrolled to a section that would otherwise be eight screens
   // down. Worth its own shot because the rows there are built by hand rather
@@ -274,7 +276,7 @@ app.whenReady().then(async () => {
       // A section far down a long page is reached the way the browser reaches
       // it - the fragment the menu's own links carry - rather than by scripting
       // a scroll from out here, which the page's scroll-spy undoes.
-      : shot.hash ? { hash: shot.hash } : {};
+      : shot.hash ? { hash: shot.hash } : shot.role ? { query: { role: shot.role } } : {};
     // The promise rejects spuriously on some of these while the page loads
     // perfectly well, so the paint is what is waited on, not the promise.
     win.loadFile(path.join(R, shot.file), opts).catch(() => {});

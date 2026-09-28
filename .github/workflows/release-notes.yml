@@ -69,11 +69,17 @@ jobs:
       - name: Publish it
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || format('v{0}', inputs.version) }}
+          # The tag is worked out in the script: a version typed as "v1.9.3"
+          # made format('v{0}') ask for vv1.9.3, which does not exist - and with
+          # announcement set, was created. The notes script strips the "v"
+          # too, so the two agree.
+          TAG_INPUT: ${{ inputs.tag }}
+          VERSION: ${{ inputs.version }}
           TITLE: ${{ inputs.title }}
           ANNOUNCEMENT: ${{ inputs.announcement }}
         run: |
           set -euo pipefail
+          TAG="${TAG_INPUT:-v${VERSION#v}}"
 
           if gh release view "$TAG" --json tagName > /dev/null 2>&1; then
             gh release edit "$TAG" --notes-file RELEASE_NOTES.md
@@ -107,9 +113,11 @@ jobs:
       - name: Report what was published
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || format('v{0}', inputs.version) }}
+          TAG_INPUT: ${{ inputs.tag }}
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
+          TAG="${TAG_INPUT:-v${VERSION#v}}"
           gh release view "$TAG" \
             --json tagName,name,isPrerelease,isDraft,assets \
             --template '{{.tagName}} — "{{.name}}"

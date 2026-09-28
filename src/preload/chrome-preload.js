@@ -105,7 +105,6 @@ const COMMANDS = new Set([
   'save-payment',
   'fill-payment',
   'sidebar-hover',
-  'page-input',
   'sidebar-typing',
   'chrome-size',
   'bookmarks-overflow',

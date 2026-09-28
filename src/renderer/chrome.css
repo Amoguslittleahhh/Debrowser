@@ -2128,3 +2128,16 @@ body.incognito .omnibox { --omni-side-extra: 110px; }
 
 /* Pinned down the side, the menu stays on the first row, at its end. */
 body[data-layout="left"]:not([data-band="true"]) .toolbar > #menu { order: 2; margin-left: auto; }
+
+/*
+ * Tucked away in a window, the chrome is two views (window.js, layStrip): the
+ * band, 40px across the top, and the tab list's own view under it at the left.
+ * The band draws no panel; the list's view draws the panel and no band.
+ */
+body[data-role="main"][data-band="true"][data-layout="left"] :is(.tabstrip, .findbar) { display: none; }
+body[data-role="main"][data-band="true"][data-layout="left"]::before { display: none; }
+body[data-role="strip"][data-band="true"][data-layout="left"] {
+  grid-template-rows: 8px auto minmax(0, 1fr) 16px;
+}
+body[data-role="strip"][data-band="true"][data-layout="left"] :is(.toolbar, .bookmarks) { display: none; }
+body[data-role="strip"][data-band="true"][data-layout="left"]::before { top: 8px; }

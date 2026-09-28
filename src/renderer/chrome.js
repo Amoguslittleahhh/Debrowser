@@ -1,5 +1,13 @@
 'use strict';
 
+/*
+ * Which of the chrome's views this page is. `strip`: tucked away in a window,
+ * the tab list's own small view under the band (window.js, layStrip), which
+ * shows the list and the find bar and nothing else. `main` everywhere else.
+ */
+const ROLE = new URLSearchParams(location.search).get('role') === 'strip' ? 'strip' : 'main';
+document.body.dataset.role = ROLE;
+
 /**
  * Browser chrome logic.
  *
@@ -154,53 +162,12 @@ function reportHover(over) {
 }
 
 // In the bar across the top only the edge it starts at brings the strip out:
-// the rest of the bar is a toolbar, used all day. Once
-// out, the view is the whole window and the panel is its left column under
-// the band: anywhere else is the page showing through, and means "put it away".
-const BAND_HEIGHT = 40;      // window.js SIDEBAR_TOP_BAND
-const PANEL_RIGHT = 256;     // the panel's column, margins included
+// the rest of the bar is a toolbar, used all day. The tab list's own view is
+// the panel, all of it.
 function pointerWantsStrip(event) {
-  if (document.body.dataset.band !== 'true') return true;
-  if (document.body.dataset.sidebarOpen === 'true') {
-    return event.clientY >= BAND_HEIGHT && event.clientX < PANEL_RIGHT;
-  }
+  if (ROLE === 'strip' || document.body.dataset.band !== 'true') return true;
   return event.clientX < 10;
 }
-
-// Tucked away and out, the view is the whole window and most of it is clear,
-// with the page beneath. Whatever the pointer does there is the page's: it is
-// handed on (main.js, page-input) rather than swallowed by a clear layer - the
-// find bar or a menu holds the panel out, and the page stayed unclickable and
-// unscrollable for as long as they did.
-function overPage(event) {
-  if (document.body.dataset.band !== 'true' || document.body.dataset.sidebarOpen !== 'true') return false;
-  return event.clientY >= BAND_HEIGHT && event.clientX >= PANEL_RIGHT;
-}
-const BUTTONS = ['left', 'middle', 'right'];
-function modifiersOf(event) {
-  return ['shift', 'control', 'alt', 'meta'].filter((m) => event[`${m === 'control' ? 'ctrl' : m}Key`]);
-}
-function forward(type, event, extra = {}) {
-  api.send('page-input', { type, x: event.clientX, y: event.clientY, modifiers: modifiersOf(event), ...extra });
-}
-document.addEventListener('mousedown', (event) => {
-  if (!overPage(event)) return;
-  event.preventDefault();
-  forward('mouseDown', event, { button: BUTTONS[event.button] || 'left', clickCount: event.detail });
-}, true);
-document.addEventListener('mouseup', (event) => {
-  if (!overPage(event)) return;
-  forward('mouseUp', event, { button: BUTTONS[event.button] || 'left', clickCount: event.detail });
-}, true);
-document.addEventListener('mousemove', (event) => { if (overPage(event)) forward('mouseMove', event); }, true);
-document.addEventListener('wheel', (event) => {
-  if (!overPage(event)) return;
-  event.preventDefault();
-  // Lines and pages to pixels, as Chromium counts them.
-  const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? window.innerHeight : 1;
-  forward('mouseWheel', event, { deltaX: event.deltaX * unit, deltaY: event.deltaY * unit });
-}, { capture: true, passive: false });
-document.addEventListener('contextmenu', (event) => { if (overPage(event)) event.preventDefault(); }, true);
 
 document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event)));
 document.addEventListener('mouseleave', () => reportHover(false));
@@ -1582,7 +1549,15 @@ el.findClose.addEventListener('click', () => api.send('find-close'));
  * is in the browser process now, so what arrives here is the *effect* - focus
  * this, open that - rather than the key that caused it.
  */
+// The tab list's own view hears what the chrome hears, and answers only what is
+// about the tabs, the find bar or its own shape: a second answer to "open the
+// site panel" or "focus the address bar" would be a second panel, or a stolen
+// keyboard.
+const STRIP_KINDS = new Set(['sidebar', 'sidebar-slide', 'find-focus', 'find-closed', 'find-result',
+  'overlay', 'pointer-released']);
+
 api.onMessage((message) => {
+  if (ROLE === 'strip' && !STRIP_KINDS.has(message.kind)) return;
   switch (message.kind) {
     case 'site-ask':
       openSite(true);

@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- **The page stays usable while the tucked-away tab panel is out.** Clicks, scrolling, dragging and hover over the page reach it instead of stopping at the panel's clear layer, including while the find bar, a menu or typing in the address bar keeps the panel open.
+- **The page stays fully usable while the tucked-away tab panel is out.** The panel is now drawn in its own small view beside the page instead of in a clear layer over the whole window, so clicks, scrolling, dragging, dropped files, touch, the page's own cursors and docked developer tools all work beside it, including while the find bar, a menu or typing keeps the panel open.
 - **The tucked-away tab panel opens sooner and slides more smoothly.** It answers the left edge in about half the time, and nothing is laid out as it starts to move.
-- **Windows Hello no longer waits for ever** if Debrowser's own prompt cannot report back; it gives up after a minute, as the helper it falls back to always did.
+- **Windows Hello no longer waits for ever** if Debrowser's own prompt cannot report back. After five minutes without an answer it gives up and closes the prompt, so a second try does not open a prompt on top of the first.
+- **Tucked away, Debrowser checks the left edge quickly only when the pointer is near it,** instead of forty times a second all day while the window has focus.
 - **Correction to 1.9.3: hardware PlayReady does not appear in Debrowser's own tabs.** The switch 1.9.3 turned on only takes effect where Chrome's own code registers PlayReady, and Debrowser, built on Electron, does not have that code. It is removed again; it had no other effect.
 
 ## 1.9.3

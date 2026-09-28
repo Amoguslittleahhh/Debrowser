@@ -41,10 +41,11 @@ built-in `GITHUB_TOKEN`. The field is not settable to a person, and a Claude
 Code session's token is refused outright when it tries to create or edit a
 release, so the body is the only place the credit can live.
 
-Appended by the "Extract this version's notes" step in
-`.github/workflows/release.yml`, so it cannot be forgotten on a release.
+Appended by `.github/scripts/release-notes.py`, which the "Build the release
+body" step in `.github/workflows/release.yml` runs (as does
+`release-notes.yml`), so it cannot be forgotten on a release.
 
-The release body is that version's notes and nothing else — the step takes the
+The release body is that version's notes and nothing else — the script takes the
 `## ` section of `CHANGELOG.md` for the version in `package.json` and drops its
 heading, so rename `## Unreleased` to the version before releasing. Publishing the
 whole changelog means every download page repeats the notes for versions the

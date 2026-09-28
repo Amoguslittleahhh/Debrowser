@@ -62,6 +62,9 @@ const SIDEBAR_WIDTH = 240;
  */
 const SIDEBAR_EDGE = 10;
 
+/** How close to the left edge the pointer must be for it to be watched closely. */
+const EDGE_NEAR = 160;
+
 /**
  * The gap around the page, and the radius of its corners.
  *
@@ -122,6 +125,12 @@ const DEVTOOLS_REDOCK_MS = 250;
  * also what gives the buttons something to sit on.
  */
 const SIDEBAR_TOP_BAND = 40;
+
+/**
+ * Width of the tab list's own view, tucked away: the panel card (224px, 16px
+ * in from the window's edge, chrome.css) and a little room for its shadow.
+ */
+const STRIP_VIEW_WIDTH = 252;
 
 /*
  * Full screen, where the chrome gets out of the way.
@@ -295,6 +304,8 @@ class BrowserShell {
     if (INCOGNITO) this.window.setContentProtection(true);
 
     this.panelView = null;
+    // Tucked away in a window, the tab list's own view (see `layout`).
+    this.stripView = null;
     this.panelOpen = false;
 
     /** Whether the find bar is showing, which the content area has to know. */
@@ -512,8 +523,8 @@ class BrowserShell {
         const win = this.window.getContentBounds();
         // Tucked away in a window the view is the whole window while the tabs
         // are out, and the strip is only its left column under the band.
-        const b = this.band()
-          ? { x: 0, y: SIDEBAR_TOP_BAND, width: SIDEBAR_WIDTH + 16, height: win.height }
+        const b = this.band() && this.stripView
+          ? this.stripView.getBounds()
           : this.chromeView.getBounds();
         const x = at.x - win.x;
         const y = at.y - win.y;
@@ -1596,9 +1607,81 @@ class BrowserShell {
     this.publishSidebar();
   }
 
+  /**
+   * The tab list, tucked away in a window: the chrome's own page in a second,
+   * small view (`?role=strip`) holding only the list and the find bar, over
+   * the page's left edge under the band. It covers the panel's column and
+   * nothing else, so the page keeps every click, wheel, drag and drop beside
+   * it. Made on the first band layout and kept, hidden, while the band lasts,
+   * so bringing the tabs out is a slide and not a page load; gone with the
+   * band, since every other shape draws its tabs in the chrome view.
+   */
+  layStrip(width, height) {
+    if (!this.band()) {
+      if (this.stripView) {
+        const view = this.stripView;
+        this.stripView = null;
+        try { this.window.contentView.removeChildView(view); } catch { /* window going */ }
+        if (!view.webContents.isDestroyed()) view.webContents.close();
+      }
+      return;
+    }
+    if (!this.stripView) this.createStrip();
+    const shown = this.sidebarOpen || Boolean(this.sidebarSliding);
+    this.stripView.setBounds({
+      x: 0, y: SIDEBAR_TOP_BAND, width: STRIP_VIEW_WIDTH, height: Math.max(0, height - SIDEBAR_TOP_BAND)
+    });
+    // Just above the chrome, so a menu or sheet opened later still lies over it.
+    const root = this.window.contentView;
+    const at = root.children.indexOf(this.stripView);
+    const chromeAt = root.children.indexOf(this.chromeView);
+    if (at !== chromeAt + 1) {
+      root.removeChildView(this.stripView);
+      root.addChildView(this.stripView, root.children.indexOf(this.chromeView) + 1);
+    }
+    this.stripView.setVisible(shown);
+  }
+
+  createStrip() {
+    const view = new WebContentsView({
+      webPreferences: {
+        preload: CHROME_PRELOAD,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false,
+        additionalArguments: preloadArgs(this.prefs)
+      }
+    });
+    try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+    view.setVisible(false);
+    this.bindShortcuts(view.webContents);
+    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    view.webContents.once('did-finish-load', () => this.onCommand('chrome-ready'));
+    view.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'), { query: { role: 'strip' } }).catch(() => {});
+    this.window.contentView.addChildView(view);
+    this.stripView = view;
+  }
+
+  /** Where a view of the chrome's sits in the window, for coordinates it sends. */
+  chromeOrigin(sender) {
+    const wc = this.stripView && this.stripView.webContents;
+    if (sender && wc && !wc.isDestroyed() && wc.id === sender.id) return { x: 0, y: SIDEBAR_TOP_BAND };
+    return { x: 0, y: 0 };
+  }
+
   /** A one-off message to the chrome, for the things that are not state. */
   toChrome(kind, payload = null) {
     send(this.chromeView, 'debrowser:ui', { kind, ...(payload || {}) });
+    // The tab list's own view, tucked away, gets the same: it runs the same
+    // page and ignores what is not about the tabs, the find bar or its shape.
+    if (this.stripView) send(this.stripView, 'debrowser:ui', { kind, ...(payload || {}) });
+  }
+
+  /** The find bar's view: the tab list's, tucked away; the chrome's otherwise. */
+  focusFind() {
+    const wc = (this.band() && this.stripView ? this.stripView : this.chromeView).webContents;
+    if (wc && !wc.isDestroyed()) wc.focus();
   }
 
   /** Put the keyboard back in the chrome - for Ctrl+L, and for the find bar. */
@@ -1735,31 +1818,45 @@ class BrowserShell {
     const want = this.detached() && !this.sidebarOpen && !this.window.isDestroyed() &&
       this.window.isVisible() && !this.window.isMinimized();
     if (!want) {
-      clearInterval(this.edgeTimer);
+      clearTimeout(this.edgeTimer);
       this.edgeTimer = null;
       this.edgeHeld = false;
       return;
     }
     if (this.edgeTimer) return;
-    this.edgeTimer = setInterval(() => {
+    // Paced by how far the pointer is from the edge: every 25ms - two frames,
+    // as quick as the pointer's own hover would be - once it is within
+    // EDGE_NEAR of it, and every 150ms otherwise. A window left focused all
+    // day with the tabs tucked away read the cursor forty times a second for
+    // a pointer that was nowhere near.
+    const tick = () => {
+      this.edgeTimer = null;
       if (this.window.isDestroyed() || !this.detached() || this.sidebarOpen) { this.watchEdge(); return; }
-      if (!this.window.isFocused()) return;
-      const at = screen.getCursorScreenPoint();
-      const b = this.window.getContentBounds();
-      const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
-      const inside = at.y >= top && at.y < b.y + b.height && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_EDGE;
-      if (inside && !this.edgeHeld) {
-        this.edgeHeld = true;
-        this.setSidebarOpen(true);
-      } else if (!inside && this.edgeHeld) {
-        this.edgeHeld = false;
-        // Left before the pause ran out: a brush past the edge, not a visit.
-        if (!this.sidebarOpen) {
-          clearTimeout(this.sidebarOpenTimer);
-          this.sidebarPointerOver = false;
+      let near = false;
+      if (this.window.isFocused()) {
+        const at = screen.getCursorScreenPoint();
+        const b = this.window.getContentBounds();
+        const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
+        const rows = at.y >= top && at.y < b.y + b.height;
+        const inside = rows && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_EDGE;
+        near = rows && at.x >= b.x - 8 && at.x < b.x + EDGE_NEAR;
+        if (inside && !this.edgeHeld) {
+          this.edgeHeld = true;
+          this.setSidebarOpen(true);
+        } else if (!inside && this.edgeHeld) {
+          this.edgeHeld = false;
+          // Left before the pause ran out: a brush past the edge, not a visit.
+          if (!this.sidebarOpen) {
+            clearTimeout(this.sidebarOpenTimer);
+            this.sidebarPointerOver = false;
+          }
         }
       }
-    }, 25);   // two frames: the edge answers as fast as the pointer's own hover would
+      if (this.window.isDestroyed() || this.sidebarOpen || this.edgeTimer) return;
+      this.edgeTimer = setTimeout(tick, near || this.edgeHeld ? 25 : 150);
+      this.edgeTimer.unref?.();
+    };
+    this.edgeTimer = setTimeout(tick, 25);
     this.edgeTimer.unref?.();
   }
 
@@ -2019,14 +2116,13 @@ class BrowserShell {
             : Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
         });
       } else {
-        // Tucked away in a window, the band stays where it is when the tabs
-        // come out: the view grows to the whole window, clear except for the
-        // band and the panel under it, so the address bar and its buttons never
-        // make way for the tabs. The panel starts at the window's edge, where
-        // the pointer that opened it is - one inset from it left a gap the
-        // pointer fell through, closing the panel and the edge reopening it.
+        // Tucked away in a window, the band keeps its 40px when the tabs come
+        // out, and the tabs are a view of their own under it (`layStrip`).
+        // Growing this view over the whole window to draw them instead left
+        // it lying over the page, clear but in the way of every click, wheel
+        // and drop - input could only be handed on piecemeal.
         this.chromeView.setBounds(this.band()
-          ? { x: 0, y: 0, width, height: this.sidebarOpen ? height : SIDEBAR_TOP_BAND }
+          ? { x: 0, y: 0, width, height: SIDEBAR_TOP_BAND }
           : this.vertical()
           ? { x: 0, y: 0, width: this.sidebarWidth(), height }
           : { x: 0, y: 0, width, height: this.chromeHeight() });
@@ -2035,6 +2131,7 @@ class BrowserShell {
     // Rounded only while it floats. A panel over a page needs corners; a column
     // against the window's own edge does not, and rounding one would leave four
     // notches of window background at the screen's corners.
+    this.layStrip(width, height);
     const chromeRadius = this.chromeFloats() ? FLOAT_RADIUS : 0;
     if (this.laidOutChromeRadius !== chromeRadius) {
       this.laidOutChromeRadius = chromeRadius;
@@ -2108,7 +2205,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
+    for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }
@@ -2151,6 +2248,7 @@ class BrowserShell {
     // Null in the ordinary browser, which is how every view tells the two apart.
     full.incognito = this.incognito ? this.incognito() : null;
     send(this.chromeView, 'debrowser:state', full);
+    if (this.stripView) send(this.stripView, 'debrowser:state', full);
     send(this.panelView, 'debrowser:state', full);
     // And the sheet, while one is up. The menu takes its preferences off the
     // `menu-model` reply and would not need this; the downloads flyout has no
@@ -2184,7 +2282,7 @@ class BrowserShell {
   }
 
   destroy() {
-    clearInterval(this.edgeTimer);
+    clearTimeout(this.edgeTimer);
     this.edgeTimer = null;
     this.closeSheet();
     this.togglePanel(false);
@@ -2203,5 +2301,5 @@ function send(view, channel, payload) {
 
 module.exports = {
   BrowserShell, CHROME_HEIGHT, BOOKMARKS_BAR_HEIGHT, PANEL_WIDTH,
-  SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP
+  SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP, STRIP_VIEW_WIDTH
 };

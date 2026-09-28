@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <map>
+#include <mutex>
 #include <string>
 
 #include <UserConsentVerifierInterop.h>
@@ -283,6 +284,11 @@ static napi_value sv_destroy(napi_env env, napi_callback_info info) {
   return nullptr;
 }
 
+// Prompts still up, by token, so one can be taken down (cancelPresence).
+// Completion arrives on a thread pool thread, hence the lock.
+std::mutex g_presence_lock;
+std::map<std::string, ComPtr<WF::IAsyncInfo>> g_presence;
+
 // verifyPresence(windowHandle: Buffer, message, token) - Windows Hello for
 // the given window. The answer arrives as a "presence" event (id 0) carrying
 // the token and the UserConsentVerificationResult as a number, or "error".
@@ -315,10 +321,21 @@ static napi_value sv_verify_presence(napi_env env, napi_callback_info info) {
       IID_PPV_ARGS(&op));
   if (FAILED(hr)) return fail("request", hr);
 
+  {
+    ComPtr<WF::IAsyncInfo> asyncInfo;
+    if (SUCCEEDED(op.As(&asyncInfo))) {
+      std::lock_guard<std::mutex> lock(g_presence_lock);
+      g_presence[token] = asyncInfo;
+    }
+  }
   hr = op->put_Completed(
       Callback<WF::IAsyncOperationCompletedHandler<CredUI::UserConsentVerificationResult>>(
           [token](WF::IAsyncOperation<CredUI::UserConsentVerificationResult>* done,
                   WF::AsyncStatus status) -> HRESULT {
+            {
+              std::lock_guard<std::mutex> lock(g_presence_lock);
+              g_presence.erase(token);
+            }
             CredUI::UserConsentVerificationResult result;
             if (status != WF::AsyncStatus::Completed || FAILED(done->GetResults(&result))) {
               sv_emit(0, "presence", token, "error status " + std::to_string(static_cast<int>(status)));
@@ -329,5 +346,24 @@ static napi_value sv_verify_presence(napi_env env, napi_callback_info info) {
           })
           .Get());
   if (FAILED(hr)) return fail("completed", hr);
+  return nullptr;
+}
+
+// cancelPresence(token) - take down a Windows Hello prompt still waiting, so
+// one that has been given up on does not stay on screen under the next.
+static napi_value sv_cancel_presence(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+  const std::string token = sv_string(env, argv[0]);
+  ComPtr<WF::IAsyncInfo> asyncInfo;
+  {
+    std::lock_guard<std::mutex> lock(g_presence_lock);
+    auto it = g_presence.find(token);
+    if (it == g_presence.end()) return nullptr;
+    asyncInfo = it->second;
+    g_presence.erase(it);
+  }
+  asyncInfo->Cancel();
   return nullptr;
 }

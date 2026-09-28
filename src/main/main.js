@@ -1858,7 +1858,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // the page instead - which on a page with its own `/` or `f` shortcut
         // is worse than the bar not opening at all.
         shell.setFindOpen(true);
-        shell.focusChrome();
+        shell.focusFind();
         break;
 
       case 'find-close':
@@ -1907,7 +1907,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // its text, and Enter or F3 then made the next letter typed replace
         // the whole query instead of refining it.
         if (!shell.findOpen) shell.setFindOpen(true);
-        if (!query || !active?.isLive) { shell.focusChrome(); break; }
+        if (!query || !active?.isLive) { shell.focusFind(); break; }
         if (find) find.tabId = active.id;
         active.wc.findInPage(query, { findNext: true, forward: command === 'find-next' });
         break;
@@ -2356,54 +2356,6 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'sidebar-hover':
         shell.setSidebarOpen(Boolean(payload?.over));
         break;
-
-      // Tucked away with the tabs out, the chrome's view covers the whole
-      // window - clear round the band and the panel - so the pointer over the
-      // page lands on the chrome. It hands it on: a click, a drag, the wheel
-      // and hover reach the page as if nothing lay over it, including while
-      // the find bar, a menu or typing holds the panel out.
-      case 'page-input': {
-        const tab = tabs && tabs.activeTab();
-        const wc = tab && tab.wc;
-        if (!wc || wc.isDestroyed()) break;
-        const TYPES = new Set(['mouseDown', 'mouseUp', 'mouseMove', 'mouseWheel']);
-        if (!TYPES.has(payload?.type)) break;
-        const page = shell.contentBounds();
-        const x = Math.round(Number(payload.x) || 0) - page.x;
-        const y = Math.round(Number(payload.y) || 0) - page.y;
-        if (x < 0 || y < 0 || x >= page.width || y >= page.height) break;
-        const modifiers = Array.isArray(payload.modifiers)
-          ? payload.modifiers.filter((m) => ['shift', 'control', 'alt', 'meta'].includes(m)) : [];
-        const event = { type: payload.type, x, y, modifiers };
-        if (payload.type === 'mouseWheel') {
-          // DOM deltas point where the content goes; Chromium's input events
-          // the other way.
-          event.deltaX = -(Number(payload.deltaX) || 0);
-          event.deltaY = -(Number(payload.deltaY) || 0);
-          event.canScroll = true;
-        } else if (payload.type !== 'mouseMove') {
-          event.button = ['left', 'middle', 'right'].includes(payload.button) ? payload.button : 'left';
-          event.clickCount = Math.max(1, Math.min(3, Number(payload.clickCount) || 1));
-        }
-        if (payload.type === 'mouseDown') wc.focus();
-        // Chromium scrolls what is under the pointer as it last saw it, and a
-        // wheel sent hard on the heels of the move that put it there was, some
-        // of the time, scrolled nowhere. Moved first; the wheel a frame later,
-        // unless the page already had the pointer there.
-        if (payload.type === 'mouseWheel') {
-          const last = shell.pageInputAt;
-          if (last && last.wc === wc && last.x === x && last.y === y) {
-            wc.sendInputEvent(event);
-          } else {
-            wc.sendInputEvent({ type: 'mouseMove', x, y, modifiers });
-            setTimeout(() => { if (!wc.isDestroyed()) wc.sendInputEvent(event); }, 16);
-          }
-        } else {
-          wc.sendInputEvent(event);
-        }
-        shell.pageInputAt = { wc, x, y };
-        break;
-      }
       case 'sidebar-typing':
         shell.sidebarTyping = Boolean(payload?.typing);
         shell.releaseSidebar();
@@ -2519,8 +2471,23 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
     if (!pageMay(senderPage(tabs, shell, event.sender), 'commands', command)) return;
-    runCommand(command, payload ?? null, event.sender);
+    runCommand(command, inWindow(payload ?? null, event.sender), event.sender);
   });
+
+  /**
+   * Coordinates from the tab list's own view, tucked away, made the window's.
+   * Every view of the chrome's sends positions in its own page - where to hang
+   * a menu, a sheet - and all the rest start at the window's corner.
+   */
+  function inWindow(payload, sender) {
+    if (!shell || !payload || typeof payload !== 'object') return payload;
+    const { x: dx, y: dy } = shell.chromeOrigin(sender);
+    if (!dx && !dy) return payload;
+    const out = { ...payload };
+    for (const key of ['x', 'right']) if (Number.isFinite(out[key])) out[key] += dx;
+    for (const key of ['y', 'bottom', 'top']) if (Number.isFinite(out[key])) out[key] += dy;
+    return out;
+  }
 
   /*
    * Ctrl and the wheel, from any page.

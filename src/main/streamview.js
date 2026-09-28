@@ -71,16 +71,23 @@ let nextToken = 1;
  * @returns {Promise<number|null>} the UserConsentVerificationResult - 0 is
  *   verified - or null where this cannot ask: no module, or the call failed
  */
-function verifyPresence(window, message, timeoutMs = 60_000) {
+function verifyPresence(window, message, timeoutMs = 5 * 60_000) {
   const mod = load();
   if (!mod || typeof mod.verifyPresence !== 'function' || !window || window.isDestroyed()) {
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
     const token = String(nextToken++);
-    // No answer in time is a "no" (a number other than 0), not "could not
-    // ask": the prompt may well be up, and falling back would stack a second.
-    const timer = setTimeout(() => { presenceAsks.delete(token); resolve(-1); }, timeoutMs);
+    // Windows' own prompt waits as long as the person needs; this is only for
+    // an answer that will never come. Given up on, the prompt is taken down
+    // too - left up, finishing it did nothing and the next try stacked a
+    // second. A "no" (a number other than 0), not "could not ask", so nothing
+    // falls back to asking again.
+    const timer = setTimeout(() => {
+      presenceAsks.delete(token);
+      try { if (typeof mod.cancelPresence === 'function') mod.cancelPresence(token); } catch { /* already gone */ }
+      resolve(-1);
+    }, timeoutMs);
     presenceAsks.set(token, (answer) => {
       clearTimeout(timer);
       resolve(/^\d+$/.test(answer) ? Number(answer) : null);

@@ -2061,7 +2061,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // reflowed every time the pointer brushed the window edge would be the most
   // distracting thing in the browser.
   {
-    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP } = require('./window');
+    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP, STRIP_VIEW_WIDTH } = require('./window');
     const chromeWidth = () => shell.chromeView.getBounds().width;
 
     prefs.set('tabBarPosition', 'left');
@@ -2085,14 +2085,18 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(150);   // the chrome is told its shape by message
     const bandWhileOut = await shell.chromeView.webContents.executeJavaScript(
       `document.getElementById('url').getBoundingClientRect().bottom <= ${SIDEBAR_TOP_BAND}`);
+    const strip = shell.stripView && shell.stripView.getVisible() ? shell.stripView.getBounds() : null;
     check('tucked away, the page is a card under a toolbar band and the tabs come out under the band',
       whole.x === CONTENT_GAP && whole.y === SIDEBAR_TOP_BAND && whole.width === winW - CONTENT_GAP * 2 &&
       whole.y + whole.height === winH - CONTENT_GAP &&
       edge.x === 0 && edge.y === 0 && edge.width === winW && edge.height === SIDEBAR_TOP_BAND &&
-      panel.x === 0 && panel.y === 0 && panel.width === winW && panel.height === winH && bandWhileOut &&
+      panel.x === 0 && panel.y === 0 && panel.width === winW && panel.height === SIDEBAR_TOP_BAND &&
+      Boolean(strip) && strip.x === 0 && strip.y === SIDEBAR_TOP_BAND && strip.width === STRIP_VIEW_WIDTH &&
+      bandWhileOut &&
       pageWhileOut.x === whole.x && pageWhileOut.width === whole.width,
       `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, band ${edge.width}x${edge.height}, ` +
-      `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, band kept: ${bandWhileOut}, page while out x=${pageWhileOut.x}`);
+      `chrome while out ${panel.x},${panel.y} ${panel.width}x${panel.height}, tabs ${JSON.stringify(strip)}, ` +
+      `band kept: ${bandWhileOut}, page while out x=${pageWhileOut.x}`);
     // Until the chrome has drawn itself as the floating panel, not a fixed wait:
     // a slow Windows runner read it while it was still the collapsed edge.
     const drawnOut = () => shell.chromeView.webContents.executeJavaScript(
@@ -2218,28 +2222,20 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       check('a menu opened from the strip keeps it out until the menu closes',
         heldMenu && !shell.sidebarOpen, `held: ${heldMenu}, then closed: ${!shell.sidebarOpen}`);
 
-      // Out, the view is the whole window, clear but for the band and the
-      // panel - so the page beneath must still get the wheel. It is handed on.
+      // Out, nothing but the band and the tab list's own view lies over the
+      // page: the rest of it gets its clicks, wheel and drops directly.
       {
         await reset();
         await at(pageLeft - 1, 300);
         await sleep(250);
-        const wc = tabs.activeTab().wc;
-        await wc.executeJavaScript(`document.documentElement.style.overflow = 'auto';
-          document.body.style.minHeight = '5000px'; scrollTo(0, 0); 1`);
-        const { width: w } = shell.window.getContentBounds();
-        const outBefore = `${shell.sidebarOpen}/${await inChrome('document.body.dataset.sidebarOpen')}`;
-        await inChrome(`document.dispatchEvent(new WheelEvent('wheel', { clientX: ${Math.round(w / 2)}, clientY: 400,
-          deltaY: 400, bubbles: true, cancelable: true })); 1`);
-        // A wheel scroll is animated, and lands a frame or two after it.
-        let scrolled = 0;
-        for (let i = 0; i < 20 && !scrolled; i++) {
-          await sleep(150);
-          scrolled = await wc.executeJavaScript('scrollY');
-        }
-        await wc.executeJavaScript(`document.body.style.minHeight = ''; document.documentElement.style.overflow = ''; scrollTo(0, 0); 1`);
-        check('tucked away with the tabs out, the wheel over the page still scrolls the page',
-          scrolled > 0, `scrollY ${scrolled}, out before the wheel: ${outBefore}`);
+        const chrome = shell.chromeView.getBounds();
+        const list = shell.stripView ? shell.stripView.getBounds() : null;
+        const drawn = shell.stripView ? await shell.stripView.webContents.executeJavaScript(
+          `[...document.querySelectorAll('#tabs .tab')].length`) : 0;
+        check('tucked away with the tabs out, only the band and the tab list lie over the page',
+          shell.sidebarOpen && chrome.height === SIDEBAR_TOP_BAND && Boolean(list) &&
+          list.x + list.width <= STRIP_VIEW_WIDTH && drawn > 0,
+          `chrome ${JSON.stringify(chrome)}, list ${JSON.stringify(list)}, tabs drawn in it: ${drawn}`);
       }
 
       // A tap on the page - focus there with the cursor off the strip - puts
