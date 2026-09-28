@@ -44,6 +44,7 @@ const STATE = {
     incognitoBridges: 'custom', incognitoJsLevel: 'balanced', incognitoKeepTorState: true,
     incognitoPreferOnion: false, incognitoCamouflage: false, incognitoIdleWipeMinutes: 0,
     incognitoBridgeLines: 'obfs4 203.0.113.5:443 9A1B2C3D4E5F60718293A4B5C6D7E8F901234567 cert=kR3x4mHq9Wn2bV7cZ8yT1uP0sL5fG6hJ iat-mode=1',
+    design: process.env.SHOOT_DESIGN || 'legacy',
     theme: 'dark', accent: '#2f857b', tabWidth: 'roomy', tabBarColor: 'default',
     windowOpacity: 1, tabBarPosition: 'top', backgroundMaterial: 'none',
     reduceMotion: false, showMemoryMeter: true, showTierDots: true,
