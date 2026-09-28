@@ -68,7 +68,7 @@ const el = {
 // would read as the address bar ignoring you rather than as a near miss.
 el.omnibox.addEventListener('mousedown', (event) => {
   if (event.target === el.url) return;      // let the caret land where it was aimed
-  if (el.site.contains(event.target) || event.target === el.zoomBadge) return;   // buttons of their own
+  if (event.target.closest('button')) return;   // the padlock, zoom, star, downloads and menu are buttons of their own
   event.preventDefault();                   // no focus flash on the pill itself
   el.url.focus();
   el.url.select();
@@ -155,10 +155,18 @@ function reportHover(over) {
 }
 
 // In the bar across the top only the tabs button, and the edge it sits on,
-// bring the strip out: the rest of the bar is a toolbar, used all day.
+// bring the strip out: the rest of the bar is a toolbar, used all day. Once
+// out, the view is the whole window and the panel is its left column under
+// the band: anywhere else is the page showing through, and means "put it away".
+const BAND_HEIGHT = 40;      // window.js SIDEBAR_TOP_BAND
+const PANEL_RIGHT = 240;     // the panel's column, margins included
 function pointerWantsStrip(event) {
   if (document.body.dataset.band !== 'true') return true;
-  return event.clientX < 10 || Boolean(event.target.closest?.('#band-tabs'));
+  if (event.target.closest?.('#band-tabs')) return true;
+  if (document.body.dataset.sidebarOpen === 'true') {
+    return event.clientY >= BAND_HEIGHT && event.clientX < PANEL_RIGHT;
+  }
+  return event.clientX < 10;
 }
 
 document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event)));

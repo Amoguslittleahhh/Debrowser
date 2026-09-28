@@ -1953,7 +1953,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const page = () => JSON.stringify(shell.contentBounds());
       const before = page();
       runCommand('find-open', null);
-      const out = shell.sidebarOpen && shell.chromeView.getBounds().width === SIDEBAR_WIDTH;
+      const out = shell.sidebarOpen && shell.chromeView.getBounds().width >= SIDEBAR_WIDTH;
       const during = page();
       runCommand('find-close', null);
       const gone = !shell.sidebarOpen;
@@ -2078,16 +2078,21 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const pageWhileOut = shell.contentBounds();
     // Zen's compact mode: the page is a card under a slim toolbar across the
     // top - which is also where the window buttons are, so they no longer sit
-    // over the page - and the strip floats over it as a panel when the pointer
-    // reaches the left edge.
-    check('tucked away, the page is a card under a toolbar band and the whole strip floats over it on demand',
+    // over the page - and the tabs come out under that band when the pointer
+    // reaches the left edge. The band stays: the view grows to the window,
+    // clear round the band and the panel, rather than trading the address bar
+    // for the tabs.
+    await sleep(150);   // the chrome is told its shape by message
+    const bandWhileOut = await shell.chromeView.webContents.executeJavaScript(
+      `document.getElementById('url').getBoundingClientRect().bottom <= ${SIDEBAR_TOP_BAND}`);
+    check('tucked away, the page is a card under a toolbar band and the tabs come out under the band',
       whole.x === CONTENT_GAP && whole.y === SIDEBAR_TOP_BAND && whole.width === winW - CONTENT_GAP * 2 &&
       whole.y + whole.height === winH - CONTENT_GAP &&
       edge.x === 0 && edge.y === 0 && edge.width === winW && edge.height === SIDEBAR_TOP_BAND &&
-      panel.x > 0 && panel.y > 0 && panel.width === SIDEBAR_WIDTH && panel.height < winH &&
+      panel.x === 0 && panel.y === 0 && panel.width === winW && panel.height === winH && bandWhileOut &&
       pageWhileOut.x === whole.x && pageWhileOut.width === whole.width,
       `page ${whole.x},${whole.y} ${whole.width}x${whole.height}, band ${edge.width}x${edge.height}, ` +
-      `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, page while out x=${pageWhileOut.x}`);
+      `panel ${panel.x},${panel.y} ${panel.width}x${panel.height}, band kept: ${bandWhileOut}, page while out x=${pageWhileOut.x}`);
     // Until the chrome has drawn itself as the floating panel, not a fixed wait:
     // a slow Windows runner read it while it was still the collapsed edge.
     const drawnOut = () => shell.chromeView.webContents.executeJavaScript(
@@ -2130,7 +2135,20 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // the edge, the pause before opening and the hold all live.
     {
       const inChrome = (code) => shell.chromeView.webContents.executeJavaScript(code);
+      // The view's own idea of where the pointer is moves too: once out, the
+      // view is the whole window, and a real cursor left wherever the test
+      // machine put it would otherwise be reported from there on the resize.
       const at = (x, y) => inChrome(`document.dispatchEvent(new MouseEvent('mousemove', { clientX: ${x}, clientY: ${y} })); 1`);
+      // Out, the strip's view is the whole window, so the machine's real
+      // cursor - parked wherever the test machine left it, often mid-screen -
+      // is inside it and reports itself on the resize, over the page and so
+      // "away". Out of the window, it has nothing to say.
+      const parked = require('electron').screen.getCursorScreenPoint();
+      const placed = shell.window.getBounds();
+      if (parked.x >= placed.x && parked.x < placed.x + placed.width &&
+          parked.y >= placed.y && parked.y < placed.y + placed.height) {
+        shell.window.setPosition(parked.x + 40, placed.y);
+      }
       const leave = () => inChrome(`document.dispatchEvent(new MouseEvent('mouseleave')); 1`);
       const settle = () => sleep(650);   // past the close delay and the slide
       const reset = async () => {

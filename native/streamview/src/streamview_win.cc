@@ -15,6 +15,11 @@
 #include <map>
 #include <string>
 
+#include <UserConsentVerifierInterop.h>
+#include <roapi.h>
+#include <windows.security.credentials.ui.h>
+#include <wrl/wrappers/corewrappers.h>
+
 #include "WebView2.h"
 #include "WebView2EnvironmentOptions.h"
 #include "events.h"
@@ -22,6 +27,9 @@
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::Make;
+using Microsoft::WRL::Wrappers::HStringReference;
+namespace CredUI = ABI::Windows::Security::Credentials::UI;
+namespace WF = ABI::Windows::Foundation;
 
 namespace {
 
@@ -261,5 +269,54 @@ static napi_value sv_destroy(napi_env env, napi_callback_info info) {
   v->controller.Reset();
   g_views.erase(it);
   delete v;
+  return nullptr;
+}
+
+// verifyPresence(windowHandle: Buffer, message, token) - Windows Hello for
+// the given window. The answer arrives as a "presence" event (id 0) carrying
+// the token and the UserConsentVerificationResult as a number, or "error".
+//
+// Asked from here rather than from a helper process: the prompt is modal to
+// the window, and only the process that owns the window - the one the user
+// is looking at - is allowed to bring a prompt to the front.
+static napi_value sv_verify_presence(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value argv[3];
+  napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+  HWND hwnd = static_cast<HWND>(sv_buffer_pointer(env, argv[0]));
+  const std::wstring message = Wide(sv_string(env, argv[1]));
+  const std::string token = sv_string(env, argv[2]);
+  auto fail = [&](const char* where, HRESULT hr) {
+    sv_emit(0, "presence", token, std::string("error ") + where + " " + Hex(hr));
+    return nullptr;
+  };
+  if (!hwnd || !IsWindow(hwnd)) return fail("window", E_INVALIDARG);
+
+  ComPtr<IUserConsentVerifierInterop> interop;
+  HRESULT hr = RoGetActivationFactory(
+      HStringReference(RuntimeClass_Windows_Security_Credentials_UI_UserConsentVerifier).Get(),
+      IID_PPV_ARGS(&interop));
+  if (FAILED(hr)) return fail("factory", hr);
+
+  ComPtr<WF::IAsyncOperation<CredUI::UserConsentVerificationResult>> op;
+  hr = interop->RequestVerificationForWindowAsync(
+      hwnd, HStringReference(message.c_str(), static_cast<unsigned int>(message.size())).Get(),
+      IID_PPV_ARGS(&op));
+  if (FAILED(hr)) return fail("request", hr);
+
+  hr = op->put_Completed(
+      Callback<WF::IAsyncOperationCompletedHandler<CredUI::UserConsentVerificationResult>>(
+          [token](WF::IAsyncOperation<CredUI::UserConsentVerificationResult>* done,
+                  WF::AsyncStatus status) -> HRESULT {
+            CredUI::UserConsentVerificationResult result;
+            if (status != WF::AsyncStatus::Completed || FAILED(done->GetResults(&result))) {
+              sv_emit(0, "presence", token, "error status " + std::to_string(static_cast<int>(status)));
+            } else {
+              sv_emit(0, "presence", token, std::to_string(static_cast<int>(result)));
+            }
+            return S_OK;
+          })
+          .Get());
+  if (FAILED(hr)) return fail("completed", hr);
   return nullptr;
 }

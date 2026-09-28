@@ -161,6 +161,10 @@ const SHOTS = [
   // at a plausible answer for eight tabs, which is the only way to see whether
   // a panel that stops partway down actually looks like one.
   { name: 'sidebar-float', file: 'chrome.html', w: 240, h: 480, side: true, floating: true },
+  // Tucked away in a window: the band across the top, and with the tabs out,
+  // the band still there and the panel under it over the page.
+  { name: 'band', file: 'chrome.html', w: 1280, h: 40, side: true, band: true },
+  { name: 'band-open', file: 'chrome.html', w: 1280, h: 720, side: true, band: true, open: true },
   { name: 'settings', file: 'settings.html', w: 1280, h: 860 },
   // The same page, scrolled to a section that would otherwise be eight screens
   // down. Worth its own shot because the rows there are built by hand rather
@@ -232,7 +236,9 @@ app.whenReady().then(async () => {
 
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';
-      STATE.sidebar = shot.collapsed
+      STATE.sidebar = shot.band
+        ? { pinned: false, open: shot.open === true, floating: false, detached: true, band: true }
+        : shot.collapsed
         ? { pinned: false, open: false }
         : { pinned: true, open: true, floating: shot.floating === true };
       STATE.bookmarksBar = false;

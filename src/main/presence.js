@@ -272,6 +272,13 @@ async function verify(reason, window = null) {
   }
 
   if (process.platform === 'win32') {
+    // In this process first: the prompt belongs to a window this process owns,
+    // and a helper process asking on its behalf was refused the foreground -
+    // "did not confirm" with no prompt ever shown. The helper stays as the
+    // fallback for a build without the native module.
+    const code = await require('./streamview').verifyPresence(window, reason);
+    if (code !== null) return code === 0;
+
     let hwnd = 0;
     try {
       const buffer = window && !window.isDestroyed() ? window.getNativeWindowHandle() : null;

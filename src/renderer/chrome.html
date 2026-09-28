@@ -84,32 +84,37 @@
              placeholder="Search or type a URL" aria-label="Address and search bar">
       <!-- The page's zoom, only while it is not the default. Pressing it resets. -->
       <button class="zoom-badge" id="zoom-badge" type="button" hidden title="Reset zoom (Ctrl+0)"></button>
+      <!-- The page's own actions sit inside the address they act on, so the
+           toolbar is the address and nothing else once the strip is tucked away. -->
+      <button class="icon-btn star" id="star" title="Bookmark this page (Ctrl+D)" aria-label="Bookmark this page">
+        <svg viewBox="0 0 16 16" aria-hidden="true" id="star-icon">
+          <path d="M8 2.2l1.76 3.57 3.94.57-2.85 2.78.67 3.92L8 11.2l-3.52 1.85.67-3.92L2.3 6.34l3.94-.57z"/>
+        </svg>
+      </button>
+      <!--
+        Downloads. Hidden until there is something to show, the way Chrome and
+        Edge both do it: a button that is dead for the first hour of every session
+        is a button in the way. The ring around it fills while something is
+        arriving, so the toolbar answers "is it done yet" without being opened.
+      -->
+      <button class="icon-btn downloads" id="downloads" hidden
+              title="Downloads (Ctrl+J)" aria-label="Downloads">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/>
+          <path d="M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5"/>
+        </svg>
+        <!-- A thin circle round the button, filling clockwise from the top. -->
+        <svg class="downloads-ring" viewBox="0 0 32 32" aria-hidden="true">
+          <circle class="ring-track" cx="16" cy="16" r="14.5"/>
+          <circle class="ring-fill" id="downloads-ring" cx="16" cy="16" r="14.5" pathLength="100"/>
+        </svg>
+      </button>
+      <button class="icon-btn" id="menu" title="Customise and control Debrowser" aria-label="Menu">
+        <svg viewBox="0 0 16 16" aria-hidden="true" class="dots">
+          <circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/>
+        </svg>
+      </button>
     </div>
-
-    <button class="icon-btn star" id="star" title="Bookmark this page (Ctrl+D)" aria-label="Bookmark this page">
-      <svg viewBox="0 0 16 16" aria-hidden="true" id="star-icon">
-        <path d="M8 2.2l1.76 3.57 3.94.57-2.85 2.78.67 3.92L8 11.2l-3.52 1.85.67-3.92L2.3 6.34l3.94-.57z"/>
-      </svg>
-    </button>
-
-    <!--
-      Downloads. Hidden until there is something to show, the way Chrome and
-      Edge both do it: a button that is dead for the first hour of every session
-      is a button in the way. The ring around it fills while something is
-      arriving, so the toolbar answers "is it done yet" without being opened.
-    -->
-    <button class="icon-btn downloads" id="downloads" hidden
-            title="Downloads (Ctrl+J)" aria-label="Downloads">
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/>
-        <path d="M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5"/>
-      </svg>
-      <!-- A thin circle round the button, filling clockwise from the top. -->
-      <svg class="downloads-ring" viewBox="0 0 32 32" aria-hidden="true">
-        <circle class="ring-track" cx="16" cy="16" r="14.5"/>
-        <circle class="ring-fill" id="downloads-ring" cx="16" cy="16" r="14.5" pathLength="100"/>
-      </svg>
-    </button>
 
     <!--
       Private windows only: which kind of window this is, and whether its
@@ -139,12 +144,6 @@
     <button class="meter" id="meter" title="Memory in use – click for the task manager">
       <span class="meter-bar"><span class="meter-fill" id="meter-fill"></span></span>
       <span class="meter-text" id="meter-text">—</span>
-    </button>
-
-    <button class="icon-btn" id="menu" title="Customise and control Debrowser" aria-label="Menu">
-      <svg viewBox="0 0 16 16" aria-hidden="true" class="dots">
-        <circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/>
-      </svg>
     </button>
 
     <!--

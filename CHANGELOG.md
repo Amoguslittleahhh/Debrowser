@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Windows Hello opens when you unlock saved passwords.** The prompt was asked for by a hidden helper process on the browser's behalf, which Windows can refuse, so it failed with "did not confirm it was you" without ever appearing. Debrowser now asks for it itself, for its own window.
+- **Tucked away, the address bar stays put when the tabs come out.** The tabs open as a panel under the toolbar across the top instead of replacing it with a narrow column where the address was cut short.
+- **The tucked-away tab panel no longer flickers open and shut** with the pointer against the left edge of the screen.
+- **The bookmark star, downloads and menu buttons sit inside the address bar,** at its right end.
+- **Tab titles use one font.** In the Paper design a sleeping tab's title was set in an italic serif, which looked like a font that had failed to load; it is now dimmed instead.
 - **The Protected video button no longer appears on pages where DRM works.** Players and test pages ask about every kind of DRM in turn; a "no" to PlayReady or FairPlay beside a Widevine that works raised the button. It now appears only when a page gets no DRM at all.
 - **Correction to 1.9.1:** Widevine still reports Debrowser as tampered on Windows and macOS, not unverified as the 1.9.1 notes said, so Netflix, Disney+ and Prime Video are likely to refuse there. Widevine playback itself works, as test streams show.
 - **Updates are noticed in a browser left open.** It checked only once, a minute after starting, so a window open for days never saw a new release. It now checks again when you come back to it - the computer waking or unlocking, or the window coming to the front - if the last check was six hours ago or more, or fifteen minutes after one that failed. Still nothing on a timer.

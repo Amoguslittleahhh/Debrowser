@@ -510,7 +510,11 @@ class BrowserShell {
         if (!this.sidebarOpen || this.window.isDestroyed()) return;
         const at = screen.getCursorScreenPoint();
         const win = this.window.getContentBounds();
-        const b = this.chromeView.getBounds();
+        // Tucked away in a window the view is the whole window while the tabs
+        // are out, and the strip is only its left column under the band.
+        const b = this.band()
+          ? { x: 0, y: SIDEBAR_TOP_BAND, width: SIDEBAR_WIDTH, height: win.height }
+          : this.chromeView.getBounds();
         const x = at.x - win.x;
         const y = at.y - win.y;
         if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return;
@@ -1625,7 +1629,9 @@ class BrowserShell {
     // Unpinned, only while it is out; collapsed it is the edge at x=0, full
     // screen or not. It was laid out as a floating ten-pixel panel ten pixels
     // in, so a pointer pushed to the screen edge landed on the page instead.
-    return this.vertical() && (this.detached() ? this.sidebarOpen : this.fullScreen());
+    // In a window the band stays across the top and the tabs come out under
+    // it (see `layout`), so only full screen floats.
+    return this.vertical() && (this.detached() ? this.sidebarOpen && !this.band() : this.fullScreen());
   }
 
   /**
@@ -2013,8 +2019,14 @@ class BrowserShell {
             : Math.min(room, Math.max(FLOAT_MIN_HEIGHT, this.chromeWantsHeight || room))
         });
       } else {
+        // Tucked away in a window, the band stays where it is when the tabs
+        // come out: the view grows to the whole window, clear except for the
+        // band and the panel under it, so the address bar and its buttons never
+        // make way for the tabs. The panel starts at the window's edge, where
+        // the pointer that opened it is - one inset from it left a gap the
+        // pointer fell through, closing the panel and the edge reopening it.
         this.chromeView.setBounds(this.band()
-          ? { x: 0, y: 0, width, height: SIDEBAR_TOP_BAND }
+          ? { x: 0, y: 0, width, height: this.sidebarOpen ? height : SIDEBAR_TOP_BAND }
           : this.vertical()
           ? { x: 0, y: 0, width: this.sidebarWidth(), height }
           : { x: 0, y: 0, width, height: this.chromeHeight() });

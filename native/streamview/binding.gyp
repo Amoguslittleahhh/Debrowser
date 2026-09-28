@@ -8,7 +8,7 @@
           "include_dirs": ["<(module_root_dir)/sdk/include"],
           "libraries": [
             "<(module_root_dir)/sdk/x64/WebView2LoaderStatic.lib",
-            "version.lib", "advapi32.lib", "ole32.lib", "shlwapi.lib", "user32.lib"
+            "version.lib", "runtimeobject.lib", "advapi32.lib", "ole32.lib", "shlwapi.lib", "user32.lib"
           ],
           "msvs_settings": {
             "VCCLCompilerTool": { "ExceptionHandling": 1, "AdditionalOptions": ["/std:c++17"] }

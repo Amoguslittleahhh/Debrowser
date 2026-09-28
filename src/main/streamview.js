@@ -41,6 +41,11 @@ function load() {
     try {
       native = require(file);
       native.setEventHandler((event) => {
+        if (event.type === 'presence') {
+          const resolve = presenceAsks.get(event.a);
+          if (resolve) { presenceAsks.delete(event.a); resolve(event.b); }
+          return;
+        }
         const view = views.get(event.id);
         if (view) view.receive(event);
       });
@@ -53,7 +58,31 @@ function load() {
 }
 
 const views = new Map();
+const presenceAsks = new Map();
 let nextToken = 1;
+
+/**
+ * Windows Hello for `window`, asked from this process (presence.js).
+ *
+ * @returns {Promise<number|null>} the UserConsentVerificationResult - 0 is
+ *   verified - or null where this cannot ask: no module, or the call failed
+ */
+function verifyPresence(window, message) {
+  const mod = load();
+  if (!mod || typeof mod.verifyPresence !== 'function' || !window || window.isDestroyed()) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    const token = String(nextToken++);
+    presenceAsks.set(token, (answer) => resolve(/^\d+$/.test(answer) ? Number(answer) : null));
+    try {
+      mod.verifyPresence(window.getNativeWindowHandle(), String(message), token);
+    } catch {
+      presenceAsks.delete(token);
+      resolve(null);
+    }
+  });
+}
 
 class StreamView extends EventEmitter {
   /**
@@ -113,4 +142,4 @@ class StreamView extends EventEmitter {
   }
 }
 
-module.exports = { StreamView, available: () => Boolean(load()), SAFARI_UA };
+module.exports = { StreamView, available: () => Boolean(load()), verifyPresence, SAFARI_UA };
