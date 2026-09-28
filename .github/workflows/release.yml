@@ -158,18 +158,6 @@ jobs:
       # What the embedded engine offers for DRM, measured on the runner.
       # Advisory: a runner has no real graphics card, so hardware levels may
       # be missing here that a real PC has.
-      - name: Streaming view DRM probe
-        if: matrix.os != 'ubuntu-latest'
-        continue-on-error: true
-        timeout-minutes: 3
-        shell: bash
-        run: |
-          E=node_modules/electron/dist/electron.exe
-          if [ "$RUNNER_OS" = "macOS" ]; then E=node_modules/electron/dist/Electron.app/Contents/MacOS/Electron; fi
-          "$E" . --streamview-probe 2>&1 | tail -30
-          # Nothing of WebView2's may outlive the probe into the tests after it.
-          if [ "$RUNNER_OS" = "Windows" ]; then taskkill //F //IM msedgewebview2.exe >/dev/null 2>&1 || true; fi
-
       - name: Build the measurement helper
         if: matrix.os != 'ubuntu-latest'
         run: npm run build:memprobe
