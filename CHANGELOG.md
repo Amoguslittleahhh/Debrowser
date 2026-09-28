@@ -6,7 +6,9 @@
 - **Tucked away, the page keeps a margin and rounded corners** instead of running to the window's edges, as in Zen's compact mode.
 - **The side panel slides in and out more smoothly** and has a border you can see against a dark page.
 - **Tucked away, a slim toolbar runs across the top** with a tabs button (showing how many are open), back, forward, reload, the address bar, the bookmark star, the memory meter and the menu. The page starts below it, so the window's minimise, maximise and close buttons no longer cover the page's top-right corner.
-- **Protected (DRM) video gets a way out.** Debrowser cannot play DRM video from Netflix, Disney+, Prime Video or Spotify, because the Electron it is built on has no Widevine. When a page asks for it, a **Protected video ↗** button appears in the toolbar and opens the page in your default browser, or in Edge or Safari if Debrowser is your default. The page gets the same answer it always did. Not in private windows, where opening another browser would leave Tor.
+- **DRM video plays: Netflix, Disney+, Prime Video, Spotify and the rest.** Debrowser now runs on castLabs' Electron (44.1.0, Chromium 152), the newest stable build with Google's Widevine. Widevine installs itself in the background on first start, and a page that asks before it is ready reloads by itself once it is. Private windows have no DRM and download nothing for it, so nothing leaves outside Tor.
+- **A way out for what still won't play.** If a page asks for a kind of DRM this build lacks, a **Protected video ↗** button appears in the toolbar and opens the page in your default browser, or in Edge or Safari if Debrowser is your default.
+- **Sites see Chrome.** The user agent no longer carries `Electron/…` or `Debrowser/…`, which streaming sites and Google sign-in turn away.
 
 ## 1.9.0
 

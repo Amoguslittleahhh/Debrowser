@@ -118,9 +118,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   check('all tabs load and get renderer processes', allLoaded,
     `pids: ${opened.map((t) => t.pid).join(', ')}`);
 
-  // Protected video: this build has no Widevine, so the page is refused it
-  // exactly as before, and the browser offers to open it elsewhere - while
-  // Clear Key, which is not DRM, raises nothing.
+  // Protected video. With castLabs' Electron, Widevine is installed in the
+  // background and a page is granted it; a key system this build does not
+  // have (PlayReady) is refused exactly as before, and the browser offers to
+  // open the page elsewhere. Clear Key, which is not DRM, raises nothing.
   {
     // Loopback, because EME exists only in a secure context.
     const local = new URL(pageUrl('idle.html'));
@@ -129,18 +130,32 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const ask = (system) => home.wc.executeJavaScript(`navigator.requestMediaKeySystemAccess('${system}',
       [{ initDataTypes: ['cenc'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }] }])
       .then(() => 'granted', (e) => e.name)`);
+    const { components } = require('electron');
+    let installed = false;
+    if (components) {
+      installed = await Promise.race([
+        components.whenReady().then(() => true, () => false),
+        sleep(90_000).then(() => false)
+      ]);
+    }
     const clear = await ask('org.w3.clearkey');
-    await sleep(300);
-    const quietForClearKey = !home.drmNeeded;
     const widevine = await ask('com.widevine.alpha');
+    await sleep(300);
+    const quiet = !home.drmNeeded;
+    check('Widevine is installed and a page is granted it, without a notice',
+      !components || (installed && widevine === 'granted' && clear === 'granted' && quiet),
+      components ? `installed ${installed}, widevine ${widevine}, clear key ${clear}, ` +
+        `status ${JSON.stringify(components.status())}` : 'stock Electron: no components API');
+    const playready = await ask('com.microsoft.playready');
     const flagged = await waitFor(() => home.drmNeeded === true, { timeoutMs: 3000 });
     const native = await home.wc.executeJavaScript('String(navigator.requestMediaKeySystemAccess).includes("[native code]")');
-    check('a page refused DRM video is noticed, and the page sees the untouched refusal',
-      clear === 'granted' && quietForClearKey && widevine === 'NotSupportedError' && flagged && native &&
-      home.toJSON().drm === true,
-      `clear key ${clear}, widevine ${widevine}, flagged ${flagged}, native-looking ${native}`);
+    check('a key system this build lacks is noticed, and the page sees the untouched refusal',
+      playready === 'NotSupportedError' && flagged && native && home.toJSON().drm === true,
+      `playready ${playready}, flagged ${flagged}, native-looking ${native}`);
     await home.wc.loadURL(pageUrl('idle.html')).catch(() => {});
     check('a new page clears the protected-video notice', !home.drmNeeded);
+    const ua = await home.wc.executeJavaScript('navigator.userAgent');
+    check('the user agent says Chrome, without Electron or app tokens', /Chrome\/\d/.test(ua) && !/Electron|debrowser/i.test(ua), ua);
   }
 
   await sleep(1500);

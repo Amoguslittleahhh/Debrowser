@@ -6,6 +6,20 @@
 
 appId: dev.debrowser.app
 productName: Debrowser
+
+## castLabs' Electron (Electron for Content Security), for Widevine. The
+## version comes from node_modules/electron ("44.1.0+wvcus"); the binaries are
+## on castLabs' releases, not Electron's, so the download is pointed there -
+## the same mirror their own install script uses.
+electronDownload:
+  mirror: https://github.com/castlabs/electron-releases/releases/download/
+
+## Production VMP signing through castLabs EVS, which Netflix, Disney+ and
+## Prime need on Windows and macOS. macOS signs before code signing (the VMP
+## signature lives inside the bundle it seals), Windows after it. Skipped, with
+## a warning, when no EVS account is set up; see build/vmp-sign.js.
+afterPack: build/vmp-after-pack.js
+afterSign: build/vmp-after-sign.js
 copyright: Debrowser
 
 directories:

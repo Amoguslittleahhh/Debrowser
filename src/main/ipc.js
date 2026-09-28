@@ -32,6 +32,9 @@ class IpcHub {
     ipcMain.on('debrowser:drm-needed', (event) => {
       const tab = this.tabForWebContents(event.sender.id);
       if (!tab || tab.drmNeeded) return;
+      // Widevine may still be installing: the tab is reloaded once it is,
+      // and only a refusal after that is shown.
+      if (this.onDrmNeeded && this.onDrmNeeded(tab)) return;
       tab.drmNeeded = true;
       tab.emit('updated');
     });

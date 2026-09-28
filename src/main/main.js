@@ -846,6 +846,20 @@ function main() {
     publish();
   };
 
+  // Widevine, from castLabs' Electron: installed and kept up to date by the
+  // component updater, in the background so the first window does not wait on
+  // a download. Never in a private window (see incognito/mode.js), and not in
+  // the speed and bench runs, where a download would be in the measurement.
+  const widevine = !INCOGNITO && (!OFFLINE_MODE || SMOKE_TEST) ? startWidevine(log) : null;
+
+  // Say Chrome, as the engine is, without the `Electron/…` and app tokens:
+  // streaming sites (and Google's sign-in) turn away a browser they do not
+  // recognise before DRM is even tried. A private window sets its own, uniform
+  // string (incognito/fingerprint.js).
+  if (!INCOGNITO) {
+    app.userAgentFallback = app.userAgentFallback.replace(/ (?:Electron|debrowser|Debrowser)\/\S+/g, '');
+  }
+
   app.whenReady().then(() => {
     // No application menu.
     //
@@ -938,6 +952,7 @@ function main() {
       applyZoom: (wc) => siteZoom.apply(wc)
     });
     const ipcHub = new IpcHub(() => tabs.all(), log);
+    if (widevine) ipcHub.onDrmNeeded = (tab) => widevine.retry(tab);
 
     if (!INCOGNITO) {
       // In memory under a test, which must not leave answers behind.
@@ -3222,6 +3237,50 @@ function fillSavedLogin(tab, credentials, prefs, log, vault = null) {
  * settings window is: a second Settings tab is never what the user meant, and
  * two of them can disagree about what the current preferences are.
  */
+/**
+ * Widevine for the ordinary browser.
+ *
+ * `components` exists only in castLabs' Electron; with stock Electron this is
+ * a no-op and a page asking for DRM gets the "open elsewhere" button instead.
+ * A page that asks before the first install finishes is reloaded once it has,
+ * so the first visit to a streaming site plays rather than erroring.
+ */
+function startWidevine(log) {
+  const { components } = require('electron');
+  if (!components || typeof components.whenReady !== 'function') return null;
+  let ready = false;
+  let failed = false;
+  /** tab -> the address it asked from; a tab that moved on is left alone. */
+  const waiting = new Map();
+  const installed = app.whenReady()
+    .then(() => components.whenReady())
+    .then(() => {
+      ready = true;
+      log(`widevine: ${JSON.stringify(components.status())}`);
+    }, (err) => {
+      failed = true;
+      log(`widevine unavailable: ${err?.message || err}`);
+    })
+    .then(() => {
+      for (const [tab, url] of waiting) {
+        if (!tab.isLive || tab.wc.isDestroyed() || tab.wc.getURL() !== url) continue;
+        if (ready) tab.wc.reload();
+        else { tab.drmNeeded = true; tab.emit('updated'); }
+      }
+      waiting.clear();
+    });
+  return {
+    installed,
+    status: () => ({ ready, failed, components: ready ? components.status() : null }),
+    /** True when the tab will be reloaded once Widevine arrives. */
+    retry(tab) {
+      if (ready || failed) return false;
+      if (tab.isLive) waiting.set(tab, tab.wc.getURL());
+      return true;
+    }
+  };
+}
+
 /**
  * Open a page in a browser that can play DRM video.
  *

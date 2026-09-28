@@ -98,6 +98,10 @@ jobs:
     # right and silently never matches.
     env:
       AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      # castLabs EVS, for Widevine's production VMP signature: see
+      # build/vmp-sign.js. Free; without it the build still plays DRM wherever a
+      # development signature is accepted.
+      VMP_SIGNING: ${{ secrets.EVS_ACCOUNT_NAME != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -117,7 +121,10 @@ jobs:
       # Windows and macOS, so it is worth a cheap check rather than a re-run.
       - name: Ensure the Electron binary is present
         shell: bash
-        run: node -e "require('electron')" > /dev/null || npm rebuild electron
+        # castLabs' Electron (a git dependency) fetches its binary the same way,
+        # from castLabs' releases; running its installer directly is the
+        # fallback that works when a rebuild does not.
+        run: node -e "require('electron')" > /dev/null || npm rebuild electron || node node_modules/electron/install.js
 
       # Before either helper is built, because on Windows both are compiled
       # with `cl`, which exists only inside a Visual Studio developer
@@ -272,6 +279,22 @@ jobs:
       # what an individual developer can actually get since the 2023 rule that
       # code-signing keys live on certified hardware - set the AZURE_* secrets
       # instead and the step below takes over. docs/PACKAGING.md has both.
+      # Logs in to castLabs EVS so the packaging hook can VMP-sign. Windows and
+      # macOS only; Linux has no VMP.
+      - name: Log in to castLabs EVS
+        if: ${{ matrix.os != 'ubuntu-latest' && env.VMP_SIGNING == 'true' }}
+        shell: bash
+        env:
+          EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
+          EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
+        run: |
+          # The same interpreter the hook runs: `python` on Windows, where
+          # `python3` is not reliably on PATH.
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=python; else PY=python3; fi
+          $PY -m pip install --upgrade castlabs-evs
+          $PY -m castlabs_evs.account reauth -A "$EVS_ACCOUNT_NAME" -P "$EVS_PASSWD"
+          echo "DEBROWSER_VMP_SIGN=1" >> "$GITHUB_ENV"
+
       - name: Package
         env:
           # WIN_CSC_LINK, not CSC_LINK, and the distinction is load-bearing.

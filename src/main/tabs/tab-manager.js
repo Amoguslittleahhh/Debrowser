@@ -142,7 +142,9 @@ class TabManager {
       // another program, which in a private window means a connection that
       // does not go through Tor.
       const allowed = new Set(['fullscreen', 'clipboard-sanitized-write']);
-      const ok = allowed.has(permission);
+      // Protected video, in the ordinary browser only - the same line as the
+      // four asked about above, since a private window has no `askPermission`.
+      const ok = allowed.has(permission) || (permission === 'mediaKeySystem' && Boolean(this.askPermission));
       if (!ok) {
         this.deniedPermissions.push(permission);
         if (this.deniedPermissions.length > 20) this.deniedPermissions.shift();

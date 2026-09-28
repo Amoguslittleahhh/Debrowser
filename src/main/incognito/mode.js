@@ -408,6 +408,9 @@ function switches(ctx) {
     ['proxy-bypass-list', BYPASS_RULES],
     ['host-resolver-rules', RESOLVER_RULES],
     ['disable-quic'],
+    // No Widevine: its component updater fetches from Google on its own
+    // network context, and DRM is a fingerprint besides.
+    ['disable-component-update'],
     ['force-webrtc-ip-handling-policy', 'disable_non_proxied_udp'],
     // Chromium's own floor today; said here so a future default cannot lower it.
     ['ssl-version-min', 'tls1.2'],
