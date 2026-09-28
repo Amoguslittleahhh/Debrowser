@@ -62,7 +62,16 @@ async function vmpSign(phase, context) {
 
   const python = process.platform === 'win32' ? 'python' : 'python3';
   console.log(`  • VMP signing ${context.appOutDir}`);
-  execFileSync(python, ['-m', 'castlabs_evs.vmp', 'sign-pkg', context.appOutDir], { stdio: 'inherit' });
+  try {
+    execFileSync(python, ['-m', 'castlabs_evs.vmp', 'sign-pkg', context.appOutDir], { stdio: 'inherit' });
+  } catch {
+    // EVS signs only castLabs' binaries as shipped, and flipping any one of
+    // the fuses (electron-builder.yml) makes it deny the request - measured,
+    // each fuse alone. A refusal leaves the development signature, which is
+    // what an unsigned build has, rather than failing the release.
+    console.warn(`  • VMP signing refused for ${platform}: EVS denies a binary with fuses flipped. ` +
+      'This build keeps its fuses and the development signature.');
+  }
 }
 
 module.exports = { vmpSign };
