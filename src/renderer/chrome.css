@@ -149,7 +149,7 @@ body[data-platform="linux"] { --caption-right: 146px; }
   align-items: center;
   gap: 8px;
   min-width: 52px;
-  max-width: 240px;
+  max-width: 256px;
   /*
    * The basis is the maximum, so tabs sit at their full width until there are
    * enough of them to force shrinking - which is what Chrome does and what the
@@ -157,7 +157,7 @@ body[data-platform="linux"] { --caption-right: 146px; }
    * short of the width available and left a few hundred pixels of empty strip
    * after the + on a window with five tabs open.
    */
-  flex: 1 1 240px;
+  flex: 1 1 256px;
   height: 34px;
   padding: 0 8px 0 11px;
   border-radius: var(--radius) var(--radius) 0 0;
@@ -172,7 +172,7 @@ body[data-platform="linux"] { --caption-right: 146px; }
   /* Containment zeroes a tab's intrinsic width, and the strip hugs its tabs'
      intrinsic widths - so without this every tab collapsed to the floor. It
      is the width the basis above asks for. */
-  contain-intrinsic-inline-size: 240px;
+  contain-intrinsic-inline-size: 256px;
   transition: background-color var(--slow) var(--ease), color var(--slow) var(--ease);
   animation: tab-in var(--slow) var(--ease-out);
 }
@@ -1895,7 +1895,8 @@ body[data-design="paper"]:not([data-layout="left"]) .tab {
   isolation: isolate;
   height: 32px;
   margin-bottom: -1px;          /* over the rule, so the open sheet can break it */
-  padding: 0 14px 0 16px;
+  padding: 0 10px 0 12px;       /* the room goes to the title */
+  gap: 6px;
   border-radius: 0;
   background: transparent;
 }
@@ -1946,12 +1947,12 @@ body[data-overlay="true"] * { -webkit-app-region: no-drag !important; }
  */
 .band-tabs { display: none; }
 
-body[data-band="true"][data-layout="left"][data-sidebar-open="false"] {
-  background: var(--strip);
-}
-body[data-band="true"][data-layout="left"][data-sidebar-open="false"] :is(.tabstrip, .bookmarks, .findbar) {
-  display: none;
-}
+/* The view is clear: the band paints itself, and whatever else the view
+   covers - the whole window while the tabs are out - shows the page. A body
+   painted here showed as a dark window for the frame between the view growing
+   and the chrome hearing why. */
+body[data-band="true"][data-layout="left"] { background: transparent; }
+body[data-band="true"][data-layout="left"] .bookmarks { display: none; }
 body[data-band="true"][data-layout="left"] .toolbar {
   opacity: 1;
   visibility: visible;
@@ -2006,11 +2007,9 @@ body[data-band="true"][data-layout="left"] .band-tabs:hover {
   stroke-width: 1.3;
 }
 body[data-band="true"][data-layout="left"] .omnibox {
+  --omni-side: 320px;       /* the window buttons, the meter and a pill beside them */
   order: 2;
-  flex: 1 1 auto;
-  max-width: 760px;
   height: 28px;
-  margin: 0 auto;
   border-width: 1px;
   border-radius: var(--radius-pill);
 }
@@ -2033,20 +2032,23 @@ body[data-band="true"][data-layout="left"] .omnibox .icon-btn { width: 24px; hei
 /*
  * Tucked away in a window and brought out: the band stays across the top and
  * the tabs are a panel under it, over the page's left edge, the page card's
- * height. The view is the whole window here (window.js, layout) and clear
+ * height. The view is the whole window then (window.js, layout) and clear
  * everywhere else, so the page shows through round the panel.
+ *
+ * Laid out the same way in and out, the panel only moved and hidden, so the
+ * slide is a transform and nothing else - no layout on its first frame - and a
+ * transition rather than an animation, so a pointer that comes back halfway
+ * through turns it round from where it is.
  */
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"] {
+body[data-band="true"][data-layout="left"] {
   display: grid;
   grid-template-columns: 8px 224px 1fr;
   grid-template-rows: 40px auto minmax(0, 1fr) 8px;
-  background: transparent;
 }
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"] .toolbar { grid-area: 1 / 1 / 2 / -1; background: var(--strip); }
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"] .bookmarks { display: none; }
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"] .findbar { grid-area: 2 / 2; margin: 8px 8px 0; }
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"] .tabstrip { grid-area: 3 / 2; padding-top: 8px; }
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"]::before {
+body[data-band="true"][data-layout="left"] .toolbar { grid-area: 1 / 1 / 2 / -1; background: var(--strip); }
+body[data-band="true"][data-layout="left"] .findbar { grid-area: 2 / 2; margin: 8px 8px 0; }
+body[data-band="true"][data-layout="left"] .tabstrip { grid-area: 3 / 2; padding-top: 8px; }
+body[data-band="true"][data-layout="left"]::before {
   content: '';
   position: fixed;
   top: 40px;
@@ -2062,19 +2064,64 @@ body[data-band="true"][data-layout="left"][data-sidebar-open="true"]::before {
   border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
 }
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"] :is(.tabstrip, .findbar),
-body[data-band="true"][data-layout="left"][data-sidebar-open="true"]::before {
-  animation: detached-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
+/* Away, or going: off to the left and not drawn. Accelerating out. */
+body[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
+body[data-band="true"][data-layout="left"]::before {
+  transform: translateX(calc(-100% - 20px));
+  opacity: 0;
+  visibility: hidden;
+  will-change: transform;
+  transition: transform 200ms cubic-bezier(0.4, 0, 1, 1), opacity 200ms ease-in,
+              visibility 0s linear 200ms;
 }
-body[data-band="true"][data-layout="left"].sliding-out :is(.tabstrip, .findbar),
-body[data-band="true"][data-layout="left"].sliding-out::before {
-  transform: translateX(calc(-100% - 12px));
-  opacity: 0.4;
-  transition: transform 200ms cubic-bezier(0.5, 0, 0.75, 0), opacity 200ms ease-in;
+/* Out: in place, decelerating in - quick to arrive, gentle to settle. */
+body[data-band="true"][data-layout="left"][data-sidebar-open="true"]:not(.sliding-out) :is(.tabstrip, .findbar),
+body[data-band="true"][data-layout="left"][data-sidebar-open="true"]:not(.sliding-out)::before {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms ease-out,
+              visibility 0s;
 }
 body.calm[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
-body.calm[data-band="true"][data-layout="left"]::before { animation: none; transition: none; }
+body.calm[data-band="true"][data-layout="left"]::before { transition: none !important; }
 @media (prefers-reduced-motion: reduce) {
   body[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
-  body[data-band="true"][data-layout="left"]::before { animation: none; transition: none; }
+  body[data-band="true"][data-layout="left"]::before { transition: none !important; }
+}
+
+/*
+ * The address bar is centred on the window, not on what is left between the
+ * buttons either side of it - those are never the same width, so a bar that
+ * filled the gap sat visibly off to one side. It keeps clear of both sides by
+ * `--omni-side`, and below a width where that would leave it too narrow it goes
+ * back to filling the gap.
+ */
+body:not([data-layout="left"]) .omnibox { --omni-side: 240px; }
+body.incognito .omnibox { --omni-side-extra: 110px; }
+@media (min-width: 900px) {
+  body:not([data-layout="left"]) .omnibox,
+  body[data-band="true"][data-layout="left"] .omnibox {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: min(760px, calc(100vw - 2 * (var(--omni-side) + var(--omni-side-extra, 0px))));
+    margin: 0;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@media (min-width: 900px) {
+  /* Everything after the back, forward and reload goes to the right end, now
+     the address bar no longer fills the row between them. */
+  body:not([data-layout="left"]) .toolbar .nav,
+  body[data-band="true"][data-layout="left"] .toolbar .nav { margin-right: auto; }
+}
+
+/* The Protected video button, in the address bar with the page's other actions. */
+.omnibox .onion-btn {
+  height: 22px;
+  margin-right: 4px;
+  padding: 0 9px;
+  font-size: 12px;
 }

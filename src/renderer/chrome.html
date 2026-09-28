@@ -86,6 +86,8 @@
       <button class="zoom-badge" id="zoom-badge" type="button" hidden title="Reset zoom (Ctrl+0)"></button>
       <!-- The page's own actions sit inside the address they act on, so the
            toolbar is the address and nothing else once the strip is tucked away. -->
+      <button class="onion-btn" id="drm" hidden
+        title="This page plays protected (DRM) video, which Debrowser cannot play. Click to open it in your other browser.">Protected video ↗</button>
       <button class="icon-btn star" id="star" title="Bookmark this page (Ctrl+D)" aria-label="Bookmark this page">
         <svg viewBox="0 0 16 16" aria-hidden="true" id="star-icon">
           <path d="M8 2.2l1.76 3.57 3.94.57-2.85 2.78.67 3.92L8 11.2l-3.52 1.85.67-3.92L2.3 6.34l3.94-.57z"/>
@@ -132,8 +134,6 @@
     -->
     <button class="onion-btn" id="slow-js" hidden
             title="This page has kept the processor busy for over 10 seconds. Private windows run scripts without the optimising compilers, where most attacks on the engine land. Full speed can be turned back on in Settings, for new private windows. Click to dismiss.">Slow page?</button>
-    <button class="onion-btn" id="drm" hidden
-      title="This page plays protected (DRM) video, which Debrowser cannot play. Click to open it in your other browser.">Protected video ↗</button>
     <button class="onion-btn" id="onion" hidden title="This site has an onion address – open it, end to end inside Tor">.onion</button>
 
     <button class="private-pill" id="private" hidden title="Private connection">

@@ -5,7 +5,10 @@
 - **Windows Hello opens when you unlock saved passwords.** The prompt was asked for by a hidden helper process on the browser's behalf, which Windows can refuse, so it failed with "did not confirm it was you" without ever appearing. Debrowser now asks for it itself, for its own window.
 - **Tucked away, the address bar stays put when the tabs come out.** The tabs open as a panel under the toolbar across the top instead of replacing it with a narrow column where the address was cut short.
 - **The tucked-away tab panel no longer flickers open and shut** with the pointer against the left edge of the screen, and its corners now match the page's, where the page's corner used to show round the panel's.
-- **The bookmark star, downloads and menu buttons sit inside the address bar,** at its right end.
+- **The bookmark star, downloads and menu buttons sit inside the address bar,** at its right end, and so does the Protected video button when it appears.
+- **The address bar is centred in the window,** rather than filling whatever space the buttons either side leave.
+- **The tab panel slides in and out smoothly every time.** It no longer lays itself out as it starts to move, a pointer that comes back halfway turns it round from where it is, and the window no longer flashes dark for a frame as it opens.
+- **Tabs across the top are a little wider,** and in the Paper design their titles get more of the tab.
 - **Tab titles use one font.** In the Paper design a sleeping tab's title was set in an italic serif, which looked like a font that had failed to load; it is now dimmed instead.
 - **The Protected video button no longer appears on pages where DRM works.** Players and test pages ask about every kind of DRM in turn; a "no" to PlayReady or FairPlay beside a Widevine that works raised the button. It now appears only when a page gets no DRM at all.
 - **Correction to 1.9.1:** Widevine still reports Debrowser as tampered on Windows and macOS, not unverified as the 1.9.1 notes said, so Netflix, Disney+ and Prime Video are likely to refuse there. Widevine playback itself works, as test streams show.
