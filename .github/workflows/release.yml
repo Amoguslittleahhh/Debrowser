@@ -279,20 +279,6 @@ jobs:
       # what an individual developer can actually get since the 2023 rule that
       # code-signing keys live on certified hardware - set the AZURE_* secrets
       # instead and the step below takes over. docs/PACKAGING.md has both.
-      # A one-off experiment, only on a hand-run named eme-probe: which DRM key
-      # systems castLabs' Electron offers here, with and without Chromium's
-      # hardware-decryption switch. See .github/scripts/eme-probe.js.
-      - name: EME probe
-        if: ${{ matrix.os != 'ubuntu-latest' && github.event.inputs.test == 'eme-probe' }}
-        shell: bash
-        run: |
-          E=node_modules/electron/dist/electron
-          if [ "$RUNNER_OS" = "Windows" ]; then E=node_modules/electron/dist/electron.exe; fi
-          if [ "$RUNNER_OS" = "macOS" ]; then E=node_modules/electron/dist/Electron.app/Contents/MacOS/Electron; fi
-          "$E" .github/scripts/eme-probe.js || true
-          "$E" .github/scripts/eme-probe.js --enable-features=HardwareSecureDecryption,HardwareSecureDecryptionFallback || true
-          exit 1
-
       # Logs in to castLabs EVS so the packaging hook can VMP-sign. Windows and
       # macOS only; Linux has no VMP.
       - name: Log in to castLabs EVS
