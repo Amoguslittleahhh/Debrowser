@@ -14,11 +14,15 @@
  * bundle, so it goes before code signing seals it; on Windows it is a separate
  * .sig file over the signed executable, so it goes after. Linux has no VMP.
  *
- * Without an account the build still succeeds, and still plays DRM wherever a
- * development signature is enough; it says so rather than failing a release.
+ * EVS signs only castLabs' binaries as shipped, and the fuses change them: it
+ * denies every build with any fuse flipped (measured, each alone). So in
+ * practice the fuses win, and the shipped development signatures - voided by
+ * the fuses - are removed, leaving Widevine UNVERIFIED rather than TAMPERED.
  */
 
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * Which hook signs on this platform. Windows goes after Authenticode - but
@@ -47,31 +51,67 @@ async function fusesFirst(context) {
   await packager.addElectronFuses(context, await packager.generateFuseConfig(fuses));
 }
 
-async function vmpSign(phase, context) {
-  const platform = context.electronPlatformName;
-  if (phaseFor(platform) !== phase) return;
-
-  if (process.env.DEBROWSER_VMP_SIGN !== '1') {
-    console.warn(`  • VMP signing skipped for ${platform}: no castLabs EVS account ` +
-      '(set the EVS_ACCOUNT_NAME and EVS_PASSWD secrets). Netflix, Disney+ and Prime ' +
-      'Video will refuse this build on this platform.');
-    return;
+/**
+ * The VMP signatures castLabs ships, which no longer match once the fuses are
+ * flipped.
+ *
+ * A signature that does not match reports the platform as TAMPERED, and
+ * licence servers treat that worse than no signature at all - UNVERIFIED,
+ * which is what every browser on Linux reports and many services accept. So
+ * a build that EVS has not signed afresh carries none.
+ */
+function staleSignatures(context) {
+  const { appOutDir, electronPlatformName: platform } = context;
+  if (platform === 'win32') {
+    return fs.readdirSync(appOutDir).filter((f) => f.toLowerCase().endsWith('.exe.sig'))
+      .map((f) => path.join(appOutDir, f));
   }
+  if (platform === 'darwin') {
+    return fs.readdirSync(appOutDir).filter((f) => f.endsWith('.app')).map((app) => path.join(appOutDir, app,
+      'Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/Electron Framework.sig'))
+      .filter((f) => fs.existsSync(f));
+  }
+  return [];
+}
 
-  if (phase === 'afterPack') await fusesFirst(context);
-
+/** EVS, if an account is set up. True when it signed. */
+function evsSign(context) {
+  if (process.env.DEBROWSER_VMP_SIGN !== '1') return false;
+  // Denied for every fused build, so not asked: castLabs asks that signing
+  // requests not be sent routinely for nothing.
+  if (context.packager.config.electronFuses) {
+    console.log(`  • VMP signing not requested for ${context.electronPlatformName}: EVS denies builds with fuses.`);
+    return false;
+  }
   const python = process.platform === 'win32' ? 'python' : 'python3';
   console.log(`  • VMP signing ${context.appOutDir}`);
   try {
     execFileSync(python, ['-m', 'castlabs_evs.vmp', 'sign-pkg', context.appOutDir], { stdio: 'inherit' });
+    return true;
   } catch {
     // EVS signs only castLabs' binaries as shipped, and flipping any one of
     // the fuses (electron-builder.yml) makes it deny the request - measured,
-    // each fuse alone. A refusal leaves the development signature, which is
-    // what an unsigned build has, rather than failing the release.
-    console.warn(`  • VMP signing refused for ${platform}: EVS denies a binary with fuses flipped. ` +
-      'This build keeps its fuses and the development signature.');
+    // each fuse alone. A refusal is not a failed release.
+    console.warn(`  • VMP signing refused for ${context.electronPlatformName}: EVS denies a binary with fuses flipped.`);
+    return false;
   }
+}
+
+async function vmpSign(phase, context) {
+  const platform = context.electronPlatformName;
+  if (platform !== 'win32' && platform !== 'darwin') return;
+
+  if (phase === 'afterPack') {
+    await fusesFirst(context);
+    if (phaseFor(platform) === 'afterPack' && evsSign(context)) return;
+    for (const file of staleSignatures(context)) {
+      fs.rmSync(file, { force: true });
+      console.log(`  • removed stale VMP signature ${path.basename(file)}: Widevine reports UNVERIFIED, not TAMPERED`);
+    }
+    return;
+  }
+  // Windows with Authenticode: signed after it, over the file as shipped.
+  if (phaseFor(platform) === 'afterSign') evsSign(context);
 }
 
 module.exports = { vmpSign };
