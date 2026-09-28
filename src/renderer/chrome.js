@@ -52,8 +52,7 @@ const el = {
   downloads: document.getElementById('downloads'),
   downloadsRing: document.getElementById('downloads-ring'),
   pin: document.getElementById('pin'),
-  bandTabs: document.getElementById('band-tabs'),
-  bandCount: document.getElementById('band-count'),
+  stripCount: document.getElementById('strip-count'),
   omnibox: document.getElementById('omnibox'),
   findbar: document.getElementById('findbar'),
   findInput: document.getElementById('find-input'),
@@ -154,15 +153,14 @@ function reportHover(over) {
   api.send('sidebar-hover', { over });
 }
 
-// In the bar across the top only the tabs button, and the edge it sits on,
-// bring the strip out: the rest of the bar is a toolbar, used all day. Once
+// In the bar across the top only the edge it starts at brings the strip out:
+// the rest of the bar is a toolbar, used all day. Once
 // out, the view is the whole window and the panel is its left column under
 // the band: anywhere else is the page showing through, and means "put it away".
 const BAND_HEIGHT = 40;      // window.js SIDEBAR_TOP_BAND
 const PANEL_RIGHT = 240;     // the panel's column, margins included
 function pointerWantsStrip(event) {
   if (document.body.dataset.band !== 'true') return true;
-  if (event.target.closest?.('#band-tabs')) return true;
   if (document.body.dataset.sidebarOpen === 'true') {
     return event.clientY >= BAND_HEIGHT && event.clientX < PANEL_RIGHT;
   }
@@ -1661,8 +1659,7 @@ api.onState((state) => {
   if (document.body.dataset.layout === 'left') releaseTabWidths();
   if (state.prefs) el.bookmarks.dataset.opensIn = state.prefs.bookmarkOpensIn || 'new-tab';
   renderTabs(state.tabs);
-  el.bandCount.textContent = String(state.tabs.length);
-  el.bandTabs.title = `${state.tabs.length} tab${state.tabs.length === 1 ? '' : 's'} – show them`;
+  el.stripCount.textContent = `${state.tabs.length} tab${state.tabs.length === 1 ? '' : 's'}`;
   // Bookmarks changed somewhere else - Settings, an import - so the star's
   // cached answer for this page is no longer one.
   if (state.bookmarksRevision !== starRevision) {

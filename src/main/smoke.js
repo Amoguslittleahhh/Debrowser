@@ -2121,10 +2121,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     })()`);
     // Asserted, not just printed: the edge is the strip's view, and nothing in
     // it that drags may reach past it.
-    const band = await shell.chromeView.webContents.executeJavaScript(`['band-tabs', 'back', 'url', 'star', 'menu']
+    const band = await shell.chromeView.webContents.executeJavaScript(`['back', 'url', 'star', 'menu']
       .filter((id) => { const r = document.getElementById(id).getBoundingClientRect(); return r.width > 0 && r.bottom <= ${SIDEBAR_TOP_BAND}; })`);
-    check('tucked away, the band carries tabs, back, address bar, star and menu',
-      band.length === 5, band.join(', '));
+    check('tucked away, the band carries back, address bar, star and menu',
+      band.length === 4, band.join(', '));
     check('collapsed down the side, nothing over the page drags the window',
       shell.chromeView.getBounds().height === SIDEBAR_TOP_BAND &&
       dragRegions.every(([, , h]) => h <= SIDEBAR_TOP_BAND),
@@ -2174,20 +2174,13 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         byGutter && slid === !shell.reducedMotion() && !shell.sidebarOpen,
         `opened from x=${pageLeft - 1}: ${byGutter}, sliding out: ${slid}, closed: ${!shell.sidebarOpen}`);
 
-      // The band is a toolbar: the pointer on it does not open the strip,
-      // except on the tabs button at its left.
+      // The band is a toolbar: the pointer on it does not open the strip.
       await reset();
       await at(600, 20);
       await sleep(300);
       const byBand = shell.sidebarOpen;
       await reset();
-      await inChrome(`document.getElementById('band-tabs').dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 30, clientY: 20 })); 1`);
-      await sleep(250);
-      const byButton = shell.sidebarOpen;
-      await leave();
-      await settle();
-      check('the band does not open the strip, its tabs button does',
-        !byBand && byButton, `band: ${byBand}, button: ${byButton}`);
+      check('the band does not open the strip', !byBand, `band: ${byBand}`);
 
       // A pointer brushing the edge on its way elsewhere does not open it.
       await reset();
