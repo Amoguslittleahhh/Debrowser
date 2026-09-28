@@ -1,12 +1,12 @@
 # Changelog
 
-## Unreleased
+## 1.9.1
 
 - **The tucked-away side panel opens every time you push the pointer to the left edge.** On Windows the outer pixels of the window belong to its resize border, which the page never hears, so a pointer stopped against the screen edge often opened nothing; the browser now watches the pointer itself.
 - **Tucked away, the page keeps a margin and rounded corners** instead of running to the window's edges, as in Zen's compact mode.
 - **The side panel slides in and out more smoothly** and has a border you can see against a dark page.
 - **Tucked away, a slim toolbar runs across the top** with a tabs button (showing how many are open), back, forward, reload, the address bar, the bookmark star, the memory meter and the menu. The page starts below it, so the window's minimise, maximise and close buttons no longer cover the page's top-right corner.
-- **DRM video plays: Netflix, Disney+, Prime Video, Spotify and the rest.** Debrowser now runs on castLabs' Electron (44.1.0, Chromium 152), the newest stable build with Google's Widevine. Widevine installs itself in the background on first start, and a page that asks before it is ready reloads by itself once it is. Private windows have no DRM and download nothing for it, so nothing leaves outside Tor.
+- **DRM video plays.** Debrowser now runs on castLabs' Electron (44.1.0, Chromium 152), the newest stable build with Google's Widevine, so Spotify and most other protected video play. Widevine installs itself in the background on first start, and a page that asks before it is ready reloads by itself once it is. Netflix, Disney+ and Prime Video may still refuse on Windows and macOS, since they also demand a signature Debrowser can only get by giving up its security fuses. Private windows have no DRM and download nothing for it, so nothing leaves outside Tor.
 - **More DRM sites play on Windows and macOS.** Debrowser's security fuses made Widevine report the browser as tampered, which streaming services refuse; it now reports itself as unverified instead, as every browser on Linux does, which many services accept.
 - **A way out for what still won't play.** If a page asks for a kind of DRM this build lacks, a **Protected video ↗** button appears in the toolbar and opens the page in your default browser, or in Edge or Safari if Debrowser is your default.
 - **Videos saved for offline on websites stay saved,** such as YouTube Premium downloads on youtube.com. Sites may now ask for their storage to be kept when the disk runs low, as Chrome allows; before, Debrowser refused, so saved videos were the first thing cleaned up. Not in private windows, which keep nothing on disk.
