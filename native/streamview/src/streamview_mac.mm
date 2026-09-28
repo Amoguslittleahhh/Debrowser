@@ -160,6 +160,18 @@ static napi_value sv_execute_script(napi_env env, napi_callback_info info) {
   return nullptr;
 }
 
+// openDevTools(id) - WebKit has no call to open its inspector; this makes the
+// view inspectable, so Safari's Develop menu lists it (macOS 13.3 and later).
+static napi_value sv_open_dev_tools(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+  auto it = g_views.find(sv_int(env, argv[0]));
+  if (it == g_views.end()) return nullptr;
+  if (@available(macOS 13.3, *)) it->second.web.inspectable = YES;
+  return nullptr;
+}
+
 static napi_value sv_destroy(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value argv[1];

@@ -108,13 +108,14 @@ static void* sv_buffer_pointer(napi_env env, napi_value v) {
   return *static_cast<void**>(data);
 }
 
-// Every platform exports the same six functions; Windows one more.
+// Every platform exports the same seven functions; Windows one more.
 static napi_value sv_create(napi_env env, napi_callback_info info);
 static napi_value sv_navigate(napi_env env, napi_callback_info info);
 static napi_value sv_set_bounds(napi_env env, napi_callback_info info);
 static napi_value sv_set_visible(napi_env env, napi_callback_info info);
 static napi_value sv_execute_script(napi_env env, napi_callback_info info);
 static napi_value sv_destroy(napi_env env, napi_callback_info info);
+static napi_value sv_open_dev_tools(napi_env env, napi_callback_info info);
 #ifdef _WIN32
 // Windows Hello, asked from this process for one of its own windows.
 static napi_value sv_verify_presence(napi_env env, napi_callback_info info);
@@ -129,6 +130,7 @@ static napi_value sv_init(napi_env env, napi_value exports) {
     {"setVisible", nullptr, sv_set_visible, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"executeScript", nullptr, sv_execute_script, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"destroy", nullptr, sv_destroy, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"openDevTools", nullptr, sv_open_dev_tools, nullptr, nullptr, nullptr, napi_default, nullptr},
 #ifdef _WIN32
     {"verifyPresence", nullptr, sv_verify_presence, nullptr, nullptr, nullptr, napi_default, nullptr},
 #endif

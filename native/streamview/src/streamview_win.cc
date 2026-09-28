@@ -254,6 +254,17 @@ static napi_value sv_execute_script(napi_env env, napi_callback_info info) {
   return nullptr;
 }
 
+// openDevTools(id) - the engine's own inspector, in a window of its own. For
+// --streamview-test: a player that fails says why in its console.
+static napi_value sv_open_dev_tools(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+  View* v = Find(sv_int(env, argv[0]));
+  if (v && v->webview) v->webview->OpenDevToolsWindow();
+  return nullptr;
+}
+
 // destroy(id)
 static napi_value sv_destroy(napi_env env, napi_callback_info info) {
   size_t argc = 1;

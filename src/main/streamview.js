@@ -118,6 +118,9 @@ class StreamView extends EventEmitter {
     if (native && this.id) native.setBounds(this.id, Math.round(x), Math.round(y), Math.round(width), Math.round(height));
   }
 
+  /** The engine's inspector (Windows), or inspectable from Safari (macOS). */
+  openDevTools() { if (native && this.id && native.openDevTools) native.openDevTools(this.id); }
+
   setVisible(visible) { if (native && this.id) native.setVisible(this.id, Boolean(visible)); }
 
   /** Runs a script in the page; resolves with its value parsed from JSON (promises are not awaited). */

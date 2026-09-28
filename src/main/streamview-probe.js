@@ -9,7 +9,7 @@
  *   --streamview-test[=url]    By hand: opens `url` (Bitmovin's DRM page by
  *                              default) in a streaming view and keeps the
  *                              window open, with the probe's answer in the
- *                              title bar.
+ *                              title bar and the engine's inspector open.
  *
  * Neither touches the profile or starts the browser proper.
  */
@@ -110,6 +110,10 @@ function run() {
     view.on('error', (where, code) => console.log(`streamview error: ${where} ${code}`));
     view.on('runtime', (version) => console.log(`streamview runtime: ${version}`));
     view.on('title', (title) => { if (!ci) win.setTitle(`${title} - streaming view test`); });
+    // By hand, the inspector comes up with the page: when a player will not
+    // play, its console says why - the licence refused, the output not
+    // protected, the decoder missing - and that is the thing to report.
+    if (!ci) view.once('ready', () => view.openDevTools());
 
     const timeout = setTimeout(() => {
       console.log(`STREAMVIEW-PROBE ${JSON.stringify({ error: 'the engine never became ready' })}`);
