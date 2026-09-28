@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Offline</title>
+<!-- A site that works offline, as YouTube's downloads page does: a service
+     worker keeps the page and a "download" in Cache Storage, and a record of it
+     in IndexedDB. See the offline checks in src/main/smoke.js. -->
+<p id="mark">offline page</p>
+<script>
+  window.offlineReady = (async () => {
+    await navigator.serviceWorker.register('offline-sw.js');
+    await navigator.serviceWorker.ready;
+    const db = await new Promise((resolve, reject) => {
+      const open = indexedDB.open('downloads', 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('videos');
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    await new Promise((resolve) => {
+      const tx = db.transaction('videos', 'readwrite');
+      tx.objectStore('videos').put({ title: 'saved video', bytes: 4096 }, 'v1');
+      tx.oncomplete = resolve;
+    });
+    return true;
+  })();
+  window.readSaved = async () => {
+    const db = await new Promise((resolve) => { const o = indexedDB.open('downloads', 1); o.onsuccess = () => resolve(o.result); });
+    const record = await new Promise((resolve) => {
+      const get = db.transaction('videos').objectStore('videos').get('v1');
+      get.onsuccess = () => resolve(get.result);
+    });
+    const video = await fetch('offline-video.bin').then((r) => r.ok ? r.arrayBuffer() : null, () => null);
+    return { record: record && record.title, videoBytes: video ? video.byteLength : 0 };
+  };
+</script>

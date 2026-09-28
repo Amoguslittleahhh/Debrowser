@@ -154,6 +154,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `playready ${playready}, flagged ${flagged}, native-looking ${native}`);
     await home.wc.loadURL(pageUrl('idle.html')).catch(() => {});
     check('a new page clears the protected-video notice', !home.drmNeeded);
+    // Offline, as YouTube Premium's downloads are watched on the web: the site
+    // keeps the video in its own storage, a service worker serves it with the
+    // network gone, and it asks for that storage to be kept (persist()).
+    {
+      const page = new URL(pageUrl('offline.html'));
+      page.hostname = '127.0.0.1';
+      await home.wc.loadURL(page.href).catch(() => {});
+      const ready = await home.wc.executeJavaScript('window.offlineReady.then(() => true, (e) => String(e))');
+      const persisted = await home.wc.executeJavaScript('navigator.storage.persist()').catch((e) => String(e));
+      const ses = home.wc.session;
+      ses.enableNetworkEmulation({ offline: true });
+      await home.wc.loadURL(page.href).catch(() => {});
+      const offline = await home.wc.executeJavaScript(
+        `(async () => ({ mark: document.getElementById('mark')?.textContent, ...(await window.readSaved()) }))()`)
+        .catch((e) => ({ error: String(e) }));
+      ses.disableNetworkEmulation();
+      check('with the network gone, a site\'s saved video plays from its own storage',
+        ready === true && offline.mark === 'offline page' && offline.record === 'saved video' &&
+        offline.videoBytes === 4096 && !home.failed,
+        `ready ${ready}, offline ${JSON.stringify(offline)}`);
+      check('a site may ask for its downloads to be kept', persisted === true, `persist() -> ${persisted}`);
+    }
     const ua = await home.wc.executeJavaScript('navigator.userAgent');
     check('the user agent says Chrome, without Electron or app tokens', /Chrome\/\d/.test(ua) && !/Electron|debrowser/i.test(ua), ua);
   }

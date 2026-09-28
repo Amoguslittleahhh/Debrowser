@@ -144,7 +144,13 @@ class TabManager {
       const allowed = new Set(['fullscreen', 'clipboard-sanitized-write']);
       // Protected video, in the ordinary browser only - the same line as the
       // four asked about above, since a private window has no `askPermission`.
-      const ok = allowed.has(permission) || (permission === 'mediaKeySystem' && Boolean(this.askPermission));
+      // And `persistent-storage`: a site asking that its data - a YouTube
+      // Premium download, say - be spared when the disk runs low. Chrome grants
+      // it without a prompt; refused, the videos saved for offline were the
+      // first thing cleared. Private windows keep nothing on disk to spare.
+      const ordinary = Boolean(this.askPermission);
+      const ok = allowed.has(permission) ||
+        (ordinary && (permission === 'mediaKeySystem' || permission === 'persistent-storage'));
       if (!ok) {
         this.deniedPermissions.push(permission);
         if (this.deniedPermissions.length > 20) this.deniedPermissions.shift();
