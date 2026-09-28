@@ -2218,6 +2218,30 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       check('a menu opened from the strip keeps it out until the menu closes',
         heldMenu && !shell.sidebarOpen, `held: ${heldMenu}, then closed: ${!shell.sidebarOpen}`);
 
+      // Out, the view is the whole window, clear but for the band and the
+      // panel - so the page beneath must still get the wheel. It is handed on.
+      {
+        await reset();
+        await at(pageLeft - 1, 300);
+        await sleep(250);
+        const wc = tabs.activeTab().wc;
+        await wc.executeJavaScript(`document.documentElement.style.overflow = 'auto';
+          document.body.style.minHeight = '5000px'; scrollTo(0, 0); 1`);
+        const { width: w } = shell.window.getContentBounds();
+        const outBefore = `${shell.sidebarOpen}/${await inChrome('document.body.dataset.sidebarOpen')}`;
+        await inChrome(`document.dispatchEvent(new WheelEvent('wheel', { clientX: ${Math.round(w / 2)}, clientY: 400,
+          deltaY: 400, bubbles: true, cancelable: true })); 1`);
+        // A wheel scroll is animated, and lands a frame or two after it.
+        let scrolled = 0;
+        for (let i = 0; i < 20 && !scrolled; i++) {
+          await sleep(150);
+          scrolled = await wc.executeJavaScript('scrollY');
+        }
+        await wc.executeJavaScript(`document.body.style.minHeight = ''; document.documentElement.style.overflow = ''; scrollTo(0, 0); 1`);
+        check('tucked away with the tabs out, the wheel over the page still scrolls the page',
+          scrolled > 0, `scrollY ${scrolled}, out before the wheel: ${outBefore}`);
+      }
+
       // A tap on the page - focus there with the cursor off the strip - puts
       // it away, with no mouse-leave to say so.
       await reset();

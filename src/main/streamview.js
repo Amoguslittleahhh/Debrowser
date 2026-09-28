@@ -18,6 +18,7 @@
  */
 
 const { EventEmitter } = require('events');
+const { screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -39,8 +40,8 @@ function load() {
   for (const file of candidates) {
     if (!fs.existsSync(file)) continue;
     try {
-      native = require(file);
-      native.setEventHandler((event) => {
+      const mod = require(file);
+      mod.setEventHandler((event) => {
         if (event.type === 'presence') {
           const resolve = presenceAsks.get(event.a);
           if (resolve) { presenceAsks.delete(event.a); resolve(event.b); }
@@ -49,6 +50,9 @@ function load() {
         const view = views.get(event.id);
         if (view) view.receive(event);
       });
+      // Only now: a module whose events cannot arrive would leave every
+      // answer - the Windows Hello one included - waiting for ever.
+      native = mod;
       return native;
     } catch (err) {
       console.error(`[debrowser] streamview: could not load ${file}: ${err.message}`);
@@ -67,17 +71,24 @@ let nextToken = 1;
  * @returns {Promise<number|null>} the UserConsentVerificationResult - 0 is
  *   verified - or null where this cannot ask: no module, or the call failed
  */
-function verifyPresence(window, message) {
+function verifyPresence(window, message, timeoutMs = 60_000) {
   const mod = load();
   if (!mod || typeof mod.verifyPresence !== 'function' || !window || window.isDestroyed()) {
     return Promise.resolve(null);
   }
   return new Promise((resolve) => {
     const token = String(nextToken++);
-    presenceAsks.set(token, (answer) => resolve(/^\d+$/.test(answer) ? Number(answer) : null));
+    // No answer in time is a "no" (a number other than 0), not "could not
+    // ask": the prompt may well be up, and falling back would stack a second.
+    const timer = setTimeout(() => { presenceAsks.delete(token); resolve(-1); }, timeoutMs);
+    presenceAsks.set(token, (answer) => {
+      clearTimeout(timer);
+      resolve(/^\d+$/.test(answer) ? Number(answer) : null);
+    });
     try {
       mod.verifyPresence(window.getNativeWindowHandle(), String(message), token);
     } catch {
+      clearTimeout(timer);
       presenceAsks.delete(token);
       resolve(null);
     }
@@ -95,8 +106,9 @@ class StreamView extends EventEmitter {
     if (!mod) throw new Error('streaming views are not available on this system');
     this.pending = new Map();
     this.ready = false;
+    this.window = window;
     this.id = mod.create(window.getNativeWindowHandle(), {
-      url, userDataDir, ...bounds,
+      url, userDataDir, ...this.physical(bounds),
       userAgent: process.platform === 'darwin' ? SAFARI_UA : ''
     });
     views.set(this.id, this);
@@ -114,8 +126,23 @@ class StreamView extends EventEmitter {
 
   navigate(url) { if (native && this.id) native.navigate(this.id, url); }
 
-  setBounds({ x, y, width, height }) {
-    if (native && this.id) native.setBounds(this.id, Math.round(x), Math.round(y), Math.round(width), Math.round(height));
+  /**
+   * Bounds as the engine takes them. Electron speaks in scaled units (DIPs);
+   * WebView2 places itself in the parent window's physical pixels, so at 150%
+   * a view given DIPs covered two-thirds of what it was meant to. WebKit on
+   * macOS works in points, as Electron does.
+   */
+  physical({ x, y, width, height }) {
+    const scale = process.platform === 'win32' && this.window && !this.window.isDestroyed()
+      ? screen.getDisplayMatching(this.window.getBounds()).scaleFactor : 1;
+    return { x: Math.round(x * scale), y: Math.round(y * scale),
+      width: Math.round(width * scale), height: Math.round(height * scale) };
+  }
+
+  setBounds(bounds) {
+    if (!native || !this.id) return;
+    const { x, y, width, height } = this.physical(bounds);
+    native.setBounds(this.id, x, y, width, height);
   }
 
   /** The engine's inspector (Windows), or inspectable from Safari (macOS). */

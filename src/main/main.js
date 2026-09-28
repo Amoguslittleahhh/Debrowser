@@ -2356,6 +2356,54 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'sidebar-hover':
         shell.setSidebarOpen(Boolean(payload?.over));
         break;
+
+      // Tucked away with the tabs out, the chrome's view covers the whole
+      // window - clear round the band and the panel - so the pointer over the
+      // page lands on the chrome. It hands it on: a click, a drag, the wheel
+      // and hover reach the page as if nothing lay over it, including while
+      // the find bar, a menu or typing holds the panel out.
+      case 'page-input': {
+        const tab = tabs && tabs.activeTab();
+        const wc = tab && tab.wc;
+        if (!wc || wc.isDestroyed()) break;
+        const TYPES = new Set(['mouseDown', 'mouseUp', 'mouseMove', 'mouseWheel']);
+        if (!TYPES.has(payload?.type)) break;
+        const page = shell.contentBounds();
+        const x = Math.round(Number(payload.x) || 0) - page.x;
+        const y = Math.round(Number(payload.y) || 0) - page.y;
+        if (x < 0 || y < 0 || x >= page.width || y >= page.height) break;
+        const modifiers = Array.isArray(payload.modifiers)
+          ? payload.modifiers.filter((m) => ['shift', 'control', 'alt', 'meta'].includes(m)) : [];
+        const event = { type: payload.type, x, y, modifiers };
+        if (payload.type === 'mouseWheel') {
+          // DOM deltas point where the content goes; Chromium's input events
+          // the other way.
+          event.deltaX = -(Number(payload.deltaX) || 0);
+          event.deltaY = -(Number(payload.deltaY) || 0);
+          event.canScroll = true;
+        } else if (payload.type !== 'mouseMove') {
+          event.button = ['left', 'middle', 'right'].includes(payload.button) ? payload.button : 'left';
+          event.clickCount = Math.max(1, Math.min(3, Number(payload.clickCount) || 1));
+        }
+        if (payload.type === 'mouseDown') wc.focus();
+        // Chromium scrolls what is under the pointer as it last saw it, and a
+        // wheel sent hard on the heels of the move that put it there was, some
+        // of the time, scrolled nowhere. Moved first; the wheel a frame later,
+        // unless the page already had the pointer there.
+        if (payload.type === 'mouseWheel') {
+          const last = shell.pageInputAt;
+          if (last && last.wc === wc && last.x === x && last.y === y) {
+            wc.sendInputEvent(event);
+          } else {
+            wc.sendInputEvent({ type: 'mouseMove', x, y, modifiers });
+            setTimeout(() => { if (!wc.isDestroyed()) wc.sendInputEvent(event); }, 16);
+          }
+        } else {
+          wc.sendInputEvent(event);
+        }
+        shell.pageInputAt = { wc, x, y };
+        break;
+      }
       case 'sidebar-typing':
         shell.sidebarTyping = Boolean(payload?.typing);
         shell.releaseSidebar();

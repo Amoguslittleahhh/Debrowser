@@ -167,6 +167,41 @@ function pointerWantsStrip(event) {
   return event.clientX < 10;
 }
 
+// Tucked away and out, the view is the whole window and most of it is clear,
+// with the page beneath. Whatever the pointer does there is the page's: it is
+// handed on (main.js, page-input) rather than swallowed by a clear layer - the
+// find bar or a menu holds the panel out, and the page stayed unclickable and
+// unscrollable for as long as they did.
+function overPage(event) {
+  if (document.body.dataset.band !== 'true' || document.body.dataset.sidebarOpen !== 'true') return false;
+  return event.clientY >= BAND_HEIGHT && event.clientX >= PANEL_RIGHT;
+}
+const BUTTONS = ['left', 'middle', 'right'];
+function modifiersOf(event) {
+  return ['shift', 'control', 'alt', 'meta'].filter((m) => event[`${m === 'control' ? 'ctrl' : m}Key`]);
+}
+function forward(type, event, extra = {}) {
+  api.send('page-input', { type, x: event.clientX, y: event.clientY, modifiers: modifiersOf(event), ...extra });
+}
+document.addEventListener('mousedown', (event) => {
+  if (!overPage(event)) return;
+  event.preventDefault();
+  forward('mouseDown', event, { button: BUTTONS[event.button] || 'left', clickCount: event.detail });
+}, true);
+document.addEventListener('mouseup', (event) => {
+  if (!overPage(event)) return;
+  forward('mouseUp', event, { button: BUTTONS[event.button] || 'left', clickCount: event.detail });
+}, true);
+document.addEventListener('mousemove', (event) => { if (overPage(event)) forward('mouseMove', event); }, true);
+document.addEventListener('wheel', (event) => {
+  if (!overPage(event)) return;
+  event.preventDefault();
+  // Lines and pages to pixels, as Chromium counts them.
+  const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? window.innerHeight : 1;
+  forward('mouseWheel', event, { deltaX: event.deltaX * unit, deltaY: event.deltaY * unit });
+}, { capture: true, passive: false });
+document.addEventListener('contextmenu', (event) => { if (overPage(event)) event.preventDefault(); }, true);
+
 document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event)));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside

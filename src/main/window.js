@@ -88,7 +88,7 @@ const CONTENT_RADIUS = 10;
  * pointer rather than lagging behind it.
  */
 const SIDEBAR_CLOSE_MS = 220;
-const SIDEBAR_OPEN_MS = 90;
+const SIDEBAR_OPEN_MS = 60;    // enough to tell a brush past the edge from a visit, short enough not to feel
 
 /** How long a detached strip takes to slide back out; see setSidebarOpen. */
 const DETACH_SLIDE_MS = 200;   // chrome.css, .sliding-out
@@ -1759,7 +1759,7 @@ class BrowserShell {
           this.sidebarPointerOver = false;
         }
       }
-    }, 50);
+    }, 25);   // two frames: the edge answers as fast as the pointer's own hover would
     this.edgeTimer.unref?.();
   }
 
