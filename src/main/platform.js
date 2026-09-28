@@ -894,6 +894,16 @@ function chromiumSwitches(cfg, incognito = null) {
     // running as root need it on the argv; see `runningRootUnsandboxed`.
   }
 
+  // Windows' own PlayReady, hardware-secure (SL3000 - the level 4K is sold
+  // at), through Media Foundation. The code is in the Chromium this ships
+  // (castLabs' build of it); this is chrome://flags#enable-hardware-secure-
+  // decryption, which Chrome 140+ gates it behind. The trust is the GPU's and
+  // Windows', not the browser binary's - so, unlike Widevine, it does not care
+  // that the fuses leave the binary unsigned. On a machine without the
+  // hardware the key system is simply not offered. Never in private windows:
+  // Media Foundation keeps licence state on disk, outside Tor.
+  if (isWindows && !incognito) features.push('HardwareSecureDecryption');
+
   if (features.length) switches.push(['enable-features', features.join(',')]);
   if (disabledFeatures.length) switches.push(['disable-features', disabledFeatures.join(',')]);
 
