@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Correction to 1.9.3: hardware PlayReady does not appear in Debrowser's own tabs.** The switch 1.9.3 turned on only takes effect where Chrome's own code registers PlayReady, and Debrowser, built on Electron, does not have that code. It is removed again; it had no other effect.
+
 ## 1.9.3
 
 - **Hardware PlayReady on Windows, experimental.** Debrowser turns on Chromium's hardware-secure decryption, which offers sites Windows' own PlayReady at SL3000, the level 4K streams are sold at, on PCs whose graphics support it. It does not depend on the signature Widevine asks for. Not in private windows.
