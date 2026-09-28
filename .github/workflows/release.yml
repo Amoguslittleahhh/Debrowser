@@ -298,6 +298,13 @@ jobs:
           echo "$BIN" >> "$GITHUB_PATH"
           echo "DEBROWSER_VMP_SIGN=1" >> "$GITHUB_ENV"
 
+      # A one-off experiment, only on a hand-run named vmp-probe: which fuses
+      # castLabs EVS will still sign. See .github/scripts/vmp-probe.js.
+      - name: VMP probe
+        if: ${{ matrix.os == 'windows-latest' && github.event.inputs.test == 'vmp-probe' && env.VMP_SIGNING == 'true' }}
+        shell: bash
+        run: node .github/scripts/vmp-probe.js && exit 1
+
       - name: Package
         env:
           # WIN_CSC_LINK, not CSC_LINK, and the distinction is load-bearing.
