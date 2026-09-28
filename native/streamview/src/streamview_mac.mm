@@ -87,23 +87,25 @@ static napi_value sv_create(napi_env env, napi_callback_info info) {
   const std::string ua = sv_prop_string(env, argv[1], "userAgent");
   if (!ua.empty()) web.customUserAgent = Str(ua);
 
-  const int id = g_next_id++;
+  // Not `id`: that is Objective-C's object type, and a variable of the name
+  // shadows it inside every block below.
+  const int viewId = g_next_id++;
   SVDelegate* delegate = [[SVDelegate alloc] init];
-  delegate.viewId = id;
+  delegate.viewId = viewId;
   web.navigationDelegate = delegate;
   [parent addSubview:web positioned:NSWindowAbove relativeTo:nil];
-  g_views[id] = View{parent, web, delegate};
+  g_views[viewId] = View{parent, web, delegate};
 
   const std::string url = sv_prop_string(env, argv[1], "url");
   if (!url.empty()) [web loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:Str(url)]]];
 
   // WebKit is ready as soon as it exists; the event keeps the two platforms alike.
   NSOperatingSystemVersion os = [[NSProcessInfo processInfo] operatingSystemVersion];
-  sv_emit(id, "runtime", std::to_string(os.majorVersion) + "." + std::to_string(os.minorVersion));
-  sv_emit(id, "ready", web.customUserAgent.UTF8String ?: "");
+  sv_emit(viewId, "runtime", std::to_string(os.majorVersion) + "." + std::to_string(os.minorVersion));
+  sv_emit(viewId, "ready", web.customUserAgent.UTF8String ?: "");
 
   napi_value out;
-  napi_create_int32(env, id, &out);
+  napi_create_int32(env, viewId, &out);
   return out;
 }
 
@@ -144,16 +146,16 @@ static napi_value sv_execute_script(napi_env env, napi_callback_info info) {
   size_t argc = 3;
   napi_value argv[3];
   napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
-  const int id = sv_int(env, argv[0]);
+  const int viewId = sv_int(env, argv[0]);
   const std::string token = sv_string(env, argv[1]);
-  auto it = g_views.find(id);
+  auto it = g_views.find(viewId);
   if (it == g_views.end()) {
-    sv_emit(id, "script", token, "null");
+    sv_emit(viewId, "script", token, "null");
     return nullptr;
   }
   [it->second.web evaluateJavaScript:Str(sv_string(env, argv[2]))
                    completionHandler:^(id result, NSError* error) {
-                     sv_emit(id, "script", token, error ? "null" : Json(result));
+                     sv_emit(viewId, "script", token, error ? "null" : Json(result));
                    }];
   return nullptr;
 }

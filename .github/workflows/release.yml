@@ -167,6 +167,8 @@ jobs:
           E=node_modules/electron/dist/electron.exe
           if [ "$RUNNER_OS" = "macOS" ]; then E=node_modules/electron/dist/Electron.app/Contents/MacOS/Electron; fi
           "$E" . --streamview-probe 2>&1 | tail -30
+          # Nothing of WebView2's may outlive the probe into the tests after it.
+          if [ "$RUNNER_OS" = "Windows" ]; then taskkill //F //IM msedgewebview2.exe >/dev/null 2>&1 || true; fi
 
       - name: Build the measurement helper
         if: matrix.os != 'ubuntu-latest'

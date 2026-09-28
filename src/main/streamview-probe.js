@@ -129,7 +129,9 @@ function run() {
       if (ci) {
         view.destroy();
         if (server) server.close();
-        app.exit(0);
+        // Long enough for the engine's own processes to wind down: left
+        // running, they slowed the CI steps after this one.
+        setTimeout(() => app.exit(0), 3000);
       } else {
         win.setTitle(`DRM here: ${summarise(result)} - streaming view test`);
       }
