@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.2
 
 - **Windows Hello opens when you unlock saved passwords.** The prompt was asked for by a hidden helper process on the browser's behalf, which Windows can refuse, so it failed with "did not confirm it was you" without ever appearing. Debrowser now asks for it itself, for its own window.
 - **Tucked away, the address bar stays put when the tabs come out.** The tabs open as a panel under the toolbar across the top instead of replacing it with a narrow column where the address was cut short.
