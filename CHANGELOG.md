@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.3
 
 - **Hardware PlayReady on Windows, experimental.** Debrowser turns on Chromium's hardware-secure decryption, which offers sites Windows' own PlayReady at SL3000, the level 4K streams are sold at, on PCs whose graphics support it. It does not depend on the signature Widevine asks for. Not in private windows.
 - **The tucked-away tab panel is a card of its own,** as in Zen: clear of the window's edges and the top bar, a shade lighter than the page, with rounded corners and a shadow, instead of a dark block fused with the window's edge.
