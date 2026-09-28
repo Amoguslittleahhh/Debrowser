@@ -288,11 +288,14 @@ jobs:
           EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
           EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
         run: |
-          # The same interpreter the hook runs: `python` on Windows, where
-          # `python3` is not reliably on PATH.
-          if [ "$RUNNER_OS" = "Windows" ]; then PY=python; else PY=python3; fi
-          $PY -m pip install --upgrade castlabs-evs
-          $PY -m castlabs_evs.account reauth -A "$EVS_ACCOUNT_NAME" -P "$EVS_PASSWD"
+          # In a virtual environment of its own: the macOS runner's Homebrew
+          # Python refuses a system-wide pip install (PEP 668). Its bin goes on
+          # PATH so the packaging hook's `python`/`python3` is this one.
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=python; BIN="$RUNNER_TEMP/evs/Scripts"; else PY=python3; BIN="$RUNNER_TEMP/evs/bin"; fi
+          $PY -m venv "$RUNNER_TEMP/evs"
+          "$BIN/python" -m pip install --upgrade castlabs-evs
+          "$BIN/python" -m castlabs_evs.account reauth -A "$EVS_ACCOUNT_NAME" -P "$EVS_PASSWD"
+          echo "$BIN" >> "$GITHUB_PATH"
           echo "DEBROWSER_VMP_SIGN=1" >> "$GITHUB_ENV"
 
       - name: Package

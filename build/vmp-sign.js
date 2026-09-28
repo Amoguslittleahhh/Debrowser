@@ -32,7 +32,22 @@ function phaseFor(platform) {
   return authenticode ? 'afterSign' : 'afterPack';
 }
 
-function vmpSign(phase, context) {
+/**
+ * The fuses, written now rather than after this hook.
+ *
+ * electron-builder flips them after `afterPack`, which rewrites the very
+ * binary VMP just signed (the executable on Windows, the framework on macOS)
+ * and voids the signature. Flipped here first, its own pass later writes back
+ * identical bytes, and the signature holds.
+ */
+async function fusesFirst(context) {
+  const { packager } = context;
+  const fuses = packager.config.electronFuses;
+  if (!fuses) return;
+  await packager.addElectronFuses(context, await packager.generateFuseConfig(fuses));
+}
+
+async function vmpSign(phase, context) {
   const platform = context.electronPlatformName;
   if (phaseFor(platform) !== phase) return;
 
@@ -42,6 +57,8 @@ function vmpSign(phase, context) {
       'Video will refuse this build on this platform.');
     return;
   }
+
+  if (phase === 'afterPack') await fusesFirst(context);
 
   const python = process.platform === 'win32' ? 'python' : 'python3';
   console.log(`  • VMP signing ${context.appOutDir}`);
