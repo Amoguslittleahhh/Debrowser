@@ -158,7 +158,7 @@ function reportHover(over) {
 // out, the view is the whole window and the panel is its left column under
 // the band: anywhere else is the page showing through, and means "put it away".
 const BAND_HEIGHT = 40;      // window.js SIDEBAR_TOP_BAND
-const PANEL_RIGHT = 240;     // the panel's column, margins included
+const PANEL_RIGHT = 256;     // the panel's column, margins included
 function pointerWantsStrip(event) {
   if (document.body.dataset.band !== 'true') return true;
   if (document.body.dataset.sidebarOpen === 'true') {

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The tucked-away tab panel is a card of its own,** as in Zen: clear of the window's edges and the top bar, a shade lighter than the page, with rounded corners and a shadow, instead of a dark block fused with the window's edge.
+- **The menu button is back at the far right,** after the memory meter.
+- **The memory meter stays in the top bar** when the tab panel closes, instead of disappearing with it.
+
 ## 1.9.2
 
 - **Windows Hello opens when you unlock saved passwords.** The prompt was asked for by a hidden helper process on the browser's behalf, which Windows can refuse, so it failed with "did not confirm it was you" without ever appearing. Debrowser now asks for it itself, for its own window.

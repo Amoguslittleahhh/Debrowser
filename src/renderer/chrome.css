@@ -631,7 +631,9 @@ body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: non
   border: none;
   border-radius: 50%;
 }
-.omnibox .icon-btn:last-child { margin-right: -8px; }
+.omnibox .icon-btn:last-of-type { margin-right: -8px; }
+/* The menu is the last thing in the toolbar, after the meter. */
+.toolbar > #menu { order: 99; flex: none; }
 .omnibox:has(#url:focus) {
   border-color: var(--accent);
   background: var(--bg);
@@ -1738,7 +1740,9 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[dat
   padding: 0;
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"] .meter-bar { flex: none; width: 56px; }
-body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"][data-sidebar-open="false"]:not([data-pinned="true"]) .meter { visibility: hidden; }
+/* Not in the band across the top, which is a toolbar the meter belongs on,
+   out or in: hiding it there made the task manager blink with the panel. */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"][data-sidebar-open="false"]:not([data-pinned="true"]):not([data-band="true"]) .meter { visibility: hidden; }
 
 /* Ledger: chips on a sage column, the open tab raised like a card. */
 body[data-design="ledger"][data-layout="left"] .toolbar { padding: calc(env(titlebar-area-y, 0px) + 12px) 10px 10px; row-gap: 12px; }
@@ -2024,27 +2028,29 @@ body[data-band="true"][data-layout="left"] .omnibox .icon-btn { width: 24px; hei
  */
 body[data-band="true"][data-layout="left"] {
   display: grid;
-  grid-template-columns: 8px 224px 1fr;
-  grid-template-rows: 40px auto minmax(0, 1fr) 8px;
+  grid-template-columns: 16px 224px 1fr;
+  grid-template-rows: 48px auto minmax(0, 1fr) 16px;
 }
-body[data-band="true"][data-layout="left"] .toolbar { grid-area: 1 / 1 / 2 / -1; background: var(--strip); }
+body[data-band="true"][data-layout="left"] .toolbar { grid-area: 1 / 1 / 2 / -1; align-self: start; background: var(--strip); }
 body[data-band="true"][data-layout="left"] .findbar { grid-area: 2 / 2; margin: 8px 8px 0; }
-body[data-band="true"][data-layout="left"] .tabstrip { grid-area: 3 / 2; padding-top: 8px; }
+body[data-band="true"][data-layout="left"] .tabstrip { grid-area: 3 / 2; padding-top: 10px; }
 body[data-band="true"][data-layout="left"]::before {
   content: '';
   position: fixed;
-  top: 40px;
-  left: 8px;
-  bottom: 8px;
+  top: 48px;
+  left: 16px;
+  bottom: 16px;
   width: 224px;
   z-index: -1;
-  /* The page card's radius (window.js CONTENT_RADIUS), not the design's: the
-     panel lies over the card's left corners, and any other curve left the
-     card's corner showing round the panel's, or the panel's round the card's. */
-  border-radius: 10px;
-  background: var(--strip);
-  border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+  /* A card of its own, as Zen's is: clear of the window's edges and of the
+     band, a shade lighter than the page it lies on, with a rim of light and a
+     shadow under it. The strip's colour, flush with the band and the window's
+     edge, read as one dark block fused with the bezel. */
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 5%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 7%, transparent),
+              0 12px 32px rgb(0 0 0 / 0.38), 0 2px 6px rgb(0 0 0 / 0.22);
 }
 /* Away, or going: off to the left and not drawn. Accelerating out. */
 body[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
@@ -2107,3 +2113,6 @@ body.incognito .omnibox { --omni-side-extra: 110px; }
   padding: 0 9px;
   font-size: 12px;
 }
+
+/* Pinned down the side, the menu stays on the first row, at its end. */
+body[data-layout="left"]:not([data-band="true"]) .toolbar > #menu { order: 2; margin-left: auto; }

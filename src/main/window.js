@@ -513,7 +513,7 @@ class BrowserShell {
         // Tucked away in a window the view is the whole window while the tabs
         // are out, and the strip is only its left column under the band.
         const b = this.band()
-          ? { x: 0, y: SIDEBAR_TOP_BAND, width: SIDEBAR_WIDTH, height: win.height }
+          ? { x: 0, y: SIDEBAR_TOP_BAND, width: SIDEBAR_WIDTH + 16, height: win.height }
           : this.chromeView.getBounds();
         const x = at.x - win.x;
         const y = at.y - win.y;
