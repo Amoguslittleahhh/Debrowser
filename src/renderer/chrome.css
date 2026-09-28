@@ -14,7 +14,11 @@
 
 html, body {
   height: 100%;
-  overflow: hidden;
+  /* Clipped, not hidden: `hidden` is still a scroll container, and focusing a
+     field scrolled it - which slid the whole tucked-away band up by the
+     difference between its layout and its 40px view, out of line with the
+     window buttons beside it. Nothing here is ever meant to scroll. */
+  overflow: clip;
 }
 
 /*
@@ -2029,6 +2033,12 @@ body[data-band="true"][data-layout="left"] .omnibox .icon-btn { width: 24px; hei
 body[data-band="true"][data-layout="left"] {
   display: grid;
   grid-template-columns: 16px 224px 1fr;
+  /* The band, then the panel's rows - which only have room while it is out.
+     Away, the view is the band's 40px and the panel's rows fold to nothing,
+     so the layout is exactly the view and there is nothing to be off by. */
+  grid-template-rows: 40px 0 0 0;
+}
+body[data-band="true"][data-layout="left"][data-sidebar-open="true"] {
   grid-template-rows: 48px auto minmax(0, 1fr) 16px;
 }
 body[data-band="true"][data-layout="left"] .toolbar { grid-area: 1 / 1 / 2 / -1; align-self: start; background: var(--strip); }

@@ -4,6 +4,7 @@
 
 - **The tucked-away tab panel is a card of its own,** as in Zen: clear of the window's edges and the top bar, a shade lighter than the page, with rounded corners and a shadow, instead of a dark block fused with the window's edge.
 - **The menu button is back at the far right,** after the memory meter.
+- **The tucked-away top bar stays lined up with the window buttons.** Its contents could slide up by a few pixels, out of line with minimise, maximise and close, after a field in it took focus.
 - **The memory meter stays in the top bar** when the tab panel closes, instead of disappearing with it.
 
 ## 1.9.2
