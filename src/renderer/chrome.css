@@ -1496,7 +1496,7 @@ body[data-layout="left"] #find-close { order: 3; }
 body[data-floating="true"] {
   justify-content: flex-start;
   padding-bottom: 8px;
-  border-radius: var(--radius-lg);
+  border-radius: 14px;   /* window.js FLOAT_RADIUS, the curve the view is clipped to */
   /* An edge, because the panel is now over a page rather than against the
      window's own border, and without one a dark strip on a dark site has no
      boundary at all. */
@@ -1657,7 +1657,7 @@ body[data-detached="true"][data-floating="false"][data-sidebar-open="false"] > *
    simply there, and simply gone. */
 body[data-detached="true"][data-floating="true"] {
   box-shadow: none;
-  border-radius: var(--radius-lg);
+  border-radius: 14px;
   /* A longer, softer arrival than a snap: out fast, settling gently. */
   animation: detached-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
   /* The panel's surface is a layer inside the body rather than the body's own
@@ -1672,7 +1672,10 @@ body[data-detached="true"][data-floating="true"]::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  border-radius: var(--radius-lg);
+  /* The curve the window clips the view to (window.js FLOAT_RADIUS): with the
+     design's own radius the border was cut off at the corners, or a sliver of
+     page showed inside them. */
+  border-radius: 14px;
   background: var(--strip);
   /* A border you can see: the panel lies over a page that is often the same
      dark, and a hairline in a tint of the accent vanished into it. */
@@ -2051,7 +2054,10 @@ body[data-band="true"][data-layout="left"][data-sidebar-open="true"]::before {
   bottom: 8px;
   width: 224px;
   z-index: -1;
-  border-radius: var(--radius-lg);
+  /* The page card's radius (window.js CONTENT_RADIUS), not the design's: the
+     panel lies over the card's left corners, and any other curve left the
+     card's corner showing round the panel's, or the panel's round the card's. */
+  border-radius: 10px;
   background: var(--strip);
   border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
