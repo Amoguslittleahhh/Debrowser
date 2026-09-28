@@ -148,6 +148,26 @@ jobs:
       # These two steps are also the only place the Windows and macOS backends
       # are ever compiled - they cannot be built or run in the container this
       # was written in - so a compile error here is the first and only warning.
+      # The streaming view module: WebView2 on Windows, WebKit on macOS. Linux
+      # has none. Compiled here and nowhere else - the container this was
+      # written in has neither SDK.
+      - name: Build the streaming view
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run build:streamview
+
+      # What the embedded engine offers for DRM, measured on the runner.
+      # Advisory: a runner has no real graphics card, so hardware levels may
+      # be missing here that a real PC has.
+      - name: Streaming view DRM probe
+        if: matrix.os != 'ubuntu-latest'
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          E=node_modules/electron/dist/electron.exe
+          if [ "$RUNNER_OS" = "macOS" ]; then E=node_modules/electron/dist/Electron.app/Contents/MacOS/Electron; fi
+          "$E" . --streamview-probe 2>&1 | tail -30
+
       - name: Build the measurement helper
         if: matrix.os != 'ubuntu-latest'
         run: npm run build:memprobe

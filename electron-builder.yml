@@ -148,6 +148,10 @@ win:
     # tools/fetch-tor.js before packaging. Per platform and architecture.
     - from: vendor/tor/${platform}-${arch}
       to: tor
+    # The streaming view: WebView2 for the sites whose DRM needs PlayReady.
+    # Built by tools/build-streamview.js; see src/main/streamview.js.
+    - from: vendor/streamview/${platform}-${arch}
+      to: streamview
 
   ## Signing.
   ##
@@ -226,6 +230,9 @@ mac:
         - net-watch.c
     - from: vendor/tor/${platform}-${arch}
       to: tor
+    # The streaming view: WebKit for the sites whose DRM needs FairPlay.
+    - from: vendor/streamview/${platform}-${arch}
+      to: streamview
 
 dmg:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}

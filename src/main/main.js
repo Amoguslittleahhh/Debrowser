@@ -290,10 +290,17 @@ if (earlyPrefs.get('hardwareAcceleration') === false) {
 // app is ready; the handler is installed after it.
 pages.registerScheme();
 
+// The streaming-view test and probe (streamview-probe.js) open a window of
+// their own and never start the browser, so they run beside a browser that is
+// already open instead of handing it their arguments.
+const STREAMVIEW_TEST = !INCOGNITO && require('./streamview-probe').run();
+
 // One instance owns the profile directory; a second launch focuses the first.
 // Incognito has a profile directory of its own, so it has a lock of its own,
 // and a second incognito launch lands in the first incognito process.
-if (!app.requestSingleInstanceLock()) {
+if (STREAMVIEW_TEST) {
+  // Nothing else to start.
+} else if (!app.requestSingleInstanceLock()) {
   // A private window is already open and gets a new tab instead. Anything the
   // launcher made for this run - its directory, a Tor already starting - goes
   // with this process: Tor exits on its own when its owning process does.
