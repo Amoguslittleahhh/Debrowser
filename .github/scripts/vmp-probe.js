@@ -1,12 +1,12 @@
 'use strict';
 // One-off probe, run by release.yml when dispatched with test=vmp-probe: which
 // Electron fuses castLabs EVS will still VMP-sign. Packs the Windows app once
-// with no fuses and no signing hook, then for each fuse copies it, flips that
+// with no fuses and no signing hook (the CLI, as
+// the Package step runs it; the build() API packed twice at once), then for each fuse copies it, flips that
 // fuse alone, and asks EVS to sign the copy.
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { build } = require('electron-builder');
 const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses');
 
 (async () => {
@@ -15,7 +15,9 @@ const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses');
   delete config.electronFuses;
   delete config.afterPack;
   delete config.afterSign;
-  await build({ win: ['dir'], publish: 'never', config });
+  fs.writeFileSync('probe-builder.yml', yaml.dump(config));
+  execFileSync('npx', ['electron-builder', '--win', 'dir', '--publish', 'never', '--config', 'probe-builder.yml'],
+    { stdio: 'inherit', shell: true });
   const cases = ['none', 'RunAsNode', 'EnableNodeOptionsEnvironmentVariable', 'EnableNodeCliInspectArguments',
     'EnableEmbeddedAsarIntegrityValidation', 'OnlyLoadAppFromAsar'];
   const results = [];
