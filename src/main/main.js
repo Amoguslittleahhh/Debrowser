@@ -1269,6 +1269,11 @@ function main() {
       });
       updater.start();
       shell.updater = updater;
+      // Coming back to the browser is when a stale answer gets refreshed;
+      // see Updater#nudge.
+      powerMonitor.on('resume', () => updater.nudge('woke'));
+      powerMonitor.on('unlock-screen', () => updater.nudge('unlocked'));
+      shell.window.on('focus', () => updater.nudge('focused'));
     }
 
     if (SMOKE_TEST && INCOGNITO) {

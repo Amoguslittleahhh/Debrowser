@@ -3708,6 +3708,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     atRest === 'unchecked' && pressed === 'unchecked',
     `at rest: ${atRest}, after "check now": ${pressed}`);
 
+  // Coming back to a browser left open checks again once the last answer is
+  // stale, sooner after a failure, and never before the launch check or in a
+  // burst - a fake updater counts the requests.
+  {
+    let asked = 0;
+    const u = new Updater({ enabled: () => true, log: () => {} });
+    u.impl = { checkForUpdates: () => { asked++; return Promise.resolve(); } };
+    const seen = [];
+    u.timer = 1; u.nudge('t'); seen.push(asked);
+    u.timer = null; u.nudge('t'); seen.push(asked);
+    u.state = 'idle'; u.nudge('t'); seen.push(asked);
+    u.lastCheckAt = Date.now() - 7 * 3600e3; u.nudge('t'); seen.push(asked);
+    u.state = 'error'; u.lastCheckAt = Date.now() - 20 * 60e3; u.nudge('t'); seen.push(asked);
+    u.state = 'error'; u.lastCheckAt = Date.now() - 5 * 60e3; u.nudge('t'); seen.push(asked);
+    check('coming back re-checks a stale or failed answer, and only then',
+      seen.join() === '0,1,1,2,3,3', `requests after each nudge: ${seen.join(', ')}`);
+  }
+
   const autoBudget = cfg.autoBudgetMB;
   prefs.set('memoryBudgetMB', 900);
   applyPrefs(cfg, prefs);

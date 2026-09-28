@@ -46,6 +46,18 @@ const FIRST_CHECK_MS = 60_000;
  */
 const MIN_AUTO_INTERVAL_MS = 10 * 60 * 1000;
 
+/**
+ * How old the last answer may get before the browser asks again - but only
+ * when you come back to it: the computer waking or unlocking, or the window
+ * being brought to the front. Still no timer. A browser left open for days
+ * used to check once, at launch, and never notice a release; this keeps the
+ * "only when you are here" rule and answers that.
+ */
+const STALE_MS = 6 * 60 * 60 * 1000;
+
+/** After a failed check - offline at launch, say - the next chance comes sooner. */
+const RETRY_MS = 15 * 60 * 1000;
+
 class Updater {
   /**
    * @param {object} deps
@@ -187,7 +199,7 @@ class Updater {
     this.wire();
 
     // Once, shortly after launch. Nothing periodic: see MIN_AUTO_INTERVAL_MS.
-    this.timer = setTimeout(() => this.check(), FIRST_CHECK_MS);
+    this.timer = setTimeout(() => { this.timer = null; this.check(); }, FIRST_CHECK_MS);
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
 
@@ -264,6 +276,19 @@ class Updater {
     this.state = 'checking';
     this.error = null;
     this.impl.checkForUpdates().catch((err) => this.fail(err));
+  }
+
+  /**
+   * You came back: the computer woke or unlocked, or the window came to the
+   * front. Checks if the last answer is stale, or failed a while ago. Before
+   * the first check at launch this does nothing - that one is already coming.
+   */
+  nudge(reason) {
+    if (!this.impl || this.timer || !this.enabled()) return;
+    const due = this.state === 'error' ? RETRY_MS : STALE_MS;
+    if (Date.now() - this.lastCheckAt < due) return;
+    this.log('updates', `checking again (${reason})`);
+    this.check();
   }
 
   /**

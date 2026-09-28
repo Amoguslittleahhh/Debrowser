@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Updates are noticed in a browser left open.** It checked only once, a minute after starting, so a window open for days never saw a new release. It now checks again when you come back to it - the computer waking or unlocking, or the window coming to the front - if the last check was six hours ago or more, or fifteen minutes after one that failed. Still nothing on a timer.
+
 ## 1.9.1
 
 - **The tucked-away side panel opens every time you push the pointer to the left edge.** On Windows the outer pixels of the window belong to its resize border, which the page never hears, so a pointer stopped against the screen edge often opened nothing; the browser now watches the pointer itself.
