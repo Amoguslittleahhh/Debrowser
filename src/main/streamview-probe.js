@@ -10,6 +10,12 @@
  *                              default) in a streaming view and keeps the
  *                              window open, with the probe's answer in the
  *                              title bar and the engine's inspector open.
+ *   --streamview-test=playready
+ *                              By hand: Microsoft's own 4K PlayReady test
+ *                              content in a small player served from
+ *                              loopback, which writes each step - key system,
+ *                              licence, key status, frames decoded - on the
+ *                              page and the last one in the title bar.
  *
  * Neither touches the profile or starts the browser proper.
  */
@@ -91,7 +97,15 @@ function run() {
 
     let server = null;
     let url = testArg && testArg.includes('=') ? testArg.slice(testArg.indexOf('=') + 1) : DEFAULT_TEST_URL;
-    if (ci) {
+    const playready = !ci && url === 'playready';
+    if (playready) {
+      // Loopback is a secure context, as EME requires; the page fetches the
+      // content and the licence from Microsoft's test servers itself.
+      const page = fs.readFileSync(path.join(__dirname, 'streamview-playready.html'));
+      server = http.createServer((_q, r) => { r.setHeader('content-type', 'text/html; charset=utf-8'); r.end(page); });
+      await new Promise((r) => server.listen(0, '127.0.0.1', r));
+      url = `http://127.0.0.1:${server.address().port}/`;
+    } else if (ci) {
       // Loopback: a secure context, as EME requires, with nothing leaving the machine.
       server = http.createServer((_q, r) => { r.setHeader('content-type', 'text/html'); r.end('<!doctype html><title>probe</title>probe'); });
       await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -114,6 +128,11 @@ function run() {
     // play, its console says why - the licence refused, the output not
     // protected, the decoder missing - and that is the thing to report.
     if (!ci) view.once('ready', () => view.openDevTools());
+    // The player reports for itself, in the title; the probe would talk over it.
+    if (playready) {
+      win.on('closed', () => { view.destroy(); if (server) server.close(); app.quit(); });
+      return;
+    }
 
     const timeout = setTimeout(() => {
       console.log(`STREAMVIEW-PROBE ${JSON.stringify({ error: 'the engine never became ready' })}`);
