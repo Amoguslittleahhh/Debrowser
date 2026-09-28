@@ -16,13 +16,13 @@
  *
  * EVS signs only castLabs' binaries as shipped, and the fuses change them: it
  * denies every build with any fuse flipped (measured, each alone). So in
- * practice the fuses win, and the shipped development signatures - voided by
- * the fuses - are removed, leaving Widevine UNVERIFIED rather than TAMPERED.
+ * practice the fuses win and Widevine reports PLATFORM_TAMPERED: it still plays
+ * wherever a licence server allows that (measured: castLabs' UAT server does),
+ * and the strict services refuse. Removing the voided signatures was tried and
+ * changes nothing - a VMP-enabled build without one is TAMPERED too.
  */
 
 const { execFileSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
 
 /**
  * Which hook signs on this platform. Windows goes after Authenticode - but
@@ -49,29 +49,6 @@ async function fusesFirst(context) {
   const fuses = packager.config.electronFuses;
   if (!fuses) return;
   await packager.addElectronFuses(context, await packager.generateFuseConfig(fuses));
-}
-
-/**
- * The VMP signatures castLabs ships, which no longer match once the fuses are
- * flipped.
- *
- * A signature that does not match reports the platform as TAMPERED, and
- * licence servers treat that worse than no signature at all - UNVERIFIED,
- * which is what every browser on Linux reports and many services accept. So
- * a build that EVS has not signed afresh carries none.
- */
-function staleSignatures(context) {
-  const { appOutDir, electronPlatformName: platform } = context;
-  if (platform === 'win32') {
-    return fs.readdirSync(appOutDir).filter((f) => f.toLowerCase().endsWith('.exe.sig'))
-      .map((f) => path.join(appOutDir, f));
-  }
-  if (platform === 'darwin') {
-    return fs.readdirSync(appOutDir).filter((f) => f.endsWith('.app')).map((app) => path.join(appOutDir, app,
-      'Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/Electron Framework.sig'))
-      .filter((f) => fs.existsSync(f));
-  }
-  return [];
 }
 
 /** EVS, if an account is set up. True when it signed. */
@@ -103,11 +80,7 @@ async function vmpSign(phase, context) {
 
   if (phase === 'afterPack') {
     await fusesFirst(context);
-    if (phaseFor(platform) === 'afterPack' && evsSign(context)) return;
-    for (const file of staleSignatures(context)) {
-      fs.rmSync(file, { force: true });
-      console.log(`  • removed stale VMP signature ${path.basename(file)}: Widevine reports UNVERIFIED, not TAMPERED`);
-    }
+    if (phaseFor(platform) === 'afterPack') evsSign(context);
     return;
   }
   // Windows with Authenticode: signed after it, over the file as shipped.

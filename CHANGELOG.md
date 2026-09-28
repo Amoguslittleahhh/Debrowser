@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The Protected video button no longer appears on pages where DRM works.** Players and test pages ask about every kind of DRM in turn; a "no" to PlayReady or FairPlay beside a Widevine that works raised the button. It now appears only when a page gets no DRM at all.
+- **Correction to 1.9.1:** Widevine still reports Debrowser as tampered on Windows and macOS, not unverified as the 1.9.1 notes said, so Netflix, Disney+ and Prime Video are likely to refuse there. Widevine playback itself works, as test streams show.
 - **Updates are noticed in a browser left open.** It checked only once, a minute after starting, so a window open for days never saw a new release. It now checks again when you come back to it - the computer waking or unlocking, or the window coming to the front - if the last check was six hours ago or more, or fifteen minutes after one that failed. Still nothing on a timer.
 
 ## 1.9.1

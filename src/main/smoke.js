@@ -146,8 +146,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       !components || (installed && widevine === 'granted' && clear === 'granted' && quiet),
       components ? `installed ${installed}, widevine ${widevine}, clear key ${clear}, ` +
         `status ${JSON.stringify(components.status())}` : 'stock Electron: no components API');
+    // A player asking about PlayReady too, as test pages and real players do,
+    // is not a page that cannot play: Widevine answered.
+    await ask('com.microsoft.playready');
+    await sleep(2200);
+    check('a refused key system beside a working Widevine raises no notice', !home.drmNeeded,
+      `notice shown: ${Boolean(home.drmNeeded)}`);
+    // A fresh page that gets nothing it asks for is the one that needs it.
+    await home.wc.loadURL(local.href).catch(() => {});
     const playready = await ask('com.microsoft.playready');
-    const flagged = await waitFor(() => home.drmNeeded === true, { timeoutMs: 3000 });
+    const flagged = await waitFor(() => home.drmNeeded === true, { timeoutMs: 4000 });
     const native = await home.wc.executeJavaScript('String(navigator.requestMediaKeySystemAccess).includes("[native code]")');
     check('a key system this build lacks is noticed, and the page sees the untouched refusal',
       playready === 'NotSupportedError' && flagged && native && home.toJSON().drm === true,

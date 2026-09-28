@@ -730,11 +730,21 @@ if (!process.argv.includes('--debrowser-private') && window === window.top &&
  */
 if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol)) {
   const { contextBridge } = require('electron');
+  // Only when the page got no DRM at all. Players and test pages ask about
+  // every key system in turn - PlayReady, FairPlay - and go on to use the one
+  // that answers; a refusal of those alongside a Widevine that works is not a
+  // page that cannot play. So a refusal waits a moment, and counts only if
+  // nothing was granted meanwhile.
   let told = false;
-  const tell = (system) => {
+  let granted = false;
+  const tell = (outcome, system) => {
+    if (outcome === 'granted') { granted = true; return; }
     if (told) return;
-    told = true;
-    ipcRenderer.send('debrowser:drm-needed', String(system).slice(0, 64));
+    setTimeout(() => {
+      if (told || granted) return;
+      told = true;
+      ipcRenderer.send('debrowser:drm-needed', String(system).slice(0, 64));
+    }, 1500);
   };
   try {
     contextBridge.executeInMainWorld({
@@ -747,7 +757,7 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
             const result = Reflect.apply(target, self, args);
             const system = String(args[0] || '');
             // Clear Key is not DRM, and it works here.
-            if (system !== 'org.w3.clearkey') result.catch(() => report(system));
+            if (system !== 'org.w3.clearkey') result.then(() => report('granted', system), () => report('refused', system));
             return result;
           }
         });
