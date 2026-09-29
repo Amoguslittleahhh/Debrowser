@@ -2773,7 +2773,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
  * there cannot be abused, whatever the sender.
  */
 const INCOGNITO_REFUSED = new Set([
-  'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment',
+  'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
   'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
@@ -2853,7 +2853,8 @@ const DOWNLOAD_REQUESTS = new Set([
 const ANY = '*';
 /** What only the passwords page may ask: unlocking, and the records. */
 const VAULT_RECORD_REQUESTS = new Set([
-  'vault-unlock', 'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment'
+  'vault-unlock', 'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment',
+  'import-logins-file'
 ]);
 const PAGE_POLICY = new Map([
   ['chrome', { commands: ANY, requests: CHROME_REQUESTS }],
@@ -3239,7 +3240,15 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         if (!read.ok) return { ok: false, reason: read.reason };
         const result = bookmarks.merge(read.entries);
         log('bookmarks', `imported ${result.added} from ${profile.browser}`);
-        return { ok: true, ...result, browser: profile.browser };
+        // The welcome tour brings the history over as well, so the address bar
+        // knows their sites from the first day. Not where history is off.
+        let pages = 0;
+        if (payload?.withHistory === true && history && !INCOGNITO && prefs.get('saveHistory') !== false) {
+          const past = require('./importer').readHistory(profile);
+          if (past.ok) pages = history.merge(past.entries).added;
+          log('history', past.ok ? `imported ${pages} page(s) from ${profile.browser}` : past.reason);
+        }
+        return { ok: true, ...result, pages, browser: profile.browser };
       }
 
       // An exported file the user picks. Read in main rather than in the
@@ -3327,6 +3336,34 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'presence-capability':
         return presence.capability();
+
+      // A password export from another browser or manager, picked by the
+      // user in the system's dialog - the page never names a file. Each row is
+      // stored like any saved sign-in, encrypted, and a row for the same site
+      // and username replaces the one here.
+      case 'import-logins-file': {
+        if (!vault.unlocked()) return { locked: true };
+        vault.touch();
+        const { canceled, filePaths: picked } = await dialog.showOpenDialog(shell.window, {
+          title: 'Import passwords',
+          properties: ['openFile'],
+          filters: [{ name: 'Password export', extensions: ['csv'] }, { name: 'All files', extensions: ['*'] }]
+        });
+        if (canceled || !picked || !picked.length) return { ok: false, cancelled: true };
+        let text;
+        try {
+          if (require('fs').statSync(picked[0]).size > 20 * 1024 * 1024) return { ok: false, reason: 'that file is too large' };
+          text = require('fs').readFileSync(picked[0], 'utf8');
+        } catch (err) {
+          return { ok: false, reason: `could not read that file: ${err.message}` };
+        }
+        const parsed = require('./importer').parseLoginCsv(text);
+        if (!parsed.ok) return parsed;
+        let added = 0;
+        for (const login of parsed.logins) if (credentials.put('login', login)) added += 1;
+        log('credentials', `imported ${added} of ${parsed.logins.length} sign-in(s) from a file`);
+        return { ok: true, added, skipped: parsed.logins.length - added };
+      }
 
       case 'list-credentials':
       case 'delete-credential':

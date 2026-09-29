@@ -562,13 +562,9 @@ function exists(file) {
 }
 
 /**
- * Read one of the files `findProfiles` located.
- *
- * Firefox-family profiles are found and named but not read: `places.sqlite` is
- * a live SQLite database, usually locked while the browser is running, and
- * reading it would mean shipping an SQLite parser to save the user one Export
- * click. The refusal names the browser and the file, so the answer is "export
- * from Zen and open the file" rather than "unsupported".
+ * Read one of the files `findProfiles` located. Chromium-family bookmarks are
+ * JSON, read here; Firefox-family ones are in `places.sqlite`, read from a
+ * copy by importer.js, since the browser that owns it may be running.
  *
  * @returns {{ok:boolean, entries?:Array<object>, reason?:string}}
  */
@@ -576,14 +572,7 @@ function readProfile(profile) {
   if (!profile || typeof profile.path !== 'string') {
     return { ok: false, reason: 'no profile given' };
   }
-  if (profile.kind === 'firefox') {
-    return {
-      ok: false,
-      reason: `${profile.browser} stores bookmarks in a SQLite database that is locked while it ` +
-              'is running. Export them from that browser (Bookmarks → Manage → Export to HTML) ' +
-              'and open the file here.'
-    };
-  }
+  if (profile.kind === 'firefox') return require('./importer').readFirefoxBookmarks(profile);
 
   let raw;
   try {

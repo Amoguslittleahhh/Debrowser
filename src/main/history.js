@@ -168,6 +168,29 @@ class History {
     };
   }
 
+  /**
+   * Pages brought over from another browser. A page already here keeps its own
+   * entry - what was done in this browser is the better record - and the rest
+   * join in date order, within the same cap as ever.
+   * @returns {{added: number}}
+   */
+  merge(entries) {
+    const known = new Set(this.items.map((e) => e.url));
+    let added = 0;
+    for (const raw of entries) {
+      const entry = this.normalise(raw);
+      if (!entry || known.has(entry.url)) continue;
+      known.add(entry.url);
+      this.items.push(entry);
+      added += 1;
+    }
+    if (!added) return { added };
+    this.items.sort((a, b) => (b.visitedAt || 0) - (a.visitedAt || 0));
+    if (this.items.length > MAX_ENTRIES) this.items.length = MAX_ENTRIES;
+    this.queueSave();
+    return { added };
+  }
+
   /** How many pages are stored. Not `all().length`, which copies the array. */
   count() {
     return this.items.length;

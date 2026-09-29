@@ -101,6 +101,7 @@ const COMMANDS = new Set([
   'list-credentials',
   // The passwords page's lock, and Settings' passcode controls (vault.js).
   'vault-status',
+  'import-logins-file',
   'vault-unlock',
   'vault-lock',
   'vault-set',

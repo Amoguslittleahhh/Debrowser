@@ -160,10 +160,11 @@ async function findProfiles() {
     b.addEventListener('click', async () => {
       b.disabled = true;
       hint.textContent = 'Importing…';
-      const r = await api.request('import-from-profile', { path: profile.path });
+      const r = await api.request('import-from-profile', { path: profile.path, withHistory: true });
       if (r && r.ok) {
-        hint.textContent = `${r.added} imported`;
-        note(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'} from ${r.browser}.`, 'ok');
+        hint.textContent = 'Imported';
+        const pages = r.pages ? ` and ${r.pages.toLocaleString()} page${r.pages === 1 ? '' : 's'} of history` : '';
+        note(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'}${pages} from ${r.browser}.`, 'ok');
       } else {
         b.disabled = false;
         hint.textContent = 'Import';

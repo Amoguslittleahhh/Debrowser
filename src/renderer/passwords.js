@@ -141,6 +141,24 @@ async function ask(command, payload) {
   return res;
 }
 
+const importButton = document.getElementById('import-logins');
+const importNote = document.getElementById('import-note');
+importButton.addEventListener('click', async () => {
+  importButton.disabled = true;
+  const res = await ask('import-logins-file');
+  importButton.disabled = false;
+  if (!res || res.cancelled) return;
+  if (res.ok) {
+    importNote.textContent = `Imported ${res.added} sign-in${res.added === 1 ? '' : 's'}. ` +
+      'Now delete the file you imported from: it holds them in plain text.';
+    importNote.classList.add('ok');
+    await load();
+  } else {
+    importNote.textContent = `Could not import: ${res.reason || 'that file did not work'}.`;
+    importNote.classList.remove('ok');
+  }
+});
+
 async function load() {
   const res = await ask('list-credentials');
   if (!res) return;

@@ -1004,6 +1004,40 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
+  // Importing: a password export in any exporter's column names, and another
+  // browser's history database, read from a copy.
+  {
+    const { parseLoginCsv, readHistory, readFirefoxBookmarks } = require('./importer');
+    const chrome = parseLoginCsv('name,url,username,password,note\r\n' +
+      'GitHub,https://github.com/login,octo,"p,a""ss",\r\nApp,android://x,,y,\r\n');
+    const bitwarden = parseLoginCsv('folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password\n' +
+      ',,login,Mail,,,,https://mail.example.com/,me,pw\n');
+    const csvOk = chrome.ok && chrome.logins.length === 1 && chrome.logins[0].origin === 'https://github.com' &&
+      chrome.logins[0].password === 'p,a"ss' && bitwarden.ok && bitwarden.logins[0].username === 'me';
+
+    const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'debrowser-imp-'));
+    const { DatabaseSync } = require('node:sqlite');
+    const cdb = new DatabaseSync(path.join(dir, 'History'));
+    cdb.exec('CREATE TABLE urls (url TEXT, title TEXT, visit_count INT, last_visit_time INT, hidden INT)');
+    const chromeNow = (Date.now() + 11644473600000) * 1000;
+    cdb.prepare('INSERT INTO urls VALUES (?, ?, ?, ?, 0)').run('https://news.example/', 'News', 7, chromeNow);
+    cdb.close();
+    const fdb = new DatabaseSync(path.join(dir, 'places.sqlite'));
+    fdb.exec(`CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT, title TEXT, visit_count INT, hidden INT, last_visit_date INT);
+              CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INT, fk INT, parent INT, title TEXT, dateAdded INT)`);
+    fdb.prepare('INSERT INTO moz_places VALUES (1, ?, ?, 3, 0, ?)').run('https://docs.example/', 'Docs', Date.now() * 1000);
+    fdb.exec(`INSERT INTO moz_bookmarks VALUES (2, 2, NULL, 0, 'Work', 0); INSERT INTO moz_bookmarks VALUES (3, 1, 1, 2, 'The docs', ${Date.now() * 1000})`);
+    fdb.close();
+    const ch = readHistory({ kind: 'chromium', browser: 'Chrome', path: path.join(dir, 'Bookmarks') });
+    const ff = readHistory({ kind: 'firefox', browser: 'Firefox', path: path.join(dir, 'places.sqlite') });
+    const fb = readFirefoxBookmarks({ kind: 'firefox', browser: 'Firefox', path: path.join(dir, 'places.sqlite') });
+    const dbOk = ch.ok && ch.entries[0]?.url === 'https://news.example/' && Math.abs(ch.entries[0].visitedAt - Date.now()) < 60_000 &&
+      ff.ok && ff.entries[0]?.visits === 3 && fb.ok && fb.entries[0]?.folder === 'Work';
+    fs.rmSync(dir, { recursive: true, force: true });
+    check('passwords import from any exporter\'s CSV; history and Firefox bookmarks from a profile',
+      csvOk && dbOk, JSON.stringify({ csv: chrome.logins, ch: ch.entries || ch.reason, ff: ff.entries || ff.reason, fb: fb.entries || fb.reason }).slice(0, 400));
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');
