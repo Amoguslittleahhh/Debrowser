@@ -226,6 +226,7 @@ class Threats {
       if (details.resourceType !== 'mainFrame') return undefined;
       const verdict = this.verdict(details.url);
       if (!verdict) return undefined;
+      this.caught = (this.caught || 0) + 1;
       this.stopped.set(details.url, verdict);
       if (this.stopped.size > 64) this.stopped.delete(this.stopped.keys().next().value);
       return { cancel: true };

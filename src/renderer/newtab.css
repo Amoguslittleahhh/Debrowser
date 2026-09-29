@@ -75,6 +75,21 @@ main {
   min-height: 1em;
 }
 
+.receipt {
+  margin: var(--s1) 0 0;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.receipt:hover { background: var(--wash-soft); color: var(--text); }
+.receipt b { color: var(--ok); font-weight: var(--fw-bold); }
+
 /* ------------------------------------------------------------------ */
 /* Tiles                                                               */
 /* ------------------------------------------------------------------ */

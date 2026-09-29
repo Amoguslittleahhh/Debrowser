@@ -59,6 +59,8 @@ const PAGES = {
   danger: 'danger.html',
   // Every protection in one place, and what needs attention.
   safety: 'safety.html',
+  // What the browser saved and stopped, day by day, for a week.
+  receipt: 'receipt.html',
   // Incognito only: the fingerprint self-check - what sites can read.
   fingerprint: 'fingerprint.html',
   // Incognito only: the empty page a private tab starts on, while its
@@ -78,6 +80,7 @@ const WELCOME_URL = `${SCHEME}://welcome`;
 const INSECURE_URL = `${SCHEME}://insecure`;
 const DANGER_URL = `${SCHEME}://danger`;
 const SAFETY_URL = `${SCHEME}://safety`;
+const RECEIPT_URL = `${SCHEME}://receipt`;
 const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
 const BLANK_URL = `${SCHEME}://blank`;
 
@@ -243,6 +246,7 @@ function titleFor(url) {
     case 'insecure': return 'Not private';
     case 'danger': return 'Warning';
     case 'safety': return 'Safety check';
+    case 'receipt': return 'This week';
     case 'fingerprint': return 'What sites can see';
     default: return 'Debrowser';
   }
@@ -250,5 +254,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
-  INSECURE_URL, DANGER_URL, SAFETY_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
+  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

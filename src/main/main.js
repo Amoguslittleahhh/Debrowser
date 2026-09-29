@@ -27,6 +27,7 @@ const { HttpsFirst } = require('./https-first');
 const { ThirdPartyCookies } = require('./third-party');
 const { LinkCleaner } = require('./link-cleaner');
 const { Threats } = require('./threats');
+const { Receipts } = require('./receipts');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -470,6 +471,7 @@ function main() {
   let sitePermissions = null;
   let sitePrefs = null;
   let blocker = null;
+  let receipts = null;
   let permissionAsks = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
@@ -559,7 +561,10 @@ function main() {
     publishQueued = true;
     setImmediate(() => {
       publishQueued = false;
-      if (shell && governor) shell.publish(governor.snapshot());
+      if (shell && governor) {
+        const state = governor.snapshot();
+        shell.publish(receipts ? { ...state, receipt: receipts.today() } : state);
+      }
       // Tabs came or went: keep a spare new tab while it is cheap (prewarm.js).
       if (prewarm) prewarm.refresh();
     });
@@ -1243,10 +1248,23 @@ function main() {
         onUpdate: (state) => {
           // Incognito: a page too heavy for Balanced JavaScript gets one hint.
           if (slowJs && slowJs.observe(tabs.activeTab())) log('incognito', 'slow-page hint shown');
-          if (shell) shell.publish(state);
+          if (shell) shell.publish(receipts ? { ...state, receipt: receipts.today() } : state);
         }
       });
       governor.start();
+      // The day's receipt (receipts.js): what sleeping tabs, the blocker and
+      // the link cleaner did, as totals, once a minute.
+      if (!INCOGNITO) {
+        receipts = new Receipts(OFFLINE_MODE ? null : path.join(app.getPath('userData'), 'receipts.json'), () => ({
+          freedMB: governor.stats.reclaimedMB,
+          slept: governor.stats.discards + governor.stats.hibernations + governor.stats.freezes,
+          blocked: blocker ? blocker.total : 0,
+          cleaned: LinkCleaner.current ? LinkCleaner.current.cleaned : 0,
+          stopped: Threats.current ? Threats.current.caught || 0 : 0
+        }));
+        receipts.tick();
+        setInterval(() => { receipts.tick(); receipts.save(); }, 60_000).unref?.();
+      }
       // Battery mode: from the setting and, on 'auto', the power source.
       const applySaver = () => {
         const mode = prefs.get('batteryMode');
@@ -1351,7 +1369,7 @@ function main() {
     shell.downloads = downloads;
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs, shell, credentials, vault, bookmarks, history, downloads, prefs, log, context,
-      sitePermissions, permissionAsks, blocker, sitePrefs });
+      sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts });
 
     /*
      * The tabs from last time, or one new one.
@@ -1533,6 +1551,7 @@ function main() {
     else if (history) history.flush();
     if (sitePrefs && sitePrefs.timer) sitePrefs.flush();
     if (downloads) downloads.flush();
+    if (receipts) { receipts.tick(); receipts.save(); }
     // Before `closeAll`, which empties the list this describes. Written
     // synchronously because quit does not wait for a timer, and the debounce
     // above means the last thing the user did is usually still pending.
@@ -2389,6 +2408,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      case 'open-receipt':
+        if (INCOGNITO) break;
+        openInternalPage(tabs, pages.RECEIPT_URL);
+        publish();
+        break;
+
       case 'open-safety':
         if (INCOGNITO) break;
         openInternalPage(tabs, pages.SAFETY_URL);
@@ -2907,7 +2932,7 @@ const INCOGNITO_REFUSED = new Set([
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
   'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
-  'import-from-profile', 'import-bookmark-file', 'open-safety', 'safety-status', 'safety-revoke',
+  'import-from-profile', 'import-bookmark-file', 'open-safety', 'safety-status', 'safety-revoke', 'open-receipt', 'receipt-week',
   'check-for-updates', 'update-restart', 'presence-capability',
   'prefetch-tab', 'prefetch-new-tab'
 ]);
@@ -3003,7 +3028,7 @@ const PAGE_POLICY = new Map([
     requests: new Set(['bookmark-profiles', 'import-from-profile', 'import-bookmark-file', 'default-browser-status'])
   }],
   ['newtab', {
-    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'open-history']),
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'open-history', 'open-receipt']),
     requests: NEWTAB_REQUESTS
   }],
   ['history', {
@@ -3033,6 +3058,10 @@ const PAGE_POLICY = new Map([
     requests: new Set()
   }],
   // The dangerous-site warning: back, the site it was mistaken for, or on.
+  ['receipt', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab', 'toggle-panel']),
+    requests: new Set(['receipt-week'])
+  }],
   ['safety', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'open-settings', 'open-passwords', 'close-tab']),
     requests: new Set(['safety-status', 'safety-revoke'])
@@ -3052,7 +3081,7 @@ function pageMay(page, channel, name) {
 
 function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
-                       context = { model: null } }) {
+                       getReceipts = () => null, context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only the passwords page may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
@@ -3375,6 +3404,10 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'remove-bookmark':
         return { removed: bookmarks.remove(String(payload?.id ?? '')) };
+
+      // The week's receipt, for its page.
+      case 'receipt-week':
+        return getReceipts() ? { week: getReceipts().week() } : { week: [] };
 
       // The safety check: every protection's state, the lists' age, the
       // sites allowed a permission, and whether passwords are worth checking.

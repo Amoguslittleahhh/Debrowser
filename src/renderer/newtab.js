@@ -214,6 +214,9 @@ window.addEventListener('focus', () => {
   if (document.activeElement === document.body) q.focus();
 });
 
+const receipt = document.getElementById('receipt');
+receipt.addEventListener('click', () => api.send('open-receipt'));
+
 // One line of the thing this browser is actually for. It costs nothing to
 // render because the numbers are already in the state message the chrome gets.
 api.onState((state) => {
@@ -225,4 +228,23 @@ api.onState((state) => {
   stat.textContent = !open ? ''
     : open === 1 ? `${size(state.totalMB)} in 1 tab`
     : `${size(state.totalMB)} in ${open} tabs, about ${size(state.totalMB / open)} each`;
+
+  // Today's receipt, once there is something on it.
+  const r = state.receipt;
+  const parts = [];
+  if (r && r.freedMB >= 1) parts.push([size(r.freedMB), 'freed']);
+  if (r && r.slept) parts.push([r.slept.toLocaleString(), r.slept === 1 ? 'tab slept' : 'tabs slept']);
+  if (r && r.blocked) parts.push([r.blocked.toLocaleString(), r.blocked === 1 ? 'tracker blocked' : 'trackers blocked']);
+  receipt.hidden = !parts.length;
+  if (parts.length) {
+    const nodes = ['Today: '];
+    parts.forEach(([n, what], i) => {
+      if (i) nodes.push(' · ');
+      const b = document.createElement('b');
+      b.textContent = n;
+      nodes.push(b, ` ${what}`);
+    });
+    receipt.replaceChildren(...nodes);
+  }
 });
+

@@ -40,6 +40,8 @@ const COMMANDS = new Set([
   'allow-http',
   'allow-danger',
   'open-safety',
+  'open-receipt',
+  'receipt-week',
   'safety-status',
   'safety-revoke',
   'new-circuit',

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>This week</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="receipt.css">
+</head>
+<body>
+  <!--
+    The receipt: what Debrowser saved and stopped, each of the last seven days.
+    Totals only, kept on this computer - nothing here says what was browsed.
+  -->
+  <main>
+    <h1>This week</h1>
+    <p class="lead" id="lead"></p>
+
+    <div class="totals" id="totals"></div>
+
+    <section>
+      <h2>Memory freed, by day</h2>
+      <div class="chart" id="chart" role="img"></div>
+    </section>
+
+    <p class="fine">Totals only, kept on this computer for seven days. Nothing here records which sites you visited.</p>
+  </main>
+  <script src="theme.js"></script>
+  <script src="receipt.js"></script>
+</body>
+</html>

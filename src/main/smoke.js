@@ -1225,6 +1225,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('battery mode turns the saver on and off from the setting', on && off, `on ${on}, off ${off}`);
   }
 
+  // Receipts: what changed since the last look is added to today, a counter
+  // that restarts is not taken as negative, and the week has seven days.
+  {
+    const { Receipts } = require('./receipts');
+    let totals = { freedMB: 100, slept: 2, blocked: 10, cleaned: 1, stopped: 0 };
+    const r = new Receipts(null, () => totals);
+    r.tick();
+    totals = { freedMB: 350, slept: 5, blocked: 40, cleaned: 1, stopped: 1 };
+    r.tick();
+    totals = { freedMB: 360, slept: 5, blocked: 3, cleaned: 1, stopped: 1 };   // the blocker restarted
+    r.tick();
+    const t = r.today();
+    check('the receipt adds up the day, through a counter restart, over seven days',
+      t.freedMB === 260 && t.slept === 3 && t.blocked === 33 && t.stopped === 1 && r.week().length === 7,
+      JSON.stringify(t));
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

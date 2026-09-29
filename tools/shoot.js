@@ -33,6 +33,7 @@ const TABS = [
 ];
 
 const STATE = {
+  receipt: { freedMB: 1290, slept: 14, blocked: 312, cleaned: 6, stopped: 0 },
   tabs: TABS, activeId: 1, totalMB: 1205, budgetMB: 6144, rssTotalMB: 512,
   privateTotalMB: 300, pressure: 'none', liveTabs: 6, maxLiveTabs: 12,
   rendererCount: 3, bookmarksBar: true, bookmarksRevision: 1,
@@ -144,6 +145,15 @@ const ANSWERS = {
     { id: 'reopen-closed-tab', label: 'Reopen closed tab', icon: 'clock' }
   ] },
   'check-for-updates': STATE.updates,
+  'receipt-week': { week: [
+    { date: '2026-09-23', freedMB: 1840, slept: 22, blocked: 610, cleaned: 12, stopped: 0 },
+    { date: '2026-09-24', freedMB: 2410, slept: 31, blocked: 902, cleaned: 18, stopped: 1 },
+    { date: '2026-09-25', freedMB: 960, slept: 9, blocked: 240, cleaned: 4, stopped: 0 },
+    { date: '2026-09-26', freedMB: 0, slept: 0, blocked: 0, cleaned: 0, stopped: 0 },
+    { date: '2026-09-27', freedMB: 3120, slept: 44, blocked: 1180, cleaned: 25, stopped: 0 },
+    { date: '2026-09-28', freedMB: 2200, slept: 27, blocked: 780, cleaned: 9, stopped: 0 },
+    { date: '2026-09-29', freedMB: 1290, slept: 14, blocked: 312, cleaned: 6, stopped: 0 }
+  ] },
   'safety-status': { version: '2.0.0', chromium: '152.0.7977.65', autoUpdate: true,
     protections: [
       { key: 'httpsMode', label: 'Secure connections', on: true, detail: 'HTTPS where a site has it' },
@@ -205,6 +215,7 @@ const SHOTS = [
   { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
   { name: 'site',     file: 'site.html',     w: 420,  h: 340 },
   { name: 'safety', file: 'safety.html', w: 1100, h: 1000 },
+  { name: 'receipt', file: 'receipt.html', w: 1100, h: 720 },
   { name: 'danger', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://paypa1.com/login', kind: 'lookalike', like: 'paypal.com' } },
   { name: 'danger-phish', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://secure-login.bank-verify.example/', kind: 'phishing' } },
   { name: 'toast', file: 'toast.html', w: 460, h: 84,
