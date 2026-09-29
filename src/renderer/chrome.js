@@ -1704,6 +1704,9 @@ api.onState((state) => {
   const shown = spaces ? state.tabs.filter((tab) => (tab.spaceId || 'home') === spaces.activeId) : state.tabs;
   renderTabs(shown);
   renderSpace(spaces);
+  // The two tabs side by side are marked as a pair.
+  const pair = state.split ? [state.split.left, state.split.right] : [];
+  for (const [id, node] of tabEls) node.root.classList.toggle('in-split', pair.includes(id));
   el.stripCount.textContent = `${state.tabs.length} tab${state.tabs.length === 1 ? '' : 's'}`;
   // Bookmarks changed somewhere else - Settings, an import - so the star's
   // cached answer for this page is no longer one.

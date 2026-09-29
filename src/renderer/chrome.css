@@ -2180,3 +2180,17 @@ body[data-role="strip"][data-band="true"][data-layout="left"]::before { top: 8px
 .space-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--space-color, var(--accent)); }
 .space-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 body[data-layout="left"] .space-chip { align-self: stretch; max-width: none; margin: 4px 8px 8px; height: 30px; }
+
+/* Two tabs side by side: a small two-pane mark before each title. */
+.tab.in-split .tab-title::before {
+  content: '';
+  display: inline-block;
+  width: 11px;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: -0.5px;
+  border: 1.4px solid currentColor;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent 44%, currentColor 44% 56%, transparent 56%);
+  opacity: 0.7;
+}

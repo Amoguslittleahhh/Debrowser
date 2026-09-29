@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Divider</title>
+  <link rel="stylesheet" href="theme.css">
+  <style>
+    html, body { height: 100%; margin: 0; background: transparent; overflow: hidden; cursor: col-resize; }
+    body { display: grid; place-items: center; }
+    .grip { width: 4px; height: 36px; border-radius: 2px; background: var(--border); transition: background-color var(--fast) var(--ease), height var(--fast) var(--ease); }
+    body:hover .grip, body.dragging .grip { background: var(--accent); height: 56px; }
+  </style>
+</head>
+<body>
+  <!-- Between two tabs side by side (window.js, split view): drag to share the width out differently. -->
+  <div class="grip"></div>
+  <script src="theme.js"></script>
+  <script src="divider.js"></script>
+</body>
+</html>

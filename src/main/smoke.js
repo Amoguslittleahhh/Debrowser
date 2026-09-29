@@ -1349,6 +1349,36 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // Split view: two tabs share the content area, a third tab in front hides
+  // both, coming back shows both again, and closing one ends the split.
+  {
+    const wasActive = tabs.activeTab();
+    const a = tabs.create({ url: pageUrl('article.html'), activate: true, realise: true });
+    const b = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true });
+    await waitFor(() => a.isLive && b.isLive, { timeoutMs: 8000 });
+    await tabs.activate(a.id);
+    runCommand('split-with-tab', { id: b.id });
+    await sleep(300);
+    const side = a.visible && b.visible && a.bounds.x < b.bounds.x && a.bounds.width > 100 && b.bounds.width > 100 &&
+      Math.abs(a.bounds.x + a.bounds.width + 8 - b.bounds.x) <= 1;
+    const other = wasActive && wasActive !== a && wasActive !== b ? wasActive : tabs.all().find((t) => t !== a && t !== b);
+    await tabs.activate(other.id);
+    await sleep(200);
+    const hidden = !a.visible && !b.visible;
+    await tabs.activate(b.id);
+    await sleep(200);
+    const shownAgain = a.visible && b.visible;
+    tabs.close(b.id);
+    await sleep(200);
+    const ended = shell.split === null && a.bounds.width > b.bounds.width;
+    check('split view shows two tabs side by side, hides them for a third, and ends when one closes',
+      side && hidden && shownAgain && ended,
+      JSON.stringify({ side, hidden, shownAgain, ended, a: a.bounds, b: b.bounds }));
+    tabs.close(a.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

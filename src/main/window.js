@@ -26,6 +26,8 @@ const PANEL_WIDTH = 360;
 /** The toast view: wide enough for a sentence and a button, tall enough for its shadow. */
 const TOAST_WIDTH = 460;
 const TOAST_HEIGHT = 84;
+/** The gap between two tabs side by side: the divider's width. */
+const SPLIT_GAP = 8;
 
 /**
  * Height the bookmarks bar adds to the chrome when it is showing.
@@ -330,6 +332,9 @@ class BrowserShell {
     this.suggestView = null;
     this.crashView = null;
     this.toastView = null;
+    /** Two tabs side by side: { left, right } tab ids and the left one's share. */
+    this.split = null;
+    this.dividerView = null;
     this.suggestOpen = false;
     this.suggestSelected = -1;
     setImmediate(() => this.releaseSidebar());
@@ -551,7 +556,7 @@ class BrowserShell {
     // switching tabs changes both who gets the content rectangle and whether
     // the dock should be on screen at all. Returning early left tab A's
     // inspector painted over tab B, with B sized as though it had the window.
-    if (this.devToolsView) this.layout();
+    if (this.devToolsView || this.inSplit(tab)) this.layout();
     else tab.setBounds(this.contentBounds());
     // A tab realised after the layout ran has never been shaped, so the change
     // guard in `layout` would skip it. Cheap, and once per attach.
@@ -1064,6 +1069,79 @@ class BrowserShell {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Split view                                                        */
+  /* ---------------------------------------------------------------- */
+
+  /** Whether a tab is one of the pair on screen together. */
+  inSplit(tab) {
+    return Boolean(this.split && tab && (tab.id === this.split.left || tab.id === this.split.right));
+  }
+
+  /**
+   * The two halves, while the tab in front is one of the pair; null otherwise,
+   * and every tab has the whole content area as before.
+   */
+  splitBounds(area) {
+    const s = this.split;
+    const active = this.tabs.activeTab();
+    if (!s || !this.inSplit(active) || !this.tabs.byId(s.left) || !this.tabs.byId(s.right)) return null;
+    const leftW = Math.round((area.width - SPLIT_GAP) * s.ratio);
+    return {
+      left: { x: area.x, y: area.y, width: leftW, height: area.height },
+      right: { x: area.x + leftW + SPLIT_GAP, y: area.y, width: area.width - leftW - SPLIT_GAP, height: area.height },
+      divider: { x: area.x + leftW, y: area.y, width: SPLIT_GAP, height: area.height }
+    };
+  }
+
+  /** Set the pair (or clear it with null) and lay the window out again. */
+  setSplit(split) {
+    this.split = split ? { left: split.left, right: split.right, ratio: split.ratio ?? 0.5 } : null;
+    this.layout();
+  }
+
+  /** The divider, which the pointer drags; `dragSplit` reads where it is. */
+  placeDivider(halves) {
+    if (!halves) {
+      if (this.dividerView) this.dividerView.setVisible(false);
+      return;
+    }
+    if (!this.dividerView) {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          additionalArguments: preloadArgs(this.prefs),
+          transparent: true
+        }
+      });
+      try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+      view.webContents.loadFile(path.join(RENDERER_DIR, 'divider.html')).catch(() => {});
+      this.dividerView = view;
+    }
+    const root = this.window.contentView;
+    // Over the pages, under the chrome and anything floating above it.
+    if (!root.children.includes(this.dividerView)) {
+      const chromeAt = root.children.indexOf(this.chromeView);
+      root.addChildView(this.dividerView, chromeAt === -1 ? undefined : chromeAt);
+    }
+    this.dividerView.setBounds(halves.divider);
+    this.dividerView.setVisible(true);
+  }
+
+  /** The divider is being dragged: the split follows the pointer, within reason. */
+  dragSplit() {
+    if (!this.split || this.window.isDestroyed()) return;
+    const area = this.contentBounds();
+    const at = screen.getCursorScreenPoint();
+    const win = this.window.getContentBounds();
+    const x = at.x - win.x - area.x;
+    this.split.ratio = Math.min(0.8, Math.max(0.2, x / Math.max(1, area.width)));
+    this.layout();
+  }
+
+  /* ---------------------------------------------------------------- */
   /* Toasts                                                            */
   /* ---------------------------------------------------------------- */
 
@@ -1416,6 +1494,7 @@ class BrowserShell {
     send(this.suggestView, 'debrowser:state', { prefs });
     send(this.crashView, 'debrowser:state', { prefs });
     send(this.toastView, 'debrowser:state', { prefs });
+    send(this.dividerView, 'debrowser:state', { prefs });
 
     // Pinned at 1, and set rather than skipped.
     //
@@ -2224,11 +2303,14 @@ class BrowserShell {
     // and every tab switch.
     const reshape = this.laidOutCard !== radius;
     this.laidOutCard = radius;
+    const halves = this.splitBounds(bounds);
     for (const tab of this.tabs.all()) {
       if (!tab.view) continue;
-      tab.setBounds(bounds);
+      tab.setBounds(halves && tab.id === this.split.left ? halves.left
+        : halves && tab.id === this.split.right ? halves.right : bounds);
       if (reshape) setRadius(tab.view, radius);
     }
+    this.placeDivider(halves);
 
     if (this.placeholderView) {
       this.placeholderView.setBounds(bounds);
@@ -2286,7 +2368,7 @@ class BrowserShell {
   isChromeSender(sender) {
     if (!sender) return false;
     for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
-      this.toastView]) {
+      this.toastView, this.dividerView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }

@@ -568,7 +568,8 @@ function main() {
   const withExtras = (state) => ({
     ...state,
     ...(receipts ? { receipt: receipts.today() } : {}),
-    ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {})
+    ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {}),
+    ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {})
   });
 
   let publishQueued = false;
@@ -837,6 +838,13 @@ function main() {
         // renderer, and the listener died with the old one.
         bindPageShortcuts(tab);
         bindContextMenu(tab);
+        // Side by side, the half you click into becomes the tab in front, so
+        // the address bar and the keyboard follow it.
+        tab.wc.on('focus', () => {
+          if (shell && shell.inSplit(tab) && tabs.activeId !== tab.id) {
+            tabs.activate(tab.id).then(publish).catch(() => {});
+          }
+        });
         bindFind(tab);
         // A page objecting to being left - unsaved work, usually. Chrome's
         // question in Chrome's words; Leave is the default, as there. Answered
@@ -897,6 +905,7 @@ function main() {
           spaces.lastTab.set(tab.spaceId, tab.id);
         }
         if (shell) shell.attachTab(tab);
+        if (shell && shell.split) showSplitFor(tabs, shell, tab);
         // The keyboard follows the tab: switching with Ctrl+Tab left no view
         // focused, and the next key went nowhere. A tab still being rebuilt
         // takes it when its page exists ('realised' below).
@@ -940,6 +949,8 @@ function main() {
         if (payload?.favicon) icons.remember(payload.favicon);
         break;
       case 'closed':
+        // Half of a pair gone: the other has the window back.
+        if (shell && shell.inSplit(tab)) shell.setSplit(null);
         if (sitePrefs && !INCOGNITO) forgetIfLast(tab);
         if (circuits) circuits.forgetTab(tab.id);
         if (permissionAsks) permissionAsks.forget(tab);
@@ -2232,6 +2243,48 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      /*
+       * Split view: two tabs of the same space side by side.
+       */
+      case 'split-with-tab': {
+        const other = tabs.byId(payload?.id);
+        if (!active || !other || other === active || other.spaceId !== active.spaceId) break;
+        shell.setSplit({ left: active.id, right: other.id });
+        showSplitFor(tabs, shell, active);
+        publish();
+        break;
+      }
+
+      // A new tab beside the one in front, with the address bar ready.
+      case 'split-new': {
+        if (!active) break;
+        const beside = tabs.create({ url: newTabUrl(prefs), activate: false, realise: true, spaceId: active.spaceId,
+          index: tabs.all().indexOf(active) + 1 });
+        shell.setSplit({ left: active.id, right: beside.id });
+        goTo(beside.id);
+        break;
+      }
+
+      case 'unsplit':
+        if (!shell.split) break;
+        shell.setSplit(null);
+        for (const t of tabs.all()) if (t.visible && t !== active) t.setVisible(false);
+        publish();
+        break;
+
+      case 'split-swap':
+        if (shell.split) shell.setSplit({ left: shell.split.right, right: shell.split.left, ratio: 1 - shell.split.ratio });
+        break;
+
+      // From the divider (divider.js): follow the pointer, or share evenly.
+      case 'split-drag':
+        shell.dragSplit();
+        break;
+
+      case 'split-even':
+        if (shell.split) shell.setSplit({ ...shell.split, ratio: 0.5 });
+        break;
+
       // Ctrl+K: the address bar as a command bar.
       case 'command-bar':
         shell.bringSidebarOut();
@@ -2887,6 +2940,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               icon: 'mute',
               payload: { id }
             },
+            // Beside the tab in front, or back to one at a time.
+            ...(shell.inSplit(tab) ? [{ id: 'unsplit', label: 'Close split view', icon: 'close', payload: {} }]
+              : tabs.activeTab() && tab !== tabs.activeTab() && tab.spaceId === tabs.activeTab().spaceId
+                ? [{ id: 'split-with-tab', label: 'Show beside this tab', icon: 'expand', payload: { id } }] : []),
             ...(spaces && !INCOGNITO && spaces.list.length > 1 ? [{ kind: 'separator' },
               ...spaces.list.filter((sp) => sp.id !== tab.spaceId).map((sp) => ({
                 id: 'move-tab-to-space', label: `Move to ${sp.name}`, icon: 'forward', payload: { id, spaceId: sp.id }
@@ -4618,6 +4675,26 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
   if (kind === 'host') return `https://${text}`;
 
   return searchTemplate.replace('%s', encodeURIComponent(text));
+}
+
+/**
+ * Split view: one of the pair in front shows the other beside it; any other
+ * tab in front hides both. The shell lays them out (window.js, splitBounds).
+ */
+function showSplitFor(tabs, shell, tab) {
+  const s = shell.split;
+  const left = tabs.byId(s.left);
+  const right = tabs.byId(s.right);
+  if (!left || !right) { shell.setSplit(null); return; }
+  if (tab === left || tab === right) {
+    const other = tab === left ? right : left;
+    if (!other.isLive && !other.view) tabs.admit(other);
+    other.setVisible(true);
+    shell.attachTab(other);
+  } else {
+    for (const t of [left, right]) if (t.visible) t.setVisible(false);
+  }
+  shell.layout();
 }
 
 /** Everything a site stored in a session: its origins' storage, and its cookies on every subdomain. */

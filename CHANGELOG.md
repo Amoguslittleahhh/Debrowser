@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Split view.** Two tabs side by side: right-click a tab and choose "Show beside this tab", or "Split view" in the command bar for a new tab beside the one you are on. Drag the line between them to share the width out, double-click it to even them up; clicking into either side makes it the tab the address bar is about. Switching to another tab puts the pair away together and coming back brings both.
 - **Spaces.** Keep sets of tabs apart - Work, Home, a project, a trip - and switch between them from the chip at the head of the tab strip, the command bar, or Ctrl+Alt+PageDown. A space you leave goes to sleep after half a minute, so a project you are not working on costs nothing until you come back to it. A space can also keep its own cookies and sign-ins, so you can be signed in to the same site with two accounts at once, one in each. Tabs move between spaces from their right-click menu; Settings renames, recolours and removes them.
 - **Picture in picture.** Right-click a video and choose "Picture in picture" to watch it in a small window that stays over everything else.
 - **Screenshot a whole page.** "Screenshot page" in the menu, or in the command bar, saves the entire page - not just what fits on screen - as a PNG in your downloads folder. A page with a password or card field on it is never photographed.
