@@ -42,6 +42,8 @@ const COMMANDS = new Set([
   'open-safety',
   'open-receipt',
   'reader-view',
+  'picture-in-picture',
+  'screenshot-page',
   'reader-article',
   'receipt-week',
   'safety-status',

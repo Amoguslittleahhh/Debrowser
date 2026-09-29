@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Picture in picture.** Right-click a video and choose "Picture in picture" to watch it in a small window that stays over everything else.
+- **Screenshot a whole page.** "Screenshot page" in the menu, or in the command bar, saves the entire page - not just what fits on screen - as a PNG in your downloads folder. A page with a password or card field on it is never photographed.
 - **Reader view, with read aloud.** On a page with an article, a book button appears in the address bar (or press Ctrl+Alt+R): the article alone, in Debrowser's own type, with the text size and a serif face to choose, and "Read aloud" where your system has a voice. Nothing of the site's can run there. The same button goes back to the page.
 - **A sleeping tab starts waking while you choose it.** Highlighting one in tab search begins bringing it back before you press Enter, as resting the pointer on it in the tab strip already did, so it is ready sooner; if you move on, it goes back to sleep.
 - **A command bar: Ctrl+K.** Type what you want to do - "dark", "history", "sleep", "private" - and press Enter: every command the browser has, by name, each with its shortcut beside it. Typing `>` in the address bar does the same.

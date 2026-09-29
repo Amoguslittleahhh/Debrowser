@@ -27,6 +27,7 @@ const COMMANDS = [
   { title: 'Reader view', command: 'reader-view', keywords: 'read article clean', needsTab: true },
   { title: 'Find in page', command: 'find-open', keywords: 'search' },
   { title: 'Save page', command: 'save-page', keywords: 'download' },
+  { title: 'Screenshot the whole page', command: 'screenshot-page', keywords: 'capture image picture', needsTab: true },
   { title: 'Print', command: 'print' },
   { title: 'Zoom in', command: 'zoom', payload: { direction: 'in' }, keywords: 'bigger larger' },
   { title: 'Zoom out', command: 'zoom', payload: { direction: 'out' }, keywords: 'smaller' },

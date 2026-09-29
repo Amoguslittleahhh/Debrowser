@@ -86,6 +86,12 @@ function buildModel(params = {}, state = {}) {
     }
   }
 
+  // A video: out into its own small window, over everything else.
+  if (params.mediaType === 'video') {
+    if (items.length) items.push(sep());
+    items.push({ id: 'picture-in-picture', label: 'Picture in picture', icon: 'expand' });
+  }
+
   // An editable field gets the clipboard set, because that is the one place in
   // a browser where cut and paste are not the page's own business. `editFlags`
   // is Chromium's answer to what is actually possible in the field that was

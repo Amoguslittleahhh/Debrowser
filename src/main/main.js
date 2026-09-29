@@ -2298,6 +2298,48 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      // The video under the pointer - or the page's only one - in its own
+      // floating window; again to bring it back. In a world of its own, with
+      // the gesture the browser was given, which the page's API asks for.
+      case 'picture-in-picture': {
+        if (!active?.isLive) break;
+        const at = context.model?.tabId === active.id ? context.model.params : null;
+        const zoom = active.wc.getZoomFactor() || 1;
+        const x = Math.round((Number(at?.x) || 0) / zoom);
+        const y = Math.round((Number(at?.y) || 0) / zoom);
+        const code = `(() => {
+          const v = document.elementsFromPoint(${x}, ${y}).find((e) => e.tagName === 'VIDEO') ||
+            (document.querySelectorAll('video').length === 1 ? document.querySelector('video') : null);
+          if (!v) return false;
+          if (document.pictureInPictureElement === v) return document.exitPictureInPicture().then(() => true);
+          v.disablePictureInPicture = false;
+          return v.requestPictureInPicture().then(() => true, () => false);
+        })()`;
+        active.wc.executeJavaScriptInIsolatedWorld(1002, [{ code }], true)
+          .catch((err) => log(`picture in picture failed: ${err.message}`));
+        break;
+      }
+
+      // The whole page, top to bottom, as a PNG in the downloads folder. Never
+      // a page with a password or card field on it - the same rule as tab
+      // thumbnails (tab.js hasSensitiveFields).
+      case 'screenshot-page': {
+        if (!active?.isLive || active.internal) break;
+        if (active.hasSensitiveFields) { toast('Pages with a password or card field are not photographed'); break; }
+        (async () => {
+          const shot = await active.cdp?.send('Page.captureScreenshot',
+            { format: 'png', captureBeyondViewport: true, fromSurface: true }, 20_000);
+          if (!shot?.data) { toast('That page could not be photographed'); return; }
+          let host = 'page';
+          try { host = new URL(active.url).hostname.replace(/^www\./, ''); } catch { /* keep "page" */ }
+          const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '.');
+          const file = path.join(await downloadDir(prefs), `Screenshot ${host} ${stamp}.png`);
+          await fs.promises.writeFile(file, Buffer.from(shot.data, 'base64'));
+          toast('Screenshot saved', 'Show', () => electronShell.showItemInFolder(file));
+        })().catch((err) => { log(`screenshot failed: ${err.message}`); toast('That page could not be photographed'); });
+        break;
+      }
+
       case 'inspect': {
         if (!active?.isLive) break;
         const own = context.model?.tabId === active.id ? context.model.params : null;
@@ -4209,6 +4251,8 @@ function menuModel({ tabs, shell }) {
       checked: full
     },
     { id: 'save-page', label: 'Save page as\u2026', accel: accel('save-page'), icon: 'download',
+      enabled: live && !tabs.activeTab()?.internal },
+    { id: 'screenshot-page', label: 'Screenshot page', icon: 'image',
       enabled: live && !tabs.activeTab()?.internal },
     { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print',
       enabled: live && !tabs.activeTab()?.internal },

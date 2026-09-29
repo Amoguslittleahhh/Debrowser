@@ -1287,6 +1287,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // A screenshot of the whole page lands in the downloads folder as a PNG, and
+  // a video's context menu offers picture in picture.
+  {
+    const wasActive = tabs.activeTab();
+    const tab = tabs.create({ url: pageUrl('article.html'), activate: true, realise: true });
+    await waitFor(() => tab.isLive && !tab.wc.isLoading() && tab.hasSensitiveFields === false, { timeoutMs: 8000 });
+    // Under a test the downloads folder is the system's own, whatever Settings
+    // says (downloadDir): the file is looked for there, and removed after.
+    const dir = app.getPath('downloads');
+    const before = new Set(fs.existsSync(dir) ? fs.readdirSync(dir) : []);
+    const fresh = () => (fs.existsSync(dir) ? fs.readdirSync(dir) : []).filter((f) => !before.has(f) && /^Screenshot .*\.png$/.test(f));
+    runCommand('screenshot-page');
+    const isPng = (f) => { try { return fs.readFileSync(path.join(dir, f)).subarray(1, 4).toString() === 'PNG'; } catch { return false; } };
+    const saved = await waitFor(() => fresh().some(isPng), { timeoutMs: 10_000 });
+    const file = fresh()[0] || null;
+    const png = Boolean(file) && isPng(file);
+    for (const f of fresh()) fs.rmSync(path.join(dir, f), { force: true });
+    const menu = contextMenu.buildModel({ mediaType: 'video', x: 10, y: 10 }, {});
+    check('a screenshot of the whole page is saved as a PNG, and videos offer picture in picture',
+      saved && png && menu.some((i) => i.id === 'picture-in-picture'), `saved ${file}, png ${png}`);
+    tabs.close(tab.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');
