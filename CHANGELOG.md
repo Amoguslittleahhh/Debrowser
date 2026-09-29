@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A sleeping tab starts waking while you choose it.** Highlighting one in tab search begins bringing it back before you press Enter, as resting the pointer on it in the tab strip already did, so it is ready sooner; if you move on, it goes back to sleep.
 - **A command bar: Ctrl+K.** Type what you want to do - "dark", "history", "sleep", "private" - and press Enter: every command the browser has, by name, each with its shortcut beside it. Typing `>` in the address bar does the same.
 - **A receipt for what Debrowser did for you.** The new tab page says what today came to - "Today: 1.3 GB freed · 14 tabs slept · 312 trackers blocked" - and clicking it shows the week: memory given back by sleeping tabs, day by day, with the tabs slept, ads and trackers blocked, and links cleaned. Totals only, kept on your computer for seven days; nothing in it records which sites you visited.
 - **Battery mode.** On battery, tabs you are not using go to sleep about three times sooner and a background tab still using the processor is paused, so a laptop lasts longer; a leaf in the memory meter says it is on. Settings can make it always on, or off.

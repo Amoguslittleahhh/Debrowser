@@ -1794,9 +1794,16 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // The address bar's list: the highlight moved, it was dismissed, or a row
       // was taken - by the keyboard in the bar, or by a press in the list.
-      case 'suggest-select':
-        shell.selectSuggestion(Number(payload?.index ?? -1));
+      case 'suggest-select': {
+        const index = Number(payload?.index ?? -1);
+        shell.selectSuggestion(index);
+        // A sleeping tab highlighted in tab search starts waking before Enter,
+        // as one hovered in the strip does; the speculation lapses if the
+        // choice moves on (TabManager#speculate).
+        const item = (shell.suggestItems || [])[index];
+        if (item && item.kind === 'tab' && prefs.get('hoverPrefetch') !== false) tabs.speculate(item.tabId);
         break;
+      }
       case 'suggest-hide':
         shell.hideSuggestions();
         break;
