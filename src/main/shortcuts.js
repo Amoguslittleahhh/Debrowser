@@ -86,6 +86,8 @@ const TABLE = [
   { command: 'focus-address', key: 'f6' },
   { command: 'search-tabs', mod: true, shift: true, key: 'a' },
   { command: 'command-bar', mod: true, key: 'k' },
+  // Firefox's reader-view shortcut, on both.
+  { command: 'reader-view', mod: true, alt: true, key: 'r' },
 
   // Find
   { command: 'find-open', mod: true, key: 'f' },
@@ -238,6 +240,7 @@ function sheet({ incognito = false } = {}) {
       row('Reopen closed tab', 'reopen-closed-tab'),
       row('Search open tabs', 'search-tabs'),
       row('Command bar', 'command-bar'),
+      row('Reader view', 'reader-view'),
       row('Next tab', 'cycle-tab', { delta: 1 }),
       row('Previous tab', 'cycle-tab', { delta: -1 }),
       { label: 'Go to tab 1 to 8', keys: `${accelFor('select-tab', { index: 0 }).slice(0, -1)}1–8` },

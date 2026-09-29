@@ -1260,6 +1260,33 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `${all.length} rows; "dark" -> ${dark.map((r) => r.title).join(', ')}; ran ${ran}`);
   }
 
+  // Reader view: an article page is marked readable, opens as the article with
+  // nothing that could run, and the button takes it back to the page.
+  {
+    const wasActive = tabs.activeTab();
+    const url = pageUrl('reader.html');
+    const tab = tabs.create({ url, activate: true, realise: true });
+    const readable = await waitFor(() => tab.readerable === true, { timeoutMs: 8000 });
+    runCommand('reader-view');
+    const opened = await waitFor(() => tab.isLive && pages.pageName(tab.wc.getURL()) === 'reader' && !tab.wc.isLoading(), { timeoutMs: 8000 });
+    await sleep(400);
+    const shown = opened ? await tab.wc.executeJavaScript(`({
+      title: document.getElementById('title').textContent,
+      paragraphs: document.querySelectorAll('#content p').length,
+      handlers: document.querySelectorAll('#content [onclick], #content script').length,
+      badLinks: [...document.querySelectorAll('#content a')].filter((a) => !/^https?:/.test(a.getAttribute('href') || '')).length
+    })`).catch(() => null) : null;
+    runCommand('reader-view');
+    const back = await waitFor(() => tab.isLive && tab.wc.getURL() === url, { timeoutMs: 8000 });
+    check('reader view shows the article clean, and the button goes back to the page',
+      readable && shown && shown.title === 'The long read' && shown.paragraphs >= 3 && shown.handlers === 0 &&
+      shown.badLinks === 0 && back,
+      `readable ${readable}, shown ${JSON.stringify(shown)}, back ${back}`);
+    tabs.close(tab.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

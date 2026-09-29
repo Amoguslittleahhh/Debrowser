@@ -84,6 +84,13 @@
            toolbar is the address and nothing else once the strip is tucked away. -->
       <button class="onion-btn" id="drm" hidden
         title="This page plays protected (DRM) video, which Debrowser cannot play. Click to open it in your other browser.">Protected video ↗</button>
+      <!-- Reader view: only where the page has an article (reader.js in main). -->
+      <button class="icon-btn reader-btn" id="reader" hidden title="Reader view (Ctrl+Alt+R)" aria-label="Reader view">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2.5 3.5h4a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 0-1.5-1.5h-4z"/>
+          <path d="M13.5 3.5h-4A1.5 1.5 0 0 0 8 5v8a1.5 1.5 0 0 1 1.5-1.5h4z"/>
+        </svg>
+      </button>
       <button class="icon-btn star" id="star" title="Bookmark this page (Ctrl+D)" aria-label="Bookmark this page">
         <svg viewBox="0 0 16 16" aria-hidden="true" id="star-icon">
           <path d="M8 2.2l1.76 3.57 3.94.57-2.85 2.78.67 3.92L8 11.2l-3.52 1.85.67-3.92L2.3 6.34l3.94-.57z"/>

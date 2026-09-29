@@ -41,6 +41,8 @@ const COMMANDS = new Set([
   'allow-danger',
   'open-safety',
   'open-receipt',
+  'reader-view',
+  'reader-article',
   'receipt-week',
   'safety-status',
   'safety-revoke',

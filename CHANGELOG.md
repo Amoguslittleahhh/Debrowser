@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Reader view, with read aloud.** On a page with an article, a book button appears in the address bar (or press Ctrl+Alt+R): the article alone, in Debrowser's own type, with the text size and a serif face to choose, and "Read aloud" where your system has a voice. Nothing of the site's can run there. The same button goes back to the page.
 - **A sleeping tab starts waking while you choose it.** Highlighting one in tab search begins bringing it back before you press Enter, as resting the pointer on it in the tab strip already did, so it is ready sooner; if you move on, it goes back to sleep.
 - **A command bar: Ctrl+K.** Type what you want to do - "dark", "history", "sleep", "private" - and press Enter: every command the browser has, by name, each with its shortcut beside it. Typing `>` in the address bar does the same.
 - **A receipt for what Debrowser did for you.** The new tab page says what today came to - "Today: 1.3 GB freed · 14 tabs slept · 312 trackers blocked" - and clicking it shows the week: memory given back by sleeping tabs, day by day, with the tabs slept, ads and trackers blocked, and links cleaned. Totals only, kept on your computer for seven days; nothing in it records which sites you visited.

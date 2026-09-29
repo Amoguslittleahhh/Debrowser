@@ -145,6 +145,9 @@ const ANSWERS = {
     { id: 'reopen-closed-tab', label: 'Reopen closed tab', icon: 'clock' }
   ] },
   'check-for-updates': STATE.updates,
+  'reader-article': { title: 'Why your browser uses so much memory', byline: 'By Sam Rivera', siteName: 'The Long Read',
+    url: 'https://example.com/story', length: 5200, lang: 'en',
+    content: '<p>Open a dozen tabs and look at what your computer says the browser is using. The number is usually startling, and it is not a bug.</p><h2>Every tab is a program</h2><p>A modern page is an application: it runs scripts, holds images decoded in memory, and keeps a copy of everything it might need again. Multiply that by every tab you leave open.</p><blockquote>The tab you are not looking at is still running.</blockquote><p>The fix is not fewer tabs. It is a browser that puts the ones you are not using to sleep, and gives the memory back.</p>' },
   'receipt-week': { week: [
     { date: '2026-09-23', freedMB: 1840, slept: 22, blocked: 610, cleaned: 12, stopped: 0 },
     { date: '2026-09-24', freedMB: 2410, slept: 31, blocked: 902, cleaned: 18, stopped: 1 },
@@ -216,6 +219,7 @@ const SHOTS = [
   { name: 'site',     file: 'site.html',     w: 420,  h: 340 },
   { name: 'safety', file: 'safety.html', w: 1100, h: 1000 },
   { name: 'receipt', file: 'receipt.html', w: 1100, h: 720 },
+  { name: 'reader', file: 'reader.html', w: 1100, h: 760, query: { t: 'x' } },
   { name: 'danger', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://paypa1.com/login', kind: 'lookalike', like: 'paypal.com' } },
   { name: 'danger-phish', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://secure-login.bank-verify.example/', kind: 'phishing' } },
   { name: 'toast', file: 'toast.html', w: 460, h: 84,

@@ -1081,6 +1081,7 @@ body[data-layout="left"] .tab.active { background: var(--bg-input); }
 .star svg { fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linejoin: round; }
 .star.on { color: var(--accent); }
 .star.on svg { fill: currentColor; }
+.reader-btn.on { color: var(--accent); }
 
 /* A saved bookmark is worth one beat of acknowledgement and no more. */
 .star.on svg { animation: star-pop var(--slow) var(--ease); }

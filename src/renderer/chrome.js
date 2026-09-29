@@ -51,6 +51,7 @@ const el = {
   reloadIcon: document.getElementById('reload-icon'),
   progress: document.getElementById('progress'),
   star: document.getElementById('star'),
+  reader: document.getElementById('reader'),
   privatePill: document.getElementById('private'),
   onion: document.getElementById('onion'),
   drm: document.getElementById('drm'),
@@ -1117,6 +1118,11 @@ function renderToolbar(state) {
   }
   if (active) lastActiveId = active.id;
   el.drm.hidden = !active?.drm;
+  // In reader view the same button is the way back, and shows as pressed.
+  const reading = /^debrowser:\/\/reader/.test(active?.url || '');
+  el.reader.hidden = !(active?.readerable || reading);
+  el.reader.classList.toggle('on', reading);
+  el.reader.setAttribute('aria-pressed', String(reading));
 
   // A website away from the default size says so, and one press puts it back.
   // Not for our own pages: Settings opens a notch larger on purpose.
@@ -1303,6 +1309,7 @@ el.back.addEventListener('click', () => api.send('back'));
 el.forward.addEventListener('click', () => api.send('forward'));
 el.reload.addEventListener('click', () => api.send(reloadShows === 'stop' ? 'stop' : 'reload'));
 
+el.reader.addEventListener('click', () => api.send('reader-view'));
 el.star.addEventListener('click', async () => {
   const res = await api.request('toggle-bookmark');
   if (!res) return;

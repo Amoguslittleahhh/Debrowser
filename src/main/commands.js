@@ -24,6 +24,7 @@ const COMMANDS = [
   { title: 'Pin tab', command: 'pin-tab', keywords: 'unpin', needsTab: true },
   { title: 'Mute tab', command: 'mute-tab', keywords: 'sound unmute', needsTab: true },
   { title: 'Bookmark this page', command: 'bookmark-page', keywords: 'star save', needsTab: true },
+  { title: 'Reader view', command: 'reader-view', keywords: 'read article clean', needsTab: true },
   { title: 'Find in page', command: 'find-open', keywords: 'search' },
   { title: 'Save page', command: 'save-page', keywords: 'download' },
   { title: 'Print', command: 'print' },

@@ -29,6 +29,8 @@ const { LinkCleaner } = require('./link-cleaner');
 const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
 const { commandList } = require('./commands');
+const reader = require('./reader');
+const readerStore = new reader.ReaderStore();
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -836,6 +838,13 @@ function main() {
         }
         break;
       case 'loaded':
+        // Is there an article here for reader view? Asked after the load, in
+        // a world of its own; the answer shows the button in the address bar.
+        if (!tab.internal && tab.isLive) {
+          reader.readerable(tab.wc).then((yes) => {
+            if (tab.readerable !== yes) { tab.readerable = yes; publish(); }
+          });
+        }
         // Fill on load, for passwords only. Payment details are never filled
         // without a click; see the note on fillSavedLogin.
         fillSavedLogin(tab, credentials, prefs, log, vault);
@@ -2016,7 +2025,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (active?.isLive && active.wc.navigationHistory.canGoBack()) active.goInHistory(-1);
         // The plain-HTTP question has a renderer of its own and so no history:
         // back is the page the tab showed before it.
-        else if (active?.isLive && ['insecure', 'danger'].includes(pages.pageName(active.url)) && active.insecureReturn) {
+        else if (active?.isLive && ['insecure', 'danger', 'reader'].includes(pages.pageName(active.url)) && active.insecureReturn) {
           active.rebuildFor(active.insecureReturn);
         }
         break;
@@ -2039,6 +2048,24 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'reload-hard':
         if (active?.isLive) active.wc.reloadIgnoringCache();
         break;
+
+      // Reader view: the article, in the same tab; Back returns to the page.
+      // From the reader page itself, it is the way back.
+      case 'reader-view': {
+        if (!active || !active.isLive) break;
+        if (pages.pageName(active.url) === 'reader') {
+          if (active.insecureReturn) active.rebuildFor(active.insecureReturn);
+          break;
+        }
+        const from = active.url;
+        reader.extract(active.wc).then((article) => {
+          if (!article) { toast('This page has no article to show in reader view'); return; }
+          const token = readerStore.put(article, from);
+          active.rebuildFor(`${pages.READER_URL}?t=${token}`);
+          active.insecureReturn = from;
+        }).catch((err) => log(`reader view failed: ${err.message}`));
+        break;
+      }
 
       // Ctrl+K: the address bar as a command bar.
       case 'command-bar':
@@ -3091,6 +3118,11 @@ const PAGE_POLICY = new Map([
     requests: new Set()
   }],
   // The dangerous-site warning: back, the site it was mistaken for, or on.
+  // Reader view: its article, links out, and the way back.
+  ['reader', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'reader-view', 'navigate', 'back']),
+    requests: new Set(['reader-article'])
+  }],
   ['receipt', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab', 'toggle-panel']),
     requests: new Set(['receipt-week'])
@@ -3438,6 +3470,12 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'remove-bookmark':
         return { removed: bookmarks.remove(String(payload?.id ?? '')) };
+
+      // The article a reader page was opened for, by the token in its address.
+      case 'reader-article': {
+        const article = readerStore.get(payload?.t);
+        return article ? { ...article } : null;
+      }
 
       // The week's receipt, for its page.
       case 'receipt-week':

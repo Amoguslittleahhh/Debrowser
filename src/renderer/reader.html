@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- The article's own images may load; nothing of the site's may run. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src https: http: data:; media-src https:;">
+  <title>Reader view</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="reader.css">
+</head>
+<body>
+  <!--
+    A page's article (reader.js in main), in the browser's type. What the site
+    wrote is sanitised before it is put on the page: no script, frame, form,
+    style or event handler survives, and links are followed by the browser.
+  -->
+  <div class="bar" role="toolbar" aria-label="Reader view">
+    <button type="button" id="original" title="Back to the page (Ctrl+Alt+R)">Original page</button>
+    <span class="spacer"></span>
+    <button type="button" id="smaller" aria-label="Smaller text">A−</button>
+    <button type="button" id="larger" aria-label="Larger text">A+</button>
+    <button type="button" id="face" aria-pressed="false">Serif</button>
+    <button type="button" id="speak" hidden>Read aloud</button>
+  </div>
+  <article id="article">
+    <p class="site" id="site"></p>
+    <h1 id="title"></h1>
+    <p class="byline" id="byline"></p>
+    <p class="time" id="time"></p>
+    <div class="content" id="content"></div>
+  </article>
+  <p class="empty" id="empty" hidden>This article is no longer here. Go back to the page and open reader view again.</p>
+  <script src="theme.js"></script>
+  <script src="reader.js"></script>
+</body>
+</html>

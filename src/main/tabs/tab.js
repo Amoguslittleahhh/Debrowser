@@ -1125,6 +1125,8 @@ class Tab {
       everVisible: this.everVisible,
       audible: this.audible,
       muted: this.muted,
+      // The page has an article reader view can show (reader.js).
+      readerable: this.readerable === true,
       loading: this.loading,
       crashed: this.crashed,
       // The page asked for DRM video this browser cannot play; see probe-preload.js.
