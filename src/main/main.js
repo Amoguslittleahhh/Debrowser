@@ -24,6 +24,7 @@ const { SiteZoom } = require('./zoom');
 const { SitePrefs } = require('./site-prefs');
 const { ContentBlocker } = require('./blocker');
 const { HttpsFirst } = require('./https-first');
+const { ThirdPartyCookies } = require('./third-party');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -1026,6 +1027,14 @@ function main() {
     if (!INCOGNITO) {
       HttpsFirst.current = new HttpsFirst(() => prefs.get('httpsMode'));
       HttpsFirst.current.attach(session.fromPartition(BROWSING_PARTITION));
+    }
+
+    // Other sites' cookies (third-party.js). A private window gives every tab
+    // its own partition and keeps nothing, so it has no need of this.
+    if (!INCOGNITO) {
+      new ThirdPartyCookies(() => prefs.get('blockThirdPartyCookies') !== false,
+        (page) => sitePrefs.get(SitePrefs.hostOf(page), 'thirdPartyCookies') === true)
+        .attach(session.fromPartition(BROWSING_PARTITION));
     }
 
     // Ads and trackers (blocker.js). Not in a private window. Under a test, a
@@ -2212,6 +2221,16 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      // Other sites' cookies on this site: let back in where a sign-in or an
+      // embed needs them. The page reloads to pick them up.
+      case 'site-third-party': {
+        const host = active && SitePrefs.hostOf(active.url);
+        if (!host || !sitePrefs || INCOGNITO) break;
+        sitePrefs.set(host, 'thirdPartyCookies', payload?.allow === true ? true : null);
+        if (active.isLive) active.wc.reload();
+        break;
+      }
+
       // How readily this site's tabs sleep: normally, never, or early.
       case 'site-sleep': {
         const host = active && SitePrefs.hostOf(active.url);
@@ -3174,6 +3193,8 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
             blocked: active.isLive ? blocker.countFor(active.wc) : 0
           } : null,
           sleep: sitePrefs && origin ? sitePrefs.get(SitePrefs.hostOf(active.url), 'sleep') || 'normal' : null,
+          thirdPartyCookies: sitePrefs && origin && !INCOGNITO && prefs.get('blockThirdPartyCookies') !== false
+            ? { blocked: sitePrefs.get(SitePrefs.hostOf(active.url), 'thirdPartyCookies') !== true } : null,
           zoom: active.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100,
           zoomDefault: Math.round((Number(prefs.get('defaultZoom')) || 1) * 100)
         };

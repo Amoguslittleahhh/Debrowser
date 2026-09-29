@@ -42,7 +42,33 @@ class WebHooks {
     this.session = session;
     this.before = [];
     this.headers = [];
-    this.installed = { before: false, headers: false };
+    this.sending = [];
+    this.installed = { before: false, headers: false, sending: false };
+  }
+
+  /**
+   * The headers a request is about to send. A handler returns
+   * { requestHeaders } to change them for the handlers after it and for the
+   * request; { cancel: true } stops it.
+   */
+  onBeforeSendHeaders(handler) {
+    this.sending.push(handler);
+    if (this.installed.sending) return;
+    this.installed.sending = true;
+    this.session.webRequest.onBeforeSendHeaders(FILTER, (details, callback) => {
+      let edited = null;
+      const each = (r) => {
+        if (r && r.requestHeaders) {
+          edited = r.requestHeaders;
+          details = { ...details, requestHeaders: edited };
+        }
+        return Boolean(r && r.cancel);
+      };
+      run(this.sending, details, (result) => {
+        if (result && result.cancel) callback({ cancel: true });
+        else callback(edited ? { requestHeaders: edited } : {});
+      }, each, () => details);
+    });
   }
 
   onBeforeRequest(handler) {

@@ -1064,6 +1064,27 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       JSON.stringify({ up, local, fell, loop2, loopFell, allowed, off }));
   }
 
+  // Other sites' cookies: a request to another site from a page goes without
+  // them, one to the page's own site (subdomains included) keeps them, and a
+  // site the user let them in on keeps them too.
+  {
+    const { ThirdPartyCookies, isThirdParty } = require('./third-party');
+    let allowed = false;
+    const tpc = new ThirdPartyCookies(() => true, () => allowed);
+    const req = (url, top, resourceType = 'script') => ({ url, resourceType, frame: { top: { url: top } } });
+    const cases = [
+      isThirdParty('https://ads.tracker.com/p.js', 'https://news.example.co.uk/a'),
+      !isThirdParty('https://static.example.co.uk/app.js', 'https://www.example.co.uk/'),
+      tpc.refuses(req('https://ads.tracker.com/p.js', 'https://news.site/')),
+      !tpc.refuses(req('https://cdn.news.site/app.js', 'https://news.site/')),
+      !tpc.refuses(req('https://ads.tracker.com/', 'https://news.site/', 'mainFrame'))
+    ];
+    allowed = true;
+    cases.push(!tpc.refuses(req('https://ads.tracker.com/p.js', 'https://news.site/')));
+    check('other sites’ cookies are refused on a page, its own site’s are not, and a site can let them in',
+      cases.every(Boolean), JSON.stringify(cases));
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

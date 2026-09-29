@@ -105,6 +105,21 @@ function showInfo(info) {
     el.shield.hidden = false;
   }
 
+  // Other sites' cookies: blocked unless let in for this site.
+  if (info.thirdPartyCookies) {
+    const li = item(['M8 2.2a5.8 5.8 0 1 0 5.8 5.8 2 2 0 0 1-2.3-2.3A2 2 0 0 1 9.2 3.4 2 2 0 0 1 8 2.2z',
+      'M5.6 7.2h.01M8.4 10.6h.01M10.8 8.8h.01'], 'Block other sites’ cookies');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = info.thirdPartyCookies.blocked;
+    box.setAttribute('aria-label', 'Block other sites’ cookies on this site');
+    box.addEventListener('change', () => api.send('site-third-party', { allow: !box.checked }));
+    li.addEventListener('click', (event) => { if (event.target !== box) box.click(); });
+    li.append(box);
+    el.shield.append(li);
+    el.shield.hidden = false;
+  }
+
   // How readily its tabs sleep. Kept awake: chat, music, a dashboard.
   if (info.sleep) {
     const li = item(['M12.5 9.6A5 5 0 0 1 6.4 3.5a5 5 0 1 0 6.1 6.1z'], 'Sleep when unused');

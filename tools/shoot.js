@@ -145,7 +145,7 @@ const ANSWERS = {
   ] },
   'check-for-updates': STATE.updates,
   'site-info': { host: 'www.theguardian.com', secure: true, website: true, incognito: false, ask: null,
-    permissions: { notifications: 'block' }, blocking: { on: true, blocked: 23 }, sleep: 'never', zoom: 100, zoomDefault: 100 }
+    permissions: { notifications: 'block' }, blocking: { on: true, blocked: 23 }, sleep: 'never', thirdPartyCookies: { blocked: true }, zoom: 100, zoomDefault: 100 }
 };
 
 const SHOTS = [

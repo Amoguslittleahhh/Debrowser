@@ -249,6 +249,12 @@ const SECTIONS = {
       ]
     },
     {
+      key: 'blockThirdPartyCookies',
+      label: 'Block other sites’ cookies',
+      hint: 'Stops ad networks following you from site to site through the pages that carry them. If a sign-in or an embedded comment box stops working, allow them for that site from the padlock.',
+      type: 'checkbox'
+    },
+    {
       key: 'blockAds',
       label: 'Block ads and trackers',
       hint: 'Uses the lists uBlock Origin uses, updated weekly. Turn it off for one site from the padlock. Not in private windows, where every copy of the browser must look alike.',
