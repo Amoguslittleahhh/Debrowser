@@ -425,6 +425,19 @@ function main() {
   let governor = null;
   /** @type {TabManager|null} */
   let tabs = null;
+
+  // macOS hands a link to the default browser as an event, not an argument,
+  // and can do so before the first window exists: held until there are tabs.
+  const earlyUrls = [];
+  if (!INCOGNITO) {
+    app.on('open-url', (event, url) => {
+      event.preventDefault();
+      if (!/^https?:\/\//i.test(url)) return;
+      if (!tabs) { earlyUrls.push(url); return; }
+      tabs.create({ url });
+      if (shell && !shell.window.isDestroyed()) shell.window.focus();
+    });
+  }
   /** @type {Prefs|null} */
   let prefs = null;
   /** @type {Updater|null} */
@@ -1254,9 +1267,15 @@ function main() {
       // Nothing can load until Tor is connected, so the first page is the one
       // that says how far along it is. It moves on to a new tab by itself.
       tabs.create({ url: `${pages.TOR_URL}?then=newtab` });
+    } else if (!INCOGNITO && !OFFLINE_MODE && !prefs.get('welcomeDone')) {
+      // A new profile starts on the welcome tour.
+      tabs.create({ url: pages.WELCOME_URL });
     } else {
       tabs.create({ url: newTabUrl(prefs) });
     }
+    // Links the system handed over at launch - Debrowser as the default
+    // browser, a link clicked in another app - open after that, in front.
+    if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) tabs.create({ url });
     shell.layout();
     if (prewarm) prewarm.holdUntil(firstTabLoaded(tabs.activeTab()));
 
@@ -1331,7 +1350,7 @@ function main() {
     }
   });
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, secondArgv) => {
     // A window kept ready is shown, with the tab it already has.
     if (shell && shell.held) {
       shell.release();
@@ -1340,6 +1359,8 @@ function main() {
     // A second Ctrl+Shift+N reaches the incognito process that is already
     // running, and means what it says: another private tab.
     if (INCOGNITO && tabs) tabs.create({ url: pages.NEW_TAB_URL });
+    // A link opened while Debrowser runs arrives as a second launch.
+    if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [])) tabs.create({ url });
     if (shell && !shell.window.isDestroyed()) {
       if (shell.window.isMinimized()) shell.window.restore();
       shell.window.focus();
@@ -2101,6 +2122,31 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         publish();
         break;
 
+      // The welcome tour is through, or skipped: remember it, and put a new tab
+      // where it was.
+      case 'welcome-done': {
+        if (INCOGNITO) break;
+        prefs.set('welcomeDone', true);
+        const welcome = sender && tabs.all().find((t) => t.wc && !t.wc.isDestroyed() && t.wc.id === sender.id);
+        tabs.create({ url: newTabUrl(prefs) });
+        if (welcome) tabs.close(welcome.id);
+        publish();
+        break;
+      }
+
+      case 'open-welcome':
+        if (INCOGNITO) break;
+        openInternalPage(tabs, pages.WELCOME_URL);
+        publish();
+        break;
+
+      // Ask the system to make this the default browser. None of them let an
+      // app simply take it any more; each has its own way of asking the user.
+      case 'make-default':
+        if (INCOGNITO) break;
+        makeDefaultBrowser(log);
+        break;
+
       case 'open-passwords':
         if (INCOGNITO) break;
         openInternalPage(tabs, pages.PASSWORDS_URL);
@@ -2678,6 +2724,12 @@ const PAGE_POLICY = new Map([
     commands: new Set([...PAGE_COMMON_COMMANDS, 'open-settings', 'close-tab']),
     requests: new Set([...VAULT_RECORD_REQUESTS, 'vault-status', 'vault-lock', 'presence-capability'])
   }],
+  // The welcome tour: choices, bookmark import, the default-browser request,
+  // and moving on when it is done.
+  ['welcome', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'set-pref', 'welcome-done', 'make-default', 'close-tab']),
+    requests: new Set(['bookmark-profiles', 'import-from-profile', 'import-bookmark-file', 'default-browser-status'])
+  }],
   ['newtab', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'open-history']),
     requests: NEWTAB_REQUESTS
@@ -3010,6 +3062,12 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'bookmark-profiles':
         return { profiles: findProfiles() };
+
+      case 'default-browser-status': {
+        let isDefault = false;
+        try { isDefault = app.isDefaultProtocolClient('https'); } catch { /* unknown: say not */ }
+        return { isDefault, platform: process.platform };
+      }
 
       // Reads a profile this machine already has. Chromium-family files are
       // JSON and are read directly; Firefox-family ones are named and refused
@@ -3509,6 +3567,55 @@ function firstTabLoaded(tab) {
     const done = () => { clearTimeout(timer); setTimeout(resolve, 100); };
     if (tab && tab.wc && !tab.wc.isDestroyed()) tab.wc.once('did-finish-load', done);
   });
+}
+
+/**
+ * Web addresses and local pages among the arguments a launch was given: how
+ * the system hands a link to its default browser. Switches are not addresses,
+ * and nothing but http(s) and existing .html/.htm files is opened -
+ * a launch argument is outside input, and a `javascript:` or custom-scheme
+ * URL has no business arriving this way.
+ */
+function launchUrls(args) {
+  const out = [];
+  for (const arg of args.slice(1)) {
+    if (typeof arg !== 'string' || arg.startsWith('-')) continue;
+    if (/^https?:\/\//i.test(arg)) {
+      try { out.push(new URL(arg).href); } catch { /* not an address */ }
+      continue;
+    }
+    if (/\.html?$/i.test(arg)) {
+      try {
+        const full = path.resolve(arg);
+        if (fs.statSync(full).isFile()) out.push(require('url').pathToFileURL(full).href);
+      } catch { /* not a file */ }
+    }
+  }
+  return out.slice(0, 20);
+}
+
+/**
+ * Ask to be the default browser. Windows 10 and 11 let no app set this for
+ * itself: the Default apps page is opened, at Debrowser's own entry where
+ * Windows 11 supports that, and the user picks it there. macOS asks the user
+ * itself when an app claims http. Linux uses the desktop's xdg-settings.
+ */
+function makeDefaultBrowser(log) {
+  const fail = (err) => log(`could not ask to be the default browser: ${err.message}`);
+  if (process.platform === 'win32') {
+    electronShell.openExternal('ms-settings:defaultapps?registeredAppUser=Debrowser')
+      .catch(() => electronShell.openExternal('ms-settings:defaultapps').catch(fail));
+    return;
+  }
+  try {
+    app.setAsDefaultProtocolClient('http');
+    app.setAsDefaultProtocolClient('https');
+  } catch (err) { fail(err); }
+  if (process.platform === 'linux') {
+    const child = require('child_process').spawn('xdg-settings', ['set', 'default-web-browser', 'debrowser.desktop'],
+      { stdio: 'ignore' });
+    child.on('error', fail);
+  }
 }
 
 function newTabUrl(prefs) {

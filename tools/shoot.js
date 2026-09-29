@@ -169,6 +169,9 @@ const SHOTS = [
   // The tab list's own view, which is what is under the band while it is out.
   { name: 'band-strip', file: 'chrome.html', w: 252, h: 680, side: true, band: true, open: true, role: 'strip' },
   { name: 'settings', file: 'settings.html', w: 1280, h: 860 },
+  // The welcome tour, a step at a time.
+  ...['hello', 'import', 'look', 'browsing', 'default', 'tour', 'done'].map((step) =>
+    ({ name: `welcome-${step}`, file: 'welcome.html', w: 1280, h: 800, hash: step })),
   // The same page, scrolled to a section that would otherwise be eight screens
   // down. Worth its own shot because the rows there are built by hand rather
   // than from the settings descriptors, so nothing else photographs them.

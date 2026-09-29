@@ -97,6 +97,14 @@ publish:
   owner: Amoguslittleahhh
   repo: Debrowser
 
+## Web links, so Debrowser can be the default browser. On macOS this becomes
+## the app's URL types in Info.plist, which is what lets it be chosen; on Linux
+## the desktop entry's handlers, alongside `mimeTypes` below. Windows is
+## registered by the installer instead (packaging/installer.nsh).
+protocols:
+  - name: Web page
+    schemes: [http, https]
+
 ## ---------------------------------------------------------------------------
 ## Windows
 ## ---------------------------------------------------------------------------
@@ -283,6 +291,10 @@ linux:
     - target: tar.gz
       arch: [x64]
   category: Network;WebBrowser
+  mimeTypes:
+    - text/html
+    - x-scheme-handler/http
+    - x-scheme-handler/https
   synopsis: A memory-adaptive web browser
   description: >
     A browser whose resource governor decides, every two seconds, how much

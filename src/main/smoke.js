@@ -890,6 +890,44 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     settingsTab.internal && floor === Tier.DISCARDED,
     `internal=${settingsTab.internal}, asked for discarded, allowed ${floor}`);
 
+  // The welcome tour: it loads in a tab with its bridge, a choice made in it
+  // reaches the preferences, and finishing it marks it done and leaves a new
+  // tab where it was.
+  {
+    const wasDone = prefs.get('welcomeDone');
+    const wasTheme = prefs.get('theme');
+    const wasActive = tabs.activeTab();
+    prefs.set('welcomeDone', false);
+    const welcome = tabs.create({ url: pages.WELCOME_URL, activate: true, realise: true });
+    await waitFor(() => welcome.isLive && !welcome.loading, { timeoutMs: 10_000 });
+    const drawn = await waitFor(async () => await welcome.wc.executeJavaScript(
+      `document.title === 'Welcome to Debrowser' && !document.querySelector('[data-step="hello"]').hidden`).catch(() => false),
+    { timeoutMs: 5000 });
+    const other = wasTheme === 'dark' ? 'light' : 'dark';
+    await welcome.wc.executeJavaScript(`document.getElementById('next').click();
+      document.getElementById('next').click();
+      document.querySelector('[data-pref="theme"] [data-value="${other}"]').click(); 1`);
+    const chosen = await waitFor(() => prefs.get('theme') === other, { timeoutMs: 3000 });
+    const pressed = await waitFor(async () => await welcome.wc.executeJavaScript(
+      `document.querySelector('[data-pref="theme"] [data-value="${other}"]').getAttribute('aria-pressed') === 'true'`)
+      .catch(() => false), { timeoutMs: 3000 });
+    const count = tabs.all().length;
+    await welcome.wc.executeJavaScript(`document.getElementById('skip').click(); 1`);
+    const finished = await waitFor(() => prefs.get('welcomeDone') === true &&
+      !tabs.all().includes(welcome) && tabs.all().length === count, { timeoutMs: 5000 });
+    check('the welcome tour loads, saves a choice as it is made, and finishing it leaves a new tab',
+      drawn && chosen && pressed && finished,
+      `drawn ${drawn}, theme saved ${chosen}, shown as chosen ${pressed}, finished ${finished}`);
+    prefs.set('theme', wasTheme);
+    prefs.set('welcomeDone', wasDone);
+    // Put things back as they were: the new tab it left goes, and the tab that
+    // was in front is again - what follows expects to find it there.
+    const left = tabs.activeTab();
+    if (left && left !== wasActive) tabs.close(left.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // Opening it twice focuses the one that is open rather than making a second,
   // which could disagree with the first about what the preferences are.
   // Actually ask for it a second time. Merely counting the tabs that exist

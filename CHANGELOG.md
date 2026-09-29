@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A welcome tour on first start.** A new install opens on a short tour: bring your bookmarks over from Chrome, Edge, Brave, Firefox or a bookmarks file; pick the theme, design, accent, where the tabs go and the bookmarks bar, with the browser changing around the page as you click; choose the search engine, whether tabs reopen at start, the memory meter and automatic updates; make Debrowser your default browser; and a quick look at what is different. Every step can be skipped, and the tour is in Settings to take again. Existing installs are not interrupted by it.
+- **Debrowser can be your default browser.** The Windows installer now registers it as a web browser, so it is listed in Windows' Default apps; macOS and Linux know it handles web links too. Settings shows whether it is the default, with a button to make it so. Links from other apps open in a new tab, whether or not Debrowser is already running.
 - **The page stays fully usable while the tucked-away tab panel is out.** The panel is now drawn in its own small view beside the page instead of in a clear layer over the whole window, so clicks, scrolling, dragging, dropped files, touch, the page's own cursors and docked developer tools all work beside it, including while the find bar, a menu or typing keeps the panel open.
 - **The tucked-away tab panel opens sooner and slides more smoothly.** It answers the left edge in about half the time, and nothing is laid out as it starts to move.
 - **Windows Hello no longer waits for ever** if Debrowser's own prompt cannot report back. After five minutes without an answer it gives up and closes the prompt, so a second try does not open a prompt on top of the first.

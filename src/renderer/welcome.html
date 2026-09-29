@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;">
+  <title>Welcome to Debrowser</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="welcome.css">
+</head>
+<body>
+  <!--
+    The first-run tour: one page, seven steps, each shown alone. Every choice
+    is saved the moment it is made, through the same set-pref the Settings page
+    uses, so the browser around this page changes as you click - the preview is
+    the browser itself. Skipping at any step keeps what was already chosen.
+    Opened on the first start of a new profile, and again from Settings.
+  -->
+  <main class="card" aria-live="polite">
+    <nav class="progress" aria-label="Steps" id="progress"></nav>
+
+    <section data-step="hello">
+      <div class="brand" aria-hidden="true">
+        <svg class="brand-mark" viewBox="0 0 64 64" width="44" height="44">
+          <rect x="10" y="10" width="44" height="44" rx="13" fill="none" stroke="currentColor" stroke-width="5.5"/>
+          <circle class="brand-dot" cx="26" cy="26" r="7"/>
+        </svg>
+      </div>
+      <h1>Welcome to Debrowser</h1>
+      <p class="lead">A browser that keeps out of the way of your computer. A few quick choices, and it's yours.</p>
+      <p class="fine">About a minute. You can skip any step, and change all of it later in Settings.</p>
+    </section>
+
+    <section data-step="import" hidden>
+      <h1>Bring your bookmarks</h1>
+      <p class="lead">From a browser already on this computer.</p>
+      <div class="list" id="profiles"><p class="fine">Looking for other browsers…</p></div>
+      <button class="link" id="import-file" type="button">Import from a bookmarks file instead</button>
+      <p class="note" id="import-note" role="status"></p>
+    </section>
+
+    <section data-step="look" hidden>
+      <h1>Make it look like yours</h1>
+      <p class="lead">Changes show around this page as you pick them.</p>
+      <div class="field">
+        <span class="label">Theme</span>
+        <div class="segmented" data-pref="theme">
+          <button type="button" data-value="system">System</button>
+          <button type="button" data-value="light">Light</button>
+          <button type="button" data-value="dark">Dark</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">Design</span>
+        <div class="choices four" data-pref="design">
+          <button type="button" data-value="ledger"><i class="swatch-ledger"></i>Ledger</button>
+          <button type="button" data-value="paper"><i class="swatch-paper"></i>Paper</button>
+          <button type="button" data-value="grid"><i class="swatch-grid"></i>Grid</button>
+          <button type="button" data-value="legacy"><i class="swatch-legacy"></i>Legacy</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="label">Accent</span>
+        <div class="swatches" data-pref="accent" id="accents"></div>
+      </div>
+      <div class="field">
+        <span class="label">Tabs</span>
+        <div class="choices two" data-pref="tabBarPosition">
+          <button type="button" data-value="top"><i class="tabs-top"></i>Across the top</button>
+          <button type="button" data-value="left"><i class="tabs-left"></i>Down the side</button>
+        </div>
+      </div>
+      <label class="toggle"><input type="checkbox" data-pref="showBookmarksBar"> Show the bookmarks bar</label>
+    </section>
+
+    <section data-step="browsing" hidden>
+      <h1>How you browse</h1>
+      <div class="field">
+        <span class="label">Search with</span>
+        <select data-pref="searchEngine" id="engines" aria-label="Search engine"></select>
+      </div>
+      <label class="toggle"><input type="checkbox" data-pref="restoreTabs">
+        <span>Reopen my tabs when I start Debrowser<small>Off starts with a fresh tab each time.</small></span></label>
+      <label class="toggle"><input type="checkbox" data-pref="showMemoryMeter">
+        <span>Show the memory meter<small>How much memory your tabs are using, in the toolbar.</small></span></label>
+      <label class="toggle"><input type="checkbox" data-pref="autoUpdate">
+        <span>Install updates automatically<small>Only what changed is downloaded.</small></span></label>
+    </section>
+
+    <section data-step="default" hidden>
+      <h1>Make Debrowser your default</h1>
+      <p class="lead">So links from other apps open here.</p>
+      <p class="note" id="default-state" role="status"></p>
+      <button class="primary wide" id="make-default" type="button">Make Debrowser the default</button>
+      <p class="fine" id="default-how"></p>
+    </section>
+
+    <section data-step="tour" hidden>
+      <h1>A few things that are different</h1>
+      <ul class="tour">
+        <li>
+          <strong>Tabs you aren't using go to sleep</strong>
+          <span>Debrowser keeps memory for the tabs in front of you. The meter in the toolbar opens the task manager.</span>
+        </li>
+        <li>
+          <strong>Private windows go through Tor</strong>
+          <span><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>N</kbd> opens one. Nothing from it is kept, and sites don't see where you are.</span>
+        </li>
+        <li>
+          <strong>Everything is a keystroke away</strong>
+          <span><kbd>Ctrl</kbd> <kbd>L</kbd> for the address bar, <kbd>Ctrl</kbd> <kbd>T</kbd> for a new tab, <kbd>Ctrl</kbd> <kbd>/</kbd> for all of them.</span>
+        </li>
+      </ul>
+    </section>
+
+    <section data-step="done" hidden>
+      <h1>You're all set</h1>
+      <p class="lead">Everything you chose can be changed in Settings, and this tour is there too.</p>
+    </section>
+
+    <footer>
+      <button class="link" id="skip" type="button">Skip</button>
+      <span class="spacer"></span>
+      <button class="secondary" id="back" type="button">Back</button>
+      <button class="primary" id="next" type="button">Get started</button>
+    </footer>
+  </main>
+
+  <script src="theme.js"></script>
+  <script src="welcome.js"></script>
+</body>
+</html>

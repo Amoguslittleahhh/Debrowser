@@ -470,7 +470,7 @@ let built = false;
 /* Building                                                            */
 /* ------------------------------------------------------------------ */
 
-function buildAll() {
+function buildAll(state = {}) {
   for (const [sectionId, rows] of Object.entries(SECTIONS)) {
     // By attribute, not id. An id named like the section is what a
     // `settings#browsing` link scrolls to by itself, and it landed on these
@@ -478,7 +478,41 @@ function buildAll() {
     const host = document.querySelector(`[data-rows="${sectionId}"]`);
     for (const row of rows) host.append(buildRow(row));
   }
+  // Not preferences, so not descriptors: the tour to take again, and asking
+  // the system to make this the default browser. Neither in a private window,
+  // which is never the default and has nothing to set up.
+  if (!state.incognito) {
+    document.querySelector('[data-rows="appearance"]').prepend(welcomeRow());
+    document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow());
+  }
   built = true;
+}
+
+function welcomeRow() {
+  const { row, control } = simpleRow('Welcome tour', 'Import, look, search and default browser, one step at a time.');
+  const open = smallButton('Open');
+  open.addEventListener('click', () => api.send('open-welcome'));
+  control.append(open);
+  return row;
+}
+
+function defaultBrowserRow() {
+  const { row, note, control } = simpleRow('Default browser', '');
+  const make = smallButton('Make default');
+  make.addEventListener('click', () => api.send('make-default'));
+  control.append(make);
+  const refresh = async () => {
+    const res = await api.request('default-browser-status');
+    const isDefault = Boolean(res && res.isDefault);
+    note.textContent = isDefault
+      ? 'Debrowser is your default browser.'
+      : 'Links from other apps open in another browser.';
+    make.hidden = isDefault;
+  };
+  refresh();
+  // Back from the system's own settings is when it may have changed.
+  window.addEventListener('focus', refresh);
+  return row;
 }
 
 /**
@@ -1050,7 +1084,7 @@ api.onState((state) => {
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) {
-    buildAll(); renderPasscode(); renderBookmarks();
+    buildAll(state); renderPasscode(); renderBookmarks();
     buildRail();
     revealSection();
   }

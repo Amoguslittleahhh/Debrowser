@@ -168,6 +168,13 @@ const SCHEMA = {
   restoreTabs: { def: false, ok: (v) => typeof v === 'boolean' },
 
   /**
+   * Whether the welcome tour has been through, or skipped. A new profile
+   * starts on it; a profile from before it existed counts as done (see load),
+   * since someone who has used the browser for months does not need greeting.
+   */
+  welcomeDone: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
    * Where a bookmark opens when it is clicked.
    *
    * A new tab by default. Replacing the page in front of you is the other
@@ -385,6 +392,8 @@ class Prefs {
     }
 
     if (!raw || typeof raw !== 'object') return values;
+    // A profile from before the tour: already set up, so not greeted.
+    if (!Object.hasOwn(raw, 'welcomeDone')) values.welcomeDone = true;
 
     for (const [key, value] of Object.entries(raw)) {
       const spec = SCHEMA[key];

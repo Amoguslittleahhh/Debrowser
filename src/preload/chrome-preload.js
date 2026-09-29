@@ -122,6 +122,11 @@ const COMMANDS = new Set([
   'remove-bookmark',
   'save-bookmark',
   'bookmark-profiles',
+  // The welcome tour (welcome.html).
+  'welcome-done',
+  'make-default',
+  'default-browser-status',
+  'open-welcome',
   'import-from-profile',
   'import-bookmark-file',
   'presence-capability',

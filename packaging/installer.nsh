@@ -14,7 +14,53 @@
 !define INCOGNITO_EXE "Debrowser-Incognito.exe"
 !define INCOGNITO_RULE "Debrowser private window"
 
+; Registered as a web browser, so Windows lists Debrowser under Default apps
+; and the welcome tour's "Make Debrowser the default" has something to point
+; at. Per-user, like the install: HKCU, no prompt. Windows 10 and 11 let no
+; app make itself the default; this only offers it, and the user chooses.
+!define BROWSER_KEY "Software\Clients\StartMenuInternet\Debrowser"
+!define URL_PROGID "DebrowserURL"
+!define HTML_PROGID "DebrowserHTML"
+
+!macro registerProgId PROGID DESC
+  WriteRegStr HKCU "Software\Classes\${PROGID}" "" "${DESC}"
+  WriteRegStr HKCU "Software\Classes\${PROGID}" "FriendlyTypeName" "${DESC}"
+  WriteRegStr HKCU "Software\Classes\${PROGID}\DefaultIcon" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
+  WriteRegStr HKCU "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+!macroend
+
+!macro registerBrowser
+  !insertmacro registerProgId "${URL_PROGID}" "Debrowser URL"
+  WriteRegStr HKCU "Software\Classes\${URL_PROGID}" "URL Protocol" ""
+  !insertmacro registerProgId "${HTML_PROGID}" "Debrowser HTML Document"
+
+  WriteRegStr HKCU "${BROWSER_KEY}" "" "Debrowser"
+  WriteRegStr HKCU "${BROWSER_KEY}\DefaultIcon" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
+  WriteRegStr HKCU "${BROWSER_KEY}\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities" "ApplicationName" "Debrowser"
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities" "ApplicationDescription" "A web browser that keeps out of the way of your computer."
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities" "ApplicationIcon" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\StartMenu" "StartMenuInternet" "Debrowser"
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\URLAssociations" "http" "${URL_PROGID}"
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\URLAssociations" "https" "${URL_PROGID}"
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\FileAssociations" ".htm" "${HTML_PROGID}"
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\FileAssociations" ".html" "${HTML_PROGID}"
+  WriteRegStr HKCU "Software\RegisteredApplications" "Debrowser" "${BROWSER_KEY}\Capabilities"
+  ; Tell Explorer the associations changed, so Default apps lists it at once.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+!macroend
+
+!macro unregisterBrowser
+  DeleteRegValue HKCU "Software\RegisteredApplications" "Debrowser"
+  DeleteRegKey HKCU "${BROWSER_KEY}"
+  DeleteRegKey HKCU "Software\Classes\${URL_PROGID}"
+  DeleteRegKey HKCU "Software\Classes\${HTML_PROGID}"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+!macroend
+
 !macro customInstall
+  !insertmacro registerBrowser
+
   ; Re-made on every install: an update replaces the real executable, and a
   ; hard link to the old file would keep running the old version.
   Delete "$INSTDIR\${INCOGNITO_EXE}"
@@ -30,6 +76,7 @@
 !macroend
 
 !macro customUnInstall
+  !insertmacro unregisterBrowser
   Delete "$INSTDIR\${INCOGNITO_EXE}"
   ; The rule is left: removing it needs elevation, and a rule naming a file
   ; that no longer exists blocks nothing and costs nothing.
