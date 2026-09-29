@@ -1722,7 +1722,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     if (!settingsTab.visible) { await tabs.activate(settingsTab.id); await sleep(300); }
     const railAtEnd = await settingsTab.wc.executeJavaScript(`(async () => {
       const main = document.querySelector('main');
-      main.scrollTop = main.scrollHeight;
+      // Again until it holds: sections that fill in from requests (updates,
+      // downloads) can lengthen the page after the first scroll to its end.
+      const end = () => Math.abs(main.scrollTop + main.clientHeight - main.scrollHeight) < 2;
+      for (let i = 0; i < 10; i++) {
+        main.scrollTop = main.scrollHeight;
+        await new Promise((r) => setTimeout(r, 200));
+        if (end()) break;
+      }
       await new Promise((r) => setTimeout(r, 400));
       const marked = document.querySelector('.rail-item.current');
       const last = [...document.querySelectorAll('section[data-section]')]
@@ -4743,6 +4750,78 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     tabs.create({ url: pageUrl('idle.html') });
 
     for (const [key, value] of saved) prefs.set(key, value);
+  }
+
+  // The performance budgets (the premium bar): a new tab drawn, the command bar
+  // open, no long task in the chrome while switching tabs, and a chrome that
+  // costs nothing when nothing is happening. Measured on a virtual display
+  // with no GPU, so each allows three times the target on a real machine: they
+  // are here to catch a regression - a synchronous layout, a timer left
+  // running - not to grade the runner.
+  {
+    const SLACK = 3;
+    const { paintedAt, nextFrameAt } = require('./speed');
+    const chrome = shell.chromeView.webContents;
+    const median = (xs) => xs.filter(Number.isFinite).sort((x, y) => x - y)[Math.floor(xs.length / 2)];
+
+    const newTab = [];
+    for (let i = 0; i < 5; i++) {
+      const t0 = Date.now();
+      runCommand('new-tab', {});
+      const tab = tabs.activeTab();
+      await waitFor(() => tab.isLive && tab.wc, { timeoutMs: 5000, pollMs: 5 });
+      let at = await paintedAt(tab.wc, 5000);
+      if (at && at < t0) at = await nextFrameAt(tab.wc);
+      newTab.push(at ? at - t0 : NaN);
+      await waitFor(() => !tab.loading, { timeoutMs: 3000 });
+      runCommand('close-tab', { id: tab.id });
+      await sleep(150);
+    }
+
+    const bar = [];
+    for (let i = 0; i < 5; i++) {
+      const shown = chrome.executeJavaScript(`new Promise((resolve) => {
+        const field = document.getElementById('url');
+        const look = () => (field && field.value.startsWith('>')
+          ? requestAnimationFrame(() => resolve(performance.timeOrigin + performance.now()))
+          : requestAnimationFrame(look));
+        look();
+      })`, true);
+      await sleep(30);
+      const t0 = Date.now();
+      runCommand('command-bar');
+      const at = await Promise.race([shown, sleep(3000).then(() => null)]);
+      bar.push(at ? at - t0 : NaN);
+      await chrome.executeJavaScript(`(() => { const f = document.getElementById('url');
+        f.value = ''; f.dispatchEvent(new Event('input', { bubbles: true })); f.blur(); })()`).catch(() => {});
+      await sleep(150);
+    }
+
+    // Long tasks in the chrome while switching back and forth between tabs.
+    await chrome.executeJavaScript(`window.__longTasks = [];
+      new PerformanceObserver((l) => window.__longTasks.push(...l.getEntries().map((e) => e.duration)))
+        .observe({ type: 'longtask' }); true`).catch(() => {});
+    const a = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    const b = tabs.create({ url: pageUrl('article.html'), activate: true, realise: true });
+    await waitFor(() => a.isLive && b.isLive && !a.wc.isLoading() && !b.wc.isLoading(), { timeoutMs: 8000 });
+    for (let i = 0; i < 8; i++) { await tabs.activate((i % 2 ? a : b).id); await sleep(120); }
+    const longest = Math.max(0, ...(await chrome.executeJavaScript('window.__longTasks').catch(() => [])));
+    for (const t of [a, b]) tabs.close(t.id);
+
+    // Nothing happening: the chrome's renderer should be all but idle.
+    await sleep(3000);
+    const chromePid = chrome.getOSProcessId();
+    const cpuOf = () => app.getAppMetrics().find((m) => m.pid === chromePid)?.cpu.percentCPUUsage;
+    cpuOf();
+    await sleep(3000);
+    const idleCpu = cpuOf();
+
+    const newTabMs = median(newTab);
+    const barMs = median(bar);
+    check('performance budgets: new tab, command bar, tab switching, idle chrome',
+      newTabMs < 100 * SLACK && barMs < 100 * SLACK && longest < 50 * SLACK && Number.isFinite(idleCpu) && idleCpu < 1 * SLACK,
+      `new tab ${Math.round(newTabMs)} ms (budget ${100 * SLACK}), command bar ${Math.round(barMs)} ms (${100 * SLACK}), ` +
+      `longest chrome task switching tabs ${Math.round(longest)} ms (${50 * SLACK}), idle chrome CPU ${idleCpu?.toFixed(2)}% (${SLACK})`);
   }
 
   /* ---------------------------------------------------------------- */

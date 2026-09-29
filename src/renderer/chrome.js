@@ -1353,11 +1353,19 @@ function setAddress(url, failed = false) {
   }
 }
 
+let meterRatio = -1;
 function renderMeter(state) {
-  const ratio = state.budgetMB ? state.totalMB / state.budgetMB : 0;
-  el.meterFill.style.transform = `scaleX(${Math.min(1, Math.max(0, ratio))})`;
-  el.meter.dataset.pressure = state.pressure;
-  el.meterText.textContent = `${state.totalMB} MB`;
+  // Moved only when the change can be seen. Under half a percent is under half
+  // a pixel of the bar, and each move is a transition to composite: on every
+  // governor tick, that was most of what an idle chrome spent.
+  const ratio = Math.min(1, Math.max(0, state.budgetMB ? state.totalMB / state.budgetMB : 0));
+  if (Math.abs(ratio - meterRatio) >= 0.005 || (ratio === 0) !== (meterRatio === 0)) {
+    meterRatio = ratio;
+    el.meterFill.style.transform = `scaleX(${ratio})`;
+  }
+  if (el.meter.dataset.pressure !== state.pressure) el.meter.dataset.pressure = state.pressure;
+  const text = `${state.totalMB} MB`;
+  if (el.meterText.textContent !== text) el.meterText.textContent = text;
   // An SVG element has no `hidden` property to set; the attribute itself.
   document.getElementById('meter-leaf').toggleAttribute('hidden', !state.saver);
   el.meter.title = (state.saver ? 'Battery mode: tabs sleep sooner to save power\n' : '') +

@@ -272,4 +272,4 @@ function print(report, startup) {
   console.log('\n  (milliseconds; command to first contentful paint, local fixtures)\n');
 }
 
-module.exports = { runSpeed, print, paintedAt, pages };
+module.exports = { runSpeed, print, paintedAt, nextFrameAt, pages };
