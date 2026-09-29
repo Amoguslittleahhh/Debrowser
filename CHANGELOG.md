@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **JavaScript hardening for every window, if you want it.** Settings → Advanced can turn off the JavaScript engine's optimising compilers everywhere, as private windows already do: most attacks on the engine go through them, everyday pages run as fast without them, and heavy ones - games, editors - run about half as fast. It takes effect at the next start, and is off by default.
 - **A safety check.** Settings opens a page with every protection in one place - secure connections, secure DNS, dangerous-site warnings, the blocker and how fresh its lists are, other sites' cookies, clean links - with what is off and where to turn it on, the way to the password check-up, and the sites allowed your camera, microphone, location or notifications, each with Remove.
 - **Unused permissions go by themselves.** A site that has not used the camera, microphone, location or notifications it was allowed for three months loses them, and asks again if it needs them. A refusal stays.
 - **A check-up for your saved passwords.** "Check passwords" on the Passwords page finds the ones that have turned up in data breaches, the ones used on more than one site, and the weak ones, and marks each on its row. Breaches are looked up with Have I Been Pwned's range search: only the first five characters of a scrambled form of each password leave your computer, never the password.

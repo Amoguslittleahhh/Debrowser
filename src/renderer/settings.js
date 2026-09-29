@@ -472,6 +472,17 @@ const SECTIONS = {
 
   advanced: [
     {
+      key: 'hardenJavaScript',
+      label: 'JavaScript security',
+      hint: 'The private window’s protection, for every window: Balanced turns off the optimising compilers, where most attacks on the engine land - everyday pages run as fast, heavy computation such as games and editors about half as fast. Applies when Debrowser next starts.',
+      type: 'select',
+      options: [
+        { value: 'full', name: 'Full speed' },
+        { value: 'balanced', name: 'Balanced – heavy scripts ~2× slower' },
+        { value: 'maximum', name: 'Maximum – no WebAssembly, text search ~4× slower' }
+      ]
+    },
+    {
       key: 'showMemoryDetail',
       label: 'Explain the memory figures',
       hint: 'Adds notes to the task manager about what each number counts.',

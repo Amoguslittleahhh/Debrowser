@@ -271,11 +271,6 @@ if (!INCOGNITO && (SMOKE_TEST || SPEED_TEST || (argv.includes('--bench-test') &&
   app.commandLine.appendSwitch('host-resolver-rules', HOST_RESOLVER_RULES);
 }
 
-for (const [name, value] of platform.chromiumSwitches(cfg, incognitoCtx)) {
-  if (value === undefined) app.commandLine.appendSwitch(name);
-  else app.commandLine.appendSwitch(name, value);
-}
-
 // Hardware acceleration has to be decided before the app starts - Chromium
 // reads it once, at launch - so the preferences file is read here rather than
 // in whenReady. `app.getPath('userData')` is available this early; nothing else
@@ -289,6 +284,14 @@ const earlyPrefs = INCOGNITO
 if (earlyPrefs.get('hardwareAcceleration') === false) {
   app.disableHardwareAcceleration();
   log('config', 'hardware acceleration disabled by preference');
+}
+
+// After the preferences, which choose the ordinary browser's JavaScript
+// hardening (platform.js); a private window has its own level.
+if (!INCOGNITO) cfg.jsLevel = earlyPrefs.get('hardenJavaScript');
+for (const [name, value] of platform.chromiumSwitches(cfg, incognitoCtx)) {
+  if (value === undefined) app.commandLine.appendSwitch(name);
+  else app.commandLine.appendSwitch(name, value);
 }
 
 // The browser's own pages live behind a real scheme, so they have origins,

@@ -239,6 +239,10 @@ const SCHEMA = {
   // Plain-HTTP addresses are tried over HTTPS first (https-first.js):
   // 'upgrade' falls back quietly, 'strict' asks first, 'off' does neither.
   httpsMode: { def: 'upgrade', ok: (v) => v === 'upgrade' || v === 'strict' || v === 'off' },
+  // JavaScript hardening for the ordinary browser, at the next start:
+  // 'full' leaves the engine as it is; 'balanced' and 'maximum' are the
+  // private window's levels (incognito/mode.js JS_LEVELS).
+  hardenJavaScript: { def: 'full', ok: (v) => v === 'full' || v === 'balanced' || v === 'maximum' },
   // A warning before known phishing and malware sites, and look-alikes of
   // sites the user visits (threats.js).
   warnDangerousSites: { def: true, ok: (v) => typeof v === 'boolean' },

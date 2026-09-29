@@ -1180,6 +1180,15 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // JavaScript hardening for the ordinary browser reaches the engine's flags.
+  {
+    const balanced = platform.chromiumSwitches({ ...cfg, jsLevel: 'balanced' }, null).find(([n]) => n === 'js-flags');
+    const full = platform.chromiumSwitches({ ...cfg, jsLevel: 'full' }, null).find(([n]) => n === 'js-flags');
+    check('JavaScript hardening turns the optimising compilers off, and full speed leaves them',
+      /--no-turbofan/.test(balanced?.[1] || '') && !/--no-turbofan|--jitless/.test(full?.[1] || ''),
+      `balanced: ${balanced?.[1]}, full: ${full?.[1] ?? '(none)'}`);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

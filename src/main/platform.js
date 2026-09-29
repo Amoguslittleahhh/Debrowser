@@ -869,6 +869,11 @@ function chromiumSwitches(cfg, incognito = null) {
     const mode = require('./incognito/mode');
     jsFlags.push(...(mode.JS_LEVELS[incognito.jsLevel] || []));
     switches.push(...mode.switches(incognito));
+  } else if (cfg.jsLevel === 'balanced' || cfg.jsLevel === 'maximum') {
+    // The ordinary browser, hardened by choice (Settings): the same levels a
+    // private window uses - most attacks on the JavaScript engine go through
+    // its optimising compilers, and these turn them off.
+    jsFlags.push(...require('./incognito/mode').JS_LEVELS[cfg.jsLevel]);
   }
   if (jsFlags.length) switches.push(['js-flags', jsFlags.join(' ')]);
 
