@@ -37,6 +37,7 @@
 - **The tucked-away tab panel opens sooner and slides more smoothly.** It answers the left edge in about half the time, and nothing is laid out as it starts to move.
 - **Tucked away, Debrowser checks the left edge quickly only when the pointer is near it,** instead of forty times a second all day while the window has focus.
 - **Copy version info.** The menu, and the command bar, copy the Debrowser and Chromium versions, your system and your design in one go, for pasting into a bug report.
+- **What's new, after an update.** The first start of a new version says so in a note at the foot of the window, with "What's new" to read this version's notes in a tab; the menu and the command bar open them any time. Nothing opens by itself.
 
 ### Fixed
 

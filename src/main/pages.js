@@ -61,6 +61,8 @@ const PAGES = {
   safety: 'safety.html',
   // What the browser saved and stopped, day by day, for a week.
   receipt: 'receipt.html',
+  // This version's notes, after an update (whats-new.js).
+  'whats-new': 'whats-new.html',
   // Reader view: a page's article in the browser's own type.
   reader: 'reader.html',
   // Your own style sheet for one site (site-styles.js).
@@ -85,6 +87,7 @@ const INSECURE_URL = `${SCHEME}://insecure`;
 const DANGER_URL = `${SCHEME}://danger`;
 const SAFETY_URL = `${SCHEME}://safety`;
 const RECEIPT_URL = `${SCHEME}://receipt`;
+const WHATS_NEW_URL = `${SCHEME}://whats-new`;
 const READER_URL = `${SCHEME}://reader`;
 const STYLE_URL = `${SCHEME}://style`;
 const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
@@ -253,6 +256,7 @@ function titleFor(url) {
     case 'danger': return 'Warning';
     case 'safety': return 'Safety check';
     case 'receipt': return 'This week';
+    case 'whats-new': return 'What’s new';
     case 'reader': return 'Reader view';
     case 'style': return 'Site style';
     case 'fingerprint': return 'What sites can see';
@@ -262,5 +266,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
-  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
+  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

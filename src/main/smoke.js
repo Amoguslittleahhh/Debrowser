@@ -1189,6 +1189,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const info = String(await require('electron').clipboard.readText());
     check('Copy version info puts the versions and system on the clipboard',
       info.includes(`Debrowser ${app.getVersion()}`) && info.includes(`Chromium ${process.versions.chrome}`) && /Design: /.test(info), info);
+
+    runCommand('open-whats-new');
+    const notesPage = await waitFor(() => tabs.activeTab() && pages.pageName(tabs.activeTab().url) === 'whats-new', { timeoutMs: 5000 });
+    const items = notesPage && await waitFor(async () => (await tabs.activeTab().wc.executeJavaScript(
+      'document.querySelectorAll("#notes li").length').catch(() => 0)) || 0, { timeoutMs: 5000 });
+    const parsed = require('./whats-new').notesFor('## 2.0.0\n\n### New\n\n- **A thing.** It `works`.\n  still\n\n## 1.0.0\n\n- Old.\n', '2.0.0');
+    check('What’s new shows this version’s notes, sorted by section',
+      items > 0 && parsed.sections[0].title === 'New' && parsed.sections[0].items[0].head === 'A thing.' &&
+      parsed.sections[0].items[0].text === 'It `works`. still', `items ${items}, ${JSON.stringify(parsed)}`);
+    if (notesPage) tabs.close(tabs.activeTab().id);
     await sleep(200);
   }
 

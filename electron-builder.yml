@@ -70,6 +70,7 @@ files:
   - src/**/*
   - test/pages/**/*
   - package.json
+  - CHANGELOG.md
   - '!**/*.map'
 
 ## Compression: maximum. The app is mostly Chromium and users download it once.

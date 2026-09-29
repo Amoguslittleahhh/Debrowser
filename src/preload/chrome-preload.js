@@ -68,6 +68,8 @@ const COMMANDS = new Set([
   'copy-version-info',
   'reader-article',
   'receipt-week',
+  'open-whats-new',
+  'whats-new-notes',
   'safety-status',
   'safety-revoke',
   'new-circuit',

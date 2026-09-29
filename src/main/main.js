@@ -28,6 +28,7 @@ const { ThirdPartyCookies } = require('./third-party');
 const { LinkCleaner } = require('./link-cleaner');
 const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
+const WhatsNew = require('./whats-new');
 const { commandList } = require('./commands');
 const { Spaces } = require('./spaces');
 const { SiteStyles } = require('./site-styles');
@@ -1552,6 +1553,17 @@ function main() {
     }
     if (prewarm) prewarm.holdUntil(firstTabLoaded(tabs.activeTab()));
 
+    // Once after an update, a quiet word and the way to the notes - never a
+    // tab opened by itself. A new install has nothing to compare, so it only
+    // records the version.
+    if (!INCOGNITO && !OFFLINE_MODE) {
+      const seen = prefs.get('seenVersion');
+      if (seen !== app.getVersion()) {
+        if (seen) runCommand.toast(`Updated to ${app.getVersion()}`, 'What’s new', () => runCommand('open-whats-new'), 12_000);
+        prefs.set('seenVersion', app.getVersion());
+      }
+    }
+
     // Updates last, and never under a test or a benchmark: both assert on
     // measured memory and CPU, and a background download competing with them
     // would make the numbers depend on whether a release happened to be out.
@@ -2872,6 +2884,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         publish();
         break;
 
+      case 'open-whats-new':
+        openInternalPage(tabs, pages.WHATS_NEW_URL);
+        publish();
+        break;
+
       case 'open-safety':
         if (INCOGNITO) break;
         openInternalPage(tabs, pages.SAFETY_URL);
@@ -3546,6 +3563,10 @@ const PAGE_POLICY = new Map([
     commands: new Set([...PAGE_COMMON_COMMANDS, 'reader-view', 'navigate', 'back']),
     requests: new Set(['reader-article'])
   }],
+  ['whats-new', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab']),
+    requests: new Set(['whats-new-notes'])
+  }],
   ['receipt', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab', 'toggle-panel']),
     requests: new Set(['receipt-week'])
@@ -3908,6 +3929,10 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         const article = readerStore.get(payload?.t);
         return article ? { ...article } : null;
       }
+
+      // This version's notes, from the packed CHANGELOG.md.
+      case 'whats-new-notes':
+        return WhatsNew.read(app.getAppPath(), app.getVersion());
 
       // The week's receipt, for its page.
       case 'receipt-week':
@@ -4667,6 +4692,7 @@ function menuModel({ tabs, shell }) {
     { id: 'show-shortcuts', label: 'Keyboard shortcuts', accel: accel('show-shortcuts'), icon: 'keyboard' },
     { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
     { kind: 'separator' },
+    { id: 'open-whats-new', label: 'What’s new', icon: 'notes' },
     { id: 'copy-version-info', label: 'Copy version info', icon: 'copy' },
     { kind: 'note', label: `Debrowser ${app.getVersion()} · Chromium ${process.versions.chrome}` }
   ];
