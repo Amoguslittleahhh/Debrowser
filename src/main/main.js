@@ -669,7 +669,9 @@ function main() {
     // nothing, and it would sit at the top of the stack in front of the page
     // the user actually wants back.
     if (!tab || !tab.url || tab.url === pages.NEW_TAB_URL || tab.url === 'about:blank') return;
-    closedTabs.push({ url: tab.url, title: tab.title || '' });
+    closedTabs.push({ url: tab.url, title: tab.title || '', index: tab.closedIndex ?? null, pinned: tab.pinned === true });
+    // Counted apart from the list, which stops growing at its cap.
+    closedTabs.remembered = (closedTabs.remembered || 0) + 1;
     if (closedTabs.length > CLOSED_TABS_KEPT) closedTabs.shift();
   };
 
@@ -1275,9 +1277,14 @@ function main() {
      * rather than from whatever the machine's last real run left behind.
      */
     sessionStore = OFFLINE_MODE || INCOGNITO ? null : new Session(log);
+    // Did the last run end without closing? Asked before this run marks itself.
+    const unclean = sessionStore ? sessionStore.claimRun() : false;
     const saved = sessionStore && prefs.get('restoreTabs') === true
       ? sessionStore.load()
       : { tabs: [], activeIndex: 0 };
+    // Restore is off, but Debrowser crashed or the computer lost power: the
+    // tabs are offered back once, rather than lost with the crash.
+    const lost = unclean && !saved.tabs.length ? sessionStore.load().tabs : [];
 
     if (saved.tabs.length) {
       saved.tabs.forEach((entry, i) => {
@@ -1302,6 +1309,16 @@ function main() {
     // browser, a link clicked in another app - open after that, in front.
     if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) tabs.create({ url });
     shell.layout();
+    if (lost.length) {
+      runCommand.toast('Debrowser didn’t close properly', `Restore ${lost.length} tab${lost.length === 1 ? '' : 's'}`, () => {
+        for (const entry of lost) {
+          const tab = tabs.create({ url: entry.url, activate: false, realise: false });
+          tab.title = entry.title || tab.title;
+          if (entry.pinned) tabs.setPinned(tab.id, true);
+        }
+        publish();
+      }, 20_000);
+    }
     if (prewarm) prewarm.holdUntil(firstTabLoaded(tabs.activeTab()));
 
     // Updates last, and never under a test or a benchmark: both assert on
@@ -1428,7 +1445,10 @@ function main() {
     // Before `closeAll`, which empties the list this describes. Written
     // synchronously because quit does not wait for a timer, and the debounce
     // above means the last thing the user did is usually still pending.
-    if (sessionStore && tabs) sessionStore.flush(tabs.all(), tabs.activeId);
+    if (sessionStore && tabs) {
+      sessionStore.flush(tabs.all(), tabs.activeId);
+      sessionStore.releaseRun();
+    }
     if (tabs) tabs.closeAll();
     // The trim helper is a long-lived child process of ours. Nothing else ends
     // it, and it holds an open stdin on a pipe that outlives us.
@@ -1555,7 +1575,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
    * on a script - is closed anyway after a moment, since a close button that
    * does nothing is worse than the work it might lose.
    */
-  const closeAfterUnload = (tab) => {
+  const closeAfterUnload = (tab, then = () => {}) => {
     if (tab.closing) return;
     const wc = tab.wc;
     let timer = null;
@@ -1566,6 +1586,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       if (!tabs.all().includes(tab)) return;
       tabs.close(tab.id);
       if (tabs.all().length === 0) lastTabClosed();
+      else then();
       publish();
     };
     tab.closing = {
@@ -1579,6 +1600,43 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     wc.once('destroyed', finish);
     timer = setTimeout(finish, 1500);
     wc.close({ waitForBeforeUnload: true });
+  };
+
+  /*
+   * Toasts (window.js, showToast): one at a time, a new one replacing the last.
+   * What a toast's button does waits here, keyed by the toast's id, until the
+   * button is pressed or the toast goes.
+   */
+  let toastSeq = 0;
+  let toastAction = null;
+  const toast = (text, action = null, run = null, ms = undefined) => {
+    if (!shell || typeof shell.showToast !== 'function') return;
+    const id = `toast-${++toastSeq}`;
+    toastAction = run ? { id, run } : null;
+    shell.showToast({ id, text, action: run ? action : null, ms });
+  };
+
+  /** Put the last closed tab back where it was. */
+  const reopenClosed = () => {
+    const last = closedTabs.pop();
+    if (!last) return null;
+    const index = Number.isInteger(last.index) ? Math.min(last.index, tabs.all().length) : null;
+    const tab = tabs.create({ url: last.url, index });
+    if (last.pinned && typeof tabs.setPinned === 'function') tabs.setPinned(tab.id, true);
+    return tab;
+  };
+
+  /**
+   * Offer Undo for tabs just closed - only for the ones that were remembered
+   * (an untouched new tab is not), and only while the window has tabs left.
+   */
+  const offerUndoClose = (remembered) => {
+    remembered = Math.min(remembered, closedTabs.length);
+    if (remembered <= 0 || tabs.all().length === 0) return;
+    toast(remembered === 1 ? 'Tab closed' : `Closed ${remembered} tabs`, 'Undo', () => {
+      for (let i = 0; i < remembered; i++) reopenClosed();
+      publish();
+    });
   };
 
   /** The strip just emptied: close the window, or keep it with a new tab. */
@@ -1728,11 +1786,14 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // would never reply, and our own pages have nothing to lose.
         const tab = tabs.byId(payload?.id ?? tabs.activeId);
         if (!tab) break;
+        const before = closedTabs.remembered || 0;
+        const since = () => (closedTabs.remembered || 0) - before;
         if (tab.isLive && !tab.crashed && !tab.internal && !isStopped(tab.tier)) {
-          closeAfterUnload(tab);
+          closeAfterUnload(tab, () => offerUndoClose(since()));
           break;
         }
         tabs.close(tab.id);
+        if (tabs.all().length) offerUndoClose(since());
         // Closing the last tab closes the browser, the way every other browser
         // behaves. An empty window with a tab strip holding nothing is a state
         // with no way forward except opening a tab or closing the window, so
@@ -1850,11 +1911,26 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       // Ctrl+Shift+T. Addresses only; see `rememberClosed`.
-      case 'reopen-closed-tab': {
-        const last = closedTabs.pop();
-        if (last) tabs.create({ url: last.url });
+      case 'reopen-closed-tab':
+        reopenClosed();
+        break;
+
+      case 'toast-action': {
+        const pending = toastAction;
+        toastAction = null;
+        shell.hideToast();
+        if (pending && pending.id === payload?.id) pending.run();
         break;
       }
+
+      case 'toast-dismiss':
+        // Only the toast still showing: a late word from one already replaced
+        // must not take its successor down with it.
+        if (payload?.id === `toast-${toastSeq}`) {
+          toastAction = null;
+          shell.hideToast();
+        }
+        break;
 
       // Ctrl+1 to Ctrl+8, and Ctrl+9 for the last one.
       case 'select-tab': {
@@ -2535,8 +2611,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const from = all.indexOf(tab);
         const doomed = all.filter((t, i) => t !== tab && !t.pinned &&
           (command === 'close-other-tabs' || i > from));
+        const before = closedTabs.remembered || 0;
+        // Right to left, so each remembers the place it will go back to.
         for (const other of doomed.reverse()) tabs.close(other.id);
         if (tabs.all().length === 0) lastTabClosed();
+        else offerUndoClose((closedTabs.remembered || 0) - before);
         break;
       }
 
@@ -2604,6 +2683,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     publish();
   });
 
+  // For the browser's own use - a crash restore at start - never a renderer's.
+  runCommand.toast = toast;
   return runCommand;
 }
 

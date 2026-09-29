@@ -67,6 +67,9 @@ const COMMANDS = new Set([
   'site-clear-data',
   'site-blocking',
   'site-sleep',
+  // The toast at the foot of the window: its button, and its going.
+  'toast-action',
+  'toast-dismiss',
   'show-shortcuts',
   'shortcut-list',
   'pin-tab',

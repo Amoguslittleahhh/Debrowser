@@ -936,6 +936,44 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // Closing tabs offers Undo, and Undo puts them back where they were.
+  {
+    const wasActive = tabs.activeTab();
+    // The last tab, so everything to its right is what this test made.
+    const keep = tabs.all()[tabs.all().length - 1];
+    const made = ['article.html', 'idle.html', 'form.html'].map((name) =>
+      tabs.create({ url: pageUrl(name), activate: false, realise: false }));
+    const order = () => tabs.all().map((t) => t.url);
+    const before = order();
+    runCommand('close-tabs-right', { id: keep.id });
+    const toastUp = await waitFor(() => shell.toastView && shell.toastView.getVisible(), { timeoutMs: 4000 });
+    const closedAll = made.every((t) => !tabs.all().includes(t));
+    runCommand('toast-action', { id: shell.lastToastId });
+    const back = JSON.stringify(order()) === JSON.stringify(before);
+    check('closing tabs shows Undo, and Undo puts them back in place',
+      toastUp && closedAll && back && !shell.toastView.getVisible(),
+      `toast ${toastUp}, closed ${closedAll}, restored in order ${back}` +
+      (back ? '' : ` ${JSON.stringify(before.slice(-4))} vs ${JSON.stringify(order().slice(-4))}`));
+    const at = tabs.all().indexOf(keep);
+    for (const t of tabs.all().slice(at + 1)) tabs.close(t.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
+  // A run that never quit is noticed at the next start, and a clean quit is not.
+  {
+    const { Session } = require('./session');
+    const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'debrowser-run-'));
+    const one = new Session(() => {}, dir);
+    const first = one.claimRun();
+    const afterCrash = new Session(() => {}, dir).claimRun();
+    one.releaseRun();
+    const afterQuit = new Session(() => {}, dir).claimRun();
+    fs.rmSync(dir, { recursive: true, force: true });
+    check('a crash is noticed at the next start, a clean quit is not',
+      !first && afterCrash && !afterQuit, `first ${first}, after a crash ${afterCrash}, after a quit ${afterQuit}`);
+  }
+
   // A site kept awake from the padlock is not put to sleep past warm.
   if (sitePrefs) {
     const tab = tabs.all().find((t) => /^https?:/.test(t.url));

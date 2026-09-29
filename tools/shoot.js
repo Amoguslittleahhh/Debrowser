@@ -191,6 +191,10 @@ const SHOTS = [
   { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 },
   { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
   { name: 'site',     file: 'site.html',     w: 420,  h: 340 },
+  { name: 'toast', file: 'toast.html', w: 460, h: 84,
+    message: { kind: 'toast', id: 't', text: 'Closed 4 tabs', action: 'Undo', ms: 60000 } },
+  { name: 'toast-restore', file: 'toast.html', w: 460, h: 84,
+    message: { kind: 'toast', id: 't', text: 'Debrowser didn’t close properly', action: 'Restore 12 tabs', ms: 60000 } },
   // The same sheet holding the tab strip's menu, which is the other thing it
   // draws and has its own set of icons to get wrong.
   { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' },
@@ -268,7 +272,8 @@ app.whenReady().then(async () => {
       webPreferences: {
         preload: path.join(__dirname, 'stub-preload.js'),
         contextIsolation: true, sandbox: false,
-        additionalArguments: [`--state=${JSON.stringify(STATE)}`, `--answers=${JSON.stringify(ANSWERS)}`]
+        additionalArguments: [`--state=${JSON.stringify(STATE)}`, `--answers=${JSON.stringify(ANSWERS)}`,
+          ...(shot.message ? [`--message=${JSON.stringify(shot.message)}`] : [])]
       }
     });
     // The sheets take their anchor - and their palette - from the query string,

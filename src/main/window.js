@@ -23,6 +23,9 @@ const { letterbox } = require('./incognito/fingerprint');
 
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
+/** The toast view: wide enough for a sentence and a button, tall enough for its shadow. */
+const TOAST_WIDTH = 460;
+const TOAST_HEIGHT = 84;
 
 /**
  * Height the bookmarks bar adds to the chrome when it is showing.
@@ -326,6 +329,7 @@ class BrowserShell {
     /** The address bar's suggestion list; see showSuggestions. */
     this.suggestView = null;
     this.crashView = null;
+    this.toastView = null;
     this.suggestOpen = false;
     this.suggestSelected = -1;
     setImmediate(() => this.releaseSidebar());
@@ -1060,6 +1064,80 @@ class BrowserShell {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Toasts                                                            */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * A line at the foot of the window - "Closed 4 tabs", with Undo - that goes
+   * by itself after a few seconds.
+   *
+   * Its own small view, over the page, because the chrome view is only as tall
+   * as the toolbar. Made on first use and closed a minute after the last toast,
+   * so a browser nobody undoes anything in holds no renderer for it.
+   *
+   * @param {{id: string, text: string, action?: string, ms?: number}} toast
+   */
+  showToast(toast) {
+    if (this.window.isDestroyed()) return;
+    this.lastToastId = toast.id;
+    clearTimeout(this.toastCloseTimer);
+    if (!this.toastView) {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          additionalArguments: preloadArgs(this.prefs),
+          transparent: true
+        }
+      });
+      try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+      view.setVisible(false);
+      this.toastView = view;
+      this.toastReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
+      view.webContents.loadFile(path.join(RENDERER_DIR, 'toast.html')).catch(() => {});
+    }
+    this.toastReady.then(() => {
+      if (!this.toastView || this.window.isDestroyed()) return;
+      this.placeToast();
+      // Topmost, over the page, the panel and the chrome.
+      this.window.contentView.addChildView(this.toastView);
+      this.toastView.setVisible(true);
+      send(this.toastView, 'debrowser:ui', { kind: 'toast', ...toast });
+    });
+  }
+
+  /** Centred at the foot of the page area, with room for its shadow. */
+  placeToast() {
+    if (!this.toastView) return;
+    const area = this.contentBounds();
+    const width = Math.min(TOAST_WIDTH, area.width);
+    this.toastView.setBounds({
+      x: Math.round(area.x + (area.width - width) / 2),
+      y: Math.max(area.y, area.y + area.height - TOAST_HEIGHT),
+      width,
+      height: Math.min(TOAST_HEIGHT, area.height)
+    });
+  }
+
+  /** The toast went (timed out, undone or dismissed): hide it, and close the view later. */
+  hideToast() {
+    if (!this.toastView) return;
+    this.toastView.setVisible(false);
+    clearTimeout(this.toastCloseTimer);
+    this.toastCloseTimer = setTimeout(() => {
+      const view = this.toastView;
+      this.toastView = null;
+      try {
+        this.window.contentView.removeChildView(view);
+        view.webContents.close();
+      } catch { /* already gone */ }
+    }, 60_000);
+    this.toastCloseTimer.unref?.();
+  }
+
+  /* ---------------------------------------------------------------- */
   /* A crashed tab                                                     */
   /* ---------------------------------------------------------------- */
 
@@ -1337,6 +1415,7 @@ class BrowserShell {
     const prefs = this.prefs.all();
     send(this.suggestView, 'debrowser:state', { prefs });
     send(this.crashView, 'debrowser:state', { prefs });
+    send(this.toastView, 'debrowser:state', { prefs });
 
     // Pinned at 1, and set rather than skipped.
     //
@@ -2192,6 +2271,7 @@ class BrowserShell {
     }
 
     if (this.crashView) this.crashView.setBounds(this.contentBounds());
+    if (this.toastView) this.placeToast();
   }
 
   /* ---------------------------------------------------------------- */
@@ -2205,7 +2285,8 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView]) {
+    for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
+      this.toastView]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }

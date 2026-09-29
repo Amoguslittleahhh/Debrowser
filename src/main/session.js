@@ -192,6 +192,26 @@ class Session {
     this.timer = null;
     return this.save(tabs, activeId);
   }
+
+  /*
+   * Crash detection. A marker is written as the browser starts and removed as
+   * it quits; one still there at the next start means the last run never
+   * reached its quit - a crash, a forced kill, the power going. That run's tabs
+   * were saved as it went (`schedule`), so they can be offered back.
+   */
+  get marker() { return `${this.file}.running`; }
+
+  /** Whether the last run ended without quitting; this run is marked either way. */
+  claimRun() {
+    const unclean = fs.existsSync(this.marker);
+    try { fs.writeFileSync(this.marker, String(process.pid), { mode: 0o600 }); } catch { /* read-only profile */ }
+    return unclean;
+  }
+
+  /** The browser is quitting properly. */
+  releaseRun() {
+    try { fs.unlinkSync(this.marker); } catch { /* never written */ }
+  }
 }
 
 /**

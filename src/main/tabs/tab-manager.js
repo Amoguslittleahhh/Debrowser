@@ -520,6 +520,8 @@ class TabManager {
       if (next) this.activate(next.id).catch((err) => this.log(`activate failed: ${err.message}`));
     }
 
+    // Where it was, so "Undo" can put it back there.
+    tab.closedIndex = index;
     this.onEvent(tab, 'closed');
     return true;
   }

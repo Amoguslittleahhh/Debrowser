@@ -20,6 +20,12 @@ contextBridge.exposeInMainWorld('debrowser', {
   // The chrome subscribes to this at parse time. Without it the call throws,
   // the rest of chrome.js never runs, and the photograph is of a toolbar with
   // no tabs in it - which is exactly what it was for one round.
-  onMessage() { return () => {}; }
+  // `--message=` hands a page one UI message after it loads, for the pages
+  // that show nothing until told to (the toast).
+  onMessage(handler) {
+    const arg = process.argv.find((a) => a.startsWith('--message='));
+    if (arg && typeof handler === 'function') setTimeout(() => handler(JSON.parse(arg.slice(10))), 50);
+    return () => {};
+  }
 });
 ipcRenderer.on('noop', () => {});

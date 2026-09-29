@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Closing tabs can be undone.** Closing a tab, or the tabs to its right or all the others, shows a note at the foot of the window with Undo, which puts them back where they were. It goes by itself after a few seconds, and waits while the pointer is on it.
+- **Tabs survive a crash even with restore off.** If Debrowser, the computer or its power went down without closing properly, the next start offers the tabs you had open, with one click to bring them back.
 - **Choose how readily a site sleeps.** The padlock has a new choice for each site: its tabs sleep normally, sooner, or never. A chat, a music player or a dashboard can stay awake; a news site you leave open can go to sleep in a quarter of the time.
 - **Ads and trackers are blocked.** Debrowser blocks them itself, with the lists uBlock Origin uses (EasyList, EasyPrivacy, Peter Lowe's and uBlock's own), fetched weekly and kept ready on disk so a start costs almost nothing. Cookie notices are hidden too, without being answered. The padlock shows how many requests were stopped on the page and turns blocking off for that site; Settings turns either part off everywhere. Private windows do not block, so every copy of them looks alike.
 - **A site's zoom is remembered after a restart,** instead of only until Debrowser closes.
