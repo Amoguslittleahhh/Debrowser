@@ -72,6 +72,7 @@ const COMMANDS = new Set([
   'site-blocking',
   'site-sleep',
   'site-third-party',
+  'site-forget',
   // The toast at the foot of the window: its button, and its going.
   'toast-action',
   'toast-dismiss',

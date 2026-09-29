@@ -1196,6 +1196,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `balanced: ${balanced?.[1]}, full: ${full?.[1] ?? '(none)'}`);
   }
 
+  // "Forget this site when I close it": closing its last tab clears its cookies.
+  if (sitePrefs) {
+    const url = pageUrl('idle.html');
+    const host = new URL(url).hostname;
+    const ses = session.fromPartition(BROWSING_PARTITION);
+    await ses.cookies.set({ url, name: 'kept', value: '1', expirationDate: Date.now() / 1000 + 3600 });
+    sitePrefs.set(host, 'forget', true);
+    const tab = tabs.create({ url, activate: false, realise: true });
+    await waitFor(() => tab.isLive && !tab.wc.isLoading(), { timeoutMs: 8000 });
+    const before = (await ses.cookies.get({ domain: host })).length;
+    tabs.close(tab.id);
+    const gone = await waitFor(async () => (await ses.cookies.get({ domain: host })).length === 0, { timeoutMs: 5000 });
+    sitePrefs.set(host, 'forget', null);
+    check('a site marked "forget" loses its cookies when its last tab closes', before > 0 && gone,
+      `cookies before ${before}, cleared ${gone}`);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

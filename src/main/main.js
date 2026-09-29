@@ -675,6 +675,21 @@ function main() {
    */
   const find = { query: '' };
 
+  /**
+   * "Forget this site when I close it" (the padlock): when the last tab on a
+   * site so marked closes, what it stored goes - cookies, local storage,
+   * caches - for every part of the site, as if it had never been visited.
+   */
+  const forgetIfLast = (tab) => {
+    const host = SitePrefs.hostOf(tab.url);
+    if (!host || sitePrefs.get(host, 'forget') !== true) return;
+    const site = require('./third-party').siteOf(tab.url);
+    if (tabs.all().some((t) => t !== tab && require('./third-party').siteOf(t.url) === site)) return;
+    forgetSite(session.fromPartition(BROWSING_PARTITION), host, site)
+      .then(() => log('site', `forgot ${site}`))
+      .catch((err) => log(`forgetting ${site} failed: ${err.message}`));
+  };
+
   const rememberClosed = (tab) => {
     // A new tab page that was never navigated is not worth reopening: it holds
     // nothing, and it would sit at the top of the stack in front of the page
@@ -865,6 +880,7 @@ function main() {
         if (payload?.favicon) icons.remember(payload.favicon);
         break;
       case 'closed':
+        if (sitePrefs && !INCOGNITO) forgetIfLast(tab);
         if (circuits) circuits.forgetTab(tab.id);
         if (permissionAsks) permissionAsks.forget(tab);
         if (shell) shell.detachTab(tab);
@@ -2271,6 +2287,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      case 'site-forget': {
+        const host = active && SitePrefs.hostOf(active.url);
+        if (!host || !sitePrefs || INCOGNITO) break;
+        sitePrefs.set(host, 'forget', payload?.on === true ? true : null);
+        break;
+      }
+
       // Other sites' cookies on this site: let back in where a sign-in or an
       // embed needs them. The page reloads to pick them up.
       case 'site-third-party': {
@@ -3274,6 +3297,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
             blocked: active.isLive ? blocker.countFor(active.wc) : 0
           } : null,
           sleep: sitePrefs && origin ? sitePrefs.get(SitePrefs.hostOf(active.url), 'sleep') || 'normal' : null,
+          forget: sitePrefs && origin && !INCOGNITO ? sitePrefs.get(SitePrefs.hostOf(active.url), 'forget') === true : null,
           thirdPartyCookies: sitePrefs && origin && !INCOGNITO && prefs.get('blockThirdPartyCookies') !== false
             ? { blocked: sitePrefs.get(SitePrefs.hostOf(active.url), 'thirdPartyCookies') !== true } : null,
           zoom: active.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100,
@@ -4247,6 +4271,17 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
   if (kind === 'host') return `https://${text}`;
 
   return searchTemplate.replace('%s', encodeURIComponent(text));
+}
+
+/** Everything a site stored in a session: its origins' storage, and its cookies on every subdomain. */
+async function forgetSite(ses, host, site) {
+  for (const origin of new Set([`https://${host}`, `http://${host}`, `https://${site}`, `https://www.${site}`])) {
+    await ses.clearStorageData({ origin });
+  }
+  for (const cookie of await ses.cookies.get({ domain: site })) {
+    const url = `${cookie.secure ? 'https' : 'http'}://${cookie.domain.replace(/^\./, '')}${cookie.path}`;
+    await ses.cookies.remove(url, cookie.name).catch(() => {});
+  }
 }
 
 /**

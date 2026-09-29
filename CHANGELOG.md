@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Forget a site when you close it.** The padlock can mark a site so that, when its last tab closes, everything it stored - cookies, saved data, caches - goes with it: you come back signed out and unknown, every time.
 - **Risky downloads are stopped or asked about.** A file fetched over plain HTTP by a secure page, which anyone on the way could have swapped, and a file from a site on the dangerous-sites lists are blocked, with "Download anyway" on the row. Opening a downloaded program now asks first.
 - **JavaScript hardening for every window, if you want it.** Settings → Advanced can turn off the JavaScript engine's optimising compilers everywhere, as private windows already do: most attacks on the engine go through them, everyday pages run as fast without them, and heavy ones - games, editors - run about half as fast. It takes effect at the next start, and is off by default.
 - **A safety check.** Settings opens a page with every protection in one place - secure connections, secure DNS, dangerous-site warnings, the blocker and how fresh its lists are, other sites' cookies, clean links - with what is off and where to turn it on, the way to the password check-up, and the sites allowed your camera, microphone, location or notifications, each with Remove.

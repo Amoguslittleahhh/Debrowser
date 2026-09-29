@@ -120,6 +120,20 @@ function showInfo(info) {
     el.shield.hidden = false;
   }
 
+  // Forget it on close: signed out, nothing kept, each time.
+  if (info.forget !== null && info.forget !== undefined) {
+    const li = item(['M3.5 4.5h9', 'M6.5 4.5V3h3v1.5', 'M4.5 4.5l.7 8.5h5.6l.7-8.5'], 'Forget this site when I close it');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = info.forget === true;
+    box.setAttribute('aria-label', 'Forget this site when its last tab closes');
+    box.addEventListener('change', () => api.send('site-forget', { on: box.checked }));
+    li.addEventListener('click', (event) => { if (event.target !== box) box.click(); });
+    li.append(box);
+    el.shield.append(li);
+    el.shield.hidden = false;
+  }
+
   // How readily its tabs sleep. Kept awake: chat, music, a dashboard.
   if (info.sleep) {
     const li = item(['M12.5 9.6A5 5 0 0 1 6.4 3.5a5 5 0 1 0 6.1 6.1z'], 'Sleep when unused');

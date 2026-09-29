@@ -7,6 +7,7 @@
  *   blocking  false when they turned the ad and tracker blocker off there
  *   sleep     'never' to keep its tabs awake, 'early' to let them sleep sooner
  *   thirdPartyCookies  true where other sites' cookies are let back in on it
+ *   forget    true to clear what the site stores once its last tab closes
  *
  * Keyed by host, as Chromium keys zoom: a site's choices hold on all its pages
  * and both schemes. That is right for these three - none of them grants the
@@ -30,7 +31,8 @@ const VALID = {
   zoom: (v) => typeof v === 'number' && v >= 0.25 && v <= 5,
   blocking: (v) => v === false,
   sleep: (v) => v === 'never' || v === 'early',
-  thirdPartyCookies: (v) => v === true
+  thirdPartyCookies: (v) => v === true,
+  forget: (v) => v === true
 };
 
 const HOST = /^[a-z0-9.-]{1,253}$|^\[[0-9a-f:.]+\]$/i;

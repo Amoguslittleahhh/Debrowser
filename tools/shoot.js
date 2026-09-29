@@ -157,7 +157,7 @@ const ANSWERS = {
     revoked: [{ origin: 'https://maps.example.com', kinds: ['location'] }],
     passwords: { configured: true } },
   'site-info': { host: 'www.theguardian.com', secure: true, website: true, incognito: false, ask: null,
-    permissions: { notifications: 'block' }, blocking: { on: true, blocked: 23 }, sleep: 'never', thirdPartyCookies: { blocked: true }, zoom: 100, zoomDefault: 100 }
+    permissions: { notifications: 'block' }, blocking: { on: true, blocked: 23 }, sleep: 'never', thirdPartyCookies: { blocked: true }, forget: false, zoom: 100, zoomDefault: 100 }
 };
 
 const SHOTS = [
