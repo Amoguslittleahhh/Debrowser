@@ -1242,6 +1242,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       JSON.stringify(t));
   }
 
+  // The command bar: ">" lists the browser's commands, words narrow them, and
+  // picking one runs it.
+  {
+    const { suggest: rank } = require('./suggest');
+    const { commandList } = require('./commands');
+    const list = commandList({ incognito: false, hasTab: true });
+    const all = rank({ text: '> ', commands: list }).items;
+    const dark = rank({ text: '> dark', commands: list }).items;
+    const wasTheme = prefs.get('theme');
+    const pick = dark[0] && list[dark[0].commandIndex];
+    if (pick) runCommand(pick.command, pick.payload);
+    const ran = prefs.get('theme') === 'dark';
+    runCommand('set-pref', { key: 'theme', value: wasTheme });
+    check('the command bar lists commands, narrows them by words, and runs the pick',
+      all.length === 10 && all.every((r) => r.kind === 'command') && dark[0]?.title === 'Use the dark theme' && ran,
+      `${all.length} rows; "dark" -> ${dark.map((r) => r.title).join(', ')}; ran ${ran}`);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

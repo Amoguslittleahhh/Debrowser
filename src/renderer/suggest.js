@@ -36,6 +36,7 @@ function glyph(paths) {
 }
 const SEARCH = ['M7 12.25A5.25 5.25 0 1 0 7 1.75a5.25 5.25 0 0 0 0 10.5z', 'M10.8 10.8l3.45 3.45'];
 const GO = ['M3 8h9.5', 'M8.5 4l4 4-4 4'];
+const COMMAND = ['M3 4.5l3.5 3.5L3 11.5', 'M8.5 11.5h4.5'];
 
 const tidy = (url) => String(url || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
 
@@ -57,6 +58,10 @@ function row(item, index) {
   } else if (item.kind === 'go') {
     el.append(glyph(GO));
     title.textContent = item.title;
+  } else if (item.kind === 'command') {
+    el.append(glyph(COMMAND));
+    title.textContent = item.title;
+    detail.textContent = item.note || '';
   } else {
     el.append(siteChip(item.url));
     title.textContent = item.title;

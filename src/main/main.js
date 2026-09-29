@@ -28,6 +28,7 @@ const { ThirdPartyCookies } = require('./third-party');
 const { LinkCleaner } = require('./link-cleaner');
 const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
+const { commandList } = require('./commands');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -1820,6 +1821,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           if (tabs.byId(item.tabId)) goTo(item.tabId);
           break;
         }
+        // A command from the bar: looked up again here by its place in the
+        // list, so what runs is the browser's own entry, never the page's.
+        if (item.kind === 'command') {
+          const entry = commandList({ incognito: INCOGNITO, hasTab: Boolean(active) })[item.commandIndex];
+          if (!entry) break;
+          const forTab = ['close-other-tabs', 'duplicate-tab', 'pin-tab', 'mute-tab'].includes(entry.command);
+          runCommand(entry.command, forTab && active ? { id: active.id } : entry.payload);
+          break;
+        }
         // The go row is exactly what was typed, and goes as typed, so it gets
         // the same retry over http that Enter on the same text does.
         const url = item.kind === 'search'
@@ -2021,6 +2031,22 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // Ctrl+Shift+R rather than Ctrl+R.
       case 'reload-hard':
         if (active?.isLive) active.wc.reloadIgnoringCache();
+        break;
+
+      // Ctrl+K: the address bar as a command bar.
+      case 'command-bar':
+        shell.bringSidebarOut();
+        shell.focusChrome();
+        shell.toChrome('focus-address', { text: '> ' });
+        break;
+
+      // Put every tab but the one in front to sleep, from the command bar.
+      case 'sleep-other-tabs':
+        if (!governor) break;
+        for (const tab of tabs.all()) {
+          if (tab.visible || !tab.isLive) continue;
+          governor.enforceManualDiscard(tab).catch((e) => log(`sleep failed: ${e.message}`));
+        }
         break;
 
       // Ctrl+Shift+A: the address bar, scoped to the open tabs.
@@ -3305,7 +3331,8 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           // Not `all()`, which copies ten thousand entries on every letter.
           history: history ? history.entries() : [],
           engine: prefs.engineName(),
-          complete: payload?.complete !== false
+          complete: payload?.complete !== false,
+          commands: text.trim().startsWith('>') ? commandList({ incognito: INCOGNITO, hasTab: Boolean(active) }) : []
         });
         shell.suggestItems = result.items;
         shell.suggestSelected = -1;

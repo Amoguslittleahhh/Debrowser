@@ -131,8 +131,31 @@ function suggestTabs(typed, tabs) {
 
 const MAX_TAB_ROWS = 10;
 
-function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the web', complete = true, now = Date.now() }) {
+/** The command bar: `>` then words, matched on each command's name and keywords. */
+const COMMAND_SCOPE = /^>\s*/;
+function suggestCommands(typed, commands) {
+  const words = typed.replace(COMMAND_SCOPE, '').toLowerCase().split(/\s+/).filter(Boolean);
+  const rows = [];
+  commands.forEach((c, index) => {
+    const score = words.length ? scoreLower(words, `${c.title} ${c.keywords}`.toLowerCase(), '') : 1;
+    if (score) rows.push({ c, index, score });
+  });
+  if (words.length) rows.sort((a, b) => b.score - a.score || a.index - b.index);
+  return {
+    items: rows.slice(0, MAX_TAB_ROWS).map(({ c, index }, i) => ({
+      kind: 'command', title: c.title, commandIndex: index, ...(c.accel ? { note: c.accel } : {}),
+      ...(i === 0 ? { isDefault: true } : {})
+    })),
+    inline: null,
+    inlineUrl: null,
+    scope: 'commands'
+  };
+}
+
+function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the web', complete = true, now = Date.now(),
+                   commands = [] }) {
   const typed = String(text || '').trim();
+  if (COMMAND_SCOPE.test(typed)) return suggestCommands(typed, commands);
   if (TAB_SCOPE.test(typed) || /^@tabs$/i.test(typed)) return suggestTabs(typed, tabs);
   if (!typed) return { items: [], inline: null, inlineUrl: null };
   const lower = typed.toLowerCase();
