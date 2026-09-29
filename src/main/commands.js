@@ -26,6 +26,8 @@ const COMMANDS = [
   { title: 'Swap the two sides', command: 'split-swap', keywords: 'split side' },
   { title: 'Put other tabs to sleep', command: 'sleep-other-tabs', keywords: 'discard memory free' },
   { title: 'Close other tabs', command: 'close-other-tabs', keywords: '', needsTab: true },
+  { title: 'Put this tab in a new group', command: 'group-tab', keywords: 'tab group collect', needsTab: true, lab: 'labTabGroups' },
+  { title: 'Fold or unfold this tab’s group', command: 'toggle-group', keywords: 'tab group collapse expand', needsTab: true, lab: 'labTabGroups' },
   { title: 'Duplicate tab', command: 'duplicate-tab', needsTab: true },
   { title: 'Pin tab', command: 'pin-tab', keywords: 'unpin', needsTab: true },
   { title: 'Mute tab', command: 'mute-tab', keywords: 'sound unmute', needsTab: true },
@@ -63,9 +65,9 @@ const COMMANDS = [
 ];
 
 /** The list for this window, each with the shortcut that does the same. */
-function commandList({ incognito = false, hasTab = true } = {}) {
+function commandList({ incognito = false, hasTab = true, labs = () => false } = {}) {
   return COMMANDS
-    .filter((c) => !(incognito && c.normalOnly) && !(c.needsTab && !hasTab))
+    .filter((c) => !(incognito && c.normalOnly) && !(c.needsTab && !hasTab) && !(c.lab && !labs(c.lab)))
     .map((c) => ({
       title: c.title,
       command: c.command,

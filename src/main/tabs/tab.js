@@ -1132,6 +1132,8 @@ class Tab {
       muted: this.muted,
       // Which space it belongs to (spaces.js).
       spaceId: this.spaceId || 'home',
+      // Its tab group, if any (tab-groups.js).
+      groupId: this.groupId || null,
       // The page has an article reader view can show (reader.js).
       readerable: this.readerable === true,
       loading: this.loading,

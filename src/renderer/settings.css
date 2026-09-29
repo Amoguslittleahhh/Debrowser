@@ -414,6 +414,17 @@ input[type="range"] {
   transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 .ghost-btn:hover { background: var(--wash-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+/* A link inside a note: reads as text, acts as a button. */
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
 .ghost-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
 .ghost-btn:active:not(:disabled) { background: var(--wash); }
 /* Every button of this kind, not only the update one: Clear on the history and

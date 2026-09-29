@@ -531,6 +531,21 @@ const SECTIONS = {
     }
   ],
 
+  labs: [
+    {
+      key: 'labTabGroups',
+      label: 'Tab groups',
+      hint: 'Right-click a tab to start a group: a name and a colour for tabs that belong together, which fold away into one label, and go to sleep while folded.',
+      type: 'checkbox'
+    },
+    {
+      key: 'labQuickWindow',
+      label: 'A small window for links from other apps',
+      hint: 'A link from your mail or chat opens in a small window of its own, to read and close - or “Open in Debrowser” to keep it as a tab.',
+      type: 'checkbox'
+    }
+  ],
+
   updates: [
     {
       key: 'autoUpdate',
@@ -1066,6 +1081,13 @@ function renderUpdateState(u) {
 
 document.getElementById('check-updates')?.addEventListener('click', async () => {
   renderUpdateState(await api.request('check-for-updates'));
+});
+
+// Labs feedback: a new GitHub issue, labelled so experiments' reports stay together.
+document.getElementById('labs-feedback')?.addEventListener('click', () => {
+  api.send('open-link-tab', {
+    url: 'https://github.com/amoguslittleahhh/debrowser/issues/new?labels=labs&title=Labs%3A%20'
+  });
 });
 
 /*

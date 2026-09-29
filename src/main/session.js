@@ -39,6 +39,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const { TabGroups, GROUP_ID } = require('./tab-groups');
 
 const FILE = 'session.json';
 
@@ -113,6 +114,7 @@ class Session {
         title: typeof entry?.title === 'string' ? entry.title.slice(0, MAX_TITLE) : '',
         pinned: entry?.pinned === true,
         spaceId: typeof entry?.spaceId === 'string' && /^[a-z0-9-]{1,24}$/.test(entry.spaceId) ? entry.spaceId : 'home',
+        groupId: typeof entry?.groupId === 'string' && GROUP_ID.test(entry.groupId) ? entry.groupId : null,
         lastActiveAt: Number.isFinite(entry?.lastActiveAt) ? entry.lastActiveAt : null
       });
     }
@@ -120,6 +122,7 @@ class Session {
     const index = Number(parsed?.activeIndex);
     return {
       tabs: kept,
+      groups: Array.isArray(parsed?.groups) ? parsed.groups : [],
       activeIndex: Number.isInteger(index) && index >= 0 && index < kept.length ? index : 0
     };
   }
@@ -139,6 +142,7 @@ class Session {
         title: typeof tab.title === 'string' ? tab.title.slice(0, MAX_TITLE) : '',
         pinned: tab.pinned === true,
         spaceId: tab.spaceId || 'home',
+        groupId: tab.groupId || null,
         lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : null
       }));
 
@@ -146,7 +150,9 @@ class Session {
     return {
       version: 1,
       activeIndex,
-      tabs: open.map(({ url, title, pinned, spaceId, lastActiveAt }) => ({ url, title, pinned, spaceId, lastActiveAt }))
+      tabs: open.map(({ url, title, pinned, spaceId, groupId, lastActiveAt }) => ({ url, title, pinned, spaceId, groupId, lastActiveAt })),
+      // Tab groups (tab-groups.js): only those a saved tab is in.
+      groups: TabGroups.current ? TabGroups.current.save(open) : []
     };
   }
 

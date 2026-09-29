@@ -2194,3 +2194,67 @@ body[data-layout="left"] .space-chip { align-self: stretch; max-width: none; mar
   background: linear-gradient(90deg, transparent 44%, currentColor 44% 56%, transparent 56%);
   opacity: 0.7;
 }
+
+/* ------------------------------------------------------------------ */
+/* Tab groups (a Lab: tab-groups.js)                                   */
+/* ------------------------------------------------------------------ */
+
+/* The group's colour runs under its tabs, so which tabs belong is seen at a
+   glance, and its label heads the first of them. */
+.tab-group-bar { display: none; }
+.tab.grouped .tab-group-bar {
+  display: block;
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--group);
+  pointer-events: none;
+}
+.tab-group {
+  flex: none;
+  max-width: 120px;
+  height: 20px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 10px;
+  background: var(--group);
+  color: #fff;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
+  transition: filter var(--fast) var(--ease);
+}
+.tab-group:hover { filter: brightness(1.08); }
+.tab-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tab-group.folded::after { content: ' ›'; }
+.tab-group-name {
+  width: 96px;
+  height: 18px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font: inherit;
+  outline: none;
+}
+
+/* Folded: the group is its label and nothing else, and its tabs are out of
+   the strip until it opens again. The tab in front always stays. */
+.tab.group-folded { display: none; }
+.tab.group-head-folded { flex: 0 0 auto; min-width: 0; padding: 0 6px; }
+.tab.group-head-folded > :not(.tab-group) { display: none !important; }
+
+
+/* Down the side the label heads its group like a section. */
+body[data-layout="left"] .tab.group-start { flex-wrap: wrap; height: auto; padding-top: 6px; }
+body[data-layout="left"] .tab.group-start .tab-group { flex-basis: 100%; max-width: none; margin-bottom: 4px; text-align: left; }
+body[data-layout="left"] .tab.grouped .tab-group-bar { left: 0; right: auto; top: 6px; bottom: 6px; width: 2px; height: auto; }

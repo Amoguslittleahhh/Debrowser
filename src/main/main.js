@@ -29,8 +29,9 @@ const { LinkCleaner } = require('./link-cleaner');
 const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
 const WhatsNew = require('./whats-new');
+const { TabGroups } = require('./tab-groups');
 const { commandList } = require('./commands');
-const { Spaces } = require('./spaces');
+const { Spaces, COLOURS } = require('./spaces');
 const { SiteStyles } = require('./site-styles');
 const { Archive } = require('./archive');
 
@@ -496,6 +497,9 @@ function main() {
   const browsingSetup = [];
   let browsingReady = false;
   let spaces = null;
+  // Tab groups (a Lab); saved with the session, through `TabGroups.current`.
+  const tabGroups = new TabGroups();
+  TabGroups.current = tabGroups;
   let siteStyles = null;
   let archive = null;
   let permissionAsks = null;
@@ -584,6 +588,7 @@ function main() {
     ...state,
     ...(receipts ? { receipt: receipts.today() } : {}),
     ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {}),
+    ...(prefs && prefs.get('labTabGroups') === true ? { groups: tabGroups.describe() } : {}),
     ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {})
   });
 
@@ -1433,7 +1438,7 @@ function main() {
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
-      sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, getArchive: () => archive,
+      sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
     });
@@ -1500,10 +1505,12 @@ function main() {
     const lost = unclean && !saved.tabs.length ? sessionStore.load().tabs : [];
 
     if (saved.tabs.length) {
+      tabGroups.load(saved.groups);
       saved.tabs.forEach((entry, i) => {
         const tab = tabs.create({ url: entry.url, activate: false, realise: false, spaceId: spaces.resolve(entry.spaceId) });
         tab.title = entry.title || tab.title;
         tab.pinned = entry.pinned === true;
+        if (tabGroups.get(entry.groupId)) tab.groupId = entry.groupId;
         // How long it has gone unopened carries across restarts (archive.js).
         if (Number.isFinite(entry.lastActiveAt)) tab.lastActiveAt = entry.lastActiveAt;
       });
@@ -1806,7 +1813,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, getArchive = () => null }) {
+                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
     for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
@@ -2002,7 +2009,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // A command from the bar: looked up again here by its place in the
         // list, so what runs is the browser's own entry, never the page's.
         if (item.kind === 'command') {
-          const entry = commandList({ incognito: INCOGNITO, hasTab: Boolean(active) })[item.commandIndex];
+          const entry = commandList({ incognito: INCOGNITO, hasTab: Boolean(active), labs: (key) => prefs.get(key) === true })[item.commandIndex];
           if (!entry) break;
           const forTab = ['close-other-tabs', 'duplicate-tab', 'pin-tab', 'mute-tab'].includes(entry.command);
           runCommand(entry.command, forTab && active ? { id: active.id } : entry.payload);
@@ -2283,6 +2290,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const tab = tabs.byId(payload?.id);
         const to = String(payload?.spaceId || '');
         if (!spaces || INCOGNITO || !tab || !spaces.byId(to) || tab.spaceId === to) break;
+        tab.groupId = null;
         if (spaces.partitionFor(to) === spaces.partitionFor(tab.spaceId)) tab.spaceId = to;
         else {
           tabs.create({ url: tab.url, activate: false, realise: false, spaceId: to });
@@ -3099,6 +3107,14 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
             ...(shell.inSplit(tab) ? [{ id: 'unsplit', label: 'Close split view', icon: 'close', payload: {} }]
               : tabs.activeTab() && tab !== tabs.activeTab() && tab.spaceId === tabs.activeTab().spaceId
                 ? [{ id: 'split-with-tab', label: 'Show beside this tab', icon: 'expand', payload: { id } }] : []),
+            // Tab groups (a Lab): a new group, a group already in this space, or out.
+            ...(prefs.get('labTabGroups') === true ? [{ kind: 'separator' },
+              ...(tab.groupId ? [{ id: 'ungroup-tab', label: 'Remove from group', icon: 'minus', payload: { id } }]
+                : [{ id: 'group-tab', label: 'Add to new group', icon: 'plus', payload: { id } },
+                  ...[...new Set(tabs.all().filter((t) => t.groupId && t.spaceId === tab.spaceId).map((t) => t.groupId))]
+                    .map((gid) => tabGroups.get(gid)).filter(Boolean).map((g) => ({
+                      id: 'add-to-group', label: `Add to ${g.name}`, swatch: g.color, payload: { id, groupId: g.id }
+                    }))])] : []),
             ...(spaces && !INCOGNITO && spaces.list.length > 1 ? [{ kind: 'separator' },
               ...spaces.list.filter((sp) => sp.id !== tab.spaceId).map((sp) => ({
                 id: 'move-tab-to-space', label: `Move to ${sp.name}`, icon: 'forward', payload: { id, spaceId: sp.id }
@@ -3250,6 +3266,111 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!tab || !tab.url) break;
         const at = tabs.all().indexOf(tab);
         tabs.create({ url: tab.url, activate: true, index: at + 1, opener: tab });
+        break;
+      }
+
+      /*
+       * Tab groups (a Lab: tab-groups.js). A group's tabs are kept side by side
+       * in the strip, and a folded group's tabs go to sleep, as a space you
+       * leave does.
+       */
+      case 'group-tab':
+      case 'add-to-group': {
+        const tab = tabs.byId(payload?.id) || active;
+        if (!tab || prefs.get('labTabGroups') !== true) break;
+        const group = command === 'group-tab' ? tabGroups.create() : tabGroups.get(String(payload?.groupId || ''));
+        if (!group) break;
+        // Beside the group's last tab, so its tabs stay together.
+        const rest = tabs.all().filter((t) => t !== tab);
+        const last = rest.map((t) => t.groupId).lastIndexOf(group.id);
+        tab.groupId = group.id;
+        if (last >= 0) tabs.move(tab.id, last + 1);
+        tabGroups.toggle(group.id, false);
+        tabGroups.prune(tabs.all());
+        publish();
+        break;
+      }
+
+      case 'ungroup-tab': {
+        const tab = tabs.byId(payload?.id) || active;
+        if (!tab || !tab.groupId) break;
+        const group = tab.groupId;
+        tab.groupId = null;
+        // Out past the group's end, rather than left in its middle.
+        const rest = tabs.all().filter((t) => t !== tab);
+        const last = rest.map((t) => t.groupId).lastIndexOf(group);
+        if (last >= 0 && tabs.all().indexOf(tab) <= last) tabs.move(tab.id, last + 1);
+        tabGroups.prune(tabs.all());
+        publish();
+        break;
+      }
+
+      case 'ungroup-all': {
+        const id = String(payload?.groupId || '');
+        for (const t of tabs.all()) if (t.groupId === id) t.groupId = null;
+        tabGroups.prune(tabs.all());
+        publish();
+        break;
+      }
+
+      case 'toggle-group': {
+        const id = String(payload?.groupId || active?.groupId || '');
+        const folded = tabGroups.toggle(id);
+        if (folded === null) break;
+        publish();
+        if (!folded) break;
+        const timer = setTimeout(() => {
+          if (!tabGroups.get(id)?.collapsed || !governor) return;
+          for (const t of tabs.all()) {
+            if (t.groupId !== id || !t.isLive || t.visible) continue;
+            governor.enforceManualDiscard(t).catch((err) => log(`group sleep failed: ${err.message}`));
+          }
+        }, SPACE_SLEEP_MS);
+        timer.unref?.();
+        break;
+      }
+
+      case 'rename-group':
+        if (tabGroups.rename(String(payload?.groupId || ''), payload?.name)) publish();
+        break;
+
+      case 'recolour-group':
+        if (tabGroups.recolour(String(payload?.groupId || ''), payload?.color)) publish();
+        break;
+
+      case 'close-group': {
+        const id = String(payload?.groupId || '');
+        const doomed = tabs.all().filter((t) => t.groupId === id);
+        if (!doomed.length) break;
+        const before = closedTabs.remembered || 0;
+        for (const t of doomed.reverse()) tabs.close(t.id);
+        tabGroups.prune(tabs.all());
+        if (tabs.all().length === 0) lastTabClosed();
+        else offerUndoClose((closedTabs.remembered || 0) - before);
+        break;
+      }
+
+      // The label's own menu: its colour, and what to do with the whole group.
+      case 'group-menu': {
+        const COLOUR_NAMES = ['Teal', 'Green', 'Clay', 'Ochre', 'Violet', 'Blue', 'Rose'];
+        const group = tabGroups.get(String(payload?.groupId || ''));
+        if (!group) break;
+        context.model = {
+          params: {},
+          items: [
+            ...COLOURS.map((color, i) => ({
+              id: 'recolour-group', label: COLOUR_NAMES[i] || 'Colour', swatch: color,
+              checked: color === group.color, payload: { groupId: group.id, color }
+            })),
+            { kind: 'separator' },
+            { id: 'toggle-group', label: group.collapsed ? 'Unfold' : 'Fold', icon: 'expand', payload: { groupId: group.id } },
+            { id: 'ungroup-all', label: 'Ungroup', icon: 'minus', payload: { groupId: group.id } },
+            { id: 'close-group', label: 'Close group', icon: 'close', payload: { groupId: group.id } }
+          ]
+        };
+        const x = Math.round(Number(payload?.x) || 0);
+        const y = Math.round(Number(payload?.y) || 0);
+        shell.openSheet('context', { x, y, right: x });
         break;
       }
 
@@ -3815,7 +3936,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           history: history ? history.entries() : [],
           engine: prefs.engineName(),
           complete: payload?.complete !== false,
-          commands: text.trim().startsWith('>') ? commandList({ incognito: INCOGNITO, hasTab: Boolean(active) }) : [],
+          commands: text.trim().startsWith('>') ? commandList({ incognito: INCOGNITO, hasTab: Boolean(active), labs: (key) => prefs.get(key) === true }) : [],
           archived: scoped && getArchive() ? getArchive().items : []
         });
         shell.suggestItems = result.items;

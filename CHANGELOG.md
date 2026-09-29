@@ -58,6 +58,11 @@
 - **Secure DNS.** Site addresses are looked up over HTTPS where your provider offers it, so the network cannot see which sites you visit; Settings can name Cloudflare, Quad9, Google or Mullvad instead, or turn it off.
 - **The menu shows which Chromium Debrowser is built on,** beside its own version, so you can tell at a glance whether a Chromium security fix has reached you.
 
+### In Labs
+
+- **Labs.** Settings → Labs lists features still being tried out, off until you turn them on, with a link to say how they went. They may change, or go, in a later release.
+- **Tab groups.** Right-click a tab and choose "Add to new group" to give tabs that belong together a name and a colour. Click the label to fold the group away into it - its tabs go to sleep while folded - double-click to rename it, and right-click it for its colour, Ungroup and Close group. Groups are kept with your tabs when Debrowser restarts.
+
 ### Corrections
 
 - **Correction to 1.9.3: hardware PlayReady does not appear in Debrowser's own tabs.** The switch 1.9.3 turned on only takes effect where Chrome's own code registers PlayReady, and Debrowser, built on Electron, does not have that code. It is removed again; it had no other effect.

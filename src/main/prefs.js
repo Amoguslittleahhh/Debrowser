@@ -210,6 +210,10 @@ const SCHEMA = {
   // On by default now that tabs are not reopened by default: closing a window
   // of twenty tabs by accident would otherwise lose all twenty.
   confirmCloseTabs: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Labs (Settings → Labs): experiments, off until turned on. Each graduates
+  // to an ordinary setting, or goes, in a later release.
+  labTabGroups: { def: false, ok: (v) => typeof v === 'boolean' },
+  labQuickWindow: { def: false, ok: (v) => typeof v === 'boolean' },
 
   // Where a tab opened from a link lands. 'after-current' keeps a page's
   // spawned tabs beside it rather than at the far end of a long strip.

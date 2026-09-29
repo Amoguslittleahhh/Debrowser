@@ -1364,6 +1364,42 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // Tab groups (a Lab): a tab joins another's group and moves beside it, the
+  // strip draws one label, a folded group's other tabs fold away and sleep,
+  // the session keeps the group, and ungrouping forgets it.
+  {
+    const wasActive = tabs.activeTab();
+    prefs.set('labTabGroups', true);
+    const a = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    const mid = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: false });
+    const c = tabs.create({ url: pageUrl('idle.html'), activate: false, realise: true });
+    await waitFor(() => a.isLive && c.isLive && !c.wc.isLoading(), { timeoutMs: 8000 });
+    runCommand('group-tab', { id: a.id });
+    const groupId = a.groupId;
+    runCommand('add-to-group', { id: c.id, groupId });
+    const order = tabs.all();
+    const beside = order.indexOf(c) === order.indexOf(a) + 1 && c.groupId === groupId && !mid.groupId;
+    await sleep(300);
+    const labels = await shell.chromeView.webContents.executeJavaScript(
+      '[...document.querySelectorAll(".tab-group:not([hidden])")].map((n) => n.textContent)').catch(() => null);
+    const saved = require('./session').Session.prototype.snapshot.call({}, tabs.all(), tabs.activeId);
+    const kept = saved.groups.some((g) => g.id === groupId) && saved.tabs.filter((t) => t.groupId === groupId).length === 2;
+    runCommand('toggle-group', { groupId });
+    await sleep(300);
+    const folded = await shell.chromeView.webContents.executeJavaScript(
+      `document.querySelector('.tab[data-id="${c.id}"]')?.classList.contains('group-folded')`).catch(() => null);
+    const slept = await waitFor(() => !c.isLive, { timeoutMs: 8000 });
+    runCommand('ungroup-all', { groupId });
+    const forgotten = !a.groupId && !c.groupId && !require('./tab-groups').TabGroups.current.get(groupId);
+    check('tab groups: joined beside, one label, folded away and asleep, saved, and forgotten when ungrouped',
+      beside && labels?.length === 1 && kept && folded === true && slept && forgotten,
+      JSON.stringify({ beside, labels, kept, folded, slept, forgotten }));
+    prefs.set('labTabGroups', false);
+    for (const t of [a, mid, c]) if (tabs.all().includes(t)) tabs.close(t.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // Split view: two tabs share the content area, a third tab in front hides
   // both, coming back shows both again, and closing one ends the split.
   {

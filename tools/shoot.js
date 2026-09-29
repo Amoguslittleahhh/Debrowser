@@ -180,6 +180,8 @@ const SHOTS = [
   { name: 'chrome-narrow', file: 'chrome.html', w: 620, h: 118 },
   { name: 'chrome-saver', file: 'chrome.html', w: 1280, h: 118, saver: true },
   { name: 'chrome-spaces', file: 'chrome.html', w: 1280, h: 118, spaces: true },
+  { name: 'chrome-groups', file: 'chrome.html', w: 1280, h: 118, groups: true },
+  { name: 'sidebar-groups', file: 'chrome.html', w: 240, h: 500, side: true, groups: true },
   { name: 'sidebar-spaces', file: 'chrome.html', w: 240, h: 500, side: true, spaces: true },
   { name: 'settings-spaces', file: 'settings.html', w: 1280, h: 860, hash: 'spaces', spaces: true },
   { name: 'sidebar',  file: 'chrome.html',   w: 240,  h: 820, side: true },
@@ -287,6 +289,15 @@ app.whenReady().then(async () => {
       { id: 'home', name: 'Home', color: '#2f857b', container: false },
       { id: 'swork', name: 'Work', color: '#7b6a9c', container: true },
       { id: 'strip', name: 'Lisbon trip', color: '#a8694a', container: false }] } : undefined;
+
+    // Two tab groups: one open (tabs 2 and 3), one folded (tabs 4 and 5).
+    STATE.groups = shot.groups ? {
+      gread: { id: 'gread', name: 'Reading', color: '#7b6a9c', collapsed: false },
+      gwatch: { id: 'gwatch', name: 'Later', color: '#a8694a', collapsed: true }
+    } : undefined;
+    for (const tab of STATE.tabs) {
+      tab.groupId = shot.groups ? ({ 2: 'gread', 3: 'gread', 4: 'gwatch', 5: 'gwatch' })[tab.id] || null : null;
+    }
 
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';

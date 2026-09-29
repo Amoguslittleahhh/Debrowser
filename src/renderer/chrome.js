@@ -573,7 +573,7 @@ let reloadShows = null;
 /* Rendering                                                           */
 /* ------------------------------------------------------------------ */
 
-function renderTabs(tabs) {
+function renderTabs(tabs, groups = null) {
   // Gone tabs leave first. Left in place until after the ordering pass, a
   // closed tab sat at its old index and every tab after it was re-inserted
   // around it - and moving a node restarts its CSS animation, so closing one
@@ -602,7 +602,7 @@ function renderTabs(tabs) {
   const skipClosing = () => {
     while (cursor && cursor.classList.contains('closing')) cursor = cursor.nextElementSibling;
   };
-  tabs.forEach((tab) => {
+  tabs.forEach((tab, i) => {
     let node = tabEls.get(tab.id);
 
     if (!node) {
@@ -618,6 +618,8 @@ function renderTabs(tabs) {
     }
 
     updateTabElement(node, tab);
+    const group = groups && tab.groupId ? groups[tab.groupId] : null;
+    updateGroup(node, tab, group, Boolean(group) && tabs[i - 1]?.groupId !== tab.groupId);
   });
   updateStripFades();
 }
@@ -758,7 +760,35 @@ function createTabElement(id) {
   close.append(crossIcon());
   close.setAttribute('aria-label', 'Close tab');
 
-  root.append(tier, icon, title, audio, close);
+  // A tab group's label (a Lab), on the group's first tab only: its name
+  // and colour, a click to fold, a double-click to rename, a right-click for
+  // the group's own menu. Part of the tab rather than a node of its own, so
+  // the strip's order and a drag's index stay a list of tabs.
+  const group = document.createElement('button');
+  group.className = 'tab-group';
+  group.type = 'button';
+  group.hidden = true;
+  const groupId = () => tabEls.get(id)?.state.groupId;
+  group.addEventListener('mousedown', (event) => event.stopPropagation());
+  group.addEventListener('pointerdown', (event) => event.stopPropagation());
+  group.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (event.detail < 2) api.send('toggle-group', { groupId: groupId() });
+  });
+  group.addEventListener('dblclick', (event) => {
+    event.stopPropagation();
+    renameGroup(group, groupId());
+  });
+  group.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    api.send('group-menu', { groupId: groupId(), x: Math.round(event.clientX), y: Math.round(event.clientY) });
+  });
+
+  const bar = document.createElement('span');
+  bar.className = 'tab-group-bar';
+
+  root.append(group, tier, icon, title, audio, close, bar);
 
   root.addEventListener('mousedown', (event) => {
     if (event.button === 1) { freezeTabWidths(); api.send('close-tab', { id }); return; }
@@ -820,7 +850,66 @@ function createTabElement(id) {
     api.send('close-tab', { id });
   });
 
-  return { root, tier, icon, favicon, chip, title, audio, close, state: {} };
+  return { root, group, tier, icon, favicon, chip, title, audio, close, state: {} };
+}
+
+/** The label becomes a field for its new name; Enter keeps it, Escape does not. */
+function renameGroup(label, groupId) {
+  if (!groupId || label.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.className = 'tab-group-name';
+  input.value = label.textContent;
+  input.maxLength = 30;
+  input.setAttribute('aria-label', 'Group name');
+  label.replaceChildren(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (keep) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    label.textContent = keep && name ? name : label.dataset.name || '';
+    if (keep && name) api.send('rename-group', { groupId, name });
+  };
+  input.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter') finish(true);
+    if (event.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  for (const type of ['mousedown', 'pointerdown', 'click', 'dblclick']) {
+    input.addEventListener(type, (event) => event.stopPropagation());
+  }
+}
+
+/**
+ * Where each tab stands in its group: the first of a run shows the label, and
+ * a folded group's tabs fold away - except the one in front, which stays.
+ */
+function updateGroup(node, tab, group, first) {
+  const prev = node.state;
+  prev.groupId = group ? group.id : null;
+  const label = first && group ? group.name : '';
+  if (!node.group.querySelector('input') && node.group.dataset.name !== label) {
+    node.group.textContent = label;
+    node.group.dataset.name = label;
+  }
+  node.group.hidden = !label;
+  node.group.title = group ? (group.collapsed ? 'Unfold group' : 'Fold group') : '';
+  node.group.classList.toggle('folded', Boolean(group && group.collapsed));
+  node.root.classList.toggle('grouped', Boolean(group));
+  node.root.classList.toggle('group-start', Boolean(group && first));
+  const folded = Boolean(group && group.collapsed && !tab.visible);
+  node.root.classList.toggle('group-folded', folded && !first);
+  // The first tab of a folded group is only its label.
+  node.root.classList.toggle('group-head-folded', folded && first);
+  const color = group ? group.color : '';
+  if (prev.groupColor !== color) {
+    if (color) node.root.style.setProperty('--group', color);
+    else node.root.style.removeProperty('--group');
+    prev.groupColor = color;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1702,7 +1791,7 @@ api.onState((state) => {
   // Only the space in front: the others' tabs are kept, out of sight.
   const spaces = state.spaces;
   const shown = spaces ? state.tabs.filter((tab) => (tab.spaceId || 'home') === spaces.activeId) : state.tabs;
-  renderTabs(shown);
+  renderTabs(shown, state.groups || null);
   renderSpace(spaces);
   // The two tabs side by side are marked as a pair.
   const pair = state.split ? [state.split.left, state.split.right] : [];
