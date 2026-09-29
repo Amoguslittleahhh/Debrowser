@@ -51,6 +51,23 @@ heading, so rename `## Unreleased` to the version before releasing. Publishing t
 whole changelog means every download page repeats the notes for versions the
 reader already has, burying the one thing they came to read.
 
+### Sections, header and footer
+
+A version's notes are sorted under `### ` headings, in this order and only when
+non-empty: `New`, `Improved`, `Fixed`, `Security`, `Known issues`, `In Labs`,
+`Leaving next release`, `Corrections`. Each item is a bold headline saying what
+the user sees, then plain sentences. An item for one system starts with
+`Windows:`, `macOS:` or `Linux:`. No emojis, apologies or donation asks.
+
+Do not write a header or footer by hand. `release-notes.py` adds both from the
+environment the release workflow sets:
+
+- the header: version, short commit, date and Chromium version, one line;
+- the footer: the workflow run and compare links, the SHA-256 of each file
+  (also uploaded as `SHA256SUMS.txt`), and the credit line above.
+
+Run locally without those variables and it prints the notes and credit alone.
+
 ### Do not hard-wrap changelog prose
 
 One paragraph or bullet is one line, however long. The rest of this repository

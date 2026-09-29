@@ -52,6 +52,8 @@ on:
 
 permissions:
   contents: write        # create the tag, the release, and upload its assets
+  id-token: write        # sign the build-provenance attestation
+  attestations: write    # and store it beside the release
 
 jobs:
   build:
@@ -446,9 +448,33 @@ jobs:
       # Both the body and its attribution footer come from one script, shared
       # with the workflow that republishes notes for an already-published
       # release. Two copies of this would drift.
+      # The checksums of every file attached, for the notes' footer - and
+      # attested, so anyone can check a download was built by this workflow
+      # from this commit (`gh attestation verify <file> -R <repo>`).
+      - name: Checksums
+        run: |
+          (cd artifacts && sha256sum * > ../SHA256SUMS.txt)
+          cat SHA256SUMS.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: artifacts/*
+
       - name: Build the release body
+        env:
+          COMMIT: ${{ github.sha }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CHECKSUMS: SHA256SUMS.txt
         run: |
           version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          # The Chromium this Electron carries, from Electron's own list; the
+          # header leaves it out rather than fail if that list is unreachable.
+          electron=$(node -p "require('./package.json').devDependencies.electron.match(/v(\d+\.\d+\.\d+)/)[1]")
+          export CHROMIUM=$(curl -fsSL https://releases.electronjs.org/releases.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s).find(x=>x.version==='$electron');process.stdout.write(r?r.chrome:'')})" || true)
+          prev=$(git ls-remote --tags origin 'v*' | awk -F/ '{print $3}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | grep -v "^v$version$" | tail -1)
+          [ -n "$prev" ] && export COMPARE_URL="${{ github.server_url }}/${{ github.repository }}/compare/$prev...${{ github.sha }}"
           python3 .github/scripts/release-notes.py "$version" > RELEASE_NOTES.md
           echo "--- release body ---"
           cat RELEASE_NOTES.md
@@ -465,5 +491,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           draft: ${{ github.event.inputs.draft == 'true' }}
           body_path: RELEASE_NOTES.md
-          files: artifacts/*
+          files: |
+            artifacts/*
+            SHA256SUMS.txt
           fail_on_unmatched_files: true
