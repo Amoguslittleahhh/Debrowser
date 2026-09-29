@@ -513,14 +513,38 @@ class Download {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * A download from an earlier run, as the list remembers it: enough to draw its
+ * row, open or show its file, and fetch it again. Nothing is running.
+ */
+class PastDownload {
+  constructor(record) {
+    Object.assign(this, record);
+    this.cancelled = record.state === 'cancelled';
+  }
+
+  snapshot() {
+    return {
+      id: this.id, url: this.url, filename: this.filename, state: this.state,
+      total: this.total, received: this.received, segments: 0, error: this.error, bytesPerSecond: 0
+    };
+  }
+
+  cancel() {}
+}
+
+const TERMINAL = new Set(['done', 'failed', 'cancelled']);
+const KEPT = 100;
+
 class DownloadManager {
   /**
    * `dir` may be a function, so a changed download folder applies to the next
    * file. `saveAs(defaultPath)` resolves to a chosen path, null for cancelled,
-   * or undefined to save without asking.
+   * or undefined to save without asking. `store` is where the list is kept
+   * between runs; null (a private window, a test) keeps it for this run only.
    */
   constructor({ dir, connections = () => 4, session = null, log = () => {}, onChange = () => {},
-                saveAs = null }) {
+                saveAs = null, store = null }) {
     this.dir = dir;
     this.saveAs = saveAs;
     this.connections = connections;
@@ -529,8 +553,78 @@ class DownloadManager {
     this.session = session;
     this.log = log;
     this.onChange = onChange;
-    /** @type {Map<string, Download>} */
+    /** @type {Map<string, Download|PastDownload>} */
     this.items = new Map();
+    this.store = store;
+    this.saveTimer = null;
+    this.load();
+  }
+
+  /**
+   * The list from last time. A download still running when the browser closed
+   * comes back as failed - "Stopped when Debrowser closed" - so Retry can
+   * finish it; its partial file was never the user's and is not kept.
+   */
+  load() {
+    if (!this.store) return;
+    let records;
+    try {
+      records = JSON.parse(fs.readFileSync(this.store, 'utf8'));
+    } catch {
+      return;
+    }
+    if (!Array.isArray(records)) return;
+    for (const r of records.slice(0, KEPT)) {
+      if (!r || typeof r.id !== 'string' || typeof r.url !== 'string' || !/^https?:/i.test(r.url)) continue;
+      const interrupted = !TERMINAL.has(r.state);
+      this.items.set(r.id, new PastDownload({
+        id: r.id,
+        url: r.url,
+        filename: typeof r.filename === 'string' ? r.filename : null,
+        file: interrupted || typeof r.file !== 'string' ? null : r.file,
+        state: interrupted ? 'failed' : r.state,
+        total: Number(r.total) || 0,
+        received: interrupted ? 0 : Number(r.received) || 0,
+        error: interrupted ? 'Stopped when Debrowser closed' : (typeof r.error === 'string' ? r.error : null),
+        startedAt: Number(r.startedAt) || 0,
+        finishedAt: Number(r.finishedAt) || 0
+      }));
+    }
+  }
+
+  /** Written a moment after a change, and at once on quit (`flush`). */
+  persist() {
+    if (!this.store) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.flush(), 1000);
+    this.saveTimer.unref?.();
+  }
+
+  flush() {
+    if (!this.store) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    const records = [...this.items.values()]
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .slice(0, KEPT)
+      .map((d) => ({
+        id: d.id, url: d.url, filename: d.filename, file: d.file, state: d.state,
+        total: d.total, received: d.received, error: d.error, startedAt: d.startedAt, finishedAt: d.finishedAt
+      }));
+    try {
+      fs.writeFileSync(`${this.store}.tmp`, JSON.stringify(records), { mode: 0o600 });
+      fs.renameSync(`${this.store}.tmp`, this.store);
+    } catch (err) {
+      this.log(`downloads: could not save the list (${err.message})`);
+    }
+  }
+
+  /** Fetch a failed or cancelled download again, in a new row at the top. */
+  retry(id) {
+    const item = this.items.get(id);
+    if (!item || (item.state !== 'failed' && item.state !== 'cancelled')) return null;
+    this.items.delete(id);
+    return this.start(item.url, { session: item.session || null, referrer: item.referrer || null });
   }
 
   /**
@@ -559,9 +653,15 @@ class DownloadManager {
       ask,
       referrer: /^https?:\/\//i.test(referrer || '') ? referrer : null,
       log: this.log,
-      onChange: () => this.onChange(this.list())
+      onChange: (d) => {
+        if (d && TERMINAL.has(d.state)) this.persist();
+        // Not the list: building it looks on disk for every finished file, and
+        // this runs four times a second while anything downloads.
+        this.onChange();
+      }
     });
     this.items.set(item.id, item);
+    this.persist();
     // The list is sorted and sent on every progress report, so finished ones
     // beyond the most recent hundred go - oldest first, never a running one.
     const finished = [...this.items.values()].filter((d) => d.state === 'done' || d.state === 'failed' || d.cancelled);
@@ -583,6 +683,7 @@ class DownloadManager {
     if (!item) return false;
     if (item.state === 'running' || item.state === 'starting') item.cancel();
     this.items.delete(id);
+    this.persist();
     return true;
   }
 
@@ -600,7 +701,9 @@ class DownloadManager {
    */
   pathOf(id) {
     const item = this.items.get(id);
-    return item && item.state === 'done' && item.file ? item.file : null;
+    const file = item && item.state === 'done' ? item.file : null;
+    // A file moved or deleted since is not there to open.
+    return file && fs.existsSync(file) ? file : null;
   }
 
   /**
@@ -633,7 +736,12 @@ class DownloadManager {
   list() {
     return [...this.items.values()]
       .sort((a, b) => b.startedAt - a.startedAt)
-      .map((item) => item.snapshot());
+      .map((item) => {
+        const row = item.snapshot();
+        // Asked only for finished ones, and only when the list is drawn.
+        if (row.state === 'done') row.missing = !this.pathOf(item.id);
+        return row;
+      });
   }
 }
 

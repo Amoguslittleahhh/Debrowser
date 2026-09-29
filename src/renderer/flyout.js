@@ -91,9 +91,15 @@ function createRow(item) {
   reveal.textContent = 'Show in folder';
   reveal.hidden = true;
 
+  const retry = document.createElement('button');
+  retry.className = 'dl-link';
+  retry.type = 'button';
+  retry.textContent = 'Retry';
+  retry.hidden = true;
+
   const links = document.createElement('span');
   links.className = 'dl-links';
-  links.append(open, reveal);
+  links.append(open, reveal, retry);
 
   text.append(name, meter, status, links);
 
@@ -105,10 +111,14 @@ function createRow(item) {
 
   root.append(chip, text, action);
 
-  const node = { root, name, meter, fill, status, open, reveal, action, state: {}, steadyAt: 0 };
+  const node = { root, name, meter, fill, status, open, reveal, retry, action, state: {}, steadyAt: 0 };
 
   open.addEventListener('click', () => api.request('open-download', { id: item.id }));
   reveal.addEventListener('click', () => api.request('reveal-download', { id: item.id }));
+  retry.addEventListener('click', async () => {
+    await api.request('retry-download', { id: item.id });
+    load();
+  });
 
   action.addEventListener('click', async () => {
     // The button changes job when a download ends - Cancel becomes Clear in
@@ -162,8 +172,9 @@ function updateRow(node, item) {
 
   if (prev.state !== item.state) {
     node.root.dataset.state = item.state;
-    node.open.hidden = item.state !== 'done';
-    node.reveal.hidden = item.state !== 'done';
+    node.open.hidden = item.state !== 'done' || item.missing === true;
+    node.reveal.hidden = item.state !== 'done' || item.missing === true;
+    node.retry.hidden = item.state !== 'failed' && item.state !== 'cancelled';
     if (prev.state !== undefined && running !== RUNNING.has(prev.state)) node.steadyAt = Date.now() + 500;
     node.action.replaceChildren(running ? 'Cancel' : crossIcon());
     node.action.setAttribute('aria-label',

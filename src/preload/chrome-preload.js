@@ -141,6 +141,7 @@ const COMMANDS = new Set([
   'clear-download',
   'reveal-download',
   'open-download',
+  'retry-download',
   'safe-copy',
   'open-downloads-page',
   'update-restart',

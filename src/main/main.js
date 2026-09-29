@@ -1236,6 +1236,8 @@ function main() {
     // downloads of the same file would race for the same name on disk.
     downloads = new DownloadManager({
       dir: () => downloadDir(prefs),
+      // The list survives a restart - but not from a private window, or a test.
+      store: INCOGNITO || OFFLINE_MODE ? null : path.join(app.getPath('userData'), 'downloads.json'),
       // One connection over Tor: several would share a circuit and gain nothing
       // but load on the exit relay.
       connections: () => (INCOGNITO ? 1 : prefs.get('downloadConnections')),
@@ -1442,6 +1444,7 @@ function main() {
     }
     else if (history) history.flush();
     if (sitePrefs && sitePrefs.timer) sitePrefs.flush();
+    if (downloads) downloads.flush();
     // Before `closeAll`, which empties the list this describes. Written
     // synchronously because quit does not wait for a timer, and the debounce
     // above means the last thing the user did is usually still pending.
@@ -2794,7 +2797,7 @@ const CHROME_REQUESTS = new Set([
   // read, unlike the credential store next door. No path crosses the boundary:
   // `reveal-download` and `open-download` take an id and resolve it here.
   'list-downloads', 'cancel-download', 'clear-download',
-  'reveal-download', 'open-download',
+  'reveal-download', 'open-download', 'retry-download',
   // The menu draws itself from this. It is a request rather than part of the
   // state broadcast because the menu is open for a second or two and the
   // broadcast reaches three views twice a second - sending a menu's worth of
@@ -2836,7 +2839,8 @@ const HISTORY_REQUESTS = new Set(['list-history', 'delete-history', 'clear-histo
 const OPENS_IN_BROWSER = /\.(pdf|png|jpe?g|gif|webp|avif|bmp|txt|md|json|csv|mp3|m4a|ogg|oga|opus|wav|flac|mp4|webm|ogv)$/i;
 
 const DOWNLOAD_REQUESTS = new Set([
-  'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download', 'safe-copy']);
+  'list-downloads', 'cancel-download', 'clear-download', 'reveal-download', 'open-download', 'safe-copy',
+  'retry-download']);
 
 /**
  * Who may send what, on both channels, in one table.
@@ -3012,6 +3016,9 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'clear-download':
         return { removed: Boolean(downloads && downloads.remove(String(payload?.id ?? ''))) };
+
+      case 'retry-download':
+        return { retried: Boolean(downloads && downloads.retry(String(payload?.id ?? ''))) };
 
       // Show the file where it landed. The renderer sends an id and never sees
       // a path, so the worst a compromised chrome can do here is reveal a file

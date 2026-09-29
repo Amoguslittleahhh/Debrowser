@@ -125,11 +125,17 @@ class ContentBlocker {
     }
   }
 
-  /** Is blocking on for the page a request belongs to? */
-  activeFor(wc) {
+  /**
+   * Is blocking on for the page a request belongs to? The page is the top
+   * document of the frame that asked - read from the frame first, because a
+   * tab's own address can still be the one it is leaving while the new page's
+   * first requests go out.
+   */
+  activeFor(wc, details = null) {
     if (!this.engine || this.enabled() === false) return false;
-    let host = null;
-    try { host = wc && !wc.isDestroyed() ? new URL(wc.getURL()).hostname : null; } catch { host = null; }
+    const host = hostOf(safely(() => details?.frame?.top?.url)) ||
+      hostOf(safely(() => (wc && !wc.isDestroyed() ? wc.getURL() : null))) ||
+      hostOf(details?.referrer);
     return !host || this.onFor(host);
   }
 
@@ -152,7 +158,7 @@ class ContentBlocker {
         if (details.webContentsId) this.perPage.delete(details.webContentsId);
         return undefined;
       }
-      if (!this.activeFor(details.webContents)) return undefined;
+      if (!this.activeFor(details.webContents, details)) return undefined;
       let out;
       this.engine.onBeforeRequest(details, (result) => { out = result; });
       if (out && (out.cancel || out.redirectURL)) {
@@ -165,7 +171,7 @@ class ContentBlocker {
     });
     hooks.onHeadersReceived((details) => {
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return undefined;
-      if (!this.activeFor(details.webContents)) return undefined;
+      if (!this.activeFor(details.webContents, details)) return undefined;
       let out;
       this.engine.onHeadersReceived(details, (result) => { out = result; });
       return out;
@@ -177,11 +183,11 @@ class ContentBlocker {
     // into the frame that asked.
     const fromWeb = (event) => /^https?:/i.test(event.senderFrame?.url || '');
     ipcMain.handle('@ghostery/adblocker/inject-cosmetic-filters', (event, url, msg) => {
-      if (!fromWeb(event) || !this.activeFor(event.sender)) return undefined;
+      if (!fromWeb(event) || !this.activeFor(event.sender, { frame: event.senderFrame })) return undefined;
       return this.engine.onInjectCosmeticFilters(event, event.senderFrame.url, msg);
     });
     ipcMain.handle('@ghostery/adblocker/is-mutation-observer-enabled', (event) => {
-      if (!fromWeb(event) || !this.activeFor(event.sender)) return false;
+      if (!fromWeb(event) || !this.activeFor(event.sender, { frame: event.senderFrame })) return false;
       return this.engine.onIsMutationObserverEnabled(event);
     });
   }
@@ -191,6 +197,14 @@ class ContentBlocker {
     if (this.enabled() === false) return;
     if (!this.engine || this.engineCookies !== (this.cookieBanners() !== false)) this.load();
   }
+}
+
+function safely(read) {
+  try { return read(); } catch { return null; }
+}
+
+function hostOf(url) {
+  try { return url && /^https?:/i.test(url) ? new URL(url).hostname : null; } catch { return null; }
 }
 
 module.exports = { ContentBlocker, listsFor };

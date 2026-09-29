@@ -98,13 +98,20 @@ function createRow(item) {
   safe.title = 'A copy with no scripts, forms, links or hidden details: each page as a picture. Text in it is no longer selectable.';
   safe.hidden = true;
 
+  // A failed or cancelled download can be fetched again, into a new row.
+  const retry = document.createElement('button');
+  retry.className = 'ghost-btn';
+  retry.type = 'button';
+  retry.textContent = 'Retry';
+  retry.hidden = true;
+
   const buttons = document.createElement('div');
   buttons.className = 'download-actions';
-  buttons.append(safe, open, action);
+  buttons.append(safe, retry, open, action);
 
   root.append(chip, text, buttons);
 
-  const node = { root, name, meter, fill, status, action, open, safe, state: {} };
+  const node = { root, name, meter, fill, status, action, open, safe, retry, state: {} };
 
   safe.addEventListener('click', async () => {
     safe.disabled = true;
@@ -128,6 +135,10 @@ function createRow(item) {
   action.addEventListener('click', async () => {
     const running = RUNNING.has(node.state.state);
     await api.request(running ? 'cancel-download' : 'clear-download', { id: item.id });
+    load();
+  });
+  retry.addEventListener('click', async () => {
+    await api.request('retry-download', { id: item.id });
     load();
   });
 
@@ -169,7 +180,8 @@ function updateRow(node, item) {
     node.root.dataset.state = item.state;
     // Only a file that finished can be opened. A cancelled or failed download
     // has nothing on disk worth handing to the system.
-    node.open.hidden = item.state !== 'done';
+    node.open.hidden = item.state !== 'done' || item.missing === true;
+    node.retry.hidden = item.state !== 'failed' && item.state !== 'cancelled';
     node.open.title = `Open ${item.filename || 'file'} · middle-click to show it in its folder`;
     node.action.textContent = running ? 'Cancel' : 'Clear';
     node.action.classList.toggle('danger', running);

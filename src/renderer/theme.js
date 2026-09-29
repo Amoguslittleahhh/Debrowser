@@ -84,6 +84,7 @@ function formatBytes(n) {
 function failureReason(error) {
   const e = String(error || '');
   if (!e) return 'Failed';
+  if (/closed/i.test(e) && /Debrowser/.test(e)) return 'Stopped when Debrowser closed';
   if (/FILE_|ACCESS_DENIED|NO_SPACE|DISK|PATH|permission/i.test(e)) return 'Failed – couldn’t save the file';
   if (/SERVER|HTTP|FORBIDDEN|UNAUTHORIZED|NOT_FOUND|BAD_CONTENT/i.test(e)) return 'Failed – the site stopped it';
   if (/NETWORK|CONNECTION|TIMED_OUT|DISCONNECTED|CONTENT_LENGTH|INCOMPLETE|RESET|interrupt/i.test(e)) {
@@ -109,6 +110,7 @@ function describeDownload(item, { brief = false } = {}) {
   const over = brief || !(item.segments > 1) ? '' : ` over ${item.segments} connections`;
   switch (item.state) {
     case 'done':
+      if (item.missing) return 'Moved or deleted';
       return brief ? null : `Finished – ${formatBytes(item.received)}${over}`;
     case 'failed':
       return failureReason(item.error);

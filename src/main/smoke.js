@@ -978,6 +978,32 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `all: ${all.map((r) => r.kind).join(',')}; "pull": ${JSON.stringify(some.map((r) => [r.tabId, r.note]))}`);
   }
 
+  // The downloads list survives a restart: a finished file whose file is gone
+  // says so, and one cut off by closing comes back as failed, ready to retry.
+  {
+    const { DownloadManager: Manager } = require('./downloads');
+    const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'debrowser-dl-'));
+    const store = path.join(dir, 'downloads.json');
+    fs.writeFileSync(store, JSON.stringify([
+      { id: 'dl-a', url: pageUrl('idle.html'), filename: 'gone.bin', file: path.join(dir, 'gone.bin'),
+        state: 'done', total: 10, received: 10, startedAt: 2 },
+      { id: 'dl-b', url: pageUrl('idle.html'), filename: 'half.bin', file: path.join(dir, 'half.bin'),
+        state: 'running', total: 10, received: 4, startedAt: 1 }
+    ]));
+    const manager = new Manager({ dir, store, session: session.fromPartition(BROWSING_PARTITION) });
+    const rows = manager.list();
+    const again = manager.retry('dl-b');
+    const ok = rows.length === 2 && rows[0].missing === true && rows[1].state === 'failed' &&
+      /closed/.test(rows[1].error) && again && !manager.items.has('dl-b');
+    if (again) await waitFor(() => again.state === 'done' || again.state === 'failed', { timeoutMs: 8000 });
+    manager.flush();
+    const saved = JSON.parse(fs.readFileSync(store, 'utf8'));
+    check('the downloads list is kept, and an interrupted download can be retried',
+      ok && again.state === 'done' && saved.some((r) => r.id === again.id && r.state === 'done'),
+      `${JSON.stringify(rows.map((r) => [r.state, r.missing ?? null]))}, retried ${again && again.state}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

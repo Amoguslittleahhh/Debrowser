@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Downloads are remembered after a restart,** and a failed or cancelled one has a Retry button. A download cut off by closing Debrowser comes back as "Stopped when Debrowser closed", ready to retry, and a finished file you have since moved or deleted says so instead of offering to open it.
 - **Search your open tabs with Ctrl+Shift+A.** The address bar opens on your tabs, most recently used first, each saying what it costs you - its memory, or that it is asleep - and narrows as you type. Typing `@tabs` in the address bar does the same.
 - **Closing tabs can be undone.** Closing a tab, or the tabs to its right or all the others, shows a note at the foot of the window with Undo, which puts them back where they were. It goes by itself after a few seconds, and waits while the pointer is on it.
 - **Tabs survive a crash even with restore off.** If Debrowser, the computer or its power went down without closing properly, the next start offers the tabs you had open, with one click to bring them back.
