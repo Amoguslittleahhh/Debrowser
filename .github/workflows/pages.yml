@@ -1,0 +1,49 @@
+# The release archive (tools/changelog-site.js) on GitHub Pages: every version's
+# notes with its date, one page each, and an Atom feed.
+#
+# Needs Pages turned on once, with "GitHub Actions" as the source
+# (Settings → Pages). Until then the deploy step fails and nothing else does.
+
+name: Release archive
+
+on:
+  push:
+    branches: [claude/master-build]
+    paths: [CHANGELOG.md, tools/changelog-site.js, .github/workflows/pages.yml]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags give each version its date
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/changelog-site.js site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
