@@ -58,10 +58,15 @@
 - **Secure DNS.** Site addresses are looked up over HTTPS where your provider offers it, so the network cannot see which sites you visit; Settings can name Cloudflare, Quad9, Google or Mullvad instead, or turn it off.
 - **The menu shows which Chromium Debrowser is built on,** beside its own version, so you can tell at a glance whether a Chromium security fix has reached you.
 
+### Known issues
+
+- **Passkeys have not been confirmed yet.** Signing in with a passkey should go to Windows Hello or Touch ID as it does in Chrome, but this release has not been tested on either, so Debrowser does not promise it. If it does not work for you, please say so on the issue tracker with your system and the site.
+
 ### In Labs
 
 - **Labs.** Settings → Labs lists features still being tried out, off until you turn them on, with a link to say how they went. They may change, or go, in a later release.
 - **Tab groups.** Right-click a tab and choose "Add to new group" to give tabs that belong together a name and a colour. Click the label to fold the group away into it - its tabs go to sleep while folded - double-click to rename it, and right-click it for its colour, Ungroup and Close group. Groups are kept with your tabs when Debrowser restarts.
+- **A small window for links from other apps.** With it on, a link from your mail, chat or documents opens in a small window of its own, to read and close; "Open in Debrowser" keeps it as a tab in the space it would have gone to. Nothing of it is kept once it closes.
 
 ### Corrections
 

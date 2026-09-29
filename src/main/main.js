@@ -458,15 +458,22 @@ function main() {
   const openExternal = (url) => {
     const chosen = prefs && prefs.get('externalLinksSpace');
     const spaceId = spaces && chosen && chosen !== 'current' && spaces.byId(chosen) ? chosen : undefined;
+    // The quick window (a Lab): a small window to read it in, not a tab.
+    if (shell && prefs.get('labQuickWindow') === true) {
+      const space = spaceId || (spaces && spaces.activeId);
+      shell.openQuick(url, tabs.sessionFor ? tabs.sessionFor(space) : tabs.session, space);
+      return true;
+    }
     tabs.create({ url, spaceId });
+    return false;
   };
   if (!INCOGNITO) {
     app.on('open-url', (event, url) => {
       event.preventDefault();
       if (!/^https?:\/\//i.test(url)) return;
       if (!tabs) { earlyUrls.push(url); return; }
-      openExternal(url);
-      if (shell && !shell.window.isDestroyed()) shell.window.focus();
+      // The quick window takes the focus itself; a tab needs the window in front.
+      if (!openExternal(url) && shell && !shell.window.isDestroyed()) shell.window.focus();
     });
   }
   /** @type {Prefs|null} */
@@ -1653,8 +1660,9 @@ function main() {
     // running, and means what it says: another private tab.
     if (INCOGNITO && tabs) tabs.create({ url: pages.NEW_TAB_URL });
     // A link opened while Debrowser runs arrives as a second launch.
-    if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [])) openExternal(url);
-    if (shell && !shell.window.isDestroyed()) {
+    let quick = false;
+    if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [])) quick = openExternal(url) || quick;
+    if (shell && !shell.window.isDestroyed() && !quick) {
       if (shell.window.isMinimized()) shell.window.restore();
       shell.window.focus();
     }
@@ -2380,6 +2388,25 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'peek-close':
         shell.closePeek();
+        break;
+
+      // The quick window (a Lab): kept as a tab in the main window, or closed.
+      case 'quick-promote': {
+        const url = shell.quickUrl();
+        const spaceId = shell.quick?.spaceId;
+        shell.closeQuick();
+        if (url && /^https?:/i.test(url)) {
+          tabs.create({ url, spaceId: spaces && spaces.byId(spaceId) ? spaceId : undefined });
+          if (!shell.window.isDestroyed()) {
+            if (shell.window.isMinimized()) shell.window.restore();
+            shell.window.focus();
+          }
+        }
+        break;
+      }
+
+      case 'quick-close':
+        shell.closeQuick();
         break;
 
       // From the link's context menu.

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Quick window</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="quick.css">
+</head>
+<body>
+  <!--
+    The bar of the quick window (window.js, openQuick): what the page is, and
+    the way into the main window. The page itself is another view, below.
+  -->
+  <header class="bar">
+    <span class="what">
+      <span class="spinner" id="spinner" hidden></span>
+      <strong id="title">Loading…</strong>
+      <span id="host"></span>
+    </span>
+    <button type="button" class="primary" id="promote">Open in Debrowser</button>
+    <button type="button" class="close" id="close" aria-label="Close" title="Close">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>
+    </button>
+  </header>
+  <script src="theme.js"></script>
+  <script src="quick.js"></script>
+</body>
+</html>

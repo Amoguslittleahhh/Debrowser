@@ -31,6 +31,9 @@ const SPLIT_GAP = 8;
 /** Peek's card: its corners, and the room above it for the buttons. */
 const PEEK_RADIUS = 12;
 const PEEK_TOP = 52;
+/** The quick window (a Lab): its size, and the bar above its page. */
+const QUICK_SIZE = { width: 900, height: 640 };
+const QUICK_BAR = 44;
 
 /**
  * Height the bookmarks bar adds to the chrome when it is showing.
@@ -1237,6 +1240,92 @@ class BrowserShell {
     }
     const active = this.tabs.activeTab();
     if (active && active.isLive) active.wc.focus();
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Quick window (a Lab)                                              */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * A link from another app, in a small window of its own, as Little Arc does:
+   * read it and close it, or "Open in Debrowser" to keep it as a tab. Like a
+   * Peek it is not a tab - nothing of it is kept once it closes - and it uses
+   * the session the link would have opened in, so the blocker and the rest of
+   * the session's protections apply to it as to any tab.
+   */
+  openQuick(url, ses, spaceId = null) {
+    if (!/^https?:/i.test(String(url || ''))) return;
+    this.closeQuick();
+    const win = new BaseWindow({
+      ...QUICK_SIZE,
+      minWidth: 420,
+      minHeight: 320,
+      show: false,
+      title: 'Debrowser',
+      backgroundColor: this.surface()
+    });
+    const bar = new WebContentsView({
+      webPreferences: {
+        preload: CHROME_PRELOAD,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        additionalArguments: preloadArgs(this.prefs)
+      }
+    });
+    bar.webContents.loadFile(path.join(RENDERER_DIR, 'quick.html')).catch(() => {});
+    const page = new WebContentsView({
+      webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true }
+    });
+    page.setBackgroundColor(this.surface());
+    const wc = page.webContents;
+    wc.setWindowOpenHandler(({ url: next }) => {
+      if (/^https?:/i.test(next)) this.onCommand('new-tab', { url: next });
+      return { action: 'deny' };
+    });
+    const tell = () => {
+      if (!this.quick || wc.isDestroyed() || bar.webContents.isDestroyed()) return;
+      send(bar, 'debrowser:ui', { kind: 'quick', url: wc.getURL(), title: wc.getTitle(), loading: wc.isLoading() });
+      win.setTitle(wc.getTitle() || 'Debrowser');
+    };
+    for (const e of ['page-title-updated', 'did-navigate', 'did-navigate-in-page', 'did-stop-loading', 'did-start-loading']) wc.on(e, tell);
+    bar.webContents.once('did-finish-load', tell);
+
+    win.contentView.addChildView(bar);
+    win.contentView.addChildView(page);
+    const place = () => {
+      if (win.isDestroyed()) return;
+      const { width, height } = win.getContentBounds();
+      bar.setBounds({ x: 0, y: 0, width, height: QUICK_BAR });
+      page.setBounds({ x: 0, y: QUICK_BAR, width, height: Math.max(0, height - QUICK_BAR) });
+    };
+    win.on('resize', place);
+    win.on('closed', () => {
+      if (this.quick && this.quick.win === win) this.quick = null;
+      for (const view of [page, bar]) {
+        try { view.webContents.close(); } catch { /* already gone */ }
+      }
+    });
+    this.quick = { win, bar, page, spaceId };
+    // It belongs to this window: it goes when the browser does.
+    this.window.once('closed', () => this.closeQuick());
+    place();
+    wc.loadURL(url).catch(() => {});
+    win.show();
+    wc.focus();
+  }
+
+  /** Where the quick window is now, for "Open in Debrowser"; null when there is none. */
+  quickUrl() {
+    const wc = this.quick && this.quick.page.webContents;
+    return wc && !wc.isDestroyed() ? wc.getURL() : null;
+  }
+
+  closeQuick() {
+    const quick = this.quick;
+    if (!quick) return;
+    this.quick = null;
+    if (!quick.win.isDestroyed()) quick.win.close();
   }
 
   /* ---------------------------------------------------------------- */
@@ -2467,7 +2556,7 @@ class BrowserShell {
   isChromeSender(sender) {
     if (!sender) return false;
     for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
-      this.toastView, this.dividerView, this.peek && this.peek.backdrop]) {
+      this.toastView, this.dividerView, this.peek && this.peek.backdrop, this.quick && this.quick.bar]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }

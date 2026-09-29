@@ -1400,6 +1400,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // The quick window (a Lab): a link opens in a small window of its own, and
+  // its bar's "Open in Debrowser" - a real click, through the command
+  // channel's sender check - makes it a tab and closes the window.
+  {
+    const url = pageUrl('article.html');
+    const before = tabs.all().length;
+    shell.openQuick(url, tabs.activeTab().session, 'home');
+    const quick = shell.quick;
+    const loaded = await waitFor(() => quick && !quick.page.webContents.isLoading() &&
+      quick.page.webContents.getURL() === url, { timeoutMs: 8000 });
+    const titled = loaded && await waitFor(async () => (await quick.bar.webContents.executeJavaScript(
+      'document.getElementById("title").textContent').catch(() => '')) !== 'Loading…', { timeoutMs: 5000 });
+    await quick.bar.webContents.executeJavaScript('document.getElementById("promote").click()').catch(() => {});
+    const promoted = await waitFor(() => !shell.quick && tabs.all().length === before + 1, { timeoutMs: 5000 });
+    const tab = tabs.all().find((t) => t.url === url);
+    check('the quick window shows a link, and "Open in Debrowser" keeps it as a tab',
+      loaded && titled && promoted && Boolean(tab) && quick.win.isDestroyed(),
+      JSON.stringify({ loaded, titled, promoted, tab: Boolean(tab), closed: quick.win.isDestroyed() }));
+    if (tab) tabs.close(tab.id);
+    await sleep(200);
+  }
+
   // Split view: two tabs share the content area, a third tab in front hides
   // both, coming back shows both again, and closing one ends the split.
   {
