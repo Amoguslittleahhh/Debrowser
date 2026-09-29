@@ -45,6 +45,7 @@
   WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\URLAssociations" "https" "${URL_PROGID}"
   WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\FileAssociations" ".htm" "${HTML_PROGID}"
   WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\FileAssociations" ".html" "${HTML_PROGID}"
+  WriteRegStr HKCU "${BROWSER_KEY}\Capabilities\FileAssociations" ".pdf" "${HTML_PROGID}"
   WriteRegStr HKCU "Software\RegisteredApplications" "Debrowser" "${BROWSER_KEY}\Capabilities"
   ; Tell Explorer the associations changed, so Default apps lists it at once.
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'

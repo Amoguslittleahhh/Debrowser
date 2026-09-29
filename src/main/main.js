@@ -3572,7 +3572,7 @@ function firstTabLoaded(tab) {
 /**
  * Web addresses and local pages among the arguments a launch was given: how
  * the system hands a link to its default browser. Switches are not addresses,
- * and nothing but http(s) and existing .html/.htm files is opened -
+ * and nothing but http(s) and existing .html/.htm/.pdf files is opened -
  * a launch argument is outside input, and a `javascript:` or custom-scheme
  * URL has no business arriving this way.
  */
@@ -3584,7 +3584,7 @@ function launchUrls(args) {
       try { out.push(new URL(arg).href); } catch { /* not an address */ }
       continue;
     }
-    if (/\.html?$/i.test(arg)) {
+    if (/\.(html?|pdf)$/i.test(arg)) {
       try {
         const full = path.resolve(arg);
         if (fs.statSync(full).isFile()) out.push(require('url').pathToFileURL(full).href);

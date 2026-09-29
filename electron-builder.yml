@@ -293,6 +293,7 @@ linux:
   category: Network;WebBrowser
   mimeTypes:
     - text/html
+    - application/pdf
     - x-scheme-handler/http
     - x-scheme-handler/https
   synopsis: A memory-adaptive web browser

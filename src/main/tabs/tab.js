@@ -104,6 +104,12 @@ function createTabView({ session, url }) {
       // WebGL hands a page the graphics card's name and quirks; a private
       // window gives it none. See incognito/fingerprint.js for WebGPU.
       webgl: !INCOGNITO,
+      // Chromium's PDF viewer, which is what `plugins` switches on - there is
+      // no other plugin left. Off, a PDF link downloaded the file instead of
+      // showing it. On in private windows too: the viewer draws the file
+      // locally, inside the sandboxed tab, where the alternative was saving it
+      // and opening it in some other program.
+      plugins: true,
       // Tells the page preload it is in a private window: see the end of
       // probe-preload.js, where dropped and pasted files are cleaned.
       additionalArguments: INCOGNITO ? ['--debrowser-private'] : []

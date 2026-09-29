@@ -890,6 +890,21 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     settingsTab.internal && floor === Tier.DISCARDED,
     `internal=${settingsTab.internal}, asked for discarded, allowed ${floor}`);
 
+  // A PDF opens in the tab, in Chromium's viewer, rather than downloading.
+  {
+    const wasActive = tabs.activeTab();
+    const pdf = tabs.create({ url: pageUrl('tracked.pdf'), activate: true, realise: true });
+    const VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/';
+    const shown = await waitFor(() => pdf.isLive && !pdf.wc.isDestroyed() &&
+      pdf.wc.mainFrame.framesInSubtree.some((f) => f.url.startsWith(VIEWER)), { timeoutMs: 10_000 });
+    const where = pdf.isLive && !pdf.wc.isDestroyed() ? pdf.wc.getURL() : '(no page)';
+    check('a PDF opens in the tab, in the built-in viewer',
+      shown && /tracked\.pdf$/.test(where), `viewer: ${shown}, tab at ${where}`);
+    tabs.close(pdf.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // The welcome tour: it loads in a tab with its bridge, a choice made in it
   // reaches the preferences, and finishing it marks it done and leaves a new
   // tab where it was.
