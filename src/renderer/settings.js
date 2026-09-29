@@ -593,12 +593,14 @@ function welcomeRow() {
  */
 const SPACE_COLOURS = ['#2f857b', '#6f8f5f', '#a8694a', '#b08a3c', '#7b6a9c', '#5f7d9c', '#b0306a'];
 let spacesDrawn = '';
-function renderSpaces(spaces) {
+let spacesPrefs = {};
+function renderSpaces(spaces, prefs = {}) {
+  spacesPrefs = prefs;
   const host = document.querySelector('[data-rows="spaces"]');
   const section = host && host.closest('section');
   if (!host) return;
   if (!spaces) { section.hidden = true; return; }
-  const key = JSON.stringify(spaces.list);
+  const key = JSON.stringify([spaces.list, prefs.externalLinksSpace]);
   if (key === spacesDrawn || host.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
   spacesDrawn = key;
   const rows = spaces.list.map((sp) => {
@@ -635,6 +637,22 @@ function renderSpaces(spaces) {
     }
     return row;
   });
+  // Where links from other apps go: the space in front, or one of these.
+  const { row: route, control: routeControl } = simpleRow('Links from other apps open in',
+    'Mail, chat and documents hand their links to Debrowser; this is the space they land in.');
+  const pick = document.createElement('select');
+  pick.setAttribute('aria-label', 'Space for links from other apps');
+  for (const [value, name] of [['current', 'The space I am in'], ...spaces.list.map((sp) => [sp.id, sp.name])]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = name;
+    pick.append(option);
+  }
+  pick.value = spacesPrefs.externalLinksSpace && spaces.list.some((sp) => sp.id === spacesPrefs.externalLinksSpace)
+    ? spacesPrefs.externalLinksSpace : 'current';
+  pick.addEventListener('change', () => api.send('set-pref', { key: 'externalLinksSpace', value: pick.value }));
+  routeControl.append(pick);
+
   const { row: add, control } = simpleRow('New space', 'Work, a project, a trip: a set of tabs you switch between. Spaces you leave go to sleep after half a minute.');
   const plain = smallButton('New space');
   plain.addEventListener('click', () => api.send('new-space', {}));
@@ -642,7 +660,7 @@ function renderSpaces(spaces) {
   own.title = 'Sign in to the same site with another account';
   own.addEventListener('click', () => api.send('new-space', { container: true }));
   control.append(plain, own);
-  host.replaceChildren(...rows, add);
+  host.replaceChildren(...rows, ...(spaces.list.length > 1 ? [route] : []), add);
 }
 
 function safetyRow() {
@@ -1238,7 +1256,7 @@ let bookmarksShown = null;
 api.onState((state) => {
   applyThemePrefs(state.prefs);
   renderUpdateState(state.updates);
-  renderSpaces(state.incognito ? null : state.spaces || null);
+  renderSpaces(state.incognito ? null : state.spaces || null, state.prefs || {});
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) {

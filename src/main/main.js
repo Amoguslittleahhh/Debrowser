@@ -448,12 +448,22 @@ function main() {
   // macOS hands a link to the default browser as an event, not an argument,
   // and can do so before the first window exists: held until there are tabs.
   const earlyUrls = [];
+  /**
+   * A link from another app. It goes to the space Settings names for them
+   * (`externalLinksSpace`) - work links into Work, say - or, by default, the
+   * space in front; Arc's Air Traffic Control, in its simplest form.
+   */
+  const openExternal = (url) => {
+    const chosen = prefs && prefs.get('externalLinksSpace');
+    const spaceId = spaces && chosen && chosen !== 'current' && spaces.byId(chosen) ? chosen : undefined;
+    tabs.create({ url, spaceId });
+  };
   if (!INCOGNITO) {
     app.on('open-url', (event, url) => {
       event.preventDefault();
       if (!/^https?:\/\//i.test(url)) return;
       if (!tabs) { earlyUrls.push(url); return; }
-      tabs.create({ url });
+      openExternal(url);
       if (shell && !shell.window.isDestroyed()) shell.window.focus();
     });
   }
@@ -1511,7 +1521,7 @@ function main() {
     }
     // Links the system handed over at launch - Debrowser as the default
     // browser, a link clicked in another app - open after that, in front.
-    if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) tabs.create({ url });
+    if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) openExternal(url);
     shell.layout();
     // Tabs unopened for the chosen number of days go to the archive, checked
     // a minute after start and hourly after (archive.js). Off by default.
@@ -1624,7 +1634,7 @@ function main() {
     // running, and means what it says: another private tab.
     if (INCOGNITO && tabs) tabs.create({ url: pages.NEW_TAB_URL });
     // A link opened while Debrowser runs arrives as a second launch.
-    if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [])) tabs.create({ url });
+    if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [])) openExternal(url);
     if (shell && !shell.window.isDestroyed()) {
       if (shell.window.isMinimized()) shell.window.restore();
       shell.window.focus();

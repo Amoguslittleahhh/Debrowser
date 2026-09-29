@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Links from other apps can go to a space of their own.** Settings → Spaces chooses where links from your mail, chat or documents open - the space you are in, or always Work, say.
 - **Tabs you stop opening can put themselves away.** Settings → Tabs can archive a tab you have not opened for a day, a week or a month: it leaves the strip, and tab search (Ctrl+Shift+A) still finds it by name and opens it again where it was. Pinned tabs and tabs playing sound are never archived. Off unless you turn it on.
 - **Hide something on a page, for good.** "Hide something on this page" in the padlock or the command bar lets you point at anything - a sidebar, a sticky video, a "recommended for you" box, a sign-up wall the blocker missed - and click it away; it stays hidden on that site from then on, with Undo straight after and "Show again" in the padlock.
 - **Your own style for a site.** The padlock's "Edit" opens a page where you can write CSS for the site you are on - a darker background, a wider column, a bigger font - which goes into every page of it as it opens.
