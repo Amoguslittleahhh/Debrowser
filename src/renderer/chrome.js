@@ -1584,7 +1584,14 @@ api.onMessage((message) => {
       break;
     case 'focus-address':
       el.url.focus();
-      el.url.select();
+      if (typeof message.text === 'string') {
+        // Tab search: the scope typed in, and the list opened on it at once.
+        el.url.value = message.text;
+        el.url.setSelectionRange(message.text.length, message.text.length);
+        el.url.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        el.url.select();
+      }
       break;
     // A detached panel slides away before the window takes it back to the
     // edge (BrowserShell#setSidebarOpen), or comes back if the pointer does.

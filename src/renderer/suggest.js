@@ -60,7 +60,8 @@ function row(item, index) {
   } else {
     el.append(siteChip(item.url));
     title.textContent = item.title;
-    detail.textContent = tidy(item.url);
+    // In tab search, what the tab costs comes first: "Asleep · github.com".
+    detail.textContent = item.note ? `${item.note} · ${tidy(item.url)}` : tidy(item.url);
   }
   el.append(title, detail);
 

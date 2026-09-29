@@ -101,8 +101,39 @@ function prepare(item) {
  * @returns {{items: object[], inline: string|null, inlineUrl: string|null}}
  *   `inline` is the address stem inline completion should fill, if any.
  */
+/** What the bar reads as "search my open tabs" (Ctrl+Shift+A types it). */
+const TAB_SCOPE = /^@tabs\b\s*/i;
+
+/**
+ * Tab search: only open tabs, matched on the words after `@tabs`, every tab
+ * when there are none - most recently used first, as the caller orders them.
+ * Each row says what the tab is costing: its memory, or that it is asleep.
+ */
+function suggestTabs(typed, tabs) {
+  const words = typed.replace(TAB_SCOPE, '').toLowerCase().split(/\s+/).filter(Boolean);
+  const rows = [];
+  for (const tab of tabs) {
+    const score = words.length ? scoreLower(words, String(tab.title || '').toLowerCase(), stem(tab.url).toLowerCase()) : 1;
+    if (score) rows.push({ tab, score });
+  }
+  if (words.length) rows.sort((a, b) => b.score - a.score);
+  return {
+    items: rows.slice(0, MAX_TAB_ROWS).map(({ tab }, i) => ({
+      kind: 'tab', title: tab.title || stem(tab.url), url: tab.url, tabId: tab.id,
+      ...(tab.note ? { note: tab.note } : {}),
+      ...(i === 0 ? { isDefault: true } : {})
+    })),
+    inline: null,
+    inlineUrl: null,
+    scope: 'tabs'
+  };
+}
+
+const MAX_TAB_ROWS = 10;
+
 function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the web', complete = true, now = Date.now() }) {
   const typed = String(text || '').trim();
+  if (TAB_SCOPE.test(typed) || /^@tabs$/i.test(typed)) return suggestTabs(typed, tabs);
   if (!typed) return { items: [], inline: null, inlineUrl: null };
   const lower = typed.toLowerCase();
   // `www.` is not part of what an address is matched on (see `stem`).
@@ -193,4 +224,4 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
   };
 }
 
-module.exports = { suggest, looksLikeAddress, matchScore, stem, MAX_ROWS };
+module.exports = { suggest, looksLikeAddress, matchScore, stem, MAX_ROWS, TAB_SCOPE };

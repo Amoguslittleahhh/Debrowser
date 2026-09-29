@@ -53,7 +53,7 @@ const { Circuits } = require('./incognito/circuits');
 const policy = require('./incognito/policy');
 const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
-const { suggest } = require('./suggest');
+const { suggest, TAB_SCOPE } = require('./suggest');
 const { classifyAddress } = require('./address');
 const palette = require('./palette');
 const { SitePermissions, PermissionAsks } = require('./site-permissions');
@@ -1900,6 +1900,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (active?.isLive) active.wc.reloadIgnoringCache();
         break;
 
+      // Ctrl+Shift+A: the address bar, scoped to the open tabs.
+      case 'search-tabs':
+        shell.bringSidebarOut();
+        shell.focusChrome();
+        shell.toChrome('focus-address', { text: '@tabs ' });
+        break;
+
       case 'focus-address':
         // Focus has to move to the *view* as well as to the field inside it:
         // the keystroke usually arrives while a page holds the keyboard, and
@@ -3093,9 +3100,17 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
       case 'suggest': {
         const text = String(payload?.text || '').slice(0, 500);
         const active = tabs.activeTab();
+        // Tab search sees every other tab, newest-used first, with what each
+        // costs; the ordinary list only needs the websites among them.
+        const scoped = TAB_SCOPE.test(text.trim()) || /^@tabs$/i.test(text.trim());
+        const others = tabs.all().filter((t) => t !== active);
+        if (scoped) others.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
         const result = suggest({
           text,
-          tabs: tabs.all().filter((t) => t !== active).map((t) => ({ id: t.id, title: t.title, url: t.url })),
+          tabs: others.map((t) => ({
+            id: t.id, title: t.title, url: t.url,
+            ...(scoped ? { note: !t.isLive || isStopped(t.tier) ? 'Asleep' : t.rssMB ? `${Math.round(t.rssMB)} MB` : '' } : {})
+          })),
           bookmarks: bookmarks ? bookmarks.all() : [],
           // Not `all()`, which copies ten thousand entries on every letter.
           history: history ? history.entries() : [],

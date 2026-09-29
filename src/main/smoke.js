@@ -960,6 +960,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // Tab search: "@tabs" lists only open tabs, every one when nothing follows,
+  // matched on words when something does, and never offers a search.
+  {
+    const { suggest: rank } = require('./suggest');
+    const open = [
+      { id: 1, title: 'Pull requests · Debrowser', url: 'https://github.com/pulls', note: 'Asleep' },
+      { id: 2, title: 'Inbox', url: 'https://mail.example.com/', note: '210 MB' },
+      { id: 3, title: 'Settings', url: 'debrowser://settings' }
+    ];
+    const history = [{ title: 'GitHub', url: 'https://github.com/', visits: 40, visitedAt: Date.now() }];
+    const all = rank({ text: '@tabs ', tabs: open, history }).items;
+    const some = rank({ text: '@tabs pull', tabs: open, history }).items;
+    check('tab search lists open tabs only, filtered by what follows @tabs',
+      all.length === 3 && all.every((r) => r.kind === 'tab') && some.length === 1 && some[0].tabId === 1 &&
+      some[0].note === 'Asleep' && some[0].isDefault === true,
+      `all: ${all.map((r) => r.kind).join(',')}; "pull": ${JSON.stringify(some.map((r) => [r.tabId, r.note]))}`);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');
