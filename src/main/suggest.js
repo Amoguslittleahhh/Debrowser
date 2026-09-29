@@ -109,7 +109,7 @@ const TAB_SCOPE = /^@tabs\b\s*/i;
  * when there are none - most recently used first, as the caller orders them.
  * Each row says what the tab is costing: its memory, or that it is asleep.
  */
-function suggestTabs(typed, tabs) {
+function suggestTabs(typed, tabs, archived = []) {
   const words = typed.replace(TAB_SCOPE, '').toLowerCase().split(/\s+/).filter(Boolean);
   const rows = [];
   for (const tab of tabs) {
@@ -117,12 +117,24 @@ function suggestTabs(typed, tabs) {
     if (score) rows.push({ tab, score });
   }
   if (words.length) rows.sort((a, b) => b.score - a.score);
+  // Archived tabs after the open ones, and only when something is typed: the
+  // archive can be long, and an empty search is for what is open.
+  const old = [];
+  if (words.length) {
+    archived.forEach((entry, index) => {
+      if (scoreLower(words, String(entry.title || '').toLowerCase(), stem(entry.url).toLowerCase())) old.push({ entry, index });
+    });
+  }
+  const items = rows.slice(0, MAX_TAB_ROWS).map(({ tab }) => ({
+    kind: 'tab', title: tab.title || stem(tab.url), url: tab.url, tabId: tab.id,
+    ...(tab.note ? { note: tab.note } : {})
+  }));
+  for (const { entry, index } of old.slice(0, Math.max(0, MAX_TAB_ROWS - items.length))) {
+    items.push({ kind: 'archived', title: entry.title || stem(entry.url), url: entry.url, archiveIndex: index, note: 'Archived' });
+  }
+  if (items.length) items[0].isDefault = true;
   return {
-    items: rows.slice(0, MAX_TAB_ROWS).map(({ tab }, i) => ({
-      kind: 'tab', title: tab.title || stem(tab.url), url: tab.url, tabId: tab.id,
-      ...(tab.note ? { note: tab.note } : {}),
-      ...(i === 0 ? { isDefault: true } : {})
-    })),
+    items,
     inline: null,
     inlineUrl: null,
     scope: 'tabs'
@@ -153,10 +165,10 @@ function suggestCommands(typed, commands) {
 }
 
 function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the web', complete = true, now = Date.now(),
-                   commands = [] }) {
+                   commands = [], archived = [] }) {
   const typed = String(text || '').trim();
   if (COMMAND_SCOPE.test(typed)) return suggestCommands(typed, commands);
-  if (TAB_SCOPE.test(typed) || /^@tabs$/i.test(typed)) return suggestTabs(typed, tabs);
+  if (TAB_SCOPE.test(typed) || /^@tabs$/i.test(typed)) return suggestTabs(typed, tabs, archived);
   if (!typed) return { items: [], inline: null, inlineUrl: null };
   const lower = typed.toLowerCase();
   // `www.` is not part of what an address is matched on (see `stem`).

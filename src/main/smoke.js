@@ -1440,6 +1440,29 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // The archive: only tabs unopened for the chosen days, never pinned or in
+  // front; tab search finds them by name, and picking one opens it again.
+  {
+    const { Archive } = require('./archive');
+    const { suggest: rank } = require('./suggest');
+    const day = 86_400_000;
+    const now = Date.now();
+    const fake = [
+      { url: 'https://old.example/', lastActiveAt: now - 9 * day },
+      { url: 'https://pinned.example/', lastActiveAt: now - 9 * day, pinned: true },
+      { url: 'https://front.example/', lastActiveAt: now - 9 * day, visible: true },
+      { url: 'https://recent.example/', lastActiveAt: now - day }
+    ];
+    const due = Archive.due(fake, 7, now).map((t) => t.url);
+    const store = new Archive(null);
+    store.add({ url: 'https://recipes.example/lasagne', title: 'Lasagne recipe', spaceId: 'home' });
+    const found = rank({ text: '@tabs lasagne', tabs: [], archived: store.items }).items;
+    const empty = rank({ text: '@tabs ', tabs: [], archived: store.items }).items;
+    check('the archive takes only long-unopened tabs, and tab search finds them again',
+      due.join() === 'https://old.example/' && found[0]?.kind === 'archived' && found[0]?.note === 'Archived' && empty.length === 0,
+      JSON.stringify({ due, found, empty }));
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

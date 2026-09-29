@@ -312,6 +312,19 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'autoArchiveDays',
+      label: 'Put away tabs I have not opened',
+      hint: 'They leave the tab strip for an archive, and tab search (Ctrl+Shift+A) finds them again. Never pinned tabs, or tabs playing sound.',
+      type: 'select',
+      numeric: true,
+      options: [
+        { value: '0', name: 'Never' },
+        { value: '1', name: 'After a day' },
+        { value: '7', name: 'After a week' },
+        { value: '30', name: 'After a month' }
+      ]
+    },
+    {
       key: 'tabCloseButton',
       label: 'Close buttons on tabs',
       type: 'select',

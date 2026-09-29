@@ -112,7 +112,8 @@ class Session {
         url,
         title: typeof entry?.title === 'string' ? entry.title.slice(0, MAX_TITLE) : '',
         pinned: entry?.pinned === true,
-        spaceId: typeof entry?.spaceId === 'string' && /^[a-z0-9-]{1,24}$/.test(entry.spaceId) ? entry.spaceId : 'home'
+        spaceId: typeof entry?.spaceId === 'string' && /^[a-z0-9-]{1,24}$/.test(entry.spaceId) ? entry.spaceId : 'home',
+        lastActiveAt: Number.isFinite(entry?.lastActiveAt) ? entry.lastActiveAt : null
       });
     }
 
@@ -137,14 +138,15 @@ class Session {
         url: safeUrl(tab.url),
         title: typeof tab.title === 'string' ? tab.title.slice(0, MAX_TITLE) : '',
         pinned: tab.pinned === true,
-        spaceId: tab.spaceId || 'home'
+        spaceId: tab.spaceId || 'home',
+        lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : null
       }));
 
     const activeIndex = Math.max(0, open.findIndex((t) => t.id === activeId));
     return {
       version: 1,
       activeIndex,
-      tabs: open.map(({ url, title, pinned, spaceId }) => ({ url, title, pinned, spaceId }))
+      tabs: open.map(({ url, title, pinned, spaceId, lastActiveAt }) => ({ url, title, pinned, spaceId, lastActiveAt }))
     };
   }
 

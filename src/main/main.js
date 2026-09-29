@@ -31,6 +31,7 @@ const { Receipts } = require('./receipts');
 const { commandList } = require('./commands');
 const { Spaces } = require('./spaces');
 const { SiteStyles } = require('./site-styles');
+const { Archive } = require('./archive');
 
 const reader = require('./reader');
 const readerStore = new reader.ReaderStore();
@@ -485,6 +486,7 @@ function main() {
   let browsingReady = false;
   let spaces = null;
   let siteStyles = null;
+  let archive = null;
   let permissionAsks = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
@@ -1028,6 +1030,7 @@ function main() {
     sitePrefs = new SitePrefs(INCOGNITO || OFFLINE_MODE ? null : app.getPath('userData'), log);
     const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'), sitePrefs.view('zoom'));
     siteStyles = INCOGNITO ? null : new SiteStyles(sitePrefs);
+    archive = INCOGNITO ? null : new Archive(OFFLINE_MODE ? null : path.join(app.getPath('userData'), 'archive.json'));
     // Incognito: a Tor circuit and a partition per tab. See incognito/circuits.js.
     circuits = INCOGNITO ? new Circuits(incognitoCtx) : null;
     // Incognito, opt-in: a decoy page load beside every real one. See
@@ -1419,7 +1422,7 @@ function main() {
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
-      sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles,
+      sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, getArchive: () => archive,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
     });
@@ -1459,7 +1462,8 @@ function main() {
     shell.downloads = downloads;
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs, shell, credentials, vault, bookmarks, history, downloads, prefs, log, context,
-      sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts });
+      sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts,
+      getArchive: () => archive });
 
     /*
      * The tabs from last time, or one new one.
@@ -1489,6 +1493,8 @@ function main() {
         const tab = tabs.create({ url: entry.url, activate: false, realise: false, spaceId: spaces.resolve(entry.spaceId) });
         tab.title = entry.title || tab.title;
         tab.pinned = entry.pinned === true;
+        // How long it has gone unopened carries across restarts (archive.js).
+        if (Number.isFinite(entry.lastActiveAt)) tab.lastActiveAt = entry.lastActiveAt;
       });
       const active = tabs.all()[saved.activeIndex] || tabs.all()[0];
       if (active) tabs.activate(active.id).catch((err) => log(`restore failed: ${err.message}`));
@@ -1507,6 +1513,23 @@ function main() {
     // browser, a link clicked in another app - open after that, in front.
     if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) tabs.create({ url });
     shell.layout();
+    // Tabs unopened for the chosen number of days go to the archive, checked
+    // a minute after start and hourly after (archive.js). Off by default.
+    const sweepArchive = () => {
+      const days = Number(prefs.get('autoArchiveDays')) || 0;
+      if (!archive || !days) return;
+      const due = Archive.due(tabs.all(), days);
+      if (!due.length || due.length >= tabs.all().length) return;
+      for (const t of due) { archive.add(t); tabs.close(t.id); }
+      publish();
+      runCommand.toast(`${due.length} tab${due.length === 1 ? '' : 's'} unopened for ${days} day${days === 1 ? '' : 's'} put in the archive`,
+        'Find them', () => runCommand('search-tabs'), 8000);
+    };
+    if (!INCOGNITO) {
+      setTimeout(sweepArchive, 60_000).unref?.();
+      setInterval(sweepArchive, 3600_000).unref?.();
+    }
+
     if (lost.length) {
       runCommand.toast('Debrowser didn’t close properly', `Restore ${lost.length} tab${lost.length === 1 ? '' : 's'}`, () => {
         for (const entry of lost) {
@@ -1761,7 +1784,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null }) {
+                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, getArchive = () => null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
     for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
@@ -1943,6 +1966,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!item) break;
         if (item.kind === 'tab') {
           if (tabs.byId(item.tabId)) goTo(item.tabId);
+          break;
+        }
+        // An archived tab, opened again in its space.
+        if (item.kind === 'archived') {
+          const entry = getArchive() && getArchive().take(item.archiveIndex);
+          if (entry) {
+            const tab = tabs.create({ url: entry.url, spaceId: spaces ? spaces.resolve(entry.spaceId) : undefined });
+            tab.title = entry.title || tab.title;
+          }
           break;
         }
         // A command from the bar: looked up again here by its place in the
@@ -3514,7 +3546,7 @@ function pageMay(page, channel, name) {
 
 function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
-                       getReceipts = () => null, context = { model: null } }) {
+                       getReceipts = () => null, getArchive = () => null, context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only the passwords page may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
@@ -3739,7 +3771,8 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           history: history ? history.entries() : [],
           engine: prefs.engineName(),
           complete: payload?.complete !== false,
-          commands: text.trim().startsWith('>') ? commandList({ incognito: INCOGNITO, hasTab: Boolean(active) }) : []
+          commands: text.trim().startsWith('>') ? commandList({ incognito: INCOGNITO, hasTab: Boolean(active) }) : [],
+          archived: scoped && getArchive() ? getArchive().items : []
         });
         shell.suggestItems = result.items;
         shell.suggestSelected = -1;
