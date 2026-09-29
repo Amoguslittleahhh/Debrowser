@@ -82,7 +82,7 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
                           openInternalPage, senderPage, bookmarks,
                           runCommand = () => {}, history = null, context = { model: null },
-                          credentials = null, vault = null }) {
+                          credentials = null, vault = null, blocker = null, sitePrefs = null }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -901,6 +901,37 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('a PDF opens in the tab, in the built-in viewer',
       shown && /tracked\.pdf$/.test(where), `viewer: ${shown}, tab at ${where}`);
     tabs.close(pdf.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
+  // The blocker: a listed script is not fetched, a listed element is hidden,
+  // and the count says so - and on a site the user exempted, neither happens.
+  if (blocker) {
+    await blocker.load();
+    const wasActive = tabs.activeTab();
+    const adsUrl = pageUrl('ads.html');
+    const probe = async () => {
+      const tab = tabs.create({ url: adsUrl, activate: true, realise: true });
+      await waitFor(() => tab.isLive && !tab.wc.isDestroyed() && !tab.wc.isLoading(), { timeoutMs: 8000 });
+      await sleep(600);    // the cosmetic rules arrive after the first paint
+      const seen = tab.isLive ? await tab.wc.executeJavaScript(
+        `({ ran: window.adRan === true, shown: getComputedStyle(document.querySelector('.debrowser-test-ad')).display !== 'none' })`)
+        .catch(() => null) : null;
+      return { tab, seen, count: tab.isLive ? blocker.countFor(tab.wc) : 0 };
+    };
+    const blocked = await probe();
+    check('the blocker stops a listed script and hides a listed element',
+      blocked.seen && !blocked.seen.ran && !blocked.seen.shown && blocked.count >= 1,
+      JSON.stringify({ ...blocked.seen, count: blocked.count }));
+    const host = new URL(blocked.tab.url).hostname;
+    tabs.close(blocked.tab.id);
+    sitePrefs.set(host, 'blocking', false);
+    const allowed = await probe();
+    check('a site the blocker is turned off for loads everything',
+      allowed.seen && allowed.seen.ran && allowed.seen.shown, JSON.stringify(allowed.seen));
+    sitePrefs.set(host, 'blocking', null);
+    tabs.close(allowed.tab.id);
     if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
     await sleep(200);
   }

@@ -45,6 +45,9 @@ section { padding: var(--s3) var(--s4) var(--s3); }
 }
 
 .kinds .label { flex: 1; }
+.kinds .count { display: block; color: var(--text-dim); font-size: var(--fs-small); }
+#shield { margin-bottom: var(--s1); padding-bottom: var(--s1); border-bottom: 1px solid var(--border); }
+#shield:has(+ .kinds[hidden]) { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
 
 .actions {
   display: flex;

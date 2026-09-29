@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Ads and trackers are blocked.** Debrowser blocks them itself, with the lists uBlock Origin uses (EasyList, EasyPrivacy, Peter Lowe's and uBlock's own), fetched weekly and kept ready on disk so a start costs almost nothing. Cookie notices are hidden too, without being answered. The padlock shows how many requests were stopped on the page and turns blocking off for that site; Settings turns either part off everywhere. Private windows do not block, so every copy of them looks alike.
+- **A site's zoom is remembered after a restart,** instead of only until Debrowser closes.
 - **The menu shows which Chromium Debrowser is built on,** beside its own version, so you can tell at a glance whether a Chromium security fix has reached you.
 - **PDFs open in the browser.** A link to a PDF shows it in a tab, in Chromium's own viewer, with its page thumbnails, search, zoom, rotate, print and download buttons, instead of downloading the file. PDF files on your computer can be opened with Debrowser too, and it is offered for them once it is your default browser.
 - **A welcome tour on first start.** A new install opens on a short tour: bring your bookmarks over from Chrome, Edge, Brave, Firefox or a bookmarks file; pick the theme, design, accent, where the tabs go and the bookmarks bar, with the browser changing around the page as you click; choose the search engine, whether tabs reopen at start, the memory meter and automatic updates; make Debrowser your default browser; and a quick look at what is different. Every step can be skipped, and the tour is in Settings to take again. Existing installs are not interrupted by it.

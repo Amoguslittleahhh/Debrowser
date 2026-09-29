@@ -33,6 +33,7 @@
  */
 
 const { ipcMain } = require('electron');
+const { WebHooks } = require('./web-hooks');
 
 /** Documents whose policy we have seen, newest last; bounded. */
 const MAX_REMEMBERED = 256;
@@ -52,16 +53,14 @@ class Speculation {
 
   /**
    * Watch document responses in a session for their content security policy.
-   * Documents only (the filter's `types`), so no image, script or font on a
-   * page passes through here.
+   * Documents only, so no image, script or font on a page is looked at here.
    */
   watch(session) {
-    session.webRequest.onHeadersReceived(
-      { urls: ['http://*/*', 'https://*/*'], types: ['mainFrame'] },
-      (details, callback) => {
+    WebHooks.for(session).onHeadersReceived((details) => {
+      if (details.resourceType === 'mainFrame' && /^https?:/i.test(details.url)) {
         this.remember(details.url, inlineRulesAllowed(details.responseHeaders));
-        callback({});
-      });
+      }
+    });
   }
 
   remember(url, ok) {

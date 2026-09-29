@@ -230,6 +230,11 @@ const SCHEMA = {
   // Never in a private window, whatever this says.
   preloadPages: { def: true, ok: (v) => typeof v === 'boolean' },
 
+  // The built-in blocker (blocker.js): ads and trackers, and cookie notices.
+  // Per-site exceptions live in site-prefs.json, not here.
+  blockAds: { def: true, ok: (v) => typeof v === 'boolean' },
+  hideCookieBanners: { def: true, ok: (v) => typeof v === 'boolean' },
+
   // Size, position and maximised state, put back on the next launch.
   rememberWindowBounds: { def: true, ok: (v) => typeof v === 'boolean' },
 

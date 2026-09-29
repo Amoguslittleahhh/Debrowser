@@ -46,6 +46,8 @@
   },
   "desktopName": "debrowser.desktop",
   "dependencies": {
+    "@ghostery/adblocker-electron": "^2.18.2",
+    "@ghostery/adblocker-electron-preload": "^2.18.2",
     "electron-updater": "^6.8.9"
   }
 }

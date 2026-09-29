@@ -65,6 +65,7 @@ const COMMANDS = new Set([
   'permission-answer',
   'site-permission',
   'site-clear-data',
+  'site-blocking',
   'show-shortcuts',
   'shortcut-list',
   'pin-tab',

@@ -16,14 +16,18 @@
  * other site, to the current default. What Chromium stores is then only ever
  * a copy of this, and a stale one is corrected at the next navigation.
  *
- * Held for the session, which is as long as Chromium would have held it.
+ * Kept in site-prefs.js, so a site's zoom survives a restart (Chromium's own
+ * copy would, too). A private window hands over an in-memory store.
  */
 class SiteZoom {
-  /** @param {() => number} defaultZoom - read live, so a change applies at once */
-  constructor(defaultZoom) {
+  /**
+   * @param {() => number} defaultZoom - read live, so a change applies at once
+   * @param {{get, set, delete}} [chosen] - hostname -> the factor the user chose
+   *   for it; SitePrefs.view('zoom') to keep it, a Map to forget it at exit
+   */
+  constructor(defaultZoom, chosen = new Map()) {
     this.defaultZoom = defaultZoom;
-    /** hostname -> the factor the user chose for it */
-    this.chosen = new Map();
+    this.chosen = chosen;
   }
 
   /** The host Chromium keys its zoom by, or null for anything that is not a website. */

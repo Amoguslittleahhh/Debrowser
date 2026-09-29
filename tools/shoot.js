@@ -143,7 +143,9 @@ const ANSWERS = {
     { kind: 'separator' },
     { id: 'reopen-closed-tab', label: 'Reopen closed tab', icon: 'clock' }
   ] },
-  'check-for-updates': STATE.updates
+  'check-for-updates': STATE.updates,
+  'site-info': { host: 'www.theguardian.com', secure: true, website: true, incognito: false, ask: null,
+    permissions: { notifications: 'block' }, blocking: { on: true, blocked: 23 }, zoom: 100, zoomDefault: 100 }
 };
 
 const SHOTS = [
@@ -188,6 +190,7 @@ const SHOTS = [
   { name: 'update',   file: 'update.html',   w: 900,  h: 560 },
   { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 },
   { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
+  { name: 'site',     file: 'site.html',     w: 420,  h: 340 },
   // The same sheet holding the tab strip's menu, which is the other thing it
   // draws and has its own set of icons to get wrong.
   { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' },

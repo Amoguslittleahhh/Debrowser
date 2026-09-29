@@ -21,6 +21,8 @@ const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB } = require('./prefs');
 const { Updater } = require('./updater');
 const { SiteZoom } = require('./zoom');
+const { SitePrefs } = require('./site-prefs');
+const { ContentBlocker } = require('./blocker');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -459,6 +461,8 @@ function main() {
   let history = null;
   /** Camera, microphone, location and notifications, per site. Never in a private window. */
   let sitePermissions = null;
+  let sitePrefs = null;
+  let blocker = null;
   let permissionAsks = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
@@ -907,7 +911,10 @@ function main() {
     log('system', JSON.stringify(platform.systemInfo()));
     log('config', `profile=${cfg.profile} budget=${cfg.memoryBudgetMB}MB`);
 
-    const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'));
+    // Per-site choices: zoom, the blocker, sleep. Written down only for the
+    // ordinary browser; a private window and a test keep them in memory.
+    sitePrefs = new SitePrefs(INCOGNITO || OFFLINE_MODE ? null : app.getPath('userData'), log);
+    const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'), sitePrefs.view('zoom'));
     // Incognito: a Tor circuit and a partition per tab. See incognito/circuits.js.
     circuits = INCOGNITO ? new Circuits(incognitoCtx) : null;
     // Incognito, opt-in: a decoy page load beside every real one. See
@@ -1007,6 +1014,23 @@ function main() {
       });
       speculation.watch(session.fromPartition(BROWSING_PARTITION));
       speculation.wire();
+    }
+
+    // Ads and trackers (blocker.js). Not in a private window. Under a test, a
+    // two-rule list instead of the real ones, which need the network.
+    if (!INCOGNITO) {
+      blocker = new ContentBlocker({
+        dir: OFFLINE_MODE ? null : app.getPath('userData'),
+        enabled: () => prefs.get('blockAds') !== false,
+        cookieBanners: () => prefs.get('hideCookieBanners') !== false,
+        sitePrefs,
+        rules: OFFLINE_MODE ? '/debrowser-test-ad.\n##.debrowser-test-ad' : null,
+        log
+      });
+      blocker.attach(session.fromPartition(BROWSING_PARTITION));
+      // After the window is up: a first build parses the lists, which is work
+      // no start should wait for.
+      if (prefs.get('blockAds') !== false) setTimeout(() => blocker.load(), OFFLINE_MODE ? 0 : 3000).unref?.();
     }
 
     // In memory under a test, which must not leave a passcode behind.
@@ -1196,7 +1220,7 @@ function main() {
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
-      sitePermissions, permissionAsks,
+      sitePermissions, permissionAsks, blocker,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
     });
@@ -1234,7 +1258,7 @@ function main() {
     shell.downloads = downloads;
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs, shell, credentials, vault, bookmarks, history, downloads, prefs, log, context,
-      sitePermissions, permissionAsks });
+      sitePermissions, permissionAsks, blocker });
 
     /*
      * The tabs from last time, or one new one.
@@ -1311,7 +1335,8 @@ function main() {
         app.exit(1);
       });
     } else if (SMOKE_TEST) {
-      runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault });
+      runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
+        blocker, sitePrefs });
     } else if (SPEED_TEST) {
       // Startup, from this process starting to the first tab drawn.
       const startedAt = Date.now() - process.uptime() * 1000;
@@ -1398,6 +1423,7 @@ function main() {
       if (prefs.get('hiddenTiles').length) prefs.set('hiddenTiles', []);
     }
     else if (history) history.flush();
+    if (sitePrefs && sitePrefs.timer) sitePrefs.flush();
     // Before `closeAll`, which empties the list this describes. Written
     // synchronously because quit does not wait for a timer, and the debounce
     // above means the last thing the user did is usually still pending.
@@ -1514,7 +1540,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null }) {
+                       getDownloads = () => null, blocker = null }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -2087,6 +2113,17 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      // The blocker on or off for the site in front of the user, from the
+      // padlock; the page reloads so what it loads matches what it now says.
+      case 'site-blocking': {
+        let host = null;
+        try { host = active && /^https?:/.test(active.url) ? new URL(active.url).hostname : null; } catch { host = null; }
+        if (!host || !blocker || INCOGNITO) break;
+        blocker.sitePrefs.set(host, 'blocking', payload?.on === false ? false : null);
+        if (active.isLive) active.wc.reload();
+        break;
+      }
+
       // Cookies and everything else the site keeps in the browser, for this
       // one site, then the page reloaded so it starts again without them.
       case 'site-clear-data': {
@@ -2218,6 +2255,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (payload.key === 'defaultZoom') {
           for (const tab of tabs.all()) if (tab.isLive) siteZoom.apply(tab.wc);
         }
+        if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
         // Turned off: the kept state goes now, not when a private window next
         // opens - it may never open again.
         if (payload.key === 'incognitoKeepTorState' && payload.value === false && !INCOGNITO) {
@@ -2770,7 +2808,7 @@ function pageMay(page, channel, name) {
 }
 
 function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, history, downloads, prefs, log,
-                       sitePermissions = null, permissionAsks = null,
+                       sitePermissions = null, permissionAsks = null, blocker = null,
                        context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only the passwords page may touch credentials.
@@ -3001,6 +3039,12 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           incognito: INCOGNITO,
           ask,
           permissions: sitePermissions && origin ? sitePermissions.forOrigin(origin) : {},
+          // Null where there is no blocker to speak of: a private window, or
+          // the setting off everywhere.
+          blocking: blocker && origin && prefs.get('blockAds') !== false ? {
+            on: blocker.onFor(host),
+            blocked: active.isLive ? blocker.countFor(active.wc) : 0
+          } : null,
           zoom: active.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100,
           zoomDefault: Math.round((Number(prefs.get('defaultZoom')) || 1) * 100)
         };
@@ -3894,7 +3938,8 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
 /* Smoke test - exercises the full lifecycle headlessly                */
 /* ------------------------------------------------------------------ */
 
-function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault }) {
+function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
+                       blocker, sitePrefs }) {
   const { runSmoke } = require('./smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
@@ -3902,7 +3947,7 @@ function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, his
             // the context menu the way a keystroke does rather than by calling
             // into their parts.
             runCommand: (command, payload) => runCommand(command, payload),
-            history, context, credentials, vault }).then((code) => {
+            history, context, credentials, vault, blocker, sitePrefs }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

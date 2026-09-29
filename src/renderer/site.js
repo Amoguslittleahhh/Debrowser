@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 const el = {
   sheet: $('sheet'), backdrop: $('backdrop'),
   ask: $('ask'), askHost: $('ask-host'), askKinds: $('ask-kinds'), allow: $('allow'), block: $('block'),
-  info: $('info'), host: $('host'), connection: $('connection'), perms: $('perms'),
+  info: $('info'), host: $('host'), connection: $('connection'), perms: $('perms'), shield: $('shield'),
   privateNote: $('private-note'), zoomRow: $('zoom-row'), zoom: $('zoom'), zoomReset: $('zoom-reset'),
   clear: $('clear'), resetPerms: $('reset-perms')
 };
@@ -81,6 +81,29 @@ function showInfo(info) {
     ? 'Connected through Tor'
     : info.secure ? 'Connection is secure' : 'Connection isn’t secure';
   el.connection.classList.toggle('insecure', !info.secure && !info.incognito);
+
+  // The blocker, where there is one: on or off for this site, and what it
+  // stopped on this page. Switching it reloads the page.
+  if (info.blocking) {
+    const li = item(['M8 1.8l5 1.9v3.9c0 3.2-2.2 5.6-5 6.6-2.8-1-5-3.4-5-6.6V3.7z'], 'Block ads and trackers');
+    const count = document.createElement('small');
+    count.className = 'count';
+    count.textContent = info.blocking.on && info.blocking.blocked
+      ? `${info.blocking.blocked} blocked on this page` : '';
+    li.querySelector('.label').append(count);
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = info.blocking.on;
+    box.setAttribute('aria-label', 'Block ads and trackers on this site');
+    box.addEventListener('change', () => {
+      api.send('site-blocking', { on: box.checked });
+      count.textContent = '';
+    });
+    li.addEventListener('click', (event) => { if (event.target !== box) box.click(); });
+    li.append(box);
+    el.shield.append(li);
+    el.shield.hidden = false;
+  }
 
   // Only what this site has asked for. A list of four switches for a site
   // that never wanted any of them is four things to read for nothing.

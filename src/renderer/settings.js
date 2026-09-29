@@ -222,6 +222,18 @@ const SECTIONS = {
       label: 'Clear history when I close the browser',
       hint: 'The list is emptied as the browser closes. Bookmarks and passwords stay.',
       type: 'checkbox'
+    },
+    {
+      key: 'blockAds',
+      label: 'Block ads and trackers',
+      hint: 'Uses the lists uBlock Origin uses, updated weekly. Turn it off for one site from the padlock. Not in private windows, where every copy of the browser must look alike.',
+      type: 'checkbox'
+    },
+    {
+      key: 'hideCookieBanners',
+      label: 'Hide cookie notices',
+      hint: 'Hides “we use cookies” banners without answering them, so nothing is accepted for you.',
+      type: 'checkbox'
     }
   ],
 
