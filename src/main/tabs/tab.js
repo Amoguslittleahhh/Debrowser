@@ -649,6 +649,27 @@ class Tab {
           });
           return;
         }
+      } else {
+        // The ordinary browser tried HTTPS first and the site has none: load
+        // the plain page, or - in strict mode - say so and let the user choose.
+        const httpsFirst = require('../https-first').HttpsFirst.current;
+        const plain = httpsFirst && httpsFirst.failed(validatedURL, errorCode);
+        if (plain) {
+          if (httpsFirst.mode() !== 'strict') {
+            httpsFirst.allow(plain);
+            setImmediate(() => { if (!this.closed && this.isLive) this.wc.loadURL(plain).catch(() => {}); });
+            return;
+          }
+          let before = '';
+          try { before = this.wc.getURL(); } catch { /* going */ }
+          const page = `${pages.INSECURE_URL}?url=${encodeURIComponent(plain)}&secure=first`;
+          setImmediate(() => {
+            if (this.closed) return;
+            this.rebuildFor(page);
+            this.insecureReturn = before && !pages.isInternal(before) ? before : null;
+          });
+          return;
+        }
       }
       // An https address the browser guessed, on a site that has none: the
       // same address over http, once, instead of an error page.

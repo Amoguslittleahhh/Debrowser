@@ -1038,6 +1038,32 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       csvOk && dbOk, JSON.stringify({ csv: chrome.logins, ch: ch.entries || ch.reason, ff: ff.entries || ff.reason, fb: fb.entries || fb.reason }).slice(0, 400));
   }
 
+  // HTTPS first: a public http address is upgraded, local and reserved names
+  // are not, a failed upgrade hands back the plain address, and a site that
+  // bounces https back to http is stopped instead of looping.
+  {
+    const { HttpsFirst } = require('./https-first');
+    let mode = 'upgrade';
+    const hf = new HttpsFirst(() => mode);
+    const nav = (url) => hf.judge({ url, resourceType: 'mainFrame' });
+    const up = nav('http://example.com/a?b=1');
+    const local = [nav('http://192.168.1.1/'), nav('http://printer/'), nav('http://site.test/'), nav('http://nas.local/')];
+    const sub = hf.judge({ url: 'http://example.org/', resourceType: 'image' });
+    const fell = hf.failed('https://example.com/a?b=1', -102);
+    const loop1 = nav('http://loop.example.net/');
+    const loop2 = nav('http://loop.example.net/');
+    const loopFell = hf.failed('http://loop.example.net/', -20);
+    hf.allow('http://plain.example.net/');
+    const allowed = nav('http://plain.example.net/x');
+    mode = 'off';
+    const off = nav('http://example.org/');
+    check('HTTPS first upgrades public http, leaves local names, falls back, and stops a redirect loop',
+      up?.redirectURL === 'https://example.com/a?b=1' && local.every((v) => v === undefined) && sub === undefined &&
+      fell === 'http://example.com/a?b=1' && loop1?.redirectURL && loop2?.cancel === true &&
+      loopFell === 'http://loop.example.net/' && allowed === undefined && off === undefined,
+      JSON.stringify({ up, local, fell, loop2, loopFell, allowed, off }));
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

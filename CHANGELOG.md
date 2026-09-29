@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Sites are tried over HTTPS first.** A plain-HTTP link, bookmark or address now loads the site's secure version where it has one, which the network between you and the site cannot read or change. Where it has none, the plain page loads as before - or, if you choose "Ask before a site without it" in Settings, a page says so and lets you decide. Addresses on your own network are left alone.
+- **Secure DNS.** Site addresses are looked up over HTTPS where your provider offers it, so the network cannot see which sites you visit; Settings can name Cloudflare, Quad9, Google or Mullvad instead, or turn it off.
 - **Bring your history and passwords over, not only bookmarks.** The welcome tour now imports the history from Chrome, Edge, Brave, Vivaldi, Opera, Arc, Firefox, Zen and the rest along with the bookmarks, so the address bar knows your sites from the first day. The Passwords page imports sign-ins from the CSV file Chrome, Edge, Firefox, Safari, Bitwarden and 1Password export, and reminds you to delete that file afterwards.
 - **Bookmarks import from Firefox, Zen, Floorp, Waterfox and LibreWolf directly,** even while that browser is open, instead of asking you to export them to a file first.
 - **Downloads are remembered after a restart,** and a failed or cancelled one has a Retry button. A download cut off by closing Debrowser comes back as "Stopped when Debrowser closed", ready to retry, and a finished file you have since moved or deleted says so instead of offering to open it.

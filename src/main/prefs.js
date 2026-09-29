@@ -232,6 +232,13 @@ const SCHEMA = {
 
   // The built-in blocker (blocker.js): ads and trackers, and cookie notices.
   // Per-site exceptions live in site-prefs.json, not here.
+  // DNS over HTTPS (main.js applySecureDns): 'automatic' upgrades the
+  // system's own DNS where its provider offers it, as Chrome does; a named
+  // provider is used for every lookup; 'off' leaves DNS as the system has it.
+  secureDns: { def: 'automatic', ok: (v) => ['automatic', 'cloudflare', 'quad9', 'google', 'mullvad', 'off'].includes(v) },
+  // Plain-HTTP addresses are tried over HTTPS first (https-first.js):
+  // 'upgrade' falls back quietly, 'strict' asks first, 'off' does neither.
+  httpsMode: { def: 'upgrade', ok: (v) => v === 'upgrade' || v === 'strict' || v === 'off' },
   blockAds: { def: true, ok: (v) => typeof v === 'boolean' },
   hideCookieBanners: { def: true, ok: (v) => typeof v === 'boolean' },
 

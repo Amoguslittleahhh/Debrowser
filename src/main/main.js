@@ -23,6 +23,7 @@ const { Updater } = require('./updater');
 const { SiteZoom } = require('./zoom');
 const { SitePrefs } = require('./site-prefs');
 const { ContentBlocker } = require('./blocker');
+const { HttpsFirst } = require('./https-first');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -1018,6 +1019,15 @@ function main() {
       speculation.wire();
     }
 
+    applySecureDns(prefs, log);
+
+    // HTTPS first (https-first.js). Before the blocker, so a page's first
+    // request is the upgraded one. A private window has its own policy.
+    if (!INCOGNITO) {
+      HttpsFirst.current = new HttpsFirst(() => prefs.get('httpsMode'));
+      HttpsFirst.current.attach(session.fromPartition(BROWSING_PARTITION));
+    }
+
     // Ads and trackers (blocker.js). Not in a private window. Under a test, a
     // two-rule list instead of the real ones, which need the network.
     if (!INCOGNITO) {
@@ -1767,9 +1777,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // explanation page's own button, for that host, until the window closes.
       // Only that page may send it - anything else asking is refused.
       case 'allow-http': {
-        if (!INCOGNITO || !sender || pages.pageName(sender.getURL()) !== 'insecure') break;
+        if (!sender || pages.pageName(sender.getURL()) !== 'insecure') break;
         const url = String(payload?.url || '');
-        if (!policy.allowHttp(url)) break;
+        // The ordinary browser's HTTPS-first, in strict mode: until restart.
+        const allowed = INCOGNITO ? policy.allowHttp(url) : Boolean(HttpsFirst.current && HttpsFirst.current.allow(url));
+        if (!allowed) break;
         const tab = tabs.all().find((t) => t.isLive && t.wc === sender) || active;
         // A website never goes into the renderer built for our page.
         if (tab && tab.isLive) tab.rebuildFor(url);
@@ -2353,6 +2365,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           for (const tab of tabs.all()) if (tab.isLive) siteZoom.apply(tab.wc);
         }
         if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
+        if (payload.key === 'secureDns') applySecureDns(prefs, log);
         // Turned off: the kept state goes now, not when a private window next
         // opens - it may never open again.
         if (payload.key === 'incognitoKeepTorState' && payload.value === false && !INCOGNITO) {
@@ -4084,6 +4097,29 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
   if (kind === 'host') return `https://${text}`;
 
   return searchTemplate.replace('%s', encodeURIComponent(text));
+}
+
+/*
+ * DNS over HTTPS: which sites you look up, hidden from the network the way
+ * HTTPS hides what you read on them. Not in a private window, where Tor does
+ * the lookups at the exit, nor under a test, which maps its own names.
+ */
+const DOH = {
+  cloudflare: 'https://cloudflare-dns.com/dns-query',
+  quad9: 'https://dns.quad9.net/dns-query',
+  google: 'https://dns.google/dns-query',
+  mullvad: 'https://dns.mullvad.net/dns-query'
+};
+function applySecureDns(prefs, log) {
+  if (INCOGNITO || OFFLINE_MODE || typeof app.configureHostResolver !== 'function') return;
+  const choice = prefs.get('secureDns');
+  try {
+    app.configureHostResolver(choice === 'off' ? { secureDnsMode: 'off' }
+      : DOH[choice] ? { secureDnsMode: 'secure', secureDnsServers: [DOH[choice]] }
+        : { secureDnsMode: 'automatic' });
+  } catch (err) {
+    log(`secure DNS: ${err.message}`);
+  }
 }
 
 /* ------------------------------------------------------------------ */

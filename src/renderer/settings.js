@@ -224,6 +224,31 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'httpsMode',
+      label: 'Secure connections',
+      hint: 'Every site is tried over HTTPS first, which the network between you and it cannot read. Private windows always ask before plain HTTP.',
+      type: 'select',
+      options: [
+        { value: 'upgrade', name: 'Use HTTPS where a site has it' },
+        { value: 'strict', name: 'Ask before a site without it' },
+        { value: 'off', name: 'Don’t upgrade' }
+      ]
+    },
+    {
+      key: 'secureDns',
+      label: 'Secure DNS',
+      hint: 'Looks up site addresses over HTTPS, so the network cannot see or change which sites you visit. Automatic uses your own provider’s secure service where it has one. Private windows look up through Tor.',
+      type: 'select',
+      options: [
+        { value: 'automatic', name: 'Automatic' },
+        { value: 'cloudflare', name: 'Cloudflare' },
+        { value: 'quad9', name: 'Quad9' },
+        { value: 'google', name: 'Google' },
+        { value: 'mullvad', name: 'Mullvad' },
+        { value: 'off', name: 'Off' }
+      ]
+    },
+    {
       key: 'blockAds',
       label: 'Block ads and trackers',
       hint: 'Uses the lists uBlock Origin uses, updated weekly. Turn it off for one site from the padlock. Not in private windows, where every copy of the browser must look alike.',
