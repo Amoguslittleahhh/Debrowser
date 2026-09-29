@@ -179,6 +179,9 @@ const SHOTS = [
   // way to see the overflow chevron and what the bar does with what is left.
   { name: 'chrome-narrow', file: 'chrome.html', w: 620, h: 118 },
   { name: 'chrome-saver', file: 'chrome.html', w: 1280, h: 118, saver: true },
+  { name: 'chrome-spaces', file: 'chrome.html', w: 1280, h: 118, spaces: true },
+  { name: 'sidebar-spaces', file: 'chrome.html', w: 240, h: 500, side: true, spaces: true },
+  { name: 'settings-spaces', file: 'settings.html', w: 1280, h: 860, hash: 'spaces', spaces: true },
   { name: 'sidebar',  file: 'chrome.html',   w: 240,  h: 820, side: true },
   // The collapsed strip, at the width the browser actually gives it. Ten
   // pixels is a degenerate picture and that is the point: everything in the
@@ -278,6 +281,10 @@ app.whenReady().then(async () => {
 
     STATE.incognito = shot.incognito || null;
     STATE.saver = shot.saver === true;
+    STATE.spaces = shot.spaces ? { activeId: 'home', list: [
+      { id: 'home', name: 'Home', color: '#2f857b', container: false },
+      { id: 'swork', name: 'Work', color: '#7b6a9c', container: true },
+      { id: 'strip', name: 'Lisbon trip', color: '#a8694a', container: false }] } : undefined;
 
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';

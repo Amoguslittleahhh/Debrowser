@@ -235,3 +235,15 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
 .zoom-reset:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .zoom-reset:active:not(:disabled) { background: color-mix(in srgb, var(--text) 14%, transparent); }
 .zoom-reset:disabled { opacity: 0.38; }
+
+/* A space in the space menu: its colour, and the one you are in marked. */
+.item .swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin: 0 3px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent);
+}
+.item.checked { font-weight: var(--fw-bold); }
+.item.checked .swatch { box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3.5px currentColor; }

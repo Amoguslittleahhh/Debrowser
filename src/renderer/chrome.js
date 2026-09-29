@@ -1310,6 +1310,21 @@ el.forward.addEventListener('click', () => api.send('forward'));
 el.reload.addEventListener('click', () => api.send(reloadShows === 'stop' ? 'stop' : 'reload'));
 
 el.reader.addEventListener('click', () => api.send('reader-view'));
+
+const spaceChip = document.getElementById('space-chip');
+/** The chip at the head of the strip, for when there is more than one space. */
+function renderSpace(spaces) {
+  const active = spaces && spaces.list.find((sp) => sp.id === spaces.activeId);
+  spaceChip.hidden = !spaces || spaces.list.length < 2 || !active;
+  if (spaceChip.hidden) { document.body.style.removeProperty('--space-color'); return; }
+  document.getElementById('space-name').textContent = active.name;
+  document.body.style.setProperty('--space-color', active.color);
+  spaceChip.setAttribute('aria-label', `Space: ${active.name}${active.container ? ', its own cookies' : ''}`);
+}
+spaceChip.addEventListener('click', () => {
+  const r = spaceChip.getBoundingClientRect();
+  api.send('space-menu', { x: Math.round(r.left), y: Math.round(r.bottom + 4) });
+});
 el.star.addEventListener('click', async () => {
   const res = await api.request('toggle-bookmark');
   if (!res) return;
@@ -1684,7 +1699,11 @@ api.onState((state) => {
   // Pinned widths are a top-strip idea; down the side `flex` is a height.
   if (document.body.dataset.layout === 'left') releaseTabWidths();
   if (state.prefs) el.bookmarks.dataset.opensIn = state.prefs.bookmarkOpensIn || 'new-tab';
-  renderTabs(state.tabs);
+  // Only the space in front: the others' tabs are kept, out of sight.
+  const spaces = state.spaces;
+  const shown = spaces ? state.tabs.filter((tab) => (tab.spaceId || 'home') === spaces.activeId) : state.tabs;
+  renderTabs(shown);
+  renderSpace(spaces);
   el.stripCount.textContent = `${state.tabs.length} tab${state.tabs.length === 1 ? '' : 's'}`;
   // Bookmarks changed somewhere else - Settings, an import - so the star's
   // cached answer for this page is no longer one.

@@ -19,6 +19,12 @@
     <!-- How many tabs are open, at the head of the panel; tucked away only,
          where the panel is the one place the tabs are. -->
     <div class="strip-count" id="strip-count"></div>
+    <!-- The space you are in, once there is more than one (spaces.js): its
+         colour and name, and a menu of the others. -->
+    <button class="space-chip" id="space-chip" hidden title="Spaces (Ctrl+Alt+PageDown for the next)">
+      <span class="space-dot" id="space-dot"></span>
+      <span class="space-name" id="space-name"></span>
+    </button>
     <div class="tabs" id="tabs"></div>
     <!-- The label is drawn only with the strip down the side, where the button
          is a full-width row and a lone + in the middle of a 240px column reads

@@ -1125,6 +1125,8 @@ class Tab {
       everVisible: this.everVisible,
       audible: this.audible,
       muted: this.muted,
+      // Which space it belongs to (spaces.js).
+      spaceId: this.spaceId || 'home',
       // The page has an article reader view can show (reader.js).
       readerable: this.readerable === true,
       loading: this.loading,

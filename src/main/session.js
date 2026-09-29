@@ -111,7 +111,8 @@ class Session {
       kept.push({
         url,
         title: typeof entry?.title === 'string' ? entry.title.slice(0, MAX_TITLE) : '',
-        pinned: entry?.pinned === true
+        pinned: entry?.pinned === true,
+        spaceId: typeof entry?.spaceId === 'string' && /^[a-z0-9-]{1,24}$/.test(entry.spaceId) ? entry.spaceId : 'home'
       });
     }
 
@@ -135,14 +136,15 @@ class Session {
         id: tab.id,
         url: safeUrl(tab.url),
         title: typeof tab.title === 'string' ? tab.title.slice(0, MAX_TITLE) : '',
-        pinned: tab.pinned === true
+        pinned: tab.pinned === true,
+        spaceId: tab.spaceId || 'home'
       }));
 
     const activeIndex = Math.max(0, open.findIndex((t) => t.id === activeId));
     return {
       version: 1,
       activeIndex,
-      tabs: open.map(({ url, title, pinned }) => ({ url, title, pinned }))
+      tabs: open.map(({ url, title, pinned, spaceId }) => ({ url, title, pinned, spaceId }))
     };
   }
 

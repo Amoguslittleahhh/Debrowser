@@ -181,6 +181,9 @@ class ContentBlocker {
     });
 
     session.registerPreloadScript({ type: 'frame', filePath: require.resolve('@ghostery/adblocker-electron-preload') });
+    // The script's questions come in on one channel for every session.
+    if (this.wired) return;
+    this.wired = true;
     // Asked by that script, in every frame. Only a web page's frame gets an
     // answer, and only about itself: what comes back is styles and scripts put
     // into the frame that asked.

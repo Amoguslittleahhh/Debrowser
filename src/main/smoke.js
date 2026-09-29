@@ -82,7 +82,7 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
                           openInternalPage, senderPage, bookmarks,
                           runCommand = () => {}, history = null, context = { model: null },
-                          credentials = null, vault = null, blocker = null, sitePrefs = null }) {
+                          credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null }) {
   console.log('\n=== Debrowser smoke test ===\n');
 
   fixtures = await fixtureServer.start();
@@ -1312,6 +1312,43 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // Spaces: a container space has cookies of its own, its tabs get the blocker
+  // too, the strip is told which space is in front, a space you leave goes
+  // to sleep, and removing a space brings its tabs home.
+  if (spaces) {
+    const homeTab = tabs.activeTab();
+    const url = pageUrl('idle.html');
+    const site = new URL(url);
+    runCommand('new-space', { name: 'Work', container: true });
+    const work = spaces.active;
+    const inWork = await waitFor(() => work.id !== 'home' && tabs.activeTab()?.spaceId === work.id, { timeoutMs: 5000 });
+    const workTab = tabs.create({ url, activate: true, realise: true });
+    await waitFor(() => workTab.isLive && !workTab.wc.isLoading(), { timeoutMs: 8000 });
+    await workTab.wc.session.cookies.set({ url, name: 'account', value: 'work', expirationDate: Date.now() / 1000 + 600 });
+    const inHome = (await session.fromPartition(BROWSING_PARTITION).cookies.get({ domain: site.hostname })).some((c) => c.name === 'account');
+    const own = workTab.wc.session !== session.fromPartition(BROWSING_PARTITION) && workTab.spaceId === work.id;
+
+    // The blocker reached the new session.
+    const adTab = tabs.create({ url: pageUrl('ads.html'), activate: true, realise: true });
+    await waitFor(() => adTab.isLive && !adTab.wc.isLoading(), { timeoutMs: 8000 });
+    await sleep(500);
+    const adRan = adTab.isLive ? await adTab.wc.executeJavaScript('window.adRan === true').catch(() => null) : null;
+    const described = governor.snapshot().tabs.find((t) => t.id === adTab.id)?.spaceId === work.id;
+
+    runCommand('switch-space', { id: 'home' });
+    const back = await waitFor(() => spaces.activeId === 'home' && tabs.activeTab()?.spaceId === 'home', { timeoutMs: 5000 });
+    const slept = await waitFor(() => !workTab.isLive, { timeoutMs: 15_000 });
+
+    runCommand('delete-space', { id: work.id });
+    const gone = !spaces.byId(work.id) && tabs.all().every((t) => t.spaceId === 'home');
+    check('a container space keeps its own cookies and the blocker, sleeps when left, and goes home when removed',
+      inWork && own && !inHome && adRan === false && described && back && slept && gone,
+      JSON.stringify({ inWork, own, inHome, adRan, described, back, slept, gone }));
+    for (const t of tabs.all()) if (t !== homeTab && /idle\.html|ads\.html/.test(t.url)) tabs.close(t.id);
+    if (homeTab && tabs.all().includes(homeTab)) await tabs.activate(homeTab.id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');
@@ -1494,6 +1531,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // screen. Asserted at the bottom of the scroll, which is the only place the
   // defect exists.
   {
+    // In front: a page out of sight is not laid out or scrolled as one on screen.
+    if (!settingsTab.visible) { await tabs.activate(settingsTab.id); await sleep(300); }
     const railAtEnd = await settingsTab.wc.executeJavaScript(`(async () => {
       const main = document.querySelector('main');
       main.scrollTop = main.scrollHeight;

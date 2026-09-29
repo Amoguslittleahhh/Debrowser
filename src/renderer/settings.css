@@ -667,3 +667,28 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.15); }
 input[type="range"]:focus-visible { outline: none; }
 input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--ring); }
 input[type="range"]:disabled { opacity: 0.4; }
+
+/* Spaces: the name edited in place, and the colours to choose from. */
+.space-name-input {
+  width: min(220px, 100%);
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--fw-bold);
+}
+.space-name-input:hover { border-color: var(--border); }
+.space-name-input:focus { border-color: var(--accent); outline: none; background: var(--bg-input); }
+.space-swatches { display: flex; gap: 6px; margin-right: var(--s2); }
+.space-swatches button {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 2px solid var(--bg-raised);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.space-swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text); }

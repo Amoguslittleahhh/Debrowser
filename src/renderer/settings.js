@@ -573,6 +573,65 @@ function welcomeRow() {
   return row;
 }
 
+/*
+ * Spaces (spaces.js): one row each - its name to edit, its colour, and Remove
+ * for any but Home - then the two ways to make one. Rebuilt when the list
+ * changes, and never while a name is being typed.
+ */
+const SPACE_COLOURS = ['#2f857b', '#6f8f5f', '#a8694a', '#b08a3c', '#7b6a9c', '#5f7d9c', '#b0306a'];
+let spacesDrawn = '';
+function renderSpaces(spaces) {
+  const host = document.querySelector('[data-rows="spaces"]');
+  const section = host && host.closest('section');
+  if (!host) return;
+  if (!spaces) { section.hidden = true; return; }
+  const key = JSON.stringify(spaces.list);
+  if (key === spacesDrawn || host.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return;
+  spacesDrawn = key;
+  const rows = spaces.list.map((sp) => {
+    const { row, control } = simpleRow('', sp.id === 'home'
+      ? 'Where Debrowser starts. Spaces without cookies of their own share Home’s.'
+      : sp.container
+        ? 'Its own cookies and sign-ins: sites here do not see those in your other spaces.'
+        : 'Shares cookies and sign-ins with Home.');
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.value = sp.name;
+    name.maxLength = 40;
+    name.className = 'space-name-input';
+    name.setAttribute('aria-label', `Name of the space ${sp.name}`);
+    name.addEventListener('change', () => api.send('edit-space', { id: sp.id, name: name.value }));
+    row.querySelector('.row-label').replaceWith(name);
+    const swatches = document.createElement('div');
+    swatches.className = 'space-swatches';
+    for (const colour of SPACE_COLOURS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.style.background = colour;
+      b.setAttribute('aria-label', 'Colour');
+      b.setAttribute('aria-pressed', String(colour.toLowerCase() === sp.color.toLowerCase()));
+      b.addEventListener('click', () => api.send('edit-space', { id: sp.id, color: colour }));
+      swatches.append(b);
+    }
+    control.append(swatches);
+    if (sp.id !== 'home') {
+      const remove = smallButton('Remove', 'ghost-btn danger');
+      remove.title = sp.container ? 'Its tabs move to Home and open again there, signed in as Home is.' : 'Its tabs move to Home.';
+      remove.addEventListener('click', () => api.send('delete-space', { id: sp.id }));
+      control.append(remove);
+    }
+    return row;
+  });
+  const { row: add, control } = simpleRow('New space', 'Work, a project, a trip: a set of tabs you switch between. Spaces you leave go to sleep after half a minute.');
+  const plain = smallButton('New space');
+  plain.addEventListener('click', () => api.send('new-space', {}));
+  const own = smallButton('With its own cookies');
+  own.title = 'Sign in to the same site with another account';
+  own.addEventListener('click', () => api.send('new-space', { container: true }));
+  control.append(plain, own);
+  host.replaceChildren(...rows, add);
+}
+
 function safetyRow() {
   const { row, control } = simpleRow('Safety check', 'Every protection in one place, with anything that needs you.');
   const open = smallButton('Open');
@@ -1166,6 +1225,7 @@ let bookmarksShown = null;
 api.onState((state) => {
   applyThemePrefs(state.prefs);
   renderUpdateState(state.updates);
+  renderSpaces(state.incognito ? null : state.spaces || null);
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) {

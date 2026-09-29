@@ -29,6 +29,8 @@ const { LinkCleaner } = require('./link-cleaner');
 const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
 const { commandList } = require('./commands');
+const { Spaces } = require('./spaces');
+
 const reader = require('./reader');
 const readerStore = new reader.ReaderStore();
 const { Credentials, originOf } = require('./credentials');
@@ -143,6 +145,8 @@ function panic(reason) {
 }
 const SPEED_TEST = process.argv.includes('--speed-test');
 const OFFLINE_MODE = SMOKE_TEST || SPEED_TEST || process.argv.includes('--bench-test');
+/** How long a space you left stays awake before its tabs go to sleep (short under a test). */
+const SPACE_SLEEP_MS = SMOKE_TEST ? 1500 : 30_000;
 
 // Tests and benchmarks must not depend on the network: they assert on memory
 // behaviour, and a slow or blocked fetch would make them vary for reasons that
@@ -475,6 +479,10 @@ function main() {
   let sitePrefs = null;
   let blocker = null;
   let receipts = null;
+  /** What every ordinary browsing session gets (web-hooks, the blocker...), in order. */
+  const browsingSetup = [];
+  let browsingReady = false;
+  let spaces = null;
   let permissionAsks = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
@@ -556,6 +564,13 @@ function main() {
    */
   const quitState = { confirmed: false, asking: false };
 
+  /** What rides on the state broadcast beside the governor's own snapshot. */
+  const withExtras = (state) => ({
+    ...state,
+    ...(receipts ? { receipt: receipts.today() } : {}),
+    ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {})
+  });
+
   let publishQueued = false;
   const publish = () => {
     // Tab events can arrive in bursts (a load fires several in a row).
@@ -566,7 +581,7 @@ function main() {
       publishQueued = false;
       if (shell && governor) {
         const state = governor.snapshot();
-        shell.publish(receipts ? { ...state, receipt: receipts.today() } : state);
+        shell.publish(withExtras(state));
       }
       // Tabs came or went: keep a spare new tab while it is cheap (prewarm.js).
       if (prewarm) prewarm.refresh();
@@ -684,6 +699,30 @@ function main() {
   const find = { query: '' };
 
   /**
+   * Spaces you leave go to sleep (spaces.js): half a minute after switching
+   * away, each of their tabs still holding a renderer is put to sleep through
+   * the governor, protections and all - unless you have come back by then.
+   */
+  const sleepTimers = new Map();
+  const leftSpace = (nowIn) => {
+    for (const [id, timer] of sleepTimers) if (id === nowIn) { clearTimeout(timer); sleepTimers.delete(id); }
+    for (const space of spaces.list) {
+      if (space.id === nowIn || sleepTimers.has(space.id)) continue;
+      if (!tabs.all().some((t) => t.spaceId === space.id && t.isLive)) continue;
+      const timer = setTimeout(() => {
+        sleepTimers.delete(space.id);
+        if (spaces.activeId === space.id || !governor) return;
+        for (const t of tabs.all()) {
+          if (t.spaceId !== space.id || !t.isLive || t.visible) continue;
+          governor.enforceManualDiscard(t).catch((err) => log(`space sleep failed: ${err.message}`));
+        }
+      }, SPACE_SLEEP_MS);
+      timer.unref?.();
+      sleepTimers.set(space.id, timer);
+    }
+  };
+
+  /**
    * "Forget this site when I close it" (the padlock): when the last tab on a
    * site so marked closes, what it stored goes - cookies, local storage,
    * caches - for every part of the site, as if it had never been visited.
@@ -693,7 +732,7 @@ function main() {
     if (!host || sitePrefs.get(host, 'forget') !== true) return;
     const site = require('./third-party').siteOf(tab.url);
     if (tabs.all().some((t) => t !== tab && require('./third-party').siteOf(t.url) === site)) return;
-    forgetSite(session.fromPartition(BROWSING_PARTITION), host, site)
+    forgetSite(tab.session || session.fromPartition(BROWSING_PARTITION), host, site)
       .then(() => log('site', `forgot ${site}`))
       .catch((err) => log(`forgetting ${site} failed: ${err.message}`));
   };
@@ -851,6 +890,12 @@ function main() {
         if (circuits) onPrivateLoad(tab);
         break;
       case 'activated':
+        // The space follows the tab: a tab from another space - picked in tab
+        // search, say - brings its space with it.
+        if (spaces && !INCOGNITO) {
+          if (spaces.activate(tab.spaceId)) leftSpace(tab.spaceId);
+          spaces.lastTab.set(tab.spaceId, tab.id);
+        }
         if (shell) shell.attachTab(tab);
         // The keyboard follows the tab: switching with Ctrl+Tab left no view
         // focused, and the next key went nowhere. A tab still being rebuilt
@@ -999,12 +1044,18 @@ function main() {
     }
     if (circuits) icons.useSession(circuits.iconSession());
 
+    spaces = new Spaces(INCOGNITO || OFFLINE_MODE ? null : app.getPath('userData'), BROWSING_PARTITION);
     tabs = new TabManager({
       cfg,
-      sessionFor: circuits ? () => circuits.newTabSession() : null,
+      // Private: a circuit per tab. Otherwise the tab's space decides - a
+      // container space has a partition of its own (spaces.js).
+      sessionFor: circuits ? () => circuits.newTabSession()
+        : (spaceId) => session.fromPartition(spaces.partitionFor(spaceId)),
+      spaceOf: () => (spaces ? spaces.activeId : 'home'),
       onNewSession: (ses) => {
         pages.serveSession(ses, log);
         takeDownloads(ses);
+        if (!INCOGNITO && browsingReady) for (const setup of browsingSetup) setup(ses);
       },
       onEvent: onTabEvent,
       log,
@@ -1061,7 +1112,7 @@ function main() {
         enabled: () => prefs.get('preloadPages') !== false,
         isTab: (sender) => tabs.all().some((t) => t.isLive && t.wc.id === sender.id && !t.internal)
       });
-      speculation.watch(session.fromPartition(BROWSING_PARTITION));
+      browsingSetup.push((ses) => speculation.watch(ses));
       speculation.wire();
     }
 
@@ -1071,13 +1122,13 @@ function main() {
     // request is the upgraded one. A private window has its own policy.
     if (!INCOGNITO) {
       HttpsFirst.current = new HttpsFirst(() => prefs.get('httpsMode'));
-      HttpsFirst.current.attach(session.fromPartition(BROWSING_PARTITION));
+      browsingSetup.push((ses) => HttpsFirst.current.attach(ses));
     }
 
     // Tracking taken out of the links you open (link-cleaner.js).
     if (!INCOGNITO) {
       LinkCleaner.current = new LinkCleaner(() => prefs.get('cleanLinks') !== false);
-      LinkCleaner.current.attach(session.fromPartition(BROWSING_PARTITION));
+      browsingSetup.push((ses) => LinkCleaner.current.attach(ses));
     }
 
     // Dangerous and look-alike sites (threats.js): the lists a few seconds
@@ -1090,7 +1141,7 @@ function main() {
         domains: OFFLINE_MODE ? ['evil.test'] : null,
         log
       });
-      Threats.current.attach(session.fromPartition(BROWSING_PARTITION));
+      browsingSetup.push((ses) => Threats.current.attach(ses));
       if (!OFFLINE_MODE) {
         setTimeout(() => Threats.current.load(), 5000).unref?.();
         setInterval(() => Threats.current.load(), 6 * 3600 * 1000).unref?.();
@@ -1100,9 +1151,9 @@ function main() {
     // Other sites' cookies (third-party.js). A private window gives every tab
     // its own partition and keeps nothing, so it has no need of this.
     if (!INCOGNITO) {
-      new ThirdPartyCookies(() => prefs.get('blockThirdPartyCookies') !== false,
-        (page) => sitePrefs.get(SitePrefs.hostOf(page), 'thirdPartyCookies') === true)
-        .attach(session.fromPartition(BROWSING_PARTITION));
+      const cookies3p = new ThirdPartyCookies(() => prefs.get('blockThirdPartyCookies') !== false,
+        (page) => sitePrefs.get(SitePrefs.hostOf(page), 'thirdPartyCookies') === true);
+      browsingSetup.push((ses) => cookies3p.attach(ses));
     }
 
     // Ads and trackers (blocker.js). Not in a private window. Under a test, a
@@ -1116,11 +1167,16 @@ function main() {
         rules: OFFLINE_MODE ? '/debrowser-test-ad.\n##.debrowser-test-ad' : null,
         log
       });
-      blocker.attach(session.fromPartition(BROWSING_PARTITION));
+      browsingSetup.push((ses) => blocker.attach(ses));
       // After the window is up: a first build parses the lists, which is work
       // no start should wait for.
       if (prefs.get('blockAds') !== false) setTimeout(() => blocker.load(), OFFLINE_MODE ? 0 : 3000).unref?.();
     }
+
+    // Everything above, on the browsing session - and on each container
+    // space's own session as it is first used (onNewSession).
+    for (const setup of browsingSetup) setup(session.fromPartition(BROWSING_PARTITION));
+    browsingReady = true;
 
     // In memory under a test, which must not leave a passcode behind.
     vault = INCOGNITO ? null : new Vault(OFFLINE_MODE ? null : app.getPath('userData'), { log });
@@ -1258,7 +1314,7 @@ function main() {
         onUpdate: (state) => {
           // Incognito: a page too heavy for Balanced JavaScript gets one hint.
           if (slowJs && slowJs.observe(tabs.activeTab())) log('incognito', 'slow-page hint shown');
-          if (shell) shell.publish(receipts ? { ...state, receipt: receipts.today() } : state);
+          if (shell) shell.publish(withExtras(state));
         }
       });
       governor.start();
@@ -1339,7 +1395,7 @@ function main() {
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
-      sitePermissions, permissionAsks, blocker, sitePrefs,
+      sitePermissions, permissionAsks, blocker, sitePrefs, spaces,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
     });
@@ -1406,7 +1462,7 @@ function main() {
 
     if (saved.tabs.length) {
       saved.tabs.forEach((entry, i) => {
-        const tab = tabs.create({ url: entry.url, activate: false, realise: false });
+        const tab = tabs.create({ url: entry.url, activate: false, realise: false, spaceId: spaces.resolve(entry.spaceId) });
         tab.title = entry.title || tab.title;
         tab.pinned = entry.pinned === true;
       });
@@ -1472,7 +1528,7 @@ function main() {
       });
     } else if (SMOKE_TEST) {
       runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
-        blocker, sitePrefs });
+        blocker, sitePrefs, spaces });
     } else if (SPEED_TEST) {
       // Startup, from this process starting to the first tab drawn.
       const startedAt = Date.now() - process.uptime() * 1000;
@@ -1681,7 +1737,30 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null, sitePrefs = null }) {
+                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null }) {
+  /** The tabs of the space in front: what the strip shows and the keyboard walks. */
+  const spaceTabs = () => (spaces && !INCOGNITO ? tabs.all().filter((t) => t.spaceId === spaces.activeId) : tabs.all());
+
+  /** A space must not be left with nothing in it while others have tabs. */
+  const ensureSpaceHasTab = () => {
+    if (!spaces || INCOGNITO || !tabs.all().length || spaceTabs().length) return;
+    tabs.create({ url: newTabUrl(prefs), spaceId: spaces.activeId });
+  };
+
+  /** Go to a space: to the tab last shown there, or a new tab if it has none. */
+  const switchSpace = (id) => {
+    if (!spaces || INCOGNITO || !spaces.byId(id)) return;
+    const mine = tabs.all().filter((t) => t.spaceId === id);
+    const last = tabs.byId(spaces.lastTab.get(id));
+    const target = last && last.spaceId === id ? last : mine[mine.length - 1];
+    if (target) goTo(target.id);
+    else {
+      spaces.activate(id);
+      tabs.create({ url: newTabUrl(prefs), spaceId: id });
+    }
+    publish();
+  };
+
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -1706,7 +1785,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       if (!tabs.all().includes(tab)) return;
       tabs.close(tab.id);
       if (tabs.all().length === 0) lastTabClosed();
-      else then();
+      else { ensureSpaceHasTab(); then(); }
       publish();
     };
     tab.closing = {
@@ -1942,6 +2021,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           break;
         }
         tabs.close(tab.id);
+        ensureSpaceHasTab();
         if (tabs.all().length) offerUndoClose(since());
         // Closing the last tab closes the browser, the way every other browser
         // behaves. An empty window with a tab strip holding nothing is a state
@@ -2067,6 +2147,91 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      /*
+       * Spaces (spaces.js). Every one is refused in a private window, which
+       * has a single space and remembers nothing.
+       */
+      case 'switch-space':
+        switchSpace(String(payload?.id || ''));
+        break;
+
+      // Ctrl+Alt+PageDown / PageUp: the next or previous space, round.
+      case 'cycle-space': {
+        if (!spaces || INCOGNITO || spaces.list.length < 2) break;
+        const at = spaces.list.findIndex((sp) => sp.id === spaces.activeId);
+        const delta = Number(payload?.delta) || 1;
+        switchSpace(spaces.list[((at + delta) % spaces.list.length + spaces.list.length) % spaces.list.length].id);
+        break;
+      }
+
+      case 'new-space': {
+        if (!spaces || INCOGNITO) break;
+        const made = spaces.create({ name: payload?.name, color: payload?.color, container: payload?.container === true });
+        if (made) switchSpace(made.id);
+        break;
+      }
+
+      case 'edit-space':
+        if (spaces && !INCOGNITO && spaces.update(String(payload?.id || ''), { name: payload?.name, color: payload?.color })) publish();
+        break;
+
+      // Its tabs go to Home - reloaded there if the space kept its own
+      // cookies, since a tab cannot change partition - and it is gone.
+      case 'delete-space': {
+        const id = String(payload?.id || '');
+        if (!spaces || INCOGNITO || id === 'home' || !spaces.byId(id)) break;
+        const container = spaces.byId(id).container;
+        for (const t of tabs.all().filter((x) => x.spaceId === id)) {
+          if (container) {
+            tabs.create({ url: t.url, activate: false, realise: false, spaceId: 'home' });
+            tabs.close(t.id);
+          } else t.spaceId = 'home';
+        }
+        const wasActive = spaces.activeId === id;
+        spaces.remove(id);
+        if (wasActive) switchSpace('home');
+        publish();
+        break;
+      }
+
+      // A tab to another space. Between two spaces that share cookies it
+      // simply moves; into or out of a container it is opened again there.
+      case 'move-tab-to-space': {
+        const tab = tabs.byId(payload?.id);
+        const to = String(payload?.spaceId || '');
+        if (!spaces || INCOGNITO || !tab || !spaces.byId(to) || tab.spaceId === to) break;
+        if (spaces.partitionFor(to) === spaces.partitionFor(tab.spaceId)) tab.spaceId = to;
+        else {
+          tabs.create({ url: tab.url, activate: false, realise: false, spaceId: to });
+          tabs.close(tab.id);
+        }
+        ensureSpaceHasTab();
+        publish();
+        break;
+      }
+
+      // The space button: every space, to switch to, and making a new one.
+      case 'space-menu': {
+        if (!spaces || INCOGNITO) break;
+        context.model = {
+          params: {},
+          items: [
+            ...spaces.list.map((sp) => ({
+              id: 'switch-space', label: sp.name, swatch: sp.color, checked: sp.id === spaces.activeId,
+              accel: sp.container ? 'Own cookies' : '', payload: { id: sp.id }
+            })),
+            { kind: 'separator' },
+            { id: 'new-space', label: 'New space', icon: 'plus', payload: {} },
+            { id: 'new-space', label: 'New space with its own cookies', icon: 'shield', payload: { container: true } },
+            { id: 'open-settings', label: 'Edit spaces…', icon: 'gear', payload: { section: 'spaces' } }
+          ]
+        };
+        const x = Math.round(Number(payload?.x) || 0);
+        const y = Math.round(Number(payload?.y) || 0);
+        shell.openSheet('context', { x, y, right: x });
+        break;
+      }
+
       // Ctrl+K: the address bar as a command bar.
       case 'command-bar':
         shell.bringSidebarOut();
@@ -2124,7 +2289,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // Ctrl+1 to Ctrl+8, and Ctrl+9 for the last one.
       case 'select-tab': {
-        const list = tabs.all();
+        const list = spaceTabs();
         const index = Number(payload?.index);
         const tab = index === -1 ? list[list.length - 1] : list[index];
         if (tab) goTo(tab.id);
@@ -2133,7 +2298,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // Ctrl+Tab and Ctrl+PageDown. Wraps, as it does everywhere else.
       case 'cycle-tab': {
-        const list = tabs.all();
+        const list = spaceTabs();
         if (list.length < 2) break;
         const at = list.findIndex((tab) => tab.id === tabs.activeId);
         const delta = Number(payload?.delta) || 1;
@@ -2722,6 +2887,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               icon: 'mute',
               payload: { id }
             },
+            ...(spaces && !INCOGNITO && spaces.list.length > 1 ? [{ kind: 'separator' },
+              ...spaces.list.filter((sp) => sp.id !== tab.spaceId).map((sp) => ({
+                id: 'move-tab-to-space', label: `Move to ${sp.name}`, icon: 'forward', payload: { id, spaceId: sp.id }
+              }))] : []),
             { kind: 'separator' },
             { id: 'close-tab', label: 'Close', icon: 'close', accel: shortcuts.accelFor('close-tab'), payload: { id } },
             {
@@ -2830,9 +2999,20 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // Dropped somewhere else in the strip. The index is where the strip drew
       // it; `move` clamps it.
-      case 'move-tab':
-        tabs.move(Number(payload?.id), Number(payload?.index));
+      case 'move-tab': {
+        // The strip counts only the space in front; the list holds every
+        // space's tabs. The place is found next to the tab it lands beside.
+        const id = Number(payload?.id);
+        const index = Number(payload?.index);
+        const moving = tabs.byId(id);
+        if (!moving || !Number.isInteger(index)) break;
+        const all = tabs.all().filter((t) => t !== moving);
+        const shown = all.filter((t) => t.spaceId === moving.spaceId);
+        const before = shown[index];
+        const at = before ? all.indexOf(before) : (shown.length ? all.indexOf(shown[shown.length - 1]) + 1 : all.length);
+        tabs.move(id, at);
         break;
+      }
 
       case 'pin-tab': {
         const tab = tabs.byId(payload?.id);
@@ -2873,7 +3053,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'close-tabs-right': {
         const tab = tabs.byId(payload?.id);
         if (!tab) break;
-        const all = tabs.all();
+        // Within the tab's own space: the others are out of sight, not "other".
+        const all = tabs.all().filter((t) => t.spaceId === tab.spaceId);
         const from = all.indexOf(tab);
         const doomed = all.filter((t, i) => t !== tab && !t.pinned &&
           (command === 'close-other-tabs' || i > from));
@@ -4496,7 +4677,7 @@ function applySecureDns(prefs, log) {
 /* ------------------------------------------------------------------ */
 
 function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
-                       blocker, sitePrefs }) {
+                       blocker, sitePrefs, spaces }) {
   const { runSmoke } = require('./smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
@@ -4504,7 +4685,7 @@ function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, his
             // the context menu the way a keystroke does rather than by calling
             // into their parts.
             runCommand: (command, payload, sender = null) => runCommand(command, payload, sender),
-            history, context, credentials, vault, blocker, sitePrefs }).then((code) => {
+            history, context, credentials, vault, blocker, sitePrefs, spaces }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

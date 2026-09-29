@@ -67,12 +67,15 @@ class TabManager {
     // Told about each session the first time a tab uses it, so what is
     // registered per session - our pages, downloads - reaches it.
     onNewSession = () => {},
+    // The space a new tab without an opener goes in (spaces.js).
+    spaceOf = () => 'home',
     log = () => {}
   } = {}) {
     this.cfg = cfg;
     this.session = electronSession.fromPartition(partition);
     this.sessionFor = sessionFor;
     this.onNewSession = onNewSession;
+    this.spaceOf = spaceOf;
     /** Sessions already given the permission policy. */
     this.configured = new WeakSet([this.session]);
     this.onEvent = onEvent;
@@ -195,8 +198,8 @@ class TabManager {
    * signed-in page is still signed in; or a new one where each tab gets its
    * own; or the shared browsing partition.
    */
-  sessionForNew(opener) {
-    const ses = (opener && opener.session) || (this.sessionFor ? this.sessionFor() : this.session);
+  sessionForNew(opener, spaceId) {
+    const ses = (opener && opener.session) || (this.sessionFor ? this.sessionFor(spaceId) : this.session);
     if (!this.configured.has(ses)) {
       this.configured.add(ses);
       this.configureSession(ses);
@@ -205,9 +208,11 @@ class TabManager {
     return ses;
   }
 
-  create({ url = 'about:blank', activate = true, realise = activate, index = null, opener = null } = {}) {
+  create({ url = 'about:blank', activate = true, realise = activate, index = null, opener = null, spaceId = null } = {}) {
+    // A tab opened from a page stays in that page's space - and its partition.
+    const space = spaceId || (opener && opener.spaceId) || this.spaceOf();
     const tab = new Tab({
-      session: this.sessionForNew(opener),
+      session: this.sessionForNew(opener, space),
       url,
       onEvent: (t, event, payload) => {
         // Finishing a load frees an admission slot for whatever is queued.
@@ -218,6 +223,7 @@ class TabManager {
       log: this.log
     });
 
+    tab.spaceId = space;
     if (index == null) this.tabs.push(tab);
     else this.tabs.splice(index, 0, tab);
 
@@ -515,7 +521,12 @@ class TabManager {
     tab.teardownView();
 
     if (this.activeId === id) {
-      const next = this.tabs[index] || this.tabs[index - 1] || null;
+      // The neighbour in the same space: closing a tab never throws you into
+      // another space. None left there, and the caller opens a new tab in it.
+      const same = (t) => t && t.spaceId === tab.spaceId;
+      const after = this.tabs.slice(index).find(same);
+      const before = this.tabs.slice(0, index).reverse().find(same);
+      const next = after || before || null;
       this.activeId = null;
       if (next) this.activate(next.id).catch((err) => this.log(`activate failed: ${err.message}`));
     }

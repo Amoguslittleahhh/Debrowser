@@ -70,7 +70,21 @@ function render(items) {
     button.setAttribute('role', 'menuitem');
     if (item.enabled === false) button.disabled = true;
 
-    button.append(menuIcon(item.icon));
+    // A space is shown by its colour rather than an icon, and the one you are
+    // in is marked as the chosen one.
+    if (item.swatch) {
+      const dot = document.createElement('span');
+      dot.className = 'swatch';
+      dot.style.background = /^#[0-9a-f]{6}$/i.test(item.swatch) ? item.swatch : 'currentColor';
+      button.append(dot);
+    } else {
+      button.append(menuIcon(item.icon));
+    }
+    if (item.checked !== undefined) {
+      button.setAttribute('role', 'menuitemradio');
+      button.setAttribute('aria-checked', String(item.checked === true));
+      button.classList.toggle('checked', item.checked === true);
+    }
 
     const label = document.createElement('span');
     label.className = 'item-label';

@@ -2154,3 +2154,29 @@ body[data-role="strip"][data-band="true"][data-layout="left"]::before { top: 8px
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* The space chip, at the head of the strip (spaces.js). */
+.space-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  max-width: 160px;
+  margin: 0 6px 6px 8px;
+  padding: 0 10px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--space-color, var(--accent)) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--space-color, var(--accent)) 12%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-bold);
+  cursor: default;
+  transition: background-color var(--fast) var(--ease);
+}
+.space-chip:hover { background: color-mix(in srgb, var(--space-color, var(--accent)) 22%, transparent); }
+.space-chip:active { transform: var(--press); }
+.space-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--space-color, var(--accent)); }
+.space-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body[data-layout="left"] .space-chip { align-self: stretch; max-width: none; margin: 4px 8px 8px; height: 30px; }
