@@ -295,40 +295,11 @@ select, input[type="text"], input[type="number"] {
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  background-color: var(--bg-input);
   color: var(--text);
   font: inherit;
   outline: none;
   user-select: text;
-}
-/*
- * The chevron is ours, because the platform's is not.
- *
- * Left alone, a <select> keeps the operating system's own arrow and well - a
- * Win32 combo box on Windows, a different one again on GTK - dropped into a
- * panel styled like none of them. It is the loudest remaining sign that the
- * controls were placed rather than drawn.
- *
- * The data URI is the one image in this project and is deliberate: it is 200
- * bytes, arrives with the stylesheet, hits no network and decodes no file. A
- * pure-CSS triangle would need a pseudo-element, which <select> does not
- * reliably render. Its colour is fixed rather than `currentColor`, which a data
- * URI cannot see - `--text-dim` is chosen to read on both palettes, and it has
- * to be updated by hand when that token moves. It was missed when the palette
- * changed, leaving a blue-grey arrow on every dropdown in a browser with no
- * blue-grey left in it.
- */
-select {
-  cursor: default;
-  appearance: none;
-  padding-right: 26px;
-  /* A long option ends in an ellipsis rather than being cut mid-word. */
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow: hidden;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239b978e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 9px center;
 }
 
 /* The ring itself is in theme.css, on `:focus-visible`, so every control in
@@ -509,6 +480,11 @@ input[type="checkbox"]:disabled { opacity: 0.45; }
 /* Scrollbars that do not appear and vanish as a filter changes the page's
    length - which shifted every row sideways by the bar's width. */
 main { scrollbar-gutter: stable; }
+/* No scroll anchoring: the room under the last section is sized by script
+   (settings.js, watchSections), and when a section grows as that room shrinks
+   the browser's anchoring moved the page up by the difference - off its end,
+   and the rail back to the section before. */
+main { overflow-anchor: none; }
 
 /*
  * A narrow window: the rail goes across the top as a row of section names,

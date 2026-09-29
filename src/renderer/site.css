@@ -47,10 +47,10 @@ section { padding: var(--s3) var(--s4) var(--s3); }
 .kinds .label { flex: 1; }
 .kinds select {
   height: 26px;
-  padding: 0 var(--s2);
+  padding: 0 24px 0 var(--s2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  background-color: var(--bg-input);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-small);

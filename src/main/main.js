@@ -3509,6 +3509,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
  * pages, or null for anything else - which includes a website sitting in a
  * renderer that used to be one of our pages.
  */
+/** "today", "yesterday", or "27 Sep": how a person says when, not a date format. */
+function whenDay(ms) {
+  const day = (t) => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+  const ago = Math.round((day(Date.now()) - day(ms)) / 86_400_000);
+  if (ago <= 0) return 'today';
+  if (ago === 1) return 'yesterday';
+  return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
 function senderPage(tabs, shell, sender) {
   // The chrome views are named, never inferred.
   //
@@ -4100,9 +4109,9 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
             { key: 'secureDns', label: 'Secure DNS', on: prefs.get('secureDns') !== 'off',
               detail: prefs.get('secureDns') === 'automatic' ? 'Automatic' : prefs.get('secureDns') === 'off' ? 'Off' : prefs.get('secureDns') },
             { key: 'warnDangerousSites', label: 'Dangerous-site warnings', on: on('warnDangerousSites'),
-              detail: Threats.current?.updatedAt ? `Lists updated ${new Date(Threats.current.updatedAt).toLocaleDateString()}` : 'Lists not downloaded yet' },
+              detail: Threats.current?.updatedAt ? `Lists updated ${whenDay(Threats.current.updatedAt)}` : 'Lists not downloaded yet' },
             { key: 'blockAds', label: 'Ads and trackers blocked', on: on('blockAds'),
-              detail: blocker?.builtAt ? `Lists updated ${new Date(blocker.builtAt).toLocaleDateString()}` : 'Lists not downloaded yet' },
+              detail: blocker?.builtAt ? `Lists updated ${whenDay(blocker.builtAt)}` : 'Lists not downloaded yet' },
             { key: 'blockThirdPartyCookies', label: 'Other sites’ cookies blocked', on: on('blockThirdPartyCookies') },
             { key: 'cleanLinks', label: 'Tracking taken out of links', on: on('cleanLinks') }
           ],

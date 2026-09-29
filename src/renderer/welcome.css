@@ -47,6 +47,23 @@ h1 {
 }
 body[data-design="paper"] h1 { font-family: var(--font-display); font-weight: 400; font-size: 27px; letter-spacing: 0; }
 .lead { margin: 0 0 20px; color: var(--text-dim); font-size: 15px; line-height: 1.5; }
+.points { display: grid; gap: 14px; margin: 8px 0 24px; padding: 0; list-style: none; }
+.points li { display: flex; align-items: flex-start; gap: 12px; color: var(--text-dim); font-size: 14px; line-height: 1.5; }
+.points strong { color: var(--text); font-weight: var(--fw-bold); }
+.points svg {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 7px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .fine { margin: 10px 0 0; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
 .note { min-height: 1.4em; margin: 10px 0 0; font-size: 13px; color: var(--text-dim); }
 .note.ok { color: var(--ok); }
@@ -136,10 +153,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 select {
   min-width: 220px;
-  padding: 7px 10px;
+  padding: 7px 28px 7px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-input);
+  background-color: var(--bg-input);
   color: var(--text);
   font: inherit;
 }

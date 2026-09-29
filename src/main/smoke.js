@@ -1747,7 +1747,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       railAtEnd.marked.toLowerCase().includes(railAtEnd.section.slice(0, 6)),
       railAtEnd && railAtEnd.error
         ? railAtEnd.error
-        : `scrolled to the end, rail says ${JSON.stringify(railAtEnd.marked)}, ` +
+        : `scrolled to the end (${railAtEnd.atBottom}), rail says ${JSON.stringify(railAtEnd.marked)}, ` +
           `last section is ${railAtEnd.section}`);
   }
 

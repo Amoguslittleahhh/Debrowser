@@ -45,7 +45,8 @@ const STATE = {
     incognitoBridges: 'custom', incognitoJsLevel: 'balanced', incognitoKeepTorState: true,
     incognitoPreferOnion: false, incognitoCamouflage: false, incognitoIdleWipeMinutes: 0,
     incognitoBridgeLines: 'obfs4 203.0.113.5:443 9A1B2C3D4E5F60718293A4B5C6D7E8F901234567 cert=kR3x4mHq9Wn2bV7cZ8yT1uP0sL5fG6hJ iat-mode=1',
-    design: process.env.SHOOT_DESIGN || 'legacy',
+    // Ledger, the design a new install has; SHOOT_DESIGN photographs another.
+    design: process.env.SHOOT_DESIGN || 'ledger',
     theme: 'dark', accent: '#2f857b', tabWidth: 'roomy', tabBarColor: 'default',
     windowOpacity: 1, tabBarPosition: 'top', backgroundMaterial: 'none',
     reduceMotion: false, showMemoryMeter: true, showTierDots: true,
@@ -148,6 +149,12 @@ const ANSWERS = {
   'reader-article': { title: 'Why your browser uses so much memory', byline: 'By Sam Rivera', siteName: 'The Long Read',
     url: 'https://example.com/story', length: 5200, lang: 'en',
     content: '<p>Open a dozen tabs and look at what your computer says the browser is using. The number is usually startling, and it is not a bug.</p><h2>Every tab is a program</h2><p>A modern page is an application: it runs scripts, holds images decoded in memory, and keeps a copy of everything it might need again. Multiply that by every tab you leave open.</p><blockquote>The tab you are not looking at is still running.</blockquote><p>The fix is not fewer tabs. It is a browser that puts the ones you are not using to sleep, and gives the memory back.</p>' },
+  'whats-new-notes': { version: '2.0.0', sections: [
+    { title: 'New', items: [
+      { head: 'Spaces.', text: 'Keep sets of tabs apart - Work, Home, a trip - and switch between them from the tab strip or Ctrl+Alt+PageDown.' },
+      { head: 'Split view.', text: 'Two tabs side by side: right-click a tab and choose `Show beside this tab`.' }] },
+    { title: 'Security', items: [
+      { head: 'Sites are tried over HTTPS first.', text: 'A plain-HTTP link loads the secure version where the site has one.' }] }] },
   'receipt-week': { week: [
     { date: '2026-09-23', freedMB: 1840, slept: 22, blocked: 610, cleaned: 12, stopped: 0 },
     { date: '2026-09-24', freedMB: 2410, slept: 31, blocked: 902, cleaned: 18, stopped: 1 },
@@ -226,6 +233,10 @@ const SHOTS = [
   { name: 'peek', file: 'peek.html', w: 1100, h: 200,
     message: { kind: 'peek', url: 'https://www.bbc.co.uk/news/articles/x', title: 'The story behind the headline', loading: false } },
   { name: 'receipt', file: 'receipt.html', w: 1100, h: 720 },
+  { name: 'whats-new', file: 'whats-new.html', w: 1100, h: 720 },
+  { name: 'quick', file: 'quick.html', w: 900, h: 44,
+    message: { kind: 'quick', url: 'https://www.bbc.co.uk/news/articles/x', title: 'The story behind the headline', loading: false } },
+  { name: 'settings-labs', file: 'settings.html', w: 1280, h: 860, hash: 'labs' },
   { name: 'reader', file: 'reader.html', w: 1100, h: 760, query: { t: 'x' } },
   { name: 'danger', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://paypa1.com/login', kind: 'lookalike', like: 'paypal.com' } },
   { name: 'danger-phish', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://secure-login.bank-verify.example/', kind: 'phishing' } },
@@ -275,6 +286,9 @@ const WANTED = ONLY ? SHOTS.filter((s) => s.name === ONLY.slice(7)) : SHOTS;
 
 process.on('unhandledRejection', (e) => console.log('unhandled:', e && e.message));
 process.on('uncaughtException', (e) => console.log('uncaught:', e && e.message));
+
+// One window at a time: without this the first one closing ends the run.
+app.on('window-all-closed', () => {});
 
 app.whenReady().then(async () => {
   for (const shot of WANTED) {

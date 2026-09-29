@@ -39,10 +39,14 @@
 - **Copy version info.** The menu, and the command bar, copy the Debrowser and Chromium versions, your system and your design in one go, for pasting into a bug report.
 - **What's new, after an update.** The first start of a new version says so in a note at the foot of the window, with "What's new" to read this version's notes in a tab; the menu and the command bar open them any time. Nothing opens by itself.
 - **An idle window costs less.** The memory meter now redraws only when its bar would visibly move, instead of on every two-second update, which was most of what the browser's own window spent with nothing happening.
+- **Every dropdown looks the same.** The site panel's "Sleep when unused" and the welcome tour's choices used your system's own dropdown, unlike every other control in the browser; they now match Settings in both themes.
+- **A warmer first step in the welcome tour.** It says in three lines what Debrowser does differently - tabs that sleep, blocking done on your own computer, spaces - instead of an empty card.
+- **Smaller touches:** the new tab page's figures for the day sit centred under the search box, reader view puts the author and reading time on one line, and the safety check says the lists were updated "today" or "yesterday" rather than giving a date.
 
 ### Fixed
 
 - **Windows Hello no longer waits for ever** if Debrowser's own prompt cannot report back. After five minutes without an answer it gives up and closes the prompt, so a second try does not open a prompt on top of the first.
+- **Settings' side list shows the last section when you reach the end of the page.** A section finishing loading as you got there could leave the page just short of its end, and the list naming the section before.
 
 ### Security
 

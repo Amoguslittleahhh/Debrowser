@@ -685,3 +685,38 @@ body {
 body.switching-theme *, body.switching-theme *::before, body.switching-theme *::after {
   transition: none !important;
 }
+
+/*
+ * The chevron is ours, because the platform's is not.
+ *
+ * Left alone, a <select> keeps the operating system's own arrow and well - a
+ * Win32 combo box on Windows, a different one again on GTK - dropped into a
+ * panel styled like none of them. It is the loudest remaining sign that the
+ * controls were placed rather than drawn.
+ *
+ * The data URI is the one image in this project and is deliberate: it is 200
+ * bytes, arrives with the stylesheet, hits no network and decodes no file. A
+ * pure-CSS triangle would need a pseudo-element, which <select> does not
+ * reliably render. Its colour is fixed rather than `currentColor`, which a data
+ * URI cannot see - `--text-dim` is chosen to read on both palettes, and it has
+ * to be updated by hand when that token moves. It was missed when the palette
+ * changed, leaving a blue-grey arrow on every dropdown in a browser with no
+ * blue-grey left in it.
+ *
+ * Here rather than in Settings alone, so every page's dropdown is the same
+ * one: the site panel and the welcome tour had the platform's. A page that
+ * colours its own sets `background-color`, not `background`, which would wipe
+ * the chevron.
+ */
+select {
+  cursor: default;
+  appearance: none;
+  padding-right: 26px;
+  /* A long option ends in an ellipsis rather than being cut mid-word. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239b978e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}

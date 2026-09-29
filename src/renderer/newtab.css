@@ -75,9 +75,12 @@ main {
   min-height: 1em;
 }
 
+/* Centred under the search, like everything else on the page: left-aligned it
+   read as a stray caption rather than as the day's figures. */
 .receipt {
-  margin: var(--s1) 0 0;
-  padding: 2px 8px;
+  display: block;
+  margin: var(--s2) auto 0;
+  padding: 4px 12px;
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;

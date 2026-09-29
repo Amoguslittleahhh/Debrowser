@@ -42,8 +42,7 @@ article {
 }
 .site { margin: 0 0 var(--s2); color: var(--accent); font: 600 13px var(--font-ui); letter-spacing: 0.03em; text-transform: uppercase; }
 h1 { margin: 0 0 var(--s3); font-size: 1.9em; line-height: 1.2; letter-spacing: -0.015em; }
-.byline, .time { margin: 0; color: var(--text-dim); font: 14px var(--font-ui); }
-.time { margin-bottom: var(--s6); }
+.meta { margin: 0 0 var(--s6); color: var(--text-dim); font: 14px var(--font-ui); }
 .content { overflow-wrap: break-word; }
 .content h2, .content h3 { line-height: 1.3; margin: 1.6em 0 0.5em; }
 .content p { margin: 0 0 1em; }

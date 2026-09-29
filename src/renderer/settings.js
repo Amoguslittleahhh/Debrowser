@@ -1403,6 +1403,11 @@ function watchSections() {
    * screen were still Private windows'.
    */
   let queued = false;
+  // Whether the page was at its end when last marked. A section shrinking
+  // there clamps the scroll short of the new end once the room below grows
+  // back, so a reader who was at the end is put back at it.
+  let wasAtEnd = false;
+  const atEnd = () => main.scrollTop + main.clientHeight >= main.scrollHeight - 2;
   const mark = () => {
     queued = false;
     const shown = sections.filter((s) => !s.hidden);
@@ -1410,10 +1415,18 @@ function watchSections() {
     const line = main.clientHeight * 0.25;
     const last = shown[shown.length - 1];
     const room = `${Math.max(0, Math.round(main.clientHeight - line - last.offsetHeight))}px`;
-    if (main.style.paddingBottom !== room) main.style.paddingBottom = room;
+    if (main.style.paddingBottom !== room) {
+      main.style.paddingBottom = room;
+      if (wasAtEnd && !atEnd()) main.scrollTop = main.scrollHeight;
+    }
+    wasAtEnd = atEnd();
     const top = main.getBoundingClientRect().top;
     let current = shown[0];
     for (const s of shown) if (s.getBoundingClientRect().top - top <= line + 1) current = s;
+    // At the very end it is the last section, whatever the line says: a section
+    // that changes height after the room was measured (Updates fills in late)
+    // can otherwise leave its heading short of the line with no scroll left.
+    if (wasAtEnd) current = last;
     markRail(current.dataset.section);
   };
   const soon = () => {
@@ -1423,6 +1436,12 @@ function watchSections() {
   };
   main.addEventListener('scroll', soon, { passive: true });
   window.addEventListener('resize', soon);
+  // A section growing or shrinking moves every heading below it without a
+  // scroll - an update check finishing, a download list filling in.
+  if (typeof ResizeObserver === 'function') {
+    const resized = new ResizeObserver(soon);
+    for (const s of sections) resized.observe(s);
+  }
   remarkRail = soon;
   soon();
 }

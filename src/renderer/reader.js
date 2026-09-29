@@ -59,6 +59,7 @@ async function load() {
   $('byline').textContent = article.byline || '';
   const minutes = Math.max(1, Math.round((article.length || 0) / 1100));
   $('time').textContent = `${minutes} min read`;
+  $('dot').hidden = !article.byline;
   const parsed = new DOMParser().parseFromString(article.content, 'text/html');
   const content = $('content');
   clean(parsed.body, content);
