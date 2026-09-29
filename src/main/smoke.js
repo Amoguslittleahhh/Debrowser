@@ -1085,6 +1085,27 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       cases.every(Boolean), JSON.stringify(cases));
   }
 
+  // Links: tracking parameters out, redirect hops skipped, the rest untouched.
+  {
+    const { clean } = require('./link-cleaner');
+    const pairs = [
+      ['https://example.com/a?utm_source=x&id=5&fbclid=abc#top', 'https://example.com/a?id=5#top'],
+      ['https://l.facebook.com/l.php?u=https%3A%2F%2Fnews.site%2Fstory%3Futm_campaign%3Dz%26p%3D2&h=AT0', 'https://news.site/story?p=2'],
+      ['https://www.google.com/url?q=https://docs.example/page&sa=D', 'https://docs.example/page'],
+      ['https://youtu.be/abc?si=XYZ&t=10', 'https://youtu.be/abc?t=10'],
+      ['https://example.com/?q=hi&si=keep', 'https://example.com/?q=hi&si=keep'],
+      ['https://example.com/path?utm_medium=email', 'https://example.com/path']
+    ];
+    const wrong = pairs.filter(([input, want]) => clean(input) !== want).map(([input]) => [input, clean(input)]);
+    check('links lose their tracking and redirect hops, and nothing else', wrong.length === 0, JSON.stringify(wrong));
+    // And on the wire: a page opened with a tracking parameter loads without it.
+    const tab = tabs.create({ url: `${pageUrl('idle.html')}?utm_source=smoke&keep=1`, activate: false, realise: true });
+    await waitFor(() => tab.isLive && !tab.wc.isLoading() && /keep=1/.test(tab.wc.getURL()), { timeoutMs: 8000 });
+    const landed = tab.isLive ? tab.wc.getURL() : '';
+    check('a page opened with utm_source loads without it', /keep=1/.test(landed) && !/utm_/.test(landed), landed);
+    tabs.close(tab.id);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

@@ -255,6 +255,12 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'cleanLinks',
+      label: 'Take tracking out of links',
+      hint: 'Removes the parts of an address that only say where you came from - utm_source, fbclid and the like - and skips the click-tracking stop some sites send links through. Copied links are cleaned too.',
+      type: 'checkbox'
+    },
+    {
       key: 'blockAds',
       label: 'Block ads and trackers',
       hint: 'Uses the lists uBlock Origin uses, updated weekly. Turn it off for one site from the padlock. Not in private windows, where every copy of the browser must look alike.',

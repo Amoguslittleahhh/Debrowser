@@ -25,6 +25,7 @@ const { SitePrefs } = require('./site-prefs');
 const { ContentBlocker } = require('./blocker');
 const { HttpsFirst } = require('./https-first');
 const { ThirdPartyCookies } = require('./third-party');
+const { LinkCleaner } = require('./link-cleaner');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -1027,6 +1028,12 @@ function main() {
     if (!INCOGNITO) {
       HttpsFirst.current = new HttpsFirst(() => prefs.get('httpsMode'));
       HttpsFirst.current.attach(session.fromPartition(BROWSING_PARTITION));
+    }
+
+    // Tracking taken out of the links you open (link-cleaner.js).
+    if (!INCOGNITO) {
+      LinkCleaner.current = new LinkCleaner(() => prefs.get('cleanLinks') !== false);
+      LinkCleaner.current.attach(session.fromPartition(BROWSING_PARTITION));
     }
 
     // Other sites' cookies (third-party.js). A private window gives every tab
@@ -2082,7 +2089,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'copy-link':
       case 'copy-text': {
-        const text = String(payload?.text ?? '');
+        let text = String(payload?.text ?? '');
+        // A copied link goes on without its tracking (link-cleaner.js).
+        if (command === 'copy-link' && LinkCleaner.current) text = LinkCleaner.current.forCopy(text);
         if (text) clipboard.writeText(text);
         break;
       }

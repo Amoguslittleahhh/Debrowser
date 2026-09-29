@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Tracking is taken out of links.** The parts of an address that only report where you came from - `utm_source`, `fbclid`, `gclid` and the like - are removed from pages you open and links you copy, and links that detour through Facebook, Google, Reddit, Steam or LinkedIn to record your click go straight to where they point. Settings turns it off.
 - **Other sites' cookies are blocked.** A cookie an ad network sets from inside the pages that carry its ads is how you are followed from site to site; Debrowser now refuses them, as Safari, Firefox and Brave do. If a sign-in box or embedded comments stop working on a site, the padlock lets them back in there.
 - **Sites are tried over HTTPS first.** A plain-HTTP link, bookmark or address now loads the site's secure version where it has one, which the network between you and the site cannot read or change. Where it has none, the plain page loads as before - or, if you choose "Ask before a site without it" in Settings, a page says so and lets you decide. Addresses on your own network are left alone.
 - **Secure DNS.** Site addresses are looked up over HTTPS where your provider offers it, so the network cannot see which sites you visit; Settings can name Cloudflare, Quad9, Google or Mullvad instead, or turn it off.
