@@ -135,7 +135,8 @@ class Threats {
         const n = buf.readUInt32LE(0);
         this.hashes = new BigUint64Array(buf.buffer.slice(buf.byteOffset + 8, buf.byteOffset + 8 + n * 8));
         this.kinds = new Uint8Array(buf.buffer.slice(buf.byteOffset + 8 + n * 8, buf.byteOffset + 8 + n * 9));
-        fresh = Date.now() - fs.statSync(file).mtimeMs < MAX_AGE_MS;
+        this.updatedAt = fs.statSync(file).mtimeMs;
+        fresh = Date.now() - this.updatedAt < MAX_AGE_MS;
       } catch { /* none yet */ }
     }
     if (fresh) return;
@@ -154,6 +155,7 @@ class Threats {
         fs.writeFileSync(`${file}.tmp`, Buffer.concat([head, Buffer.from(this.hashes.buffer), Buffer.from(this.kinds.buffer)]));
         fs.renameSync(`${file}.tmp`, file);
       }
+      this.updatedAt = Date.now();
       this.log(`threats: ${this.hashes.length} dangerous domains listed`);
     } catch (err) {
       this.log(`threats: could not refresh the lists (${err.message})`);

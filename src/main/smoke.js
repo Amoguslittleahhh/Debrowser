@@ -1155,6 +1155,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       ok, JSON.stringify({ results, asked }));
   }
 
+  // Permissions a site has not used in three months go by themselves; a
+  // refusal stays. And the safety check draws every protection.
+  {
+    const { SitePermissions } = require('./site-permissions');
+    const store = new SitePermissions(() => {}, null);
+    store.set('https://old.example', 'camera', 'allow');
+    store.set('https://old.example', 'notifications', 'block');
+    store.set('https://fresh.example', 'microphone', 'allow');
+    const day = 86_400_000;
+    store.expire(Date.now() - 100 * day);                // first sight: the clock starts, nothing goes
+    store.markUsed('https://fresh.example');
+    const gone = store.expire(Date.now());
+    const ok = gone.length === 1 && gone[0].origin === 'https://old.example' &&
+      store.get('https://old.example', 'camera') === undefined && store.get('https://old.example', 'notifications') === 'block' &&
+      store.get('https://fresh.example', 'microphone') === 'allow';
+    runCommand('open-safety');
+    const page = await waitFor(() => tabs.activeTab() && pages.pageName(tabs.activeTab().url) === 'safety', { timeoutMs: 5000 });
+    const drawn = page && await waitFor(async () => (await tabs.activeTab().wc.executeJavaScript(
+      'document.querySelectorAll("#protections .row").length').catch(() => 0)) >= 6, { timeoutMs: 5000 });
+    check('unused permissions expire after three months, refusals stay, and the safety check draws',
+      ok && page && drawn, `expired ${JSON.stringify(gone)}, page ${page}, drawn ${drawn}`);
+    if (page) tabs.close(tabs.activeTab().id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

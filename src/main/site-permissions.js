@@ -66,6 +66,10 @@ class SitePermissions {
     this.file = dir ? path.join(dir, FILE) : null;
     /** origin -> { kind: 'allow' | 'block' } */
     this.sites = new Map();
+    /** origin -> when an allowed permission was last used (auto-revoke, below) */
+    this.usedAt = new Map();
+    /** What the last expiry took away, for the safety check to report. */
+    this.revoked = [];
     this.load();
   }
 
@@ -91,6 +95,7 @@ class SitePermissions {
         if (Object.hasOwn(KINDS, kind) && (value === 'allow' || value === 'block')) clean[kind] = value;
       }
       if (Object.keys(clean).length) this.sites.set(origin, clean);
+      if (Number.isFinite(entry.usedAt)) this.usedAt.set(origin, entry.usedAt);
     }
   }
 
@@ -98,7 +103,11 @@ class SitePermissions {
     if (!this.file) return;
     const tmp = `${this.file}.tmp`;
     try {
-      fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.sites), null, 2), { mode: 0o600 });
+      const out = {};
+      for (const [origin, entry] of this.sites) {
+        out[origin] = this.usedAt.has(origin) ? { ...entry, usedAt: this.usedAt.get(origin) } : entry;
+      }
+      fs.writeFileSync(tmp, JSON.stringify(out, null, 2), { mode: 0o600 });
       fs.renameSync(tmp, this.file);
     } catch (err) {
       this.log(`site permissions: could not save (${err.message})`);
@@ -133,8 +142,50 @@ class SitePermissions {
   decide(origin, kinds) {
     const answers = kinds.map((kind) => this.get(origin, kind));
     if (answers.some((a) => a === 'block')) return 'block';
-    if (answers.every((a) => a === 'allow')) return 'allow';
+    if (answers.every((a) => a === 'allow')) {
+      this.markUsed(origin);
+      return 'allow';
+    }
     return 'ask';
+  }
+
+  /** An allowed permission was used. Written at most once a day per site. */
+  markUsed(origin, now = Date.now()) {
+    const last = this.usedAt.get(origin) || 0;
+    this.usedAt.set(origin, now);
+    if (now - last > 86_400_000) this.save();
+  }
+
+  /**
+   * Chrome's safety check, done by itself: a site that has not used what it
+   * was allowed for three months loses it, and asks again next time. A
+   * refusal stays - nothing is gained by forgetting that. A site with no
+   * record of use (from before this was kept) starts its three months now.
+   * @returns {Array<{origin: string, kinds: string[]}>} what was taken away
+   */
+  expire(now = Date.now(), maxAgeMs = 90 * 86_400_000) {
+    const revoked = [];
+    let changed = false;
+    for (const [origin, entry] of this.sites) {
+      const allowed = Object.keys(entry).filter((kind) => entry[kind] === 'allow');
+      if (!allowed.length) continue;
+      if (!this.usedAt.has(origin)) { this.usedAt.set(origin, now); changed = true; continue; }
+      if (now - this.usedAt.get(origin) < maxAgeMs) continue;
+      const kept = Object.fromEntries(Object.entries(entry).filter(([, v]) => v !== 'allow'));
+      if (Object.keys(kept).length) this.sites.set(origin, kept);
+      else this.sites.delete(origin);
+      this.usedAt.delete(origin);
+      revoked.push({ origin, kinds: allowed });
+      changed = true;
+    }
+    if (changed) this.save();
+    if (revoked.length) this.revoked = revoked;
+    return revoked;
+  }
+
+  /** Every site with a decision, for the safety check. */
+  all() {
+    return [...this.sites].map(([origin, entry]) => ({ origin, ...entry, usedAt: this.usedAt.get(origin) || null }));
   }
 }
 

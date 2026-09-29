@@ -538,7 +538,7 @@ function buildAll(state = {}) {
   // which is never the default and has nothing to set up.
   if (!state.incognito) {
     document.querySelector('[data-rows="appearance"]').prepend(welcomeRow());
-    document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow());
+    document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow(), safetyRow());
   }
   built = true;
 }
@@ -547,6 +547,14 @@ function welcomeRow() {
   const { row, control } = simpleRow('Welcome tour', 'Import, look, search and default browser, one step at a time.');
   const open = smallButton('Open');
   open.addEventListener('click', () => api.send('open-welcome'));
+  control.append(open);
+  return row;
+}
+
+function safetyRow() {
+  const { row, control } = simpleRow('Safety check', 'Every protection in one place, with anything that needs you.');
+  const open = smallButton('Open');
+  open.addEventListener('click', () => api.send('open-safety'));
   control.append(open);
   return row;
 }

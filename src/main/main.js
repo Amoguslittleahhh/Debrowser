@@ -1001,6 +1001,11 @@ function main() {
       });
       tabs.askPermission = (wc, kinds, details, callback) => permissionAsks.request(wc, kinds, details, callback);
       tabs.permissionGranted = (origin, kinds) => sitePermissions.decide(originOf(origin), kinds) === 'allow';
+      // Permissions a site has not used in three months go by themselves,
+      // checked at start and daily after.
+      const revoked = sitePermissions.expire();
+      if (revoked.length) log('permissions', `removed from ${revoked.length} site(s) unused for 90 days`);
+      setInterval(() => sitePermissions.expire(), 24 * 3600 * 1000).unref?.();
     }
 
     // None at all in a private window. Every request that reads or writes it
@@ -2314,9 +2319,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'open-settings':
-        // One deep link, from the passwords page to where its passcode is set.
-        openInternalPage(tabs, payload?.section === 'credentials'
-          ? `${pages.SETTINGS_URL}#credentials` : pages.SETTINGS_URL);
+        // One deep link per page that needs one: the passwords page to where
+        // its passcode is set, the safety check to the privacy settings.
+        openInternalPage(tabs, /^[a-z]{3,20}$/.test(String(payload?.section || ''))
+          ? `${pages.SETTINGS_URL}#${payload.section}` : pages.SETTINGS_URL);
         publish();
         break;
 
@@ -2336,6 +2342,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         publish();
         break;
       }
+
+      case 'open-safety':
+        if (INCOGNITO) break;
+        openInternalPage(tabs, pages.SAFETY_URL);
+        publish();
+        break;
 
       case 'open-welcome':
         if (INCOGNITO) break;
@@ -2848,7 +2860,7 @@ const INCOGNITO_REFUSED = new Set([
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
   'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
-  'import-from-profile', 'import-bookmark-file',
+  'import-from-profile', 'import-bookmark-file', 'open-safety', 'safety-status', 'safety-revoke',
   'check-for-updates', 'update-restart', 'presence-capability',
   'prefetch-tab', 'prefetch-new-tab'
 ]);
@@ -2974,6 +2986,10 @@ const PAGE_POLICY = new Map([
     requests: new Set()
   }],
   // The dangerous-site warning: back, the site it was mistaken for, or on.
+  ['safety', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'open-settings', 'open-passwords', 'close-tab']),
+    requests: new Set(['safety-status', 'safety-revoke'])
+  }],
   ['danger', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'allow-danger', 'back', 'navigate']),
     requests: new Set()
@@ -3297,6 +3313,42 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'remove-bookmark':
         return { removed: bookmarks.remove(String(payload?.id ?? '')) };
+
+      // The safety check: every protection's state, the lists' age, the
+      // sites allowed a permission, and whether passwords are worth checking.
+      case 'safety-status': {
+        const on = (key) => prefs.get(key) !== false;
+        return {
+          version: app.getVersion(),
+          chromium: process.versions.chrome,
+          autoUpdate: prefs.get('autoUpdate') !== false,
+          protections: [
+            { key: 'httpsMode', label: 'Secure connections', on: prefs.get('httpsMode') !== 'off',
+              detail: { upgrade: 'HTTPS where a site has it', strict: 'Asks before a site without HTTPS', off: 'Off' }[prefs.get('httpsMode')] },
+            { key: 'secureDns', label: 'Secure DNS', on: prefs.get('secureDns') !== 'off',
+              detail: prefs.get('secureDns') === 'automatic' ? 'Automatic' : prefs.get('secureDns') === 'off' ? 'Off' : prefs.get('secureDns') },
+            { key: 'warnDangerousSites', label: 'Dangerous-site warnings', on: on('warnDangerousSites'),
+              detail: Threats.current?.updatedAt ? `Lists updated ${new Date(Threats.current.updatedAt).toLocaleDateString()}` : 'Lists not downloaded yet' },
+            { key: 'blockAds', label: 'Ads and trackers blocked', on: on('blockAds'),
+              detail: blocker?.builtAt ? `Lists updated ${new Date(blocker.builtAt).toLocaleDateString()}` : 'Lists not downloaded yet' },
+            { key: 'blockThirdPartyCookies', label: 'Other sites’ cookies blocked', on: on('blockThirdPartyCookies') },
+            { key: 'cleanLinks', label: 'Tracking taken out of links', on: on('cleanLinks') }
+          ],
+          permissions: sitePermissions ? sitePermissions.all().filter((p) => Object.values(p).includes('allow')) : [],
+          revoked: sitePermissions ? sitePermissions.revoked : [],
+          passwords: { configured: Boolean(vault && vault.configured()) }
+        };
+      }
+
+      // Take away everything a site was allowed, from the safety check.
+      case 'safety-revoke': {
+        const origin = originOf(String(payload?.origin || ''));
+        if (!origin || !sitePermissions) return { ok: false };
+        for (const kind of ['camera', 'microphone', 'location', 'notifications']) {
+          if (sitePermissions.get(origin, kind) === 'allow') sitePermissions.set(origin, kind, null);
+        }
+        return { ok: true };
+      }
 
       case 'bookmark-profiles':
         return { profiles: findProfiles() };

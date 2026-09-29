@@ -82,6 +82,7 @@ class ContentBlocker {
     this.loading = this.build(cookies).then((engine) => {
       this.engine = engine;
       this.engineCookies = cookies;
+      this.loadedAt = Date.now();
       return engine;
     }).catch((err) => {
       this.log(`blocker: no engine (${err?.message || err})`);
@@ -102,6 +103,7 @@ class ContentBlocker {
         const info = JSON.parse(fs.readFileSync(meta, 'utf8'));
         const buffer = fs.readFileSync(file);
         const engine = ElectronBlocker.deserialize(new Uint8Array(buffer));
+        this.builtAt = info.built;
         if (info.cookies === cookies && Date.now() - info.built < MAX_AGE_MS) return engine;
         stale = engine;
       } catch { /* none yet, or unreadable: build one */ }
@@ -116,6 +118,7 @@ class ContentBlocker {
         fs.renameSync(`${file}.tmp`, file);
         fs.writeFileSync(meta, JSON.stringify({ built: Date.now(), cookies }));
       }
+      this.builtAt = Date.now();
       this.log(`blocker: lists compiled${cookies ? ', with cookie notices' : ''}`);
       return engine;
     } catch (err) {

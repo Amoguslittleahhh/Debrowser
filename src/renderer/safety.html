@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;">
+  <title>Safety check</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="safety.css">
+</head>
+<body>
+  <!--
+    Every protection in one place: what is on, how fresh its lists are, which
+    sites may use the camera, microphone, location or notifications, and the
+    way to the password check-up. Nothing here is a setting of its own; each
+    row says where to change it.
+  -->
+  <main>
+    <header>
+      <h1>Safety check</h1>
+      <p class="lead" id="summary"></p>
+    </header>
+
+    <section>
+      <h2>Debrowser</h2>
+      <div class="rows" id="browser"></div>
+    </section>
+
+    <section>
+      <h2>Protections</h2>
+      <div class="rows" id="protections"></div>
+    </section>
+
+    <section>
+      <h2>Passwords</h2>
+      <div class="rows" id="passwords"></div>
+    </section>
+
+    <section>
+      <h2>Sites with permissions</h2>
+      <p class="note" id="revoked" hidden></p>
+      <div class="rows" id="permissions"></div>
+      <p class="note" id="permissions-empty" hidden>No site may use your camera, microphone, location or notifications.</p>
+    </section>
+  </main>
+  <script src="theme.js"></script>
+  <script src="safety.js"></script>
+</body>
+</html>

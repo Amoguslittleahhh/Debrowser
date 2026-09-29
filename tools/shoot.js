@@ -144,6 +144,18 @@ const ANSWERS = {
     { id: 'reopen-closed-tab', label: 'Reopen closed tab', icon: 'clock' }
   ] },
   'check-for-updates': STATE.updates,
+  'safety-status': { version: '2.0.0', chromium: '152.0.7977.65', autoUpdate: true,
+    protections: [
+      { key: 'httpsMode', label: 'Secure connections', on: true, detail: 'HTTPS where a site has it' },
+      { key: 'secureDns', label: 'Secure DNS', on: true, detail: 'Automatic' },
+      { key: 'warnDangerousSites', label: 'Dangerous-site warnings', on: true, detail: 'Lists updated 29/09/2026' },
+      { key: 'blockAds', label: 'Ads and trackers blocked', on: true, detail: 'Lists updated 27/09/2026' },
+      { key: 'blockThirdPartyCookies', label: 'Other sites’ cookies blocked', on: false },
+      { key: 'cleanLinks', label: 'Tracking taken out of links', on: true }
+    ],
+    permissions: [{ origin: 'https://meet.google.com', camera: 'allow', microphone: 'allow', usedAt: Date.now() - 3 * 86400000 }],
+    revoked: [{ origin: 'https://maps.example.com', kinds: ['location'] }],
+    passwords: { configured: true } },
   'site-info': { host: 'www.theguardian.com', secure: true, website: true, incognito: false, ask: null,
     permissions: { notifications: 'block' }, blocking: { on: true, blocked: 23 }, sleep: 'never', thirdPartyCookies: { blocked: true }, zoom: 100, zoomDefault: 100 }
 };
@@ -191,6 +203,7 @@ const SHOTS = [
   { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 },
   { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
   { name: 'site',     file: 'site.html',     w: 420,  h: 340 },
+  { name: 'safety', file: 'safety.html', w: 1100, h: 1000 },
   { name: 'danger', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://paypa1.com/login', kind: 'lookalike', like: 'paypal.com' } },
   { name: 'danger-phish', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://secure-login.bank-verify.example/', kind: 'phishing' } },
   { name: 'toast', file: 'toast.html', w: 460, h: 84,
