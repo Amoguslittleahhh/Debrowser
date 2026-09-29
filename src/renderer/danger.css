@@ -1,0 +1,40 @@
+/* The warning in place of a dangerous site. Red, calm, one obvious way out. */
+
+html, body { height: 100%; }
+body {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 24px 16px;
+  box-sizing: border-box;
+  background: color-mix(in srgb, var(--crit) 10%, var(--bg));
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+main { width: min(560px, 100%); }
+.mark {
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--s3);
+  fill: none;
+  stroke: var(--crit);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+h1 { margin: 0 0 var(--s2); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+.lead { margin: 0 0 var(--s3); color: var(--text-dim); font-size: 15px; line-height: 1.55; }
+.host { margin: 0 0 var(--s5); font: 13px var(--font-mono); color: var(--text-dim); word-break: break-all; }
+.actions { display: flex; gap: var(--s2); margin-bottom: var(--s5); }
+button { font: inherit; cursor: pointer; }
+.primary, .secondary { padding: 8px 18px; border-radius: var(--radius-pill); font-size: 14px; }
+.primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.primary:hover { filter: brightness(1.08); }
+.secondary { border: 1px solid var(--border); background: transparent; color: var(--text); }
+.secondary:hover { background: var(--wash-soft); }
+details { color: var(--text-dim); font-size: 13px; line-height: 1.55; }
+summary { cursor: pointer; width: max-content; }
+.link { padding: 0; border: 0; background: none; text-decoration: underline; text-underline-offset: 3px; }
+.link.danger { color: var(--crit); }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }

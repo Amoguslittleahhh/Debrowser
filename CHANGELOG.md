@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A warning before dangerous sites.** Debrowser now stops before a site known for phishing or spreading malware, using lists from Phishing Army and URLhaus that are updated daily and checked on your own computer, so the sites you visit are never sent anywhere to be checked. It also asks "Did you mean paypal.com?" before a site you have never visited whose name is one letter from one you use often. Go back is the first choice; the site can still be opened from Details.
 - **Tracking is taken out of links.** The parts of an address that only report where you came from - `utm_source`, `fbclid`, `gclid` and the like - are removed from pages you open and links you copy, and links that detour through Facebook, Google, Reddit, Steam or LinkedIn to record your click go straight to where they point. Settings turns it off.
 - **Other sites' cookies are blocked.** A cookie an ad network sets from inside the pages that carry its ads is how you are followed from site to site; Debrowser now refuses them, as Safari, Firefox and Brave do. If a sign-in box or embedded comments stop working on a site, the padlock lets them back in there.
 - **Sites are tried over HTTPS first.** A plain-HTTP link, bookmark or address now loads the site's secure version where it has one, which the network between you and the site cannot read or change. Where it has none, the plain page loads as before - or, if you choose "Ask before a site without it" in Settings, a page says so and lets you decide. Addresses on your own network are left alone.

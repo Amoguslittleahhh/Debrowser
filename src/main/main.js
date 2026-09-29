@@ -26,6 +26,7 @@ const { ContentBlocker } = require('./blocker');
 const { HttpsFirst } = require('./https-first');
 const { ThirdPartyCookies } = require('./third-party');
 const { LinkCleaner } = require('./link-cleaner');
+const { Threats } = require('./threats');
 const { Credentials, originOf } = require('./credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./session');
@@ -1036,6 +1037,23 @@ function main() {
       LinkCleaner.current.attach(session.fromPartition(BROWSING_PARTITION));
     }
 
+    // Dangerous and look-alike sites (threats.js): the lists a few seconds
+    // after start and daily after that; under a test, one listed name.
+    if (!INCOGNITO) {
+      Threats.current = new Threats({
+        dir: OFFLINE_MODE ? null : app.getPath('userData'),
+        enabled: () => prefs.get('warnDangerousSites') !== false,
+        history: () => (history ? history.entries() : []),
+        domains: OFFLINE_MODE ? ['evil.test'] : null,
+        log
+      });
+      Threats.current.attach(session.fromPartition(BROWSING_PARTITION));
+      if (!OFFLINE_MODE) {
+        setTimeout(() => Threats.current.load(), 5000).unref?.();
+        setInterval(() => Threats.current.load(), 6 * 3600 * 1000).unref?.();
+      }
+    }
+
     // Other sites' cookies (third-party.js). A private window gives every tab
     // its own partition and keeps nothing, so it has no need of this.
     if (!INCOGNITO) {
@@ -1804,6 +1822,17 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      // "Open the site anyway", from the warning page's Details: this host,
+      // until restart. Only that page may ask.
+      case 'allow-danger': {
+        if (!sender || pages.pageName(sender.getURL()) !== 'danger' || !Threats.current) break;
+        const url = String(payload?.url || '');
+        if (!/^https?:/i.test(url) || !Threats.current.allow(url)) break;
+        const tab = tabs.all().find((t) => t.isLive && t.wc === sender) || active;
+        if (tab && tab.isLive) tab.rebuildFor(url);
+        break;
+      }
+
       case 'new-incognito-window':
         // From inside incognito this is simply another private tab.
         if (INCOGNITO) tabs.create({ url: newTabUrl(prefs) });
@@ -1907,7 +1936,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (active?.isLive && active.wc.navigationHistory.canGoBack()) active.goInHistory(-1);
         // The plain-HTTP question has a renderer of its own and so no history:
         // back is the page the tab showed before it.
-        else if (active?.isLive && pages.pageName(active.url) === 'insecure' && active.insecureReturn) {
+        else if (active?.isLive && ['insecure', 'danger'].includes(pages.pageName(active.url)) && active.insecureReturn) {
           active.rebuildFor(active.insecureReturn);
         }
         break;
@@ -2941,6 +2970,11 @@ const PAGE_POLICY = new Map([
   // `allow-http` is also checked against the sender where it is handled.
   ['insecure', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'allow-http', 'back']),
+    requests: new Set()
+  }],
+  // The dangerous-site warning: back, the site it was mistaken for, or on.
+  ['danger', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'allow-danger', 'back', 'navigate']),
     requests: new Set()
   }]
 ]);
@@ -4164,7 +4198,7 @@ function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, his
             // The command dispatcher itself, so the suite exercises find and
             // the context menu the way a keystroke does rather than by calling
             // into their parts.
-            runCommand: (command, payload) => runCommand(command, payload),
+            runCommand: (command, payload, sender = null) => runCommand(command, payload, sender),
             history, context, credentials, vault, blocker, sitePrefs }).then((code) => {
     app.exit(code);
   }).catch((err) => {

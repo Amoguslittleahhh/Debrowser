@@ -55,6 +55,8 @@ const PAGES = {
   tor: 'tor.html',
   // Incognito only: a page asked for plain HTTP and HTTPS was not available.
   insecure: 'insecure.html',
+  // A site on the dangerous-sites lists, or one letter from a site you use.
+  danger: 'danger.html',
   // Incognito only: the fingerprint self-check - what sites can read.
   fingerprint: 'fingerprint.html',
   // Incognito only: the empty page a private tab starts on, while its
@@ -72,6 +74,7 @@ const PASSWORDS_URL = `${SCHEME}://passwords`;
 const TOR_URL = `${SCHEME}://tor`;
 const WELCOME_URL = `${SCHEME}://welcome`;
 const INSECURE_URL = `${SCHEME}://insecure`;
+const DANGER_URL = `${SCHEME}://danger`;
 const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
 const BLANK_URL = `${SCHEME}://blank`;
 
@@ -235,6 +238,7 @@ function titleFor(url) {
     case 'passwords': return 'Passwords';
     case 'tor': return 'Private connection';
     case 'insecure': return 'Not private';
+    case 'danger': return 'Warning';
     case 'fingerprint': return 'What sites can see';
     default: return 'Debrowser';
   }
@@ -242,5 +246,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
-  INSECURE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
+  INSECURE_URL, DANGER_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

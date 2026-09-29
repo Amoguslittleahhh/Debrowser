@@ -38,6 +38,7 @@ const COMMANDS = new Set([
   'new-incognito-window',
   'tor-retry',
   'allow-http',
+  'allow-danger',
   'new-circuit',
   'open-onion',
   'open-drm-elsewhere',

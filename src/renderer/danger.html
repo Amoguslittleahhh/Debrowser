@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Warning</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="danger.css">
+</head>
+<body>
+  <!--
+    In the tab, in place of a site the browser stopped (threats.js): one on a
+    list of phishing or malware sites, or one a letter away from a site this
+    person uses a lot. Going back is the first and largest choice; going on is
+    there, behind "Details", because lists are sometimes wrong.
+  -->
+  <main>
+    <svg class="mark" viewBox="0 0 48 48" aria-hidden="true">
+      <path d="M24 5 44 41H4z"/><path d="M24 19v10M24 35v.5"/>
+    </svg>
+    <h1 id="title">This site may be dangerous</h1>
+    <p class="lead" id="lead"></p>
+    <p class="host" id="host"></p>
+    <div class="actions">
+      <button class="primary" id="back" type="button">Go back</button>
+      <button class="secondary" id="like" type="button" hidden></button>
+    </div>
+    <details id="details">
+      <summary>Details</summary>
+      <p id="why"></p>
+      <button class="link danger" id="go" type="button">Open the site anyway</button>
+    </details>
+  </main>
+  <script src="theme.js"></script>
+  <script src="danger.js"></script>
+</body>
+</html>

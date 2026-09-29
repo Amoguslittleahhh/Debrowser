@@ -191,6 +191,8 @@ const SHOTS = [
   { name: 'menu',     file: 'menu.html',     w: 900,  h: 560 },
   { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
   { name: 'site',     file: 'site.html',     w: 420,  h: 340 },
+  { name: 'danger', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://paypa1.com/login', kind: 'lookalike', like: 'paypal.com' } },
+  { name: 'danger-phish', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://secure-login.bank-verify.example/', kind: 'phishing' } },
   { name: 'toast', file: 'toast.html', w: 460, h: 84,
     message: { kind: 'toast', id: 't', text: 'Closed 4 tabs', action: 'Undo', ms: 60000 } },
   { name: 'toast-restore', file: 'toast.html', w: 460, h: 84,
@@ -287,7 +289,8 @@ app.whenReady().then(async () => {
       // A section far down a long page is reached the way the browser reaches
       // it - the fragment the menu's own links carry - rather than by scripting
       // a scroll from out here, which the page's scroll-spy undoes.
-      : shot.hash ? { hash: shot.hash } : shot.role ? { query: { role: shot.role } } : {};
+      : shot.hash ? { hash: shot.hash } : shot.role ? { query: { role: shot.role } }
+        : shot.query ? { query: shot.query } : {};
     // The promise rejects spuriously on some of these while the page loads
     // perfectly well, so the paint is what is waited on, not the promise.
     win.loadFile(path.join(R, shot.file), opts).catch(() => {});

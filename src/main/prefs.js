@@ -239,6 +239,9 @@ const SCHEMA = {
   // Plain-HTTP addresses are tried over HTTPS first (https-first.js):
   // 'upgrade' falls back quietly, 'strict' asks first, 'off' does neither.
   httpsMode: { def: 'upgrade', ok: (v) => v === 'upgrade' || v === 'strict' || v === 'off' },
+  // A warning before known phishing and malware sites, and look-alikes of
+  // sites the user visits (threats.js).
+  warnDangerousSites: { def: true, ok: (v) => typeof v === 'boolean' },
   // Tracking parameters and redirect hops taken out of links (link-cleaner.js).
   cleanLinks: { def: true, ok: (v) => typeof v === 'boolean' },
   // Other sites' cookies, refused on every page (third-party.js).

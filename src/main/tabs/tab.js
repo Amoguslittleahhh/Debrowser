@@ -650,6 +650,21 @@ class Tab {
           return;
         }
       } else {
+        // Stopped as a dangerous or look-alike site (threats.js): the warning,
+        // in a renderer of its own, with Go back returning to what was here.
+        const verdict = errorCode === -20 && require('../threats').Threats.current?.takeStopped(validatedURL);
+        if (verdict) {
+          let before = '';
+          try { before = this.wc.getURL(); } catch { /* going */ }
+          const page = `${pages.DANGER_URL}?url=${encodeURIComponent(validatedURL)}&kind=${verdict.kind}` +
+            (verdict.like ? `&like=${encodeURIComponent(verdict.like)}` : '');
+          setImmediate(() => {
+            if (this.closed) return;
+            this.rebuildFor(page);
+            this.insecureReturn = before && !pages.isInternal(before) ? before : null;
+          });
+          return;
+        }
         // The ordinary browser tried HTTPS first and the site has none: load
         // the plain page, or - in strict mode - say so and let the user choose.
         const httpsFirst = require('../https-first').HttpsFirst.current;

@@ -224,6 +224,12 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'warnDangerousSites',
+      label: 'Warn before dangerous sites',
+      hint: 'Before a site known for phishing or malware (lists from Phishing Army and URLhaus, updated daily and checked on this computer), and before a site you have never visited whose name is one letter from one you use often.',
+      type: 'checkbox'
+    },
+    {
       key: 'httpsMode',
       label: 'Secure connections',
       hint: 'Every site is tried over HTTPS first, which the network between you and it cannot read. Private windows always ask before plain HTTP.',

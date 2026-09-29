@@ -1106,6 +1106,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     tabs.close(tab.id);
   }
 
+  // Dangerous sites: a listed domain (and its subdomains) is stopped with the
+  // warning page in the tab, "open anyway" lets it load; a site one letter
+  // from one the user uses often is caught too, and a familiar one is not.
+  {
+    const { Threats, domainsIn, distance } = require('./threats');
+    const parsed = domainsIn('# comment\n127.0.0.1\tbad.example\nphish.example.net\n0.0.0.0 localhost\n');
+    const fake = new Threats({ dir: null, enabled: () => true, domains: ['evil.example'],
+      history: () => [{ url: 'https://github.com/x', visits: 30 }, { url: 'https://paypal.com/', visits: 9 }] });
+    const unit = parsed.join() === 'bad.example,phish.example.net' &&
+      fake.listed('login.evil.example') === 'phishing' && fake.listed('example') === null &&
+      distance('githbu', 'github') === 1 && fake.verdict('https://githbu.com/')?.like === 'github.com' &&
+      fake.verdict('https://paypa1.com/')?.like === 'paypal.com' && fake.verdict('https://github.com/') === null &&
+      fake.verdict('https://gitlab.com/') === null;
+    const port = new URL(pageUrl('idle.html')).port;
+    const bad = `http://evil.test:${port}/idle.html`;
+    const tab = tabs.create({ url: bad, activate: true, realise: true });
+    const warned = await waitFor(() => tab.isLive && pages.pageName(tab.wc.getURL()) === 'danger', { timeoutMs: 8000 });
+    if (warned) runCommand('allow-danger', { url: bad }, tab.wc);
+    const through = warned && await waitFor(() => tab.isLive && tab.wc.getURL() === bad && !tab.wc.isLoading(), { timeoutMs: 8000 });
+    check('a listed dangerous site shows the warning, and "open anyway" loads it; look-alikes are caught',
+      unit && warned && through, `unit ${unit}, warned ${warned}, through ${through}, at ${tab.isLive ? tab.wc.getURL() : '-'}`);
+    tabs.close(tab.id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');
