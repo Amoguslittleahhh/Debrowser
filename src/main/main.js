@@ -30,6 +30,7 @@ const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
 const { commandList } = require('./commands');
 const { Spaces } = require('./spaces');
+const { SiteStyles } = require('./site-styles');
 
 const reader = require('./reader');
 const readerStore = new reader.ReaderStore();
@@ -483,6 +484,7 @@ function main() {
   const browsingSetup = [];
   let browsingReady = false;
   let spaces = null;
+  let siteStyles = null;
   let permissionAsks = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
@@ -949,6 +951,9 @@ function main() {
         // touch beyond the well-known default path.
         if (payload?.favicon) icons.remember(payload.favicon);
         break;
+      case 'dom-ready':
+        if (siteStyles) siteStyles.apply(tab);
+        break;
       case 'peek':
         // Not in a private window: its tabs carry protections a bare view
         // would not, so a pop-up there is a tab as it always was.
@@ -1022,6 +1027,7 @@ function main() {
     // ordinary browser; a private window and a test keep them in memory.
     sitePrefs = new SitePrefs(INCOGNITO || OFFLINE_MODE ? null : app.getPath('userData'), log);
     const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'), sitePrefs.view('zoom'));
+    siteStyles = INCOGNITO ? null : new SiteStyles(sitePrefs);
     // Incognito: a Tor circuit and a partition per tab. See incognito/circuits.js.
     circuits = INCOGNITO ? new Circuits(incognitoCtx) : null;
     // Incognito, opt-in: a decoy page load beside every real one. See
@@ -1413,7 +1419,7 @@ function main() {
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
-      sitePermissions, permissionAsks, blocker, sitePrefs, spaces,
+      sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
     });
@@ -1755,7 +1761,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null }) {
+                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null }) {
+  /** A site's style lost something: its open pages start again from what is saved. */
+  const restyle = (host) => {
+    for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
+  };
+
   /** The tabs of the space in front: what the strip shows and the keyboard walks. */
   const spaceTabs = () => (spaces && !INCOGNITO ? tabs.all().filter((t) => t.spaceId === spaces.activeId) : tabs.all());
 
@@ -2247,6 +2258,51 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const x = Math.round(Number(payload?.x) || 0);
         const y = Math.round(Number(payload?.y) || 0);
         shell.openSheet('context', { x, y, right: x });
+        break;
+      }
+
+      /*
+       * Site styles (site-styles.js): hiding things on a site, and the site's
+       * own style sheet. Each change reaches every open page of that site.
+       */
+      case 'hide-element': {
+        const host = active && SitePrefs.hostOf(active.url);
+        if (!siteStyles || !host || !active.isLive) break;
+        siteStyles.pick(active).then((selector) => {
+          if (!selector) return;
+          siteStyles.hide(host, selector);
+          for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) siteStyles.add(t, selector);
+          toast('Hidden on this site', 'Undo', () => {
+            sitePrefs.set(host, 'hide', (sitePrefs.get(host, 'hide') || []).filter((sel) => sel !== selector));
+            restyle(host);
+          });
+        });
+        break;
+      }
+
+      case 'show-hidden': {
+        const host = active && SitePrefs.hostOf(active.url);
+        if (!siteStyles || !host) break;
+        sitePrefs.set(host, 'hide', null);
+        restyle(host);
+        break;
+      }
+
+      case 'open-site-style': {
+        const host = active && SitePrefs.hostOf(active.url);
+        if (!siteStyles || !host) break;
+        openInternalPage(tabs, `${pages.STYLE_URL}?host=${encodeURIComponent(host)}`);
+        publish();
+        break;
+      }
+
+      // From the style page: the host is its own address's, checked here.
+      case 'site-style-set': {
+        const host = String(payload?.host || '');
+        if (!siteStyles || !/^[a-z0-9.-]{1,253}$/i.test(host)) break;
+        const css = String(payload?.css || '').slice(0, 20000);
+        sitePrefs.set(host, 'css', css.trim() ? css : null);
+        restyle(host);
         break;
       }
 
@@ -3299,7 +3355,7 @@ const INCOGNITO_REFUSED = new Set([
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
   'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
-  'import-from-profile', 'import-bookmark-file', 'open-safety', 'safety-status', 'safety-revoke', 'open-receipt', 'receipt-week',
+  'import-from-profile', 'import-bookmark-file', 'open-safety', 'safety-status', 'safety-revoke', 'open-receipt', 'receipt-week', 'hide-element', 'show-hidden', 'open-site-style', 'site-style-set', 'site-style-get',
   'check-for-updates', 'update-restart', 'presence-capability',
   'prefetch-tab', 'prefetch-new-tab'
 ]);
@@ -3426,6 +3482,11 @@ const PAGE_POLICY = new Map([
   }],
   // The dangerous-site warning: back, the site it was mistaken for, or on.
   // Reader view: its article, links out, and the way back.
+  // A site's own style sheet: its text, saved for that site.
+  ['style', {
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'site-style-set', 'close-tab']),
+    requests: new Set(['site-style-get'])
+  }],
   ['reader', {
     commands: new Set([...PAGE_COMMON_COMMANDS, 'reader-view', 'navigate', 'back']),
     requests: new Set(['reader-article'])
@@ -3717,6 +3778,8 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           } : null,
           sleep: sitePrefs && origin ? sitePrefs.get(SitePrefs.hostOf(active.url), 'sleep') || 'normal' : null,
           forget: sitePrefs && origin && !INCOGNITO ? sitePrefs.get(SitePrefs.hostOf(active.url), 'forget') === true : null,
+          hidden: sitePrefs && origin && !INCOGNITO ? (sitePrefs.get(SitePrefs.hostOf(active.url), 'hide') || []).length : 0,
+          styled: Boolean(sitePrefs && origin && !INCOGNITO && sitePrefs.get(SitePrefs.hostOf(active.url), 'css')),
           thirdPartyCookies: sitePrefs && origin && !INCOGNITO && prefs.get('blockThirdPartyCookies') !== false
             ? { blocked: sitePrefs.get(SitePrefs.hostOf(active.url), 'thirdPartyCookies') !== true } : null,
           zoom: active.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100,
@@ -3777,6 +3840,12 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'remove-bookmark':
         return { removed: bookmarks.remove(String(payload?.id ?? '')) };
+
+      case 'site-style-get': {
+        const host = String(payload?.host || '');
+        if (!sitePrefs || !/^[a-z0-9.-]{1,253}$/i.test(host)) return null;
+        return { host, css: sitePrefs.get(host, 'css') || '', hidden: sitePrefs.get(host, 'hide') || [] };
+      }
 
       // The article a reader page was opened for, by the token in its address.
       case 'reader-article': {

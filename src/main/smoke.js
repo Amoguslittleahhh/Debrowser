@@ -1403,6 +1403,43 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // Site styles: a site's own CSS reaches its pages, and the picker hides the
+  // element that was clicked, on that site, until it is shown again.
+  if (sitePrefs) {
+    const wasActive = tabs.activeTab();
+    const url = pageUrl('article.html');
+    const host = new URL(url).hostname;
+    sitePrefs.set(host, 'css', 'body { outline: 7px solid rgb(1, 2, 3); }');
+    const tab = tabs.create({ url, activate: true, realise: true });
+    await waitFor(() => tab.isLive && !tab.wc.isLoading(), { timeoutMs: 8000 });
+    await sleep(300);
+    const styled = await tab.wc.executeJavaScript('getComputedStyle(document.body).outlineWidth').catch(() => null);
+    // The picker, clicked where the first heading is.
+    const r = await tab.wc.executeJavaScript(`(() => { const h = document.querySelector('h1, h2, p');
+      const b = h.getBoundingClientRect(); return { x: Math.round(b.left + 5), y: Math.round(b.top + b.height / 2), tag: h.tagName }; })()`);
+    runCommand('hide-element');
+    await sleep(300);
+    tab.wc.sendInputEvent({ type: 'mouseMove', x: r.x, y: r.y });
+    await sleep(100);
+    tab.wc.sendInputEvent({ type: 'mouseDown', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    tab.wc.sendInputEvent({ type: 'mouseUp', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    const hidden = await waitFor(() => (sitePrefs.get(host, 'hide') || []).length === 1, { timeoutMs: 4000 });
+    await sleep(300);
+    const gone = await tab.wc.executeJavaScript(`getComputedStyle(document.querySelector(${JSON.stringify(r.tag.toLowerCase())})).display`).catch(() => null);
+    runCommand('show-hidden');
+    await sleep(300);
+    await waitFor(() => tab.isLive && !tab.wc.isLoading(), { timeoutMs: 8000 });
+    await sleep(300);
+    const back = await tab.wc.executeJavaScript(`getComputedStyle(document.querySelector(${JSON.stringify(r.tag.toLowerCase())})).display`).catch(() => null);
+    sitePrefs.set(host, 'css', null);
+    check('a site’s own style reaches its pages, and a picked element is hidden until shown again',
+      styled === '7px' && hidden && gone === 'none' && back !== 'none',
+      JSON.stringify({ styled, hidden, picked: sitePrefs.get(host, 'hide'), gone, back }));
+    tabs.close(tab.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

@@ -757,6 +757,8 @@ class Tab {
     // finished loading" needs. A saved sign-in is never on a renderer's first
     // document, so hanging the fill off the `once` meant it never ran at all.
     wc.on('did-finish-load', () => this.emit('loaded'));
+    // Each document, as soon as it is parsed: when a site's own style goes in (site-styles.js).
+    wc.on('dom-ready', () => this.emit('dom-ready'));
 
     // New windows open as tabs rather than popups.
     // A shift-click, or a page's own pop-up, asks for a new window: that is a

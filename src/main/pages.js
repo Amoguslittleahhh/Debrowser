@@ -63,6 +63,8 @@ const PAGES = {
   receipt: 'receipt.html',
   // Reader view: a page's article in the browser's own type.
   reader: 'reader.html',
+  // Your own style sheet for one site (site-styles.js).
+  style: 'style.html',
   // Incognito only: the fingerprint self-check - what sites can read.
   fingerprint: 'fingerprint.html',
   // Incognito only: the empty page a private tab starts on, while its
@@ -84,6 +86,7 @@ const DANGER_URL = `${SCHEME}://danger`;
 const SAFETY_URL = `${SCHEME}://safety`;
 const RECEIPT_URL = `${SCHEME}://receipt`;
 const READER_URL = `${SCHEME}://reader`;
+const STYLE_URL = `${SCHEME}://style`;
 const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
 const BLANK_URL = `${SCHEME}://blank`;
 
@@ -251,6 +254,7 @@ function titleFor(url) {
     case 'safety': return 'Safety check';
     case 'receipt': return 'This week';
     case 'reader': return 'Reader view';
+    case 'style': return 'Site style';
     case 'fingerprint': return 'What sites can see';
     default: return 'Debrowser';
   }
@@ -258,5 +262,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
-  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, READER_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
+  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
 };

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Site style</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="style-page.css">
+</head>
+<body>
+  <!-- One site's own style sheet (site-styles.js): written here, put into
+       every page of the site as it loads, over the site's own styles. -->
+  <main>
+    <h1>Style for <span id="host"></span></h1>
+    <p class="lead">CSS of your own for this site: a darker background, a wider column, a font you can read. It goes into every page of the site as it opens, and wins over the site’s own. Saving reloads the site’s open pages.</p>
+    <textarea id="css" spellcheck="false" placeholder="body { background: #111; color: #eee; }&#10;article { max-width: 72ch; margin: auto; font-size: 18px; }"></textarea>
+    <div class="actions">
+      <button type="button" class="primary" id="save">Save</button>
+      <button type="button" class="secondary" id="remove">Remove style</button>
+      <span class="note" id="note" role="status"></span>
+    </div>
+    <p class="fine" id="hidden-note" hidden></p>
+  </main>
+  <script src="theme.js"></script>
+  <script src="style-page.js"></script>
+</body>
+</html>

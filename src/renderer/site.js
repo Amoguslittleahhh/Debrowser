@@ -134,6 +134,27 @@ function showInfo(info) {
     el.shield.hidden = false;
   }
 
+  // What the user hid here, and their own style for the site.
+  if (info.forget !== null && info.forget !== undefined) {
+    const li = item(['M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z', 'M3 13L13 3'],
+      info.hidden ? `${info.hidden} thing${info.hidden === 1 ? '' : 's'} hidden here` : 'Hide something on this page');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'link';
+    b.textContent = info.hidden ? 'Show again' : 'Choose';
+    b.addEventListener('click', () => { api.send(info.hidden ? 'show-hidden' : 'hide-element'); close(); });
+    li.append(b);
+    el.shield.append(li);
+    const style = item(['M3 13l1.2-3.6L11 2.6a1.7 1.7 0 0 1 2.4 2.4L6.6 11.8z'], info.styled ? 'Your style for this site' : 'Your own style for this site');
+    const e = document.createElement('button');
+    e.type = 'button';
+    e.className = 'link';
+    e.textContent = 'Edit';
+    e.addEventListener('click', () => { api.send('open-site-style'); close(); });
+    style.append(e);
+    el.shield.append(style);
+  }
+
   // How readily its tabs sleep. Kept awake: chat, music, a dashboard.
   if (info.sleep) {
     const li = item(['M12.5 9.6A5 5 0 0 1 6.4 3.5a5 5 0 1 0 6.1 6.1z'], 'Sleep when unused');

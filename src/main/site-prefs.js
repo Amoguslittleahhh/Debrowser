@@ -32,7 +32,11 @@ const VALID = {
   blocking: (v) => v === false,
   sleep: (v) => v === 'never' || v === 'early',
   thirdPartyCookies: (v) => v === true,
-  forget: (v) => v === true
+  forget: (v) => v === true,
+  // The user's own style sheet for the site, and the things they hid on it (site-styles.js).
+  css: (v) => typeof v === 'string' && v.length > 0 && v.length <= 20000,
+  hide: (v) => Array.isArray(v) && v.length > 0 && v.length <= 50 &&
+    v.every((sel) => typeof sel === 'string' && sel.length > 0 && sel.length <= 300 && !/[{}<]/.test(sel))
 };
 
 const HOST = /^[a-z0-9.-]{1,253}$|^\[[0-9a-f:.]+\]$/i;
