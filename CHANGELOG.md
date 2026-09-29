@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A check-up for your saved passwords.** "Check passwords" on the Passwords page finds the ones that have turned up in data breaches, the ones used on more than one site, and the weak ones, and marks each on its row. Breaches are looked up with Have I Been Pwned's range search: only the first five characters of a scrambled form of each password leave your computer, never the password.
 - **A warning before dangerous sites.** Debrowser now stops before a site known for phishing or spreading malware, using lists from Phishing Army and URLhaus that are updated daily and checked on your own computer, so the sites you visit are never sent anywhere to be checked. It also asks "Did you mean paypal.com?" before a site you have never visited whose name is one letter from one you use often. Go back is the first choice; the site can still be opened from Details.
 - **Tracking is taken out of links.** The parts of an address that only report where you came from - `utm_source`, `fbclid`, `gclid` and the like - are removed from pages you open and links you copy, and links that detour through Facebook, Google, Reddit, Steam or LinkedIn to record your click go straight to where they point. Settings turns it off.
 - **Other sites' cookies are blocked.** A cookie an ad network sets from inside the pages that carry its ads is how you are followed from site to site; Debrowser now refuses them, as Safari, Firefox and Brave do. If a sign-in box or embedded comments stop working on a site, the padlock lets them back in there.

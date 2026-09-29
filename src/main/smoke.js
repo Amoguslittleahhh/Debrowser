@@ -1131,6 +1131,30 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // The password check-up: only a five-character hash prefix is asked about,
+  // a breached password is matched here, and reuse and weakness are found.
+  {
+    const { checkPasswords, sha1 } = require('./password-check');
+    const asked = [];
+    const breachedHash = sha1('password');
+    const fake = async (url) => {
+      asked.push(url);
+      const prefix = url.slice(-5);
+      const body = prefix === breachedHash.slice(0, 5) ? `${breachedHash.slice(5)}:3861493\r\n0000000000000000000000000000000000A:0\r\n` : 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF:2\r\n';
+      return { ok: true, text: async () => body };
+    };
+    const { results, checked } = await checkPasswords([
+      { id: 'a', password: 'password' },
+      { id: 'b', password: 'Tr0ub4dor&3-horse-battery' },
+      { id: 'c', password: 'Tr0ub4dor&3-horse-battery' },
+      { id: 'd', password: 'short' }
+    ], fake);
+    const ok = checked && results.a.breached === 3861493 && results.b.reused && results.c.reused && !results.b.breached &&
+      results.d.weak && !results.b.weak && asked.every((u) => /\/range\/[0-9A-F]{5}$/.test(u)) && asked.length === 3;
+    check('the password check-up finds breached, reused and weak passwords, sending only hash prefixes',
+      ok, JSON.stringify({ results, asked }));
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

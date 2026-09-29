@@ -12,7 +12,7 @@
  */
 
 const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, powerMonitor,
-        shell: electronShell } = require('electron');
+        shell: electronShell, net: electronNet } = require('electron');
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
@@ -2844,6 +2844,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
  */
 const INCOGNITO_REFUSED = new Set([
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
+  'check-passwords',
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
   'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
@@ -2924,7 +2925,7 @@ const ANY = '*';
 /** What only the passwords page may ask: unlocking, and the records. */
 const VAULT_RECORD_REQUESTS = new Set([
   'vault-unlock', 'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment',
-  'import-logins-file'
+  'import-logins-file', 'check-passwords'
 ]);
 const PAGE_POLICY = new Map([
   ['chrome', { commands: ANY, requests: CHROME_REQUESTS }],
@@ -3440,6 +3441,18 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         for (const login of parsed.logins) if (credentials.put('login', login)) added += 1;
         log('credentials', `imported ${added} of ${parsed.logins.length} sign-in(s) from a file`);
         return { ok: true, added, skipped: parsed.logins.length - added };
+      }
+
+      // The check-up (password-check.js): breached, reused and weak
+      // passwords. Answers by record id; no password goes back to the page.
+      case 'check-passwords': {
+        if (!vault.unlocked()) return { locked: true };
+        vault.touch();
+        const logins = credentials.list().logins.map((l) => ({
+          id: l.id, password: credentials.reveal('login', l.id)?.password || ''
+        })).filter((l) => l.password);
+        const { checkPasswords } = require('./password-check');
+        return checkPasswords(logins, (url, init) => electronNet.fetch(url, init));
       }
 
       case 'list-credentials':

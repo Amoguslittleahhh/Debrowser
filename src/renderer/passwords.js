@@ -172,7 +172,8 @@ function render() {
 
   const logins = data.logins.filter((l) => hit(l.origin, l.username));
   el.logins.replaceChildren(...logins.map((l) => row({
-    kind: 'login', id: l.id, title: host(l.origin), site: l.origin, detail: l.username || '(no username)'
+    kind: 'login', id: l.id, title: host(l.origin), site: l.origin, detail: l.username || '(no username)',
+    flag: flagFor(checkup && checkup.results[l.id])
   })));
   el.loginsEmpty.hidden = data.logins.length > 0;
   if (needle && data.logins.length && !logins.length) {
@@ -201,7 +202,49 @@ function button(text, className = 'ghost-btn') {
   return b;
 }
 
-function row({ kind, id, title, site, detail }) {
+/* ------------------------------------------------------------------ */
+/* The check-up                                                        */
+/* ------------------------------------------------------------------ */
+
+let checkup = null;
+
+/** What a row says about its password after a check, worst first. */
+function flagFor(result) {
+  if (!result) return null;
+  if (result.breached) {
+    return { level: 'crit', text: `Found in ${result.breached.toLocaleString()} data breach${result.breached === 1 ? '' : 'es'} – change it` };
+  }
+  if (result.reused) return { level: 'warn', text: 'Used on more than one site' };
+  if (result.weak) return { level: 'warn', text: 'Weak – easy to guess' };
+  return null;
+}
+
+const checkButton = document.getElementById('check');
+const checkNote = document.getElementById('checkup');
+checkButton.addEventListener('click', async () => {
+  checkButton.disabled = true;
+  checkButton.textContent = 'Checking…';
+  const res = await ask('check-passwords');
+  checkButton.disabled = false;
+  checkButton.textContent = 'Check passwords';
+  if (!res) return;
+  checkup = res;
+  const all = Object.values(res.results);
+  const breached = all.filter((r) => r.breached).length;
+  const reused = all.filter((r) => !r.breached && r.reused).length;
+  const weak = all.filter((r) => !r.breached && !r.reused && r.weak).length;
+  const parts = [];
+  if (breached) parts.push(`${breached} found in data breaches`);
+  if (reused) parts.push(`${reused} used on more than one site`);
+  if (weak) parts.push(`${weak} weak`);
+  checkNote.textContent = (parts.length ? `${parts.join(', ')}.` : 'No problems found.') +
+    (res.checked ? '' : ' Breaches could not be checked: no connection.');
+  checkNote.classList.toggle('ok', !parts.length && res.checked);
+  checkNote.hidden = false;
+  render();
+});
+
+function row({ kind, id, title, site, detail, flag = null }) {
   const root = document.createElement('div');
   root.className = 'row';
 
@@ -214,6 +257,12 @@ function row({ kind, id, title, site, detail }) {
   hint.className = 'row-hint';
   hint.textContent = detail;
   text.append(label, hint);
+  if (flag) {
+    const note = document.createElement('span');
+    note.className = `row-flag ${flag.level}`;
+    note.textContent = flag.text;
+    text.append(note);
+  }
   if (site) root.append(siteChip(site));
 
   const controls = document.createElement('div');
