@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The menu shows which Chromium Debrowser is built on,** beside its own version, so you can tell at a glance whether a Chromium security fix has reached you.
 - **PDFs open in the browser.** A link to a PDF shows it in a tab, in Chromium's own viewer, with its page thumbnails, search, zoom, rotate, print and download buttons, instead of downloading the file. PDF files on your computer can be opened with Debrowser too, and it is offered for them once it is your default browser.
 - **A welcome tour on first start.** A new install opens on a short tour: bring your bookmarks over from Chrome, Edge, Brave, Firefox or a bookmarks file; pick the theme, design, accent, where the tabs go and the bookmarks bar, with the browser changing around the page as you click; choose the search engine, whether tabs reopen at start, the memory meter and automatic updates; make Debrowser your default browser; and a quick look at what is different. Every step can be skipped, and the tour is in Settings to take again. Existing installs are not interrupted by it.
 - **Debrowser can be your default browser.** The Windows installer now registers it as a web browser, so it is listed in Windows' Default apps; macOS and Linux know it handles web links too. Settings shows whether it is the default, with a button to make it so. Links from other apps open in a new tab, whether or not Debrowser is already running.

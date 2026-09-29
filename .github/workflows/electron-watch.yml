@@ -1,0 +1,49 @@
+# Is the bundled Electron (and so Chromium) castLabs' newest build?
+#
+# Daily, and on demand. Chromium security fixes reach Debrowser only through
+# Electron, so a castLabs release we have not picked up is a security fix we
+# are not shipping. When one exists the run fails and opens an issue - once:
+# an open issue with the same title is left alone. See tools/electron-watch.js.
+name: Electron version watch
+
+on:
+  schedule:
+    - cron: '41 5 * * *'        # daily, 05:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compare the bundled Electron with castLabs' newest
+        id: compare
+        run: |
+          set +e
+          node tools/electron-watch.js > watch.txt
+          code=$?
+          cat watch.txt
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit $code
+      - name: Open an issue if Electron is behind
+        if: failure() && steps.compare.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="The bundled Electron is out of date"
+          existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq 'length')
+          if [ "$existing" != "0" ]; then echo "already reported"; exit 0; fi
+          gh issue create --title "$title" --body "$(cat watch.txt)
+
+          Every Chromium security fix reaches Debrowser through Electron. Until this is merged and released, those fixes are not in the browser.
+
+          ---
+          _Opened by the Electron version watch (.github/workflows/electron-watch.yml)._"

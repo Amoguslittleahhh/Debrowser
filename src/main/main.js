@@ -3728,7 +3728,7 @@ function menuModel({ tabs, shell }) {
     { id: 'show-shortcuts', label: 'Keyboard shortcuts', accel: accel('show-shortcuts'), icon: 'keyboard' },
     { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
     { kind: 'separator' },
-    { kind: 'note', label: `Debrowser ${app.getVersion()}` }
+    { kind: 'note', label: `Debrowser ${app.getVersion()} · Chromium ${process.versions.chrome}` }
   ];
 }
 
