@@ -65,6 +65,8 @@ class Governor {
   constructor({ app, cfg, tabManager, ipcHub, log = () => {}, onUpdate = () => {}, sitePolicy = () => undefined }) {
     this.app = app;
     this.sitePolicy = sitePolicy;
+    /** Battery mode: the ladder runs faster (see runIdleLadder). Set by main.js. */
+    this.saver = false;
     this.cfg = cfg;
     this.tabs = tabManager;
     this.ipcHub = ipcHub;
@@ -366,7 +368,11 @@ class Governor {
 
   async runIdleLadder() {
     const now = Date.now();
-    const accel = this.cfg.pressureAccel[this.pressure] ?? 1;
+    // On battery (main.js, battery mode) the whole ladder runs at a third of
+    // its timings, and a background tab still burning CPU is frozen at a
+    // quarter of the usual threshold: power is the thing being saved.
+    const accel = (this.cfg.pressureAccel[this.pressure] ?? 1) * (this.saver ? 0.35 : 1);
+    const freezeCpu = this.cfg.freezeCpuThreshold * (this.saver ? 0.25 : 1);
 
     for (const tab of this.tabs.all()) {
       if (tab.visible) {
@@ -416,7 +422,7 @@ class Governor {
       // worker. There the trade is overwhelmingly worth it: real CPU to zero
       // for a few megabytes. Freezing a page that is already quiet buys no CPU
       // (it is using none) and costs that memory for nothing.
-      if (idle >= this.cfg.freezeAfterMs * accel && tab.cpu >= this.cfg.freezeCpuThreshold) {
+      if (idle >= this.cfg.freezeAfterMs * accel && tab.cpu >= freezeCpu) {
         target = Tier.FROZEN;
       }
 
@@ -914,6 +920,7 @@ class Governor {
       maxLiveTabs: this.cfg.maxLiveTabs,
       liveTabs: this.tabs.all().filter((tab) => tab.isLive).length,
       pressure: this.pressure,
+      saver: this.saver === true,
       profile: this.cfg.profile,
       boostedTabId: this.boost.boostedTabId,
       stats: {

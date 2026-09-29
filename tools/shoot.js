@@ -165,6 +165,7 @@ const SHOTS = [
   // The same chrome in a window too narrow for its bookmarks, which is the only
   // way to see the overflow chevron and what the bar does with what is left.
   { name: 'chrome-narrow', file: 'chrome.html', w: 620, h: 118 },
+  { name: 'chrome-saver', file: 'chrome.html', w: 1280, h: 118, saver: true },
   { name: 'sidebar',  file: 'chrome.html',   w: 240,  h: 820, side: true },
   // The collapsed strip, at the width the browser actually gives it. Ten
   // pixels is a degenerate picture and that is the point: everything in the
@@ -261,6 +262,7 @@ app.whenReady().then(async () => {
     if (shot.answers) ANSWERS['context-model'] = ANSWERS[shot.answers];
 
     STATE.incognito = shot.incognito || null;
+    STATE.saver = shot.saver === true;
 
     if (shot.side) {
       STATE.prefs.tabBarPosition = 'left';

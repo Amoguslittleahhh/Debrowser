@@ -2141,3 +2141,15 @@ body[data-role="strip"][data-band="true"][data-layout="left"] {
 }
 body[data-role="strip"][data-band="true"][data-layout="left"] :is(.toolbar, .bookmarks) { display: none; }
 body[data-role="strip"][data-band="true"][data-layout="left"]::before { top: 8px; }
+
+/* Battery mode's leaf, before the bar. */
+.meter-leaf {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

@@ -342,6 +342,17 @@ const SECTIONS = {
 
   resources: [
     {
+      key: 'batteryMode',
+      label: 'Battery mode',
+      hint: 'Tabs you are not using go to sleep about three times sooner, and a background tab still using the processor is paused, so a laptop lasts longer. A leaf in the memory meter shows it is on.',
+      type: 'select',
+      options: [
+        { value: 'auto', name: 'On battery' },
+        { value: 'always', name: 'Always' },
+        { value: 'off', name: 'Off' }
+      ]
+    },
+    {
       key: 'memoryBudgetMB',
       label: 'Memory budget',
       hint: 'What the browser may hold before it reclaims. Empty sizes it to this machine.',

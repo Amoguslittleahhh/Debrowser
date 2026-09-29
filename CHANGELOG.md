@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Battery mode.** On battery, tabs you are not using go to sleep about three times sooner and a background tab still using the processor is paused, so a laptop lasts longer; a leaf in the memory meter says it is on. Settings can make it always on, or off.
 - **Forget a site when you close it.** The padlock can mark a site so that, when its last tab closes, everything it stored - cookies, saved data, caches - goes with it: you come back signed out and unknown, every time.
 - **Risky downloads are stopped or asked about.** A file fetched over plain HTTP by a secure page, which anyone on the way could have swapped, and a file from a site on the dangerous-sites lists are blocked, with "Download anyway" on the row. Opening a downloaded program now asks first.
 - **JavaScript hardening for every window, if you want it.** Settings → Advanced can turn off the JavaScript engine's optimising compilers everywhere, as private windows already do: most attacks on the engine go through them, everyday pages run as fast without them, and heavy ones - games, editors - run about half as fast. It takes effect at the next start, and is off by default.

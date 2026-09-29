@@ -1263,7 +1263,9 @@ function renderMeter(state) {
   el.meterFill.style.transform = `scaleX(${Math.min(1, Math.max(0, ratio))})`;
   el.meter.dataset.pressure = state.pressure;
   el.meterText.textContent = `${state.totalMB} MB`;
-  el.meter.title =
+  // An SVG element has no `hidden` property to set; the attribute itself.
+  document.getElementById('meter-leaf').toggleAttribute('hidden', !state.saver);
+  el.meter.title = (state.saver ? 'Battery mode: tabs sleep sooner to save power\n' : '') +
     `${state.totalMB} MB of ${state.budgetMB} MB budget\n` +
     `${state.liveTabs} tabs holding a renderer ` +
     `(${state.rendererCount} process(es)), ${state.tabs.length} tab(s) open\n` +

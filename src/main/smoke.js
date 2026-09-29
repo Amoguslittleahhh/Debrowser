@@ -1213,6 +1213,18 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `cookies before ${before}, cleared ${gone}`);
   }
 
+  // Battery mode: 'always' turns the governor's saver on and shows it in the
+  // state; 'off' turns it back off.
+  if (governor.applySaver) {
+    const was = prefs.get('batteryMode');
+    runCommand('set-pref', { key: 'batteryMode', value: 'always' });
+    const on = governor.saver === true && governor.snapshot().saver === true;
+    runCommand('set-pref', { key: 'batteryMode', value: 'off' });
+    const off = governor.saver === false;
+    runCommand('set-pref', { key: 'batteryMode', value: was });
+    check('battery mode turns the saver on and off from the setting', on && off, `on ${on}, off ${off}`);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');

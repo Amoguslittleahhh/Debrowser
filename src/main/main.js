@@ -1247,6 +1247,22 @@ function main() {
         }
       });
       governor.start();
+      // Battery mode: from the setting and, on 'auto', the power source.
+      const applySaver = () => {
+        const mode = prefs.get('batteryMode');
+        let onBattery = false;
+        try { onBattery = powerMonitor.isOnBatteryPower(); } catch { onBattery = false; }
+        const saver = mode === 'always' || (mode === 'auto' && onBattery);
+        if (saver !== governor.saver) {
+          governor.saver = saver;
+          log('governor', `battery mode ${saver ? 'on' : 'off'}`);
+          publish();
+        }
+      };
+      applySaver();
+      powerMonitor.on('on-battery', applySaver);
+      powerMonitor.on('on-ac', applySaver);
+      governor.applySaver = applySaver;
     }
 
     // Started while the pointer is still on its way to the + or the menu, so
@@ -2465,6 +2481,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         }
         if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
         if (payload.key === 'secureDns') applySecureDns(prefs, log);
+        if (payload.key === 'batteryMode' && governor && governor.applySaver) governor.applySaver();
         // Turned off: the kept state goes now, not when a private window next
         // opens - it may never open again.
         if (payload.key === 'incognitoKeepTorState' && payload.value === false && !INCOGNITO) {

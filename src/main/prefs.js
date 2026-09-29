@@ -239,6 +239,8 @@ const SCHEMA = {
   // Plain-HTTP addresses are tried over HTTPS first (https-first.js):
   // 'upgrade' falls back quietly, 'strict' asks first, 'off' does neither.
   httpsMode: { def: 'upgrade', ok: (v) => v === 'upgrade' || v === 'strict' || v === 'off' },
+  // Battery mode: tabs sleep sooner to save power - 'auto' on battery only.
+  batteryMode: { def: 'auto', ok: (v) => v === 'auto' || v === 'always' || v === 'off' },
   // JavaScript hardening for the ordinary browser, at the next start:
   // 'full' leaves the engine as it is; 'balanced' and 'maximum' are the
   // private window's levels (incognito/mode.js JS_LEVELS).
