@@ -175,6 +175,7 @@ function updateRow(node, item) {
     node.open.hidden = item.state !== 'done' || item.missing === true;
     node.reveal.hidden = item.state !== 'done' || item.missing === true;
     node.retry.hidden = item.state !== 'failed' && item.state !== 'cancelled';
+    node.retry.textContent = item.blocked ? 'Download anyway' : 'Retry';
     if (prev.state !== undefined && running !== RUNNING.has(prev.state)) node.steadyAt = Date.now() + 500;
     node.action.replaceChildren(running ? 'Cancel' : crossIcon());
     node.action.setAttribute('aria-label',

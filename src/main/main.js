@@ -504,7 +504,7 @@ function main() {
       posted.set(details.url, Date.now());
       if (posted.size > 64) posted.delete(posted.keys().next().value);
     });
-    ses.on('will-download', (event, item) => {
+    ses.on('will-download', (event, item, source) => {
       const url = item.getURL();
       // Only what a download can mean. A blob: or data: URL has no server to
       // ask for ranges and nothing for our manager to fetch, so Chromium keeps
@@ -513,6 +513,10 @@ function main() {
       const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : [url];
       if (chain.some((u) => Date.now() - (posted.get(u) || 0) < 60_000)) return;
       event.preventDefault();
+      let page = '';
+      try { page = source && !source.isDestroyed() ? source.getURL() : ''; } catch { page = ''; }
+      const risk = INCOGNITO ? null : downloadRisk(url, page);
+      if (risk) { downloads.refuse(url, risk, item.getFilename()); return; }
       downloads.start(url, { session: ses });
     });
   };
@@ -3179,6 +3183,20 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           if (response === 1) electronShell.showItemInFolder(file);
           if (response !== 2) return { ok: false, reason: 'not opened' };
         }
+        // A program is asked about first, as every browser asks: it can do
+        // anything the user can.
+        if (!INCOGNITO && RUNS_AS_PROGRAM.test(file)) {
+          const { response } = await dialog.showMessageBox(shell.window, {
+            type: 'warning',
+            buttons: ['Cancel', 'Open'],
+            defaultId: 0,
+            cancelId: 0,
+            title: 'Open a program?',
+            message: `${path.basename(file)} is a program.`,
+            detail: 'Opening it runs it, and it can do anything you can on this computer. Only open it if you trust where it came from.'
+          });
+          if (response !== 1) return { ok: false, reason: 'not opened' };
+        }
         const problem = await electronShell.openPath(file);
         return { ok: problem === '', reason: problem || null };
       }
@@ -4230,6 +4248,24 @@ function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false }
 
   return searchTemplate.replace('%s', encodeURIComponent(text));
 }
+
+/**
+ * Why a download should not start, or null. Chrome's two rules that need no
+ * outside service: a file from a site on the dangerous-sites lists, and a file
+ * fetched over plain HTTP by a secure page - which anyone on the way could
+ * have swapped for something else.
+ */
+function downloadRisk(url, pageUrl) {
+  let host = '';
+  try { host = new URL(url).hostname; } catch { return null; }
+  const listed = Threats.current && Threats.current.enabled() !== false && Threats.current.listed(host);
+  if (listed) return `Blocked – this site is known for ${listed === 'malware' ? 'malware' : 'phishing'}`;
+  if (/^http:/i.test(url) && /^https:/i.test(pageUrl || '')) return 'Blocked – it came over an insecure connection';
+  return null;
+}
+
+/** Files that run as programs when opened. */
+const RUNS_AS_PROGRAM = /\.(exe|msi|msix|appx|bat|cmd|com|scr|pif|ps1|vbs|vbe|js|jse|wsf|hta|jar|reg|lnk|dmg|pkg|app|command|sh|run|appimage|deb|rpm|apk)$/i;
 
 /*
  * DNS over HTTPS: which sites you look up, hidden from the network the way

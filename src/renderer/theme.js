@@ -84,6 +84,7 @@ function formatBytes(n) {
 function failureReason(error) {
   const e = String(error || '');
   if (!e) return 'Failed';
+  if (/^Blocked – /.test(e)) return e;
   if (/closed/i.test(e) && /Debrowser/.test(e)) return 'Stopped when Debrowser closed';
   if (/FILE_|ACCESS_DENIED|NO_SPACE|DISK|PATH|permission/i.test(e)) return 'Failed – couldn’t save the file';
   if (/SERVER|HTTP|FORBIDDEN|UNAUTHORIZED|NOT_FOUND|BAD_CONTENT/i.test(e)) return 'Failed – the site stopped it';

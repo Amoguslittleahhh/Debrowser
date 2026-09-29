@@ -526,7 +526,8 @@ class PastDownload {
   snapshot() {
     return {
       id: this.id, url: this.url, filename: this.filename, state: this.state,
-      total: this.total, received: this.received, segments: 0, error: this.error, bytesPerSecond: 0
+      total: this.total, received: this.received, segments: 0, error: this.error, bytesPerSecond: 0,
+      ...(this.blocked ? { blocked: true } : {})
     };
   }
 
@@ -617,6 +618,27 @@ class DownloadManager {
     } catch (err) {
       this.log(`downloads: could not save the list (${err.message})`);
     }
+  }
+
+  /**
+   * A download the browser stopped before it started (main.js, downloadRisk):
+   * a row saying why, whose Retry is the user's "download it anyway".
+   */
+  refuse(url, reason, filename = null) {
+    let name = filename;
+    if (!name) {
+      try { name = decodeURIComponent(path.basename(new URL(url).pathname)) || null; } catch { name = null; }
+    }
+    const item = new PastDownload({
+      id: `dl-${Date.now().toString(36)}-${(nextId += 1).toString(36)}`,
+      url, filename: name, file: null, state: 'failed', total: 0, received: 0,
+      error: reason, startedAt: Date.now(), finishedAt: Date.now()
+    });
+    item.blocked = true;
+    this.items.set(item.id, item);
+    this.persist();
+    this.onChange();
+    return item;
   }
 
   /** Fetch a failed or cancelled download again, in a new row at the top. */

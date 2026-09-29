@@ -998,6 +998,13 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     if (again) await waitFor(() => again.state === 'done' || again.state === 'failed', { timeoutMs: 8000 });
     manager.flush();
     const saved = JSON.parse(fs.readFileSync(store, 'utf8'));
+    const refused = manager.refuse(pageUrl('idle.html'), 'Blocked – it came over an insecure connection');
+    const refusedRow = manager.list().find((r) => r.id === refused.id);
+    const anyway = manager.retry(refused.id);
+    if (anyway) await waitFor(() => anyway.state === 'done' || anyway.state === 'failed', { timeoutMs: 8000 });
+    check('a refused download says why, and "download anyway" fetches it',
+      refusedRow?.blocked === true && /insecure/.test(refusedRow.error) && anyway?.state === 'done',
+      `${JSON.stringify(refusedRow)}, then ${anyway && anyway.state}`);
     check('the downloads list is kept, and an interrupted download can be retried',
       ok && again.state === 'done' && saved.some((r) => r.id === again.id && r.state === 'done'),
       `${JSON.stringify(rows.map((r) => [r.state, r.missing ?? null]))}, retried ${again && again.state}`);

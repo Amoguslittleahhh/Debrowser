@@ -182,6 +182,7 @@ function updateRow(node, item) {
     // has nothing on disk worth handing to the system.
     node.open.hidden = item.state !== 'done' || item.missing === true;
     node.retry.hidden = item.state !== 'failed' && item.state !== 'cancelled';
+    node.retry.textContent = item.blocked ? 'Download anyway' : 'Retry';
     node.open.title = `Open ${item.filename || 'file'} · middle-click to show it in its folder`;
     node.action.textContent = running ? 'Cancel' : 'Clear';
     node.action.classList.toggle('danger', running);
