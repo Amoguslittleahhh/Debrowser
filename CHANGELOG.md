@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Choose how readily a site sleeps.** The padlock has a new choice for each site: its tabs sleep normally, sooner, or never. A chat, a music player or a dashboard can stay awake; a news site you leave open can go to sleep in a quarter of the time.
 - **Ads and trackers are blocked.** Debrowser blocks them itself, with the lists uBlock Origin uses (EasyList, EasyPrivacy, Peter Lowe's and uBlock's own), fetched weekly and kept ready on disk so a start costs almost nothing. Cookie notices are hidden too, without being answered. The padlock shows how many requests were stopped on the page and turns blocking off for that site; Settings turns either part off everywhere. Private windows do not block, so every copy of them looks alike.
 - **A site's zoom is remembered after a restart,** instead of only until Debrowser closes.
 - **The menu shows which Chromium Debrowser is built on,** beside its own version, so you can tell at a glance whether a Chromium security fix has reached you.

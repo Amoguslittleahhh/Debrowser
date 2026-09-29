@@ -57,8 +57,14 @@ class Governor {
   /**
    * @param {object} deps - { app, cfg, tabManager, ipcHub, log, onUpdate }
    */
-  constructor({ app, cfg, tabManager, ipcHub, log = () => {}, onUpdate = () => {} }) {
+  /**
+   * @param {object} deps
+   * @param {(tab) => ('never'|'early'|undefined)} [deps.sitePolicy] - what the user
+   *   chose for the tab's site: keep it awake, or let it sleep sooner
+   */
+  constructor({ app, cfg, tabManager, ipcHub, log = () => {}, onUpdate = () => {}, sitePolicy = () => undefined }) {
     this.app = app;
+    this.sitePolicy = sitePolicy;
     this.cfg = cfg;
     this.tabs = tabManager;
     this.ipcHub = ipcHub;
@@ -393,7 +399,9 @@ class Governor {
         continue;
       }
 
-      const idle = tab.idleMs(now);
+      // A site the user said may sleep early runs the whole ladder at a
+      // quarter of its timings; one kept awake is capped in the protections.
+      const idle = tab.idleMs(now) * (this.sitePolicy(tab) === 'early' ? 4 : 1);
       let target = Tier.WARM;
       if (idle >= this.cfg.coldAfterMs * accel) target = Tier.COLD;
 
@@ -685,6 +693,11 @@ class Governor {
     }
 
     if (tab.pinned) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.COLD);
+
+    // A site the user keeps awake - a chat, a music player, a dashboard. Warm,
+    // like a tab playing sound, until memory is critical: then it may be
+    // hibernated, which loses nothing, but never discarded.
+    if (this.sitePolicy(tab) === 'never') cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.WARM);
 
     // A tab with developer tools open is a tab being worked on.
     //

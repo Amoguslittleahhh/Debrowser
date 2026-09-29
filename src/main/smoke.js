@@ -936,6 +936,20 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // A site kept awake from the padlock is not put to sleep past warm.
+  if (sitePrefs) {
+    const tab = tabs.all().find((t) => /^https?:/.test(t.url));
+    const host = tab && new URL(tab.url).hostname;
+    if (host) {
+      sitePrefs.set(host, 'sleep', 'never');
+      const floor = governor.clampToProtections(tab, Tier.DISCARDED, { ignoreGrace: true });
+      sitePrefs.set(host, 'sleep', null);
+      const after = governor.clampToProtections(tab, Tier.DISCARDED, { ignoreGrace: true });
+      check('a site kept awake stays warm, and sleeps again once that is undone',
+        floor === Tier.WARM && after !== Tier.WARM, `kept: ${floor}, after: ${after}`);
+    }
+  }
+
   // The welcome tour: it loads in a tab with its bridge, a choice made in it
   // reaches the preferences, and finishing it marks it done and leaves a new
   // tab where it was.

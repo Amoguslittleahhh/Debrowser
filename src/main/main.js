@@ -1165,6 +1165,7 @@ function main() {
         tabManager: tabs,
         ipcHub,
         log,
+        sitePolicy: (tab) => sitePrefs.get(SitePrefs.hostOf(tab.url), 'sleep'),
         onUpdate: (state) => {
           // Incognito: a page too heavy for Balanced JavaScript gets one hint.
           if (slowJs && slowJs.observe(tabs.activeTab())) log('incognito', 'slow-page hint shown');
@@ -1220,7 +1221,7 @@ function main() {
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
-      sitePermissions, permissionAsks, blocker,
+      sitePermissions, permissionAsks, blocker, sitePrefs,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
     });
@@ -1258,7 +1259,7 @@ function main() {
     shell.downloads = downloads;
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs, shell, credentials, vault, bookmarks, history, downloads, prefs, log, context,
-      sitePermissions, permissionAsks, blocker });
+      sitePermissions, permissionAsks, blocker, sitePrefs });
 
     /*
      * The tabs from last time, or one new one.
@@ -1540,7 +1541,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null }) {
+                       getDownloads = () => null, blocker = null, sitePrefs = null }) {
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
   const goTo = (id) => tabs.activate(id)
     .then(publish)
@@ -2113,13 +2114,23 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      // How readily this site's tabs sleep: normally, never, or early.
+      case 'site-sleep': {
+        const host = active && SitePrefs.hostOf(active.url);
+        if (!host || !sitePrefs) break;
+        const value = payload?.value === 'never' || payload?.value === 'early' ? payload.value : null;
+        sitePrefs.set(host, 'sleep', value);
+        publish();
+        break;
+      }
+
       // The blocker on or off for the site in front of the user, from the
       // padlock; the page reloads so what it loads matches what it now says.
       case 'site-blocking': {
         let host = null;
         try { host = active && /^https?:/.test(active.url) ? new URL(active.url).hostname : null; } catch { host = null; }
-        if (!host || !blocker || INCOGNITO) break;
-        blocker.sitePrefs.set(host, 'blocking', payload?.on === false ? false : null);
+        if (!host || !blocker || !sitePrefs || INCOGNITO) break;
+        sitePrefs.set(host, 'blocking', payload?.on === false ? false : null);
         if (active.isLive) active.wc.reload();
         break;
       }
@@ -2808,7 +2819,7 @@ function pageMay(page, channel, name) {
 }
 
 function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, history, downloads, prefs, log,
-                       sitePermissions = null, permissionAsks = null, blocker = null,
+                       sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
                        context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only the passwords page may touch credentials.
@@ -3045,6 +3056,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
             on: blocker.onFor(host),
             blocked: active.isLive ? blocker.countFor(active.wc) : 0
           } : null,
+          sleep: sitePrefs && origin ? sitePrefs.get(SitePrefs.hostOf(active.url), 'sleep') || 'normal' : null,
           zoom: active.isLive ? Math.round(active.wc.getZoomFactor() * 100) : 100,
           zoomDefault: Math.round((Number(prefs.get('defaultZoom')) || 1) * 100)
         };

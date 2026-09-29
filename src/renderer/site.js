@@ -105,6 +105,24 @@ function showInfo(info) {
     el.shield.hidden = false;
   }
 
+  // How readily its tabs sleep. Kept awake: chat, music, a dashboard.
+  if (info.sleep) {
+    const li = item(['M12.5 9.6A5 5 0 0 1 6.4 3.5a5 5 0 1 0 6.1 6.1z'], 'Sleep when unused');
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', 'When this site’s tabs sleep');
+    for (const [value, name] of [['normal', 'Normally'], ['early', 'Sooner'], ['never', 'Never']]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = name;
+      select.append(option);
+    }
+    select.value = info.sleep;
+    select.addEventListener('change', () => api.send('site-sleep', { value: select.value }));
+    li.append(select);
+    el.shield.append(li);
+    el.shield.hidden = false;
+  }
+
   // Only what this site has asked for. A list of four switches for a site
   // that never wanted any of them is four things to read for nothing.
   const decided = KINDS.filter(([kind]) => info.permissions[kind]);
