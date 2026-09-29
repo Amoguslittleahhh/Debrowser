@@ -65,6 +65,7 @@ const COMMANDS = new Set([
   'space-menu',
   'picture-in-picture',
   'screenshot-page',
+  'copy-version-info',
   'reader-article',
   'receipt-week',
   'safety-status',

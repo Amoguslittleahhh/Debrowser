@@ -2591,6 +2591,19 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       }
 
+      // What a bug report needs, in one paste (.github/ISSUE_TEMPLATE/bug.yml).
+      case 'copy-version-info': {
+        const os = require('os');
+        clipboard.writeText([
+          `Debrowser ${app.getVersion()}`,
+          `Chromium ${process.versions.chrome} · Electron ${process.versions.electron}`,
+          `${os.type()} ${os.release()} (${process.arch})`,
+          `Design: ${prefs.get('design')}, ${prefs.get('theme')} theme`
+        ].join('\n'));
+        toast('Version info copied');
+        break;
+      }
+
       // Straight to the download manager, which names the file - and asks where
       // to put it, if Settings says to - the same path a click on a download
       // link takes.
@@ -4654,6 +4667,7 @@ function menuModel({ tabs, shell }) {
     { id: 'show-shortcuts', label: 'Keyboard shortcuts', accel: accel('show-shortcuts'), icon: 'keyboard' },
     { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
     { kind: 'separator' },
+    { id: 'copy-version-info', label: 'Copy version info', icon: 'copy' },
     { kind: 'note', label: `Debrowser ${app.getVersion()} · Chromium ${process.versions.chrome}` }
   ];
 }

@@ -38,6 +38,7 @@ const COMMANDS = [
   { title: 'Save page', command: 'save-page', keywords: 'download' },
   { title: 'Screenshot the whole page', command: 'screenshot-page', keywords: 'capture image picture', needsTab: true },
   { title: 'Print', command: 'print' },
+  { title: 'Copy version info', command: 'copy-version-info', keywords: 'about bug report' },
   { title: 'Zoom in', command: 'zoom', payload: { direction: 'in' }, keywords: 'bigger larger' },
   { title: 'Zoom out', command: 'zoom', payload: { direction: 'out' }, keywords: 'smaller' },
   { title: 'Reset zoom', command: 'zoom', payload: { direction: 'reset' }, keywords: '100' },

@@ -1184,6 +1184,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('unused permissions expire after three months, refusals stay, and the safety check draws',
       ok && page && drawn, `expired ${JSON.stringify(gone)}, page ${page}, drawn ${drawn}`);
     if (page) tabs.close(tabs.activeTab().id);
+
+    runCommand('copy-version-info');
+    const info = String(await require('electron').clipboard.readText());
+    check('Copy version info puts the versions and system on the clipboard',
+      info.includes(`Debrowser ${app.getVersion()}`) && info.includes(`Chromium ${process.versions.chrome}`) && /Design: /.test(info), info);
     await sleep(200);
   }
 

@@ -1,0 +1,20 @@
+name: Feature request
+description: Something Debrowser could do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The task, not the solution - what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+  - type: textarea
+    id: elsewhere
+    attributes:
+      label: Seen elsewhere?
+      description: Another browser that does this well, if any.
