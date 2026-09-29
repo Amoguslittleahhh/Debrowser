@@ -771,6 +771,7 @@ function main() {
           canGoForward: tab.wc.navigationHistory.canGoForward(),
           bookmarked: Boolean(bookmarks && tab.url && bookmarks.has(tab.url)),
           internal: tab.internal,
+          incognito: INCOGNITO,
           engineName: prefs ? prefs.engineName() : null
         }),
         // Kept beside the model rather than in it: an item's payload is what
@@ -947,6 +948,12 @@ function main() {
         // reported for a page the user loaded is the only kind that route will
         // touch beyond the well-known default path.
         if (payload?.favicon) icons.remember(payload.favicon);
+        break;
+      case 'peek':
+        // Not in a private window: its tabs carry protections a bare view
+        // would not, so a pop-up there is a tab as it always was.
+        if (INCOGNITO || !shell) openLinkTab(tabs, prefs, tab, payload?.url);
+        else shell.openPeek(payload?.url, tab.session);
         break;
       case 'closed':
         // Half of a pair gone: the other has the window back.
@@ -2242,6 +2249,26 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         shell.openSheet('context', { x, y, right: x });
         break;
       }
+
+      // Peek (window.js): kept as a tab beside the one it came from, or put away.
+      case 'peek-promote': {
+        const url = shell.peekUrl();
+        shell.closePeek();
+        if (url && /^https?:/i.test(url)) {
+          tabs.create({ url, index: active ? tabs.all().indexOf(active) + 1 : null, spaceId: active?.spaceId });
+        }
+        break;
+      }
+
+      case 'peek-close':
+        shell.closePeek();
+        break;
+
+      // From the link's context menu.
+      case 'peek-link':
+        if (INCOGNITO || !active) break;
+        if (/^https?:/i.test(String(payload?.url || ''))) shell.openPeek(payload.url, active.session);
+        break;
 
       /*
        * Split view: two tabs of the same space side by side.

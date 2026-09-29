@@ -1,0 +1,53 @@
+/* Peek's backdrop: the page dimmed, and the bar above the card. */
+
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  background: rgb(0 0 0 / 0.42);
+  font: var(--fs-body) / 1.3 var(--font-ui);
+  color: #fff;
+  animation: dim var(--slow) var(--ease-out);
+}
+@keyframes dim { from { background: rgb(0 0 0 / 0); } }
+
+/* Lined up with the card (window.js placePeek: 8% in from each side). */
+.bar {
+  position: absolute;
+  top: 10px;
+  left: max(24px, 8%);
+  right: max(24px, 8%);
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 34px;
+}
+.what { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--s2); overflow: hidden; white-space: nowrap; }
+.what strong { overflow: hidden; text-overflow: ellipsis; font-weight: var(--fw-bold); }
+.what #host { color: rgb(255 255 255 / 0.7); font-size: var(--fs-small); }
+button { font: inherit; cursor: default; }
+.primary {
+  height: 30px;
+  padding: 0 var(--s4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #fff;
+  font-weight: var(--fw-bold);
+}
+.primary:hover { filter: brightness(1.1); }
+.close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.16);
+  color: #fff;
+}
+.close:hover { background: rgb(255 255 255 / 0.26); }
+.close svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.spinner { width: 10px; height: 10px; border: 2px solid rgb(255 255 255 / 0.35); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; align-self: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+[hidden] { display: none !important; }

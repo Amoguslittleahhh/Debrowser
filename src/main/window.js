@@ -28,6 +28,9 @@ const TOAST_WIDTH = 460;
 const TOAST_HEIGHT = 84;
 /** The gap between two tabs side by side: the divider's width. */
 const SPLIT_GAP = 8;
+/** Peek's card: its corners, and the room above it for the buttons. */
+const PEEK_RADIUS = 12;
+const PEEK_TOP = 52;
 
 /**
  * Height the bookmarks bar adds to the chrome when it is showing.
@@ -335,6 +338,8 @@ class BrowserShell {
     /** Two tabs side by side: { left, right } tab ids and the left one's share. */
     this.split = null;
     this.dividerView = null;
+    /** Peek: a page in a card over the tab - its page view and the backdrop with its buttons. */
+    this.peek = null;
     this.suggestOpen = false;
     this.suggestSelected = -1;
     setImmediate(() => this.releaseSidebar());
@@ -1139,6 +1144,99 @@ class BrowserShell {
     const x = at.x - win.x - area.x;
     this.split.ratio = Math.min(0.8, Math.max(0.2, x / Math.max(1, area.width)));
     this.layout();
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Peek                                                              */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * A link opened in a card over the page, as Arc and Zen do: glance at it,
+   * then Escape, a click outside or the close button puts it away - or "Open
+   * as tab" keeps it. It is not a tab: no history, no place in the strip, no
+   * renderer after it closes. In the opener's session, so it is signed in
+   * wherever the page was.
+   */
+  openPeek(url, ses) {
+    if (this.window.isDestroyed() || !/^https?:/i.test(String(url || ''))) return;
+    this.closePeek();
+    const backdrop = new WebContentsView({
+      webPreferences: {
+        preload: CHROME_PRELOAD,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        additionalArguments: preloadArgs(this.prefs),
+        transparent: true
+      }
+    });
+    try { backdrop.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+    backdrop.webContents.loadFile(path.join(RENDERER_DIR, 'peek.html')).catch(() => {});
+    const page = new WebContentsView({
+      webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true }
+    });
+    page.setBackgroundColor(this.surface());
+    setRadius(page, PEEK_RADIUS);
+    const wc = page.webContents;
+    // Anything it opens goes to a real tab; Escape anywhere puts it away.
+    wc.setWindowOpenHandler(({ url: next }) => {
+      if (/^https?:/i.test(next)) this.onCommand('new-tab', { url: next });
+      return { action: 'deny' };
+    });
+    const escape = (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'Escape') { event.preventDefault(); this.closePeek(); }
+    };
+    wc.on('before-input-event', escape);
+    backdrop.webContents.on('before-input-event', escape);
+    const tell = () => {
+      if (!this.peek || wc.isDestroyed()) return;
+      send(backdrop, 'debrowser:ui', { kind: 'peek', url: wc.getURL(), title: wc.getTitle(), loading: wc.isLoading() });
+    };
+    for (const e of ['page-title-updated', 'did-navigate', 'did-stop-loading', 'did-start-loading']) wc.on(e, tell);
+    backdrop.webContents.once('did-finish-load', tell);
+
+    const root = this.window.contentView;
+    const chromeAt = root.children.indexOf(this.chromeView);
+    root.addChildView(backdrop, chromeAt === -1 ? undefined : chromeAt);
+    root.addChildView(page, root.children.indexOf(backdrop) + 1);
+    this.peek = { backdrop, page };
+    this.placePeek();
+    wc.loadURL(url).catch(() => {});
+    wc.focus();
+  }
+
+  /** The card: inset from the content area, with room above it for its buttons. */
+  placePeek() {
+    if (!this.peek) return;
+    const area = this.contentBounds();
+    this.peek.backdrop.setBounds(area);
+    const side = Math.max(24, Math.round(area.width * 0.08));
+    this.peek.page.setBounds({
+      x: area.x + side,
+      y: area.y + PEEK_TOP,
+      width: Math.max(200, area.width - side * 2),
+      height: Math.max(160, area.height - PEEK_TOP - 28)
+    });
+  }
+
+  /** Where the peek is now, for "Open as tab"; null when there is none. */
+  peekUrl() {
+    const wc = this.peek && this.peek.page.webContents;
+    return wc && !wc.isDestroyed() ? wc.getURL() : null;
+  }
+
+  closePeek() {
+    const peek = this.peek;
+    if (!peek) return;
+    this.peek = null;
+    for (const view of [peek.page, peek.backdrop]) {
+      try {
+        this.window.contentView.removeChildView(view);
+        view.webContents.close();
+      } catch { /* already gone */ }
+    }
+    const active = this.tabs.activeTab();
+    if (active && active.isLive) active.wc.focus();
   }
 
   /* ---------------------------------------------------------------- */
@@ -2311,6 +2409,7 @@ class BrowserShell {
       if (reshape) setRadius(tab.view, radius);
     }
     this.placeDivider(halves);
+    this.placePeek();
 
     if (this.placeholderView) {
       this.placeholderView.setBounds(bounds);
@@ -2368,7 +2467,7 @@ class BrowserShell {
   isChromeSender(sender) {
     if (!sender) return false;
     for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
-      this.toastView, this.dividerView]) {
+      this.toastView, this.dividerView, this.peek && this.peek.backdrop]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }

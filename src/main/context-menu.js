@@ -64,6 +64,9 @@ function buildModel(params = {}, state = {}) {
     items.push(
       { id: 'open-link-tab', label: 'Open link in new tab', icon: 'plus',
         payload: { url: link } },
+      // A card over the page, for a glance (Shift-click does the same).
+      ...(state.incognito ? [] : [{ id: 'peek-link', label: 'Peek at link', icon: 'search', accel: 'Shift+Click',
+        payload: { url: link } }]),
       { id: 'copy-link', label: 'Copy link address', icon: 'copy',
         payload: { text: link } },
       { id: 'save-link', label: 'Save link as…', icon: 'download',

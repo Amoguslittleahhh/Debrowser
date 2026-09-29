@@ -221,6 +221,8 @@ const SHOTS = [
   { name: 'context',  file: 'context.html',  w: 900,  h: 560 },
   { name: 'site',     file: 'site.html',     w: 420,  h: 340 },
   { name: 'safety', file: 'safety.html', w: 1100, h: 1000 },
+  { name: 'peek', file: 'peek.html', w: 1100, h: 200,
+    message: { kind: 'peek', url: 'https://www.bbc.co.uk/news/articles/x', title: 'The story behind the headline', loading: false } },
   { name: 'receipt', file: 'receipt.html', w: 1100, h: 720 },
   { name: 'reader', file: 'reader.html', w: 1100, h: 760, query: { t: 'x' } },
   { name: 'danger', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://paypa1.com/login', kind: 'lookalike', like: 'paypal.com' } },

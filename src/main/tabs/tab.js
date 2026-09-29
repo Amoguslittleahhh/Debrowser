@@ -759,8 +759,11 @@ class Tab {
     wc.on('did-finish-load', () => this.emit('loaded'));
 
     // New windows open as tabs rather than popups.
-    wc.setWindowOpenHandler(({ url }) => {
-      this.emit('open-tab', { url });
+    // A shift-click, or a page's own pop-up, asks for a new window: that is a
+    // Peek (window.js) - a card over the page - rather than a tab. Everything
+    // else is a tab, as before.
+    wc.setWindowOpenHandler(({ url, disposition }) => {
+      this.emit(disposition === 'new-window' && /^https?:/i.test(url) ? 'peek' : 'open-tab', { url });
       return { action: 'deny' };
     });
   }

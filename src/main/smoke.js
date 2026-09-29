@@ -1379,6 +1379,30 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(200);
   }
 
+  // Peek: a shift-click (a new-window request) opens the link in a card over
+  // the page, not as a tab; "Open as tab" keeps it; closing leaves nothing.
+  {
+    const wasActive = tabs.activeTab();
+    const base = tabs.create({ url: pageUrl('article.html'), activate: true, realise: true });
+    await waitFor(() => base.isLive && !base.wc.isLoading(), { timeoutMs: 8000 });
+    const count = tabs.all().length;
+    const target = pageUrl('idle.html');
+    await base.wc.executeJavaScript(`window.open(${JSON.stringify(target)}, '_blank', 'popup,width=400,height=300')`, true).catch(() => {});
+    const opened = await waitFor(() => shell.peek && /idle\.html/.test(shell.peekUrl() || ''), { timeoutMs: 8000 });
+    const noTab = tabs.all().length === count;
+    runCommand('peek-promote');
+    const promoted = await waitFor(() => !shell.peek && tabs.all().some((t) => /idle\.html/.test(t.url) && t !== base), { timeoutMs: 5000 });
+    runCommand('peek-link', { url: target });
+    const again = Boolean(shell.peek);
+    runCommand('peek-close');
+    check('a pop-up opens as a Peek over the page, Open as tab keeps it, and closing leaves nothing',
+      opened && noTab && promoted && again && !shell.peek, JSON.stringify({ opened, noTab, promoted, again }));
+    for (const t of tabs.all()) if (/idle\.html/.test(t.url) && t !== wasActive) tabs.close(t.id);
+    tabs.close(base.id);
+    if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
+    await sleep(200);
+  }
+
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
     const { Session } = require('./session');
