@@ -207,6 +207,15 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run smoke:headless
 
+      # Every page measured against the rules that hold on every platform:
+      # text at least 11px, 4.5:1 contrast, 24px targets (tools/audit-probe.js).
+      # Both themes of the default design; `npm run audit` locally for any other.
+      - name: Design audit
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          xvfb-run -a npx electron tools/shoot.js --audit --no-sandbox --disable-gpu
+          xvfb-run -a npx electron tools/shoot.js --audit --theme=light --no-sandbox --disable-gpu
+
       - name: Smoke test
         if: matrix.os == 'windows-latest'
         run: npm run smoke

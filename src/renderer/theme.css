@@ -59,7 +59,7 @@
    * needs, named for their job rather than for their size, so a change is made
    * once.
    */
-  --fs-micro: 10.5px;   /* stat labels, the one-line footer */
+  --fs-micro: 11px;     /* stat labels, the one-line footer; 11px is the floor for text anywhere */
   --fs-small: 12px;     /* hints, shortcuts, secondary lines */
   --fs-body: 14px;      /* everything the user reads */
   --fs-lead: 16px;      /* a figure worth reading first */
@@ -158,7 +158,9 @@
      tier dots are distinguishable at 6px without reading their tooltips. */
   --ok: #6f9f6a;
   --warn: #c9953f;
-  --crit: #c05c4e;
+  /* Readable as text at 4.5:1 on every surface it sits on; the light palette
+     has its own, below. */
+  --crit: #d97866;
   /* A private window's own colour, and nothing else's: the pill, the onion
      button, the tint on its toolbar. */
   --private: #8a6bd1;
@@ -238,6 +240,10 @@
     --bg: #f3f1ec;
     --bg-raised: #fbfaf7;
     --bg-input: #fffefc;
+  --crit: #a8483b;
+  /* Status colours dark enough to read as text on the light palette. */
+  --ok: #4b6c48;
+  --warn: #815f28;
     --border: #dcd7cc;
     --border-soft: #e9e5db;
     --text: #201f1c;
@@ -254,6 +260,10 @@ body[data-theme="light"] {
   --bg: #f3f1ec;
   --bg-raised: #fbfaf7;
   --bg-input: #fffefc;
+  --crit: #a8483b;
+  /* Status colours dark enough to read as text on the light palette. */
+  --ok: #4b6c48;
+  --warn: #815f28;
   --border: #dcd7cc;
   --border-soft: #e9e5db;
   --text: #201f1c;
@@ -392,6 +402,10 @@ body[data-design="grid"][data-theme="light"] {
 body {
   /* The tab strip's own colour, unless one has been chosen. */
   --strip: var(--bg);
+  /* The accent where it carries text; theme.js replaces both with values
+     worked out to pass 4.5:1 for the accent and palette in use. */
+  --accent-fill: var(--accent);
+  --accent-text: var(--accent);
 
   /*
    * One tint, derived from the accent, for every surface and state that needs

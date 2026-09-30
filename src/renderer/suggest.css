@@ -83,4 +83,4 @@ body { padding: 0 var(--s6) var(--s7); }
   color: var(--text-dim);
   font-size: var(--fs-small);
 }
-.row.selected .action { color: var(--accent); }
+.row.selected .action { color: var(--accent-text); }

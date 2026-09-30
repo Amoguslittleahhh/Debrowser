@@ -321,6 +321,38 @@ function siteChip(url, { icon = null, chipClass = 'chip', iconClass = 'site-icon
   return chip;
 }
 
+/**
+ * Whether movement is welcome: false when the system asks for reduced motion.
+ * CSS animations follow it through theme.css; this is for motion started from
+ * script, such as a smooth scroll, which that rule cannot reach.
+ */
+/* exported motionOk */
+function motionOk() {
+  return !matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * `colour`, moved toward black or white only as far as it takes to reach
+ * 4.5:1 against `against` - so a text colour that already passes is kept
+ * exactly as chosen, and one that does not keeps its hue.
+ */
+function readable(colour, against, need = 4.6) {
+  const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const lum = (c) => {
+    const [r, g, b] = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const base = rgb(colour);
+  const other = rgb(against);
+  const toward = lum(other) > 0.18 ? [0, 0, 0] : [255, 255, 255];
+  let out = base;
+  for (let t = 0; t <= 1 && ratio(out, other) < need; t += 0.02) {
+    out = base.map((v, i) => Math.round(v + (toward[i] - v) * t));
+  }
+  return `#${out.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
 function applyThemePrefs(prefs) {
   if (!prefs) return;
   const body = document.body;
@@ -350,6 +382,23 @@ function applyThemePrefs(prefs) {
 
   if (body.style.getPropertyValue('--accent') !== prefs.accent) {
     body.style.setProperty('--accent', prefs.accent);
+  }
+  // The accent where it carries text, made to pass 4.5:1 whatever accent was
+  // chosen: `--accent-fill` behind white text (a primary button, a label), and
+  // `--accent-text` as text on this palette's background. The accent itself
+  // stays as chosen for rings, marks and bars, where no text depends on it.
+  const bg = getComputedStyle(body).getPropertyValue('--bg').trim();
+  const raised = getComputedStyle(body).getPropertyValue('--bg-raised').trim();
+  const key = `${prefs.accent}|${bg}|${raised}`;
+  if (body.dataset.accentKey !== key && /^#[0-9a-f]{6}$/i.test(prefs.accent || '')) {
+    body.dataset.accentKey = key;
+    body.style.setProperty('--accent-fill', readable(prefs.accent, '#ffffff'));
+    // Against the page and against raised surfaces - a toast, a card - since
+    // accent text sits on both.
+    if (/^#[0-9a-f]{6}$/i.test(bg)) {
+      const onBg = readable(prefs.accent, bg);
+      body.style.setProperty('--accent-text', /^#[0-9a-f]{6}$/i.test(raised) ? readable(onBg, raised) : onBg);
+    }
   }
 
   // The tab strip is its own colour, deliberately not the accent: it is the

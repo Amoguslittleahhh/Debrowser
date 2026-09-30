@@ -26,6 +26,7 @@
     "build:netns": "node tools/build-helper.js netns-launch",
     "build:streamview": "node tools/build-streamview.js",
     "test:incognito": "node test/incognito-leak.js",
+    "audit": "electron tools/shoot.js --audit --disable-gpu",
     "dist:intune": "npm run build:memprobe && npm run build:memtrim && node tools/build-intune.js",
     "lint": "eslint src tools bench test"
   },

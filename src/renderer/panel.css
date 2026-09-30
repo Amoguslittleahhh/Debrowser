@@ -136,7 +136,7 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 .row-sub { color: var(--text-dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .row-mem { font-variant-numeric: tabular-nums; color: var(--text-dim); }
-.row-mem.boosted { color: var(--accent); }
+.row-mem.boosted { color: var(--accent-text); }
 
 .row-action {
   border: 1px solid var(--border);

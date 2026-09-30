@@ -166,7 +166,8 @@
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--text) 8%, transparent);
   font-size: var(--fs-micro);
-  color: var(--text-dim);
+  /* On its own tint, so a step stronger than plain dimmed text. */
+  color: color-mix(in srgb, var(--text) 75%, var(--bg));
   font-variant-numeric: tabular-nums;
 }
 

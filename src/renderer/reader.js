@@ -116,7 +116,7 @@ $('speak').addEventListener('click', () => {
   parts.forEach((node, i) => {
     const u = new SpeechSynthesisUtterance(node.textContent);
     u.lang = document.documentElement.lang || 'en';
-    u.onstart = () => { node.classList.add('speaking'); node.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+    u.onstart = () => { node.classList.add('speaking'); node.scrollIntoView({ block: 'center', behavior: motionOk() ? 'smooth' : 'auto' }); };
     u.onend = () => { node.classList.remove('speaking'); if (i === parts.length - 1) done(); };
     u.onerror = done;
     speech.speak(u);

@@ -1,7 +1,7 @@
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
 main { width: min(760px, 100% - 32px); margin: 0 auto; padding: 48px 0; }
 h1 { margin: 0 0 var(--s2); font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
-#host { color: var(--accent); }
+#host { color: var(--accent-text); }
 .lead { margin: 0 0 var(--s5); color: var(--text-dim); line-height: 1.5; }
 textarea {
   box-sizing: border-box;
@@ -19,7 +19,7 @@ textarea {
 textarea:focus { outline: none; border-color: var(--accent); }
 .actions { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); }
 button { font: inherit; cursor: pointer; padding: 7px 16px; border-radius: var(--radius-pill); }
-.primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.primary { border: 1px solid var(--accent); background: var(--accent-fill); color: #fff; }
 .secondary { border: 1px solid var(--border); background: transparent; color: var(--text); }
 .secondary:hover { background: var(--wash-soft); }
 .note { color: var(--ok); font-size: 13px; }

@@ -42,6 +42,8 @@
 - **Every dropdown looks the same.** The site panel's "Sleep when unused" and the welcome tour's choices used your system's own dropdown, unlike every other control in the browser; they now match Settings in both themes.
 - **A warmer first step in the welcome tour.** It says in three lines what Debrowser does differently - tabs that sleep, blocking done on your own computer, spaces - instead of an empty card.
 - **Smaller touches:** the new tab page's figures for the day sit centred under the search box, reader view puts the author and reading time on one line, and the safety check says the lists were updated "today" or "yesterday" rather than giving a date.
+- **Easier to read and to hit, in every design and both themes.** All of Debrowser's own text now meets the 4.5:1 contrast that accessibility guidelines ask for - primary buttons, links and labels in your accent colour, whichever one you choose, plus warnings, errors and the green and amber status text in the light theme - and none of it is smaller than 11px. Small controls grew to at least 24 pixels to click without changing how they look: the mute button on a tab, the tab-group label, the download panel's links, the space colour dots and the transparency slider.
+- **Reduced motion covers scrolling too.** With your system set to reduce motion, Settings' section list and reader view's read-aloud jump instead of scrolling smoothly, as animations already did.
 
 ### Fixed
 

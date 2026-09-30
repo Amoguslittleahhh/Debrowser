@@ -79,7 +79,7 @@ section { padding: var(--s3) var(--s4) var(--s3); }
 }
 .btn:hover { background: var(--wash-soft); }
 .btn:active { background: var(--wash); }
-.btn.primary { border-color: transparent; background: var(--accent); color: #fff; }
+.btn.primary { border-color: transparent; background: var(--accent-fill); color: #fff; }
 .btn.primary:hover { filter: brightness(1.1); }
 .btn.primary:active { filter: brightness(0.94); }
 

@@ -637,7 +637,7 @@ function renderSpaces(spaces, prefs = {}) {
     for (const colour of SPACE_COLOURS) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.style.background = colour;
+      b.style.color = colour;
       b.setAttribute('aria-label', 'Colour');
       b.setAttribute('aria-pressed', String(colour.toLowerCase() === sp.color.toLowerCase()));
       b.addEventListener('click', () => api.send('edit-space', { id: sp.id, color: colour }));
@@ -1356,7 +1356,7 @@ function buildRail() {
     button.type = 'button';
     button.textContent = heading ? heading.textContent : name;
     button.addEventListener('click', () => {
-      section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      section.scrollIntoView({ block: 'start', behavior: motionOk() ? 'smooth' : 'auto' });
       // Marked immediately rather than waiting for the observer: a smooth
       // scroll takes a few hundred milliseconds, and a rail that lights up
       // after the page has finished moving feels like it did not register the

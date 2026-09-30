@@ -275,6 +275,10 @@ const SHOTS = [
 
 // `--theme=light` photographs the other palette, which nothing else checks.
 const THEME = process.argv.find((a) => a.startsWith('--theme='));
+// `--audit` measures each page against tools/audit-probe.js instead of only
+// photographing it, and exits non-zero when anything fails.
+const AUDIT = process.argv.includes('--audit');
+const auditFindings = [];
 if (THEME) STATE.prefs.theme = THEME.slice(8);
 // `--strip=#rrggbb` paints the tab strip, which is where a colour chosen for
 // one palette meets the other.
@@ -371,6 +375,10 @@ app.whenReady().then(async () => {
       win.destroy();
       continue;
     }
+    if (AUDIT) {
+      const found = await win.webContents.executeJavaScript(require('./audit-probe')).catch((e) => [{ kind: 'error', el: '', detail: e.message }]);
+      for (const f of found) auditFindings.push({ shot: shot.name, ...f });
+    }
     try {
       const img = await Promise.race([
         win.webContents.capturePage(),
@@ -384,5 +392,14 @@ app.whenReady().then(async () => {
     }
     win.destroy();
   }
-  app.exit(0);
+  if (AUDIT) {
+    const byKind = {};
+    for (const f of auditFindings) (byKind[f.kind] ||= []).push(f);
+    for (const [kind, list] of Object.entries(byKind)) {
+      console.log(`\n${kind}: ${list.length}`);
+      for (const f of list) console.log(`  ${f.shot.padEnd(18)} ${f.el.padEnd(60)} ${f.detail}`);
+    }
+    console.log(`\nAUDIT ${auditFindings.length} finding(s)${THEME ? ` (${STATE.prefs.theme})` : ''}`);
+  }
+  app.exit(AUDIT && auditFindings.length ? 1 : 0);
 });

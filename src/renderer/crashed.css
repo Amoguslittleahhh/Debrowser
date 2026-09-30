@@ -34,7 +34,7 @@ p {
   padding: 0 var(--s4);
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
   font: inherit;
   cursor: default;

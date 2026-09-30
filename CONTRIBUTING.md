@@ -23,6 +23,7 @@ Before sending a change, run what CI runs:
 npm run lint
 npm run smoke:headless     # the smoke suite, in a virtual display
 npm run test:incognito     # private windows leave nothing behind
+xvfb-run -a npm run audit   # text size, contrast and target size on every page
 ```
 
 ## Sending a change
@@ -37,6 +38,9 @@ npm run test:incognito     # private windows leave nothing behind
 - Code wraps at about 80 columns and matches the file around it.
 - A new page or IPC message goes in the preload allowlist and `PAGE_POLICY`.
 - Private windows must not write anything new to disk.
+- Every page holds to the same rules on every platform: text at least 11px,
+  4.5:1 contrast in both themes, click targets at least 24px, and motion
+  that stops when the system asks for less. `npm run audit` measures them.
 
 Issues labelled `good first issue` are small and self-contained.
 

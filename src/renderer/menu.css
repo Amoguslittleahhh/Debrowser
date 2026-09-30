@@ -122,7 +122,7 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
   stroke-linejoin: round;
   color: var(--text-dim);
 }
-.item:hover:not(:disabled) svg, .item:focus-visible svg, .item[aria-checked="true"] svg { color: var(--accent); }
+.item:hover:not(:disabled) svg, .item:focus-visible svg, .item[aria-checked="true"] svg { color: var(--accent-text); }
 
 /*
  * A checked item says so in its own colour rather than with a tick glyph that

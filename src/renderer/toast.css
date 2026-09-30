@@ -55,7 +55,7 @@ button {
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: var(--fw-bold);
   transition: background-color var(--fast) var(--ease);
 }

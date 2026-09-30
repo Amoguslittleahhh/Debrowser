@@ -110,6 +110,7 @@ module.exports = [
         siteHue: 'readonly',
         iconSrc: 'readonly',
         showIcon: 'readonly',
+        motionOk: 'readonly',
         anchorSheet: 'readonly',
         watchTransientInput: 'readonly',
         defaultIcon: 'readonly',

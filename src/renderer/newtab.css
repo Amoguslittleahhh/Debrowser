@@ -350,7 +350,7 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .co
 .continue-meta { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .continue-all {
   margin: 6px 12px 0; padding: 4px 0; border: 0; background: transparent;
-  color: var(--accent); font: inherit; font-size: 13px; font-weight: 600;
+  color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600;
 }
 .continue-all:hover { text-decoration: underline; }
 

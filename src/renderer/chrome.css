@@ -501,8 +501,8 @@ body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: non
   /* A control now rather than a mark, so it needs a target rather than a
      glyph's worth of room - grown by its padding and given the space back with
      a negative margin, which leaves the strip's layout exactly where it was. */
-  padding: 4px;
-  margin: -4px;
+  padding: 5.5px;
+  margin: -5.5px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -601,7 +601,7 @@ body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: non
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
               transform var(--fast) var(--ease);
 }
-.new-tab:hover { background: var(--wash); color: var(--accent); }
+.new-tab:hover { background: var(--wash); color: var(--accent-text); }
 
 .omnibox {
   display: flex;
@@ -822,7 +822,7 @@ body[data-dots="off"] .tier { display: none; }
 .meter[data-pressure="high"]     .meter-fill { background: var(--warn); }
 .meter[data-pressure="critical"] .meter-fill { background: var(--crit); }
 
-.meter-text { font-size: var(--fs-small); }
+.meter-text { font-size: var(--fs-small); color: color-mix(in srgb, var(--text) 78%, var(--bg)); }
 
 /* ---------------------------------------------------------------- */
 /* Loading line                                                      */
@@ -1079,9 +1079,9 @@ body[data-layout="left"] .tab.active { background: var(--bg-input); }
  * second thing to theme.
  */
 .star svg { fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linejoin: round; }
-.star.on { color: var(--accent); }
+.star.on { color: var(--accent-text); }
 .star.on svg { fill: currentColor; }
-.reader-btn.on { color: var(--accent); }
+.reader-btn.on { color: var(--accent-text); }
 
 /* A saved bookmark is worth one beat of acknowledgement and no more. */
 .star.on svg { animation: star-pop var(--slow) var(--ease); }
@@ -1359,7 +1359,7 @@ body[data-layout="left"] .pin { display: grid; }
    toggle nobody trusts. */
 .pin[aria-pressed="true"] {
   background: var(--wash);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .pin svg {
@@ -1616,7 +1616,9 @@ body[data-design="paper"][data-layout="left"] .tab.active::before {
 }
 /* A sleeping tab is dimmed, in the same face as the rest: a serif italic among
    sans titles read as a font that failed to load, not as a state. */
-body[data-design="paper"] .tab:has(.tier[data-tier="discarded"]) .tab-title { color: color-mix(in srgb, var(--text-dim) 70%, transparent); }
+/* Asleep: set in italic rather than faded - faded, the title fell below
+   what can be read, and the hollow dot already says which tabs are asleep. */
+body[data-design="paper"] .tab:has(.tier[data-tier="discarded"]) .tab-title { color: var(--text-dim); font-style: italic; }
 /* A field with an edge all round, in Paper's near-square corners: a bare rule
    under the text did not read as somewhere to type. */
 body[data-design="paper"] .omnibox,
@@ -2216,17 +2218,18 @@ body[data-layout="left"] .space-chip { align-self: stretch; max-width: none; mar
 .tab-group {
   flex: none;
   max-width: 120px;
-  height: 20px;
-  padding: 0 8px;
+  height: 24px;
+  padding: 0 9px;
   overflow: hidden;
   border: 0;
-  border-radius: 10px;
-  background: var(--group);
+  border-radius: 12px;
+  /* Darkened a little, so white text passes 4.5:1 on every group colour. */
+  background: color-mix(in oklab, var(--group) 82%, #000);
   color: #fff;
   font: inherit;
   font-size: 11.5px;
   font-weight: 600;
-  line-height: 20px;
+  line-height: 24px;
   white-space: nowrap;
   text-overflow: ellipsis;
   cursor: default;

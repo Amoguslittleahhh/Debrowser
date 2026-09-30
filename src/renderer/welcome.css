@@ -99,7 +99,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: transparent;
   color: var(--text-dim);
 }
-.segmented button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.segmented button[aria-pressed="true"] { background: var(--accent-fill); color: #fff; }
 
 .choices { display: grid; gap: 8px; }
 .choices.four { grid-template-columns: repeat(4, 1fr); }
@@ -164,6 +164,7 @@ select {
 .toggle {
   display: flex;
   align-items: flex-start;
+  min-height: 24px;
   gap: 10px;
   margin: 12px 0 0;
   font-size: 14px;
@@ -212,7 +213,7 @@ footer { display: flex; align-items: center; gap: 8px; margin-top: 22px; }
   border-radius: var(--radius-pill);
   font-size: 14px;
 }
-.primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.primary { border: 1px solid var(--accent); background: var(--accent-fill); color: #fff; }
 .primary:hover { filter: brightness(1.08); }
 .primary.wide { width: 100%; padding: 10px; margin-top: 4px; }
 .secondary { border: 1px solid var(--border); background: transparent; }

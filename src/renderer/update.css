@@ -83,7 +83,7 @@
 /* Restart is the default and reads as it: filled, and what Enter does. Later is
    the quiet one, because choosing it costs nothing and undoes nothing. */
 .btn.primary {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
 }
 .btn.primary:hover { background: color-mix(in srgb, #fff 12%, var(--accent)); }
