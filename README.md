@@ -64,6 +64,12 @@ It cannot work from an AppImage at all — a file capability cannot be set on a
 file inside a read-only mount. The task manager says so by name rather than
 quietly doing nothing.
 
+### Licence
+
+Debrowser is open source under the [MIT licence](LICENSE). The components it
+bundles - Chromium and Electron, Tor, Mozilla's Readability, the Ghostery
+ad-blocking engine and the filter lists - keep their own licences.
+
 ### Code signing policy
 
 Free code signing provided by [SignPath.io](https://signpath.io), certificate
