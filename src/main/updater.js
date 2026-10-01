@@ -70,8 +70,10 @@ class Updater {
    *   light-themed on a dark window, in a different typeface, with the system's
    *   own buttons.
    */
-  constructor({ enabled = () => true, log = () => {}, onReady = () => {} }) {
+  constructor({ enabled = () => true, channel = () => 'stable', log = () => {}, onReady = () => {} }) {
     this.enabled = enabled;
+    /** 'stable', or 'beta' for releases published as prereleases. Read live. */
+    this.channel = channel;
     this.log = log;
     this.onReady = onReady;
     /** When the last check actually started, for MIN_AUTO_INTERVAL_MS. */
@@ -275,6 +277,8 @@ class Updater {
     this.lastCheckAt = Date.now();
     this.state = 'checking';
     this.error = null;
+    // The beta channel takes prereleases as well; stable never sees them.
+    this.impl.allowPrerelease = this.channel() === 'beta';
     this.impl.checkForUpdates().catch((err) => this.fail(err));
   }
 

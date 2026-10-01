@@ -1243,7 +1243,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         const kept = fs.readdirSync(d).some((f) => f.startsWith('spaces.json.corrupt-')) && !fs.existsSync(p.join(d, 'spaces.json'));
         const backedUp = backupProfile(d, '1.9.3') && fs.existsSync(p.join(d, 'Backups', '1.9.3', 'preferences.json'));
         const once = backupProfile(d, '1.9.3') === false;
-        return threw && kept && backedUp && once;
+        // Two failed starts of a new version offer the way back, and the restore puts the old files back.
+        const { StartupGuard } = require('./startup-guard');
+        const guard = new StartupGuard(d, '2.0.0');
+        guard.begin(); guard.begin();
+        const troubled = guard.troubled(guard.begin());
+        fs.writeFileSync(p.join(d, 'preferences.json'), '{"theme":"light"}');
+        guard.restore(guard.backup());
+        const restored = JSON.parse(fs.readFileSync(p.join(d, 'preferences.json'), 'utf8')).theme === 'dark' &&
+          fs.existsSync(p.join(d, 'Backups', '2.0.0-before-restore', 'preferences.json'));
+        return threw && kept && backedUp && once && troubled && restored;
       })();
       check('review fixes: private suffixes, malformed links, HTTPS-first re-upgrade, inherited pref keys, idle time, restore origin, profile safety',
         privateSites && decoded && upgradedTwice && prefsLoad && idleFromLeaving && restoreGuard && profile,

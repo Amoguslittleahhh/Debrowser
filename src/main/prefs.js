@@ -337,6 +337,8 @@ const SCHEMA = {
   // Off means the browser never reaches the network to look for a version,
   // which is a privacy choice as much as a bandwidth one.
   autoUpdate:   { def: true,     ok: (v) => typeof v === 'boolean' },
+  // 'beta' also takes releases published as prereleases, a few weeks early.
+  updateChannel: { def: 'stable', ok: (v) => v === 'stable' || v === 'beta' },
 
   /* --- Developer tools -------------------------------------------- */
   // Where the inspector goes. `right` and `bottom` host it in a view of the

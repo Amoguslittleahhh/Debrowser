@@ -49,6 +49,15 @@ on:
         type: boolean
         required: false
         default: false
+      beta:
+        description: 'Publish as a beta (a prerelease): only the Beta update channel is offered it.'
+        type: boolean
+        required: false
+        default: false
+      rollout:
+        description: 'Offer the update to this percentage of users at first (1-100). Raise it later by editing stagingPercentage in latest*.yml on the release.'
+        required: false
+        default: '100'
 
 # Read-only by default: the build runs dependency install scripts, and a
 # compromised one must not find a token that can push tags, edit releases or
@@ -466,6 +475,25 @@ jobs:
       # The checksums of every file attached, for the notes' footer - and
       # attested, so anyone can check a download was built by this workflow
       # from this commit (`gh attestation verify <file> -R <repo>`).
+      # A staged rollout: electron-updater offers the update to this share of
+      # installs (each machine draws its own number), so a bad release reaches
+      # a few people rather than everyone. 100 leaves the files untouched.
+      - name: Staged rollout
+        env:
+          ROLLOUT: ${{ github.event.inputs.rollout || '100' }}
+        run: |
+          if ! [[ "$ROLLOUT" =~ ^[0-9]+$ ]] || [ "$ROLLOUT" -lt 1 ] || [ "$ROLLOUT" -gt 100 ]; then
+            echo "::error::rollout must be a whole number from 1 to 100, not '$ROLLOUT'"; exit 1
+          fi
+          if [ "$ROLLOUT" -lt 100 ]; then
+            for f in artifacts/latest*.yml; do
+              [ -f "$f" ] || continue
+              sed -i '/^stagingPercentage:/d' "$f"
+              echo "stagingPercentage: $ROLLOUT" >> "$f"
+              echo "$f: offered to $ROLLOUT% of installs"
+            done
+          fi
+
       - name: Checksums
         run: |
           (cd artifacts && sha256sum * > ../SHA256SUMS.txt)
@@ -513,6 +541,10 @@ jobs:
           # by then - which need not be what the installers were built from.
           target_commitish: ${{ github.sha }}
           draft: ${{ github.event.inputs.draft == 'true' }}
+          # A beta is a prerelease: GitHub's "latest" (and so the Stable
+          # channel) stays on the last stable version.
+          prerelease: ${{ github.event.inputs.beta == 'true' }}
+          make_latest: ${{ github.event.inputs.beta == 'true' && 'false' || 'true' }}
           body_path: RELEASE_NOTES.md
           files: |
             artifacts/*

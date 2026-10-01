@@ -30,6 +30,8 @@
 - **Windows: a jump list on the taskbar button.** Right-click Debrowser's taskbar button for "New tab" and "New private window", whether or not it is already open.
 - **Download progress on the taskbar button.** While files download, Debrowser's taskbar button fills with their progress, as Windows apps do - on macOS and Linux docks that show it too.
 - **Follow your system's accent colour.** A new "System" swatch under Settings → Appearance takes the accent from Windows' personalisation settings (or macOS's) and follows it when you change it there.
+- **A Beta update channel.** Settings → Updates can switch to Beta, to get each release a few weeks before everyone else; Stable never sees a beta.
+- **A way back from an update that won't start.** If a new version fails to start twice in a row, the next start offers to put your settings, tabs and spaces back as they were before the update, or to download the previous version again.
 
 ### Improved
 

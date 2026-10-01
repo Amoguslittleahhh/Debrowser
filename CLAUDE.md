@@ -68,6 +68,14 @@ environment the release workflow sets:
 
 Run locally without those variables and it prints the notes and credit alone.
 
+### Betas and staged rollouts
+
+A beta is a release run with `beta: true`: published as a prerelease, offered
+only to the Beta update channel, and never marked Latest. `rollout` (1-100)
+offers a release to that share of installs at first; raise it by editing
+`stagingPercentage` in the release's `latest*.yml`, or remove the line to
+offer it to everyone.
+
 ### Do not hard-wrap changelog prose
 
 One paragraph or bullet is one line, however long. The rest of this repository

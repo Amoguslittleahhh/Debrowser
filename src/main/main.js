@@ -30,6 +30,7 @@ const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
 const WhatsNew = require('./whats-new');
 const { backupProfile } = require('./store-file');
+const { StartupGuard } = require('./startup-guard');
 const { TabGroups } = require('./tab-groups');
 const { commandList } = require('./commands');
 const { Spaces, COLOURS } = require('./spaces');
@@ -301,6 +302,9 @@ if (!INCOGNITO && !OFFLINE_MODE) {
   const seen = earlyPrefs.get('seenVersion');
   if (seen && seen !== app.getVersion()) backupProfile(app.getPath('userData'), seen, log);
 }
+// Starts of this version that never got going (startup-guard.js).
+const startupGuard = !INCOGNITO && !OFFLINE_MODE ? new StartupGuard(app.getPath('userData'), app.getVersion(), log) : null;
+const failedStarts = startupGuard ? startupGuard.begin() : 0;
 if (earlyPrefs.get('hardwareAcceleration') === false) {
   app.disableHardwareAcceleration();
   log('config', 'hardware acceleration disabled by preference');
@@ -1037,6 +1041,11 @@ function main() {
   }
 
   app.whenReady().then(() => {
+    // This version has failed to start twice running: the way back, before
+    // anything else can fail the same way (startup-guard.js).
+    if (startupGuard && startupGuard.troubled(failedStarts)) offerWayBack();
+    if (startupGuard) startupGuard.settle();
+
     // No application menu.
     //
     // Electron installs a default File/Edit/View/Window menu on every app that
@@ -1643,6 +1652,7 @@ function main() {
         // Read live rather than captured, so turning it off in Settings takes
         // effect at the next check instead of at the next launch.
         enabled: () => prefs.get('autoUpdate'),
+        channel: () => prefs.get('updateChannel'),
         log,
         // The browser draws its own prompt rather than asking the system for
         // one: a Win32 message box in the middle of a window that draws
@@ -3616,6 +3626,42 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
  * pages, or null for anything else - which includes a website sitting in a
  * renderer that used to be one of our pages.
  */
+/**
+ * Debrowser has not started properly the last few times since updating. Asked
+ * with the system's own dialog, since our window may be what is failing.
+ */
+function offerWayBack() {
+  const backup = startupGuard.backup();
+  const buttons = [
+    ...(backup ? [`Restore my settings from ${backup.version}`, `Download ${backup.version} again`] : []),
+    'Keep trying'
+  ];
+  const choice = dialog.showMessageBoxSync({
+    type: 'warning',
+    title: 'Debrowser',
+    message: `Debrowser ${app.getVersion()} has not started properly the last ${failedStarts} times.`,
+    detail: backup
+      ? `Your settings, tabs and spaces from before the update to ${app.getVersion()} were saved. Putting them back often fixes this; if it does not, the previous version can be installed again over this one. Nothing is deleted either way.`
+      : 'If it keeps happening, please report it - Copy version info in the menu says what we need to know.',
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+    noLink: true
+  });
+  if (!backup) return;
+  if (choice === 0) {
+    try {
+      startupGuard.restore(backup);
+      // Started again on the restored files: what this run already loaded
+      // would otherwise be saved back over them.
+      app.relaunch();
+      app.exit(0);
+    } catch (err) { log(`restore failed: ${err.message}`); }
+  } else if (choice === 1) {
+    electronShell.openExternal(`https://github.com/amoguslittleahhh/debrowser/releases/tag/v${backup.version}`).catch(() => {});
+  }
+}
+
 /** "today", "yesterday", or "27 Sep": how a person says when, not a date format. */
 function whenDay(ms) {
   const day = (t) => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };

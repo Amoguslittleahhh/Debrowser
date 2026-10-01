@@ -554,6 +554,16 @@ const SECTIONS = {
       unavailable: (state) => (state.updates && state.updates.available === false
         ? sentence(state.updates.reason || 'Updates are not available for this copy.') : ''),
       type: 'checkbox'
+    },
+    {
+      key: 'updateChannel',
+      label: 'Update channel',
+      hint: 'Beta gets each release a few weeks before everyone else, so you can try what is new - and tell us when something is not right.',
+      type: 'select',
+      options: [
+        { value: 'stable', name: 'Stable' },
+        { value: 'beta', name: 'Beta' }
+      ]
     }
   ]
 };
