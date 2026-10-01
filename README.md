@@ -35,10 +35,14 @@ push, or on demand from the Actions tab, and attached to the release.
 | **Linux** | `Debrowser-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
 | **Debian/Ubuntu** | `Debrowser-<version>-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
 
-**None of it is signed.** Windows SmartScreen shows "Windows protected your PC"
-(More info → Run anyway) and macOS Gatekeeper refuses the first launch
-(right-click → Open, once). Those warnings are accurate: no certificate vouches
-for these binaries.
+**Windows builds are signed through the SignPath Foundation** - free code
+signing provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org) - once signing is switched on for
+a release; until then, and on macOS, the builds are unsigned. Windows
+SmartScreen then shows "Windows protected your PC" (More info → Run anyway) and
+macOS Gatekeeper refuses the first launch (right-click → Open, once). Those
+warnings are accurate: no certificate vouches for an unsigned binary. See the
+[code signing policy](#code-signing-policy) below.
 
 The build is wired for signing — set two repository secrets and the release
 workflow signs, with no code change. Getting the certificate is the hard part,
@@ -57,6 +61,30 @@ sudo setcap cap_sys_nice+ep /opt/Debrowser/resources/tools/mem-trim
 It cannot work from an AppImage at all — a file capability cannot be set on a
 file inside a read-only mount. The task manager says so by name rather than
 quietly doing nothing.
+
+### Code signing policy
+
+Free code signing provided by [SignPath.io](https://signpath.io), certificate
+by [SignPath Foundation](https://signpath.org).
+
+- **What is signed:** only the Windows installers and the portable build that
+  `.github/workflows/release.yml` builds from this repository's source, on
+  GitHub's own runners. Nothing built elsewhere, and nothing from another
+  project, is signed with this certificate.
+- **Committers and reviewers:** [Amoguslittleahhh](https://github.com/amoguslittleahhh)
+  (owner). Changes from anyone else arrive as pull requests and are reviewed
+  before they are merged.
+- **Approvers:** [Amoguslittleahhh](https://github.com/amoguslittleahhh)
+  approves each signing request, by hand, for each release.
+- **Privacy:** Debrowser sends nothing about you or your browsing anywhere by
+  itself. The connections it makes on its own are to fetch: updates (from this
+  repository's GitHub releases; can be turned off in Settings), the ad-blocking
+  and dangerous-site lists (the lists' own servers; no record of what you
+  visit), and secure DNS (the provider chosen in Settings). Checking passwords
+  against Have I Been Pwned happens only when you ask, and sends only the first
+  five characters of a scrambled form of each password. Private windows connect
+  through Tor. Crash reports are never sent automatically - you see a prefilled
+  GitHub issue and choose whether to submit it.
 
 ### Check the build you downloaded
 
