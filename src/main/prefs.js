@@ -15,6 +15,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 const path = require('path');
 const { app } = require('electron');
 
@@ -420,7 +421,7 @@ class Prefs {
 
     let raw;
     try {
-      raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      raw = readJson(this.file);
     } catch (err) {
       // A missing file is the ordinary first run. Anything else is worth one
       // line in the log, and then the defaults - never a failure to start.

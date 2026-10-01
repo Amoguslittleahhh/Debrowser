@@ -40,6 +40,7 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 const { TabGroups, GROUP_ID } = require('./tab-groups');
+const { setAside } = require('./set-aside');
 
 const FILE = 'session.json';
 
@@ -101,6 +102,8 @@ class Session {
       parsed = JSON.parse(raw);
     } catch {
       this.log('session', 'the saved session is not readable; starting fresh');
+      // Kept, not overwritten by the fresh one: it is every tab someone had open.
+      setAside(this.file, (line) => this.log('session', line));
       return { tabs: [], activeIndex: 0 };
     }
 

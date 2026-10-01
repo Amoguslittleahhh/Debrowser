@@ -17,6 +17,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 const path = require('path');
 
 const HOME = 'home';
@@ -44,7 +45,7 @@ class Spaces {
   load() {
     if (!this.file) return;
     let parsed;
-    try { parsed = JSON.parse(fs.readFileSync(this.file, 'utf8')); } catch { return; }
+    try { parsed = readJson(this.file); } catch { return; }
     if (!parsed || !Array.isArray(parsed.spaces)) return;
     const seen = new Set();
     const list = [];

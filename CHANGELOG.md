@@ -48,6 +48,7 @@
 - **Easier to read and to hit, in every design and both themes.** All of Debrowser's own text now meets the 4.5:1 contrast that accessibility guidelines ask for - primary buttons, links and labels in your accent colour, whichever one you choose, plus warnings, errors and the green and amber status text in the light theme - and none of it is smaller than 11px. Small controls grew to at least 24 pixels to click without changing how they look: the mute button on a tab, the tab-group label, the download panel's links, the space colour dots and the transparency slider.
 - **Reduced motion covers scrolling too.** With your system set to reduce motion, Settings' section list and reader view's read-aloud jump instead of scrolling smoothly, as animations already did.
 - **Windows High Contrast themes are supported.** In a High Contrast theme, where Windows repaints everything in a few strong colours, keyboard focus is now drawn as a clear outline (it was invisible), the tab in front, the chosen option and the memory meter are marked in the theme's own highlight colour, and dropdowns keep their arrow.
+- **Your settings can't be lost to a damaged file.** If a settings, session, space, download or other profile file is ever damaged, Debrowser keeps the damaged copy beside it instead of quietly saving fresh defaults over it, and before a new version first runs it backs up the profile as the previous version left it, in a Backups folder, so an update that went wrong can be undone with nothing lost.
 
 ### Fixed
 

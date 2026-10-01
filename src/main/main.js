@@ -29,6 +29,7 @@ const { LinkCleaner } = require('./link-cleaner');
 const { Threats } = require('./threats');
 const { Receipts } = require('./receipts');
 const WhatsNew = require('./whats-new');
+const { backupProfile } = require('./store-file');
 const { TabGroups } = require('./tab-groups');
 const { commandList } = require('./commands');
 const { Spaces, COLOURS } = require('./spaces');
@@ -293,6 +294,13 @@ if (!INCOGNITO && (SMOKE_TEST || SPEED_TEST || (argv.includes('--bench-test') &&
 const earlyPrefs = INCOGNITO
   ? new Prefs(log, { file: path.join(incognitoCtx.normalUserData, 'preferences.json'), readOnly: true })
   : new Prefs(log);
+// Before this version writes to the profile for the first time, a copy of it
+// as the last version left it (store-file.js): what an update that goes wrong
+// can be rolled back to. Not in a private window, or a test run.
+if (!INCOGNITO && !OFFLINE_MODE) {
+  const seen = earlyPrefs.get('seenVersion');
+  if (seen && seen !== app.getVersion()) backupProfile(app.getPath('userData'), seen, log);
+}
 if (earlyPrefs.get('hardwareAcceleration') === false) {
   app.disableHardwareAcceleration();
   log('config', 'hardware acceleration disabled by preference');

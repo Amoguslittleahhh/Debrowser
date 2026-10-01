@@ -26,6 +26,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -63,7 +64,7 @@ class Vault {
   load() {
     if (!this.file) return null;
     try {
-      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      const raw = readJson(this.file);
       if (raw && typeof raw.salt === 'string' && typeof raw.hash === 'string') return raw;
     } catch { /* none set, or unreadable: treated as none */ }
     return null;

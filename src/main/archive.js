@@ -11,6 +11,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 
 const KEPT = 200;
 
@@ -21,7 +22,7 @@ class Archive {
     this.items = [];
     if (file) {
       try {
-        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const parsed = readJson(file);
         if (Array.isArray(parsed)) {
           this.items = parsed.filter((e) => e && typeof e.url === 'string' && /^https?:/i.test(e.url)).slice(0, KEPT)
             .map((e) => ({ url: e.url, title: String(e.title || '').slice(0, 300), spaceId: String(e.spaceId || 'home'), at: Number(e.at) || 0 }));

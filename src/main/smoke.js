@@ -1230,9 +1230,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         const result = fake.applySuspendedPageState();
         return result === 'done' && sent === 0 && fake.suspendedState.state === null;
       })();
-      check('review fixes: private suffixes, malformed links, HTTPS-first re-upgrade, inherited pref keys, idle time, restore origin',
-        privateSites && decoded && upgradedTwice && prefsLoad && idleFromLeaving && restoreGuard,
-        JSON.stringify({ privateSites, decoded, upgradedTwice, prefsLoad, idleFromLeaving, restoreGuard }));
+      // A damaged store is moved aside, not overwritten; a new version backs the profile up first.
+      const profile = (() => {
+        const fs = require('fs');
+        const p = require('path');
+        const { readJson, backupProfile } = require('./store-file');
+        const d = fs.mkdtempSync(p.join(require('os').tmpdir(), 'profile-'));
+        fs.writeFileSync(p.join(d, 'spaces.json'), '{"spaces": [');
+        fs.writeFileSync(p.join(d, 'preferences.json'), '{"theme":"dark"}');
+        let threw = false;
+        try { readJson(p.join(d, 'spaces.json')); } catch { threw = true; }
+        const kept = fs.readdirSync(d).some((f) => f.startsWith('spaces.json.corrupt-')) && !fs.existsSync(p.join(d, 'spaces.json'));
+        const backedUp = backupProfile(d, '1.9.3') && fs.existsSync(p.join(d, 'Backups', '1.9.3', 'preferences.json'));
+        const once = backupProfile(d, '1.9.3') === false;
+        return threw && kept && backedUp && once;
+      })();
+      check('review fixes: private suffixes, malformed links, HTTPS-first re-upgrade, inherited pref keys, idle time, restore origin, profile safety',
+        privateSites && decoded && upgradedTwice && prefsLoad && idleFromLeaving && restoreGuard && profile,
+        JSON.stringify({ privateSites, decoded, upgradedTwice, prefsLoad, idleFromLeaving, restoreGuard, profile }));
     }
 
     check('Copy version info puts the versions and system on the clipboard',

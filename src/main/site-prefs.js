@@ -19,6 +19,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 const path = require('path');
 const { setAside } = require('./set-aside');
 
@@ -69,7 +70,7 @@ class SitePrefs {
     if (!this.file) return;
     let parsed;
     try {
-      parsed = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      parsed = readJson(this.file);
     } catch (err) {
       if (err.code !== 'ENOENT') {
         this.log(`site prefs: ${this.file} unreadable, starting empty (${err.message})`);

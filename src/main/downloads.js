@@ -37,6 +37,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 const path = require('path');
 const { net } = require('electron');
 
@@ -570,7 +571,7 @@ class DownloadManager {
     if (!this.store) return;
     let records;
     try {
-      records = JSON.parse(fs.readFileSync(this.store, 'utf8'));
+      records = readJson(this.store);
     } catch {
       return;
     }

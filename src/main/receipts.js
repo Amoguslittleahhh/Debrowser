@@ -18,6 +18,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 
 const DAYS = 7;
 const KEYS = ['freedMB', 'slept', 'blocked', 'cleaned', 'stopped'];
@@ -44,7 +45,7 @@ class Receipts {
   load() {
     if (!this.file) return;
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      const parsed = readJson(this.file);
       for (const [date, totals] of Object.entries(parsed || {})) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !totals || typeof totals !== 'object') continue;
         this.days.set(date, Object.fromEntries(KEYS.map((k) => [k, Math.max(0, Number(totals[k]) || 0)])));

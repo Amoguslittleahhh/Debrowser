@@ -21,6 +21,7 @@
  */
 
 const fs = require('fs');
+const { readJson } = require('./store-file');
 const { setAside } = require('./set-aside');
 const path = require('path');
 const { originOf } = require('./credentials');
@@ -77,7 +78,7 @@ class SitePermissions {
     if (!this.file) return;
     let parsed;
     try {
-      parsed = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      parsed = readJson(this.file);
     } catch (err) {
       if (err.code !== 'ENOENT') {
         this.log(`site permissions: ${this.file} unreadable, starting empty (${err.message})`);
