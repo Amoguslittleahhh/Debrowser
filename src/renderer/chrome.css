@@ -1980,7 +1980,7 @@ body[data-band="true"][data-layout="left"] .toolbar {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 140ms ease;
+  transition: opacity var(--fast) var(--ease);
   flex-wrap: nowrap;
   height: 40px;
   row-gap: 0;
@@ -2237,7 +2237,17 @@ body[data-layout="left"] .space-chip { align-self: stretch; max-width: none; mar
 }
 .tab-group:hover { filter: brightness(1.08); }
 .tab-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tab-group.folded::after { content: ' ›'; }
+.tab-group.folded::after {
+  /* Drawn, not a › glyph, which every font puts at a different height. */
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin: 0 1px 1px 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
 .tab-group-name {
   width: 96px;
   height: 18px;
