@@ -12,7 +12,7 @@
  */
 
 const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, powerMonitor,
-        shell: electronShell, net: electronNet } = require('electron');
+        systemPreferences, shell: electronShell, net: electronNet } = require('electron');
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
@@ -504,6 +504,8 @@ function main() {
   const browsingSetup = [];
   let browsingReady = false;
   let spaces = null;
+  /** The system's accent colour, for Settings' "System" swatch; refreshed when it changes. */
+  let systemAccentNow = systemAccent();
   // Tab groups (a Lab); saved with the session, through `TabGroups.current`.
   const tabGroups = new TabGroups();
   TabGroups.current = tabGroups;
@@ -596,6 +598,7 @@ function main() {
     ...(receipts ? { receipt: receipts.today() } : {}),
     ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {}),
     ...(prefs && prefs.get('labTabGroups') === true ? { groups: tabGroups.describe() } : {}),
+    ...(!INCOGNITO && systemAccentNow ? { systemAccent: systemAccentNow } : {}),
     ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {})
   });
 
@@ -1460,6 +1463,21 @@ function main() {
     // there is no way to ask it for more - so `will-download` is cancelled and
     // the URL is handed to our manager. Cancelled rather than left running: two
     // downloads of the same file would race for the same name on disk.
+    /*
+     * Downloads on the taskbar button, as Windows apps show them (and the
+     * macOS dock and Linux launchers that support it): the bytes of every
+     * running download together, a moving bar when a size is unknown, and
+     * nothing once they are all done.
+     */
+    const taskbarProgress = () => {
+      if (!shell || shell.window.isDestroyed() || !downloads) return;
+      // The toolbar button's own summary: no disk checks, at four a second.
+      const { active, progress } = downloads.summary();
+      if (!active) shell.window.setProgressBar(-1);
+      else if (progress === null) shell.window.setProgressBar(2, { mode: 'indeterminate' });
+      else shell.window.setProgressBar(progress, { mode: 'normal' });
+    };
+
     downloads = new DownloadManager({
       dir: () => downloadDir(prefs),
       // The list survives a restart - but not from a private window, or a test.
@@ -1482,7 +1500,7 @@ function main() {
       // sign-in still fetches as the signed-in user.
       session: session.fromPartition(BROWSING_PARTITION),
       log,
-      onChange: () => publish()
+      onChange: () => { publish(); taskbarProgress(); }
     });
     // So the state broadcast can carry the count and progress the toolbar
     // button draws, without carrying the list itself.
@@ -1541,6 +1559,33 @@ function main() {
     // Links the system handed over at launch - Debrowser as the default
     // browser, a link clicked in another app - open after that, in front.
     if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) openExternal(url);
+    // The taskbar button's jump list on Windows - right-click it, or drag up
+    // on it - as every Windows browser has: a new tab and a private window,
+    // without opening the browser first. Each relaunches with a flag, which a
+    // running Debrowser receives as a second launch (below).
+    if (process.platform === 'win32' && app.isPackaged && !INCOGNITO) {
+      try {
+        app.setUserTasks([
+          { program: process.execPath, arguments: '--new-tab', iconPath: process.execPath, iconIndex: 0,
+            title: 'New tab', description: 'Open a new tab' },
+          { program: process.execPath, arguments: '--new-private-window', iconPath: process.execPath, iconIndex: 0,
+            title: 'New private window', description: 'Browse through Tor, keeping nothing' }
+        ]);
+      } catch (err) { log(`jump list: ${err.message}`); }
+    }
+    if (!INCOGNITO && process.argv.includes('--new-private-window')) runCommand('new-incognito-window');
+    // The system accent, followed if Settings says so: now, and whenever it is
+    // changed in Windows' personalisation settings.
+    const followAccent = () => {
+      systemAccentNow = systemAccent();
+      if (!INCOGNITO && systemAccentNow && prefs.get('accentFromSystem') && prefs.get('accent') !== systemAccentNow) {
+        runCommand('set-pref', { key: 'accent', value: systemAccentNow, fromSystem: true });
+      } else publish();
+    };
+    if (systemAccentNow) {
+      followAccent();
+      try { systemPreferences.on('accent-color-changed', followAccent); } catch { /* not on this system */ }
+    }
     shell.layout();
     // Tabs unopened for the chosen number of days go to the archive, checked
     // a minute after start and hourly after (archive.js). Off by default.
@@ -1663,6 +1708,12 @@ function main() {
     // A second Ctrl+Shift+N reaches the incognito process that is already
     // running, and means what it says: another private tab.
     if (INCOGNITO && tabs) tabs.create({ url: pages.NEW_TAB_URL });
+    // The jump list's two tasks, arriving as a second launch.
+    if (!INCOGNITO && tabs && (secondArgv || []).includes('--new-private-window')) {
+      runCommand('new-incognito-window');
+      return;
+    }
+    if (!INCOGNITO && tabs && (secondArgv || []).includes('--new-tab')) runCommand('new-tab');
     // A link opened while Debrowser runs arrives as a second launch.
     let quick = false;
     if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [])) quick = openExternal(url) || quick;
@@ -3034,6 +3085,18 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'set-pref': {
+        // Following the system's accent: switched on, the colour is taken now;
+        // a colour chosen by hand switches it off.
+        if (payload?.key === 'accentFromSystem' && payload.value === true) {
+          const colour = systemAccent();
+          if (!colour) break;
+          prefs.set('accentFromSystem', true);
+          runCommand('set-pref', { key: 'accent', value: colour, fromSystem: true });
+          break;
+        }
+        if (payload?.key === 'accent' && !payload.fromSystem && prefs.get('accentFromSystem')) {
+          prefs.set('accentFromSystem', false);
+        }
         if (!prefs.set(payload?.key, payload?.value)) break;
         applyPrefs(cfg, prefs, log);
         shell.applyWindowPrefs();
@@ -4731,6 +4794,20 @@ function firstTabLoaded(tab) {
  * a launch argument is outside input, and a `javascript:` or custom-scheme
  * URL has no business arriving this way.
  */
+/**
+ * The accent colour the system is set to - Windows' personalisation colour,
+ * or macOS's - as '#rrggbb', or null where there is none to follow (Linux).
+ */
+function systemAccent() {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return null;
+  try {
+    const c = systemPreferences.getAccentColor();
+    return /^[0-9a-f]{6}/i.test(c || '') ? `#${c.slice(0, 6).toLowerCase()}` : null;
+  } catch {
+    return null;
+  }
+}
+
 function launchUrls(args) {
   const out = [];
   for (const arg of args.slice(1)) {

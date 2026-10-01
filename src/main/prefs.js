@@ -72,6 +72,8 @@ const SCHEMA = {
   hiddenTiles:  { def: [], ok: (v) => Array.isArray(v) && v.length <= 200 &&
                   v.every((o) => typeof o === 'string' && o.length < 300) },
   accent:       { def: '#2f857b', ok: (v) => /^#[0-9a-f]{6}$/i.test(v) },
+  // Take the accent from the system (Windows, macOS) and follow it when it changes.
+  accentFromSystem: { def: false, ok: (v) => typeof v === 'boolean' },
   tabWidth:     { def: 'roomy',  ok: (v) => ['roomy', 'compact'].includes(v) },
 
   /**

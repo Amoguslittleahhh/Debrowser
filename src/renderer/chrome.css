@@ -2261,3 +2261,15 @@ body[data-layout="left"] .space-chip { align-self: stretch; max-width: none; mar
 body[data-layout="left"] .tab.group-start { flex-wrap: wrap; height: auto; padding-top: 6px; }
 body[data-layout="left"] .tab.group-start .tab-group { flex-basis: 100%; max-width: none; margin-bottom: 4px; text-align: left; }
 body[data-layout="left"] .tab.grouped .tab-group-bar { left: 0; right: auto; top: 6px; bottom: 6px; width: 2px; height: auto; }
+
+/* Windows High Contrast (see theme.css): what the strip says with colour and
+   shadow alone - which tab is in front, how full the memory meter is, a tab's
+   tier - said with the system's colours instead. */
+@media (forced-colors: active) {
+  .tab.active { outline: 2px solid Highlight; outline-offset: -2px; }
+  .meter-fill { forced-color-adjust: none; background: Highlight; }
+  .meter-bar { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }
+  .tier { forced-color-adjust: none; background: CanvasText; }
+  .tier[data-tier="discarded"] { background: Canvas; box-shadow: none; border: 1px solid CanvasText; }
+  .tab-group { border: 1px solid CanvasText; }
+}

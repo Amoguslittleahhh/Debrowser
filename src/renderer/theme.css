@@ -734,3 +734,43 @@ select {
   background-repeat: no-repeat;
   background-position: right 9px center;
 }
+
+/*
+ * Windows High Contrast themes (and any forced-colours mode).
+ *
+ * The browser repaints every page in the user's few system colours, which is
+ * the point - but it also drops box-shadows and background images, and this
+ * design leans on both: the focus ring is a shadow, controls are told apart
+ * by a tint, the dropdown chevron is an image. Without this block a keyboard
+ * user in High Contrast could not see where focus was. So: a real outline in
+ * the system's highlight colour, borders where tints were, and the chevron
+ * drawn again from the text colour.
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+  button, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea {
+    border: 1px solid ButtonText;
+  }
+  button:disabled, select:disabled, input:disabled { border-color: GrayText; color: GrayText; }
+  [aria-pressed="true"], [aria-selected="true"], [aria-current="true"], .current {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  select {
+    forced-color-adjust: none;
+    background-color: Field;
+    color: FieldText;
+    background-image: linear-gradient(45deg, transparent 50%, FieldText 50%),
+      linear-gradient(135deg, FieldText 50%, transparent 50%);
+    background-position: right 13px center, right 9px center;
+    background-size: 4px 4px, 4px 4px;
+  }
+  /* A colour that is the choice itself - an accent, a space, a group - keeps it. */
+  .swatch, .space-swatches button, .tab-group, .tab-group-bar, .brand-dot {
+    forced-color-adjust: none;
+  }
+  ::selection { background: Highlight; color: HighlightText; }
+}

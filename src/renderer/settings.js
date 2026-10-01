@@ -984,12 +984,25 @@ function buildControl(spec) {
         wrap.append(button);
         return { button, value };
       });
+      // The system's own accent - Windows' personalisation colour, or macOS's -
+      // followed as it changes. Shown only where there is one (systemAccent on
+      // the state broadcast), in that colour.
+      const system = document.createElement('button');
+      system.className = 'swatch swatch-system';
+      system.id = 'accent-system';
+      system.hidden = true;
+      system.title = 'Your system’s accent colour';
+      system.setAttribute('aria-label', 'System accent colour');
+      system.setAttribute('aria-pressed', 'false');
+      system.addEventListener('click', () => api.send('set-pref', { key: 'accentFromSystem', value: true }));
+      wrap.append(system);
       return {
         node: wrap,
         input: null,
         write(value) {
+          const fromSystem = system.getAttribute('aria-pressed') === 'true';
           for (const { button, value: own } of buttons) {
-            button.setAttribute('aria-pressed', String(own === value));
+            button.setAttribute('aria-pressed', String(!fromSystem && own === value));
           }
         }
       };
@@ -1275,6 +1288,15 @@ function passcodeRow(status) {
 /** The bookmarks revision the list was last drawn at. */
 let bookmarksShown = null;
 
+/** The System accent swatch: there when the system has an accent, pressed while followed. */
+function renderSystemAccent(state) {
+  const system = document.getElementById('accent-system');
+  if (!system) return;
+  system.hidden = !state.systemAccent;
+  if (state.systemAccent) system.style.background = state.systemAccent;
+  system.setAttribute('aria-pressed', String(Boolean(state.prefs && state.prefs.accentFromSystem)));
+}
+
 api.onState((state) => {
   applyThemePrefs(state.prefs);
   renderUpdateState(state.updates);
@@ -1298,6 +1320,7 @@ api.onState((state) => {
       bookmarksShown = state.bookmarksRevision;
     }
   }
+  renderSystemAccent(state);
   for (const [key, control] of controls) {
     control.write(state.prefs[key]);
     if (control.spec?.unavailable) markUnavailable(control, control.spec.unavailable(state));

@@ -278,6 +278,8 @@ const THEME = process.argv.find((a) => a.startsWith('--theme='));
 // `--audit` measures each page against tools/audit-probe.js instead of only
 // photographing it, and exits non-zero when anything fails.
 const AUDIT = process.argv.includes('--audit');
+// `--forced-colors` emulates a Windows High Contrast theme.
+const FORCED = process.argv.includes('--forced-colors');
 const auditFindings = [];
 if (THEME) STATE.prefs.theme = THEME.slice(8);
 // `--strip=#rrggbb` paints the tab strip, which is where a colour chosen for
@@ -362,6 +364,17 @@ app.whenReady().then(async () => {
     // The promise rejects spuriously on some of these while the page loads
     // perfectly well, so the paint is what is waited on, not the promise.
     win.loadFile(path.join(R, shot.file), opts).catch(() => {});
+    if (FORCED) {
+      try {
+        win.webContents.debugger.attach('1.3');
+        await Promise.race([
+          win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+            features: [{ name: 'forced-colors', value: 'active' }, { name: 'prefers-color-scheme', value: 'dark' }]
+          }),
+          new Promise((r) => setTimeout(r, 2000))
+        ]);
+      } catch (err) { console.log('forced colours not emulated:', err.message); }
+    }
     await new Promise((r) => setTimeout(r, 1400));
 
     // The viewport is asserted, not assumed. `force-device-scale-factor` was in
@@ -384,7 +397,7 @@ app.whenReady().then(async () => {
         win.webContents.capturePage(),
         new Promise((_r, reject) => setTimeout(() => reject(new Error('capture timed out')), 8000))
       ]);
-      const suffix = THEME ? `-${STATE.prefs.theme}` : '';
+      const suffix = (THEME ? `-${STATE.prefs.theme}` : '') + (FORCED ? '-hc' : '');
       fs.writeFileSync(path.join(OUT, `${shot.name}${suffix}.png`), img.toPNG());
       console.log('shot', shot.name, img.getSize().width + 'x' + img.getSize().height);
     } catch (err) {

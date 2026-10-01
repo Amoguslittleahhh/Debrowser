@@ -692,3 +692,20 @@ input[type="range"]:disabled { opacity: 0.4; }
   box-shadow: 0 0 0 1px var(--border);
 }
 .space-swatches button[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--text); }
+
+/* Follows the system's accent: a ring inside says "automatic". */
+.swatch-system { position: relative; margin-left: 6px; }
+.swatch-system::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  border: 1.5px solid rgb(255 255 255 / 0.85);
+}
+
+/* High Contrast: the range track and thumb in system colours (theme.css). */
+@media (forced-colors: active) {
+  input[type="range"] { forced-color-adjust: none; }
+  input[type="range"]::-webkit-slider-runnable-track { background: CanvasText; }
+  input[type="range"]::-webkit-slider-thumb { background: Canvas; border-color: Highlight; }
+}

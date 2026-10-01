@@ -27,6 +27,9 @@
 - **PDFs open in the browser.** A link to a PDF shows it in a tab, in Chromium's own viewer, with its page thumbnails, search, zoom, rotate, print and download buttons, instead of downloading the file. PDF files on your computer can be opened with Debrowser too, and it is offered for them once it is your default browser.
 - **A welcome tour on first start.** A new install opens on a short tour: bring your bookmarks over from Chrome, Edge, Brave, Firefox or a bookmarks file; pick the theme, design, accent, where the tabs go and the bookmarks bar, with the browser changing around the page as you click; choose the search engine, whether tabs reopen at start, the memory meter and automatic updates; make Debrowser your default browser; and a quick look at what is different. Every step can be skipped, and the tour is in Settings to take again. Existing installs are not interrupted by it.
 - **Debrowser can be your default browser.** The Windows installer now registers it as a web browser, so it is listed in Windows' Default apps; macOS and Linux know it handles web links too. Settings shows whether it is the default, with a button to make it so. Links from other apps open in a new tab, whether or not Debrowser is already running.
+- **Windows: a jump list on the taskbar button.** Right-click Debrowser's taskbar button for "New tab" and "New private window", whether or not it is already open.
+- **Download progress on the taskbar button.** While files download, Debrowser's taskbar button fills with their progress, as Windows apps do - on macOS and Linux docks that show it too.
+- **Follow your system's accent colour.** A new "System" swatch under Settings → Appearance takes the accent from Windows' personalisation settings (or macOS's) and follows it when you change it there.
 
 ### Improved
 
@@ -44,6 +47,7 @@
 - **Smaller touches:** the new tab page's figures for the day sit centred under the search box, reader view puts the author and reading time on one line, and the safety check says the lists were updated "today" or "yesterday" rather than giving a date.
 - **Easier to read and to hit, in every design and both themes.** All of Debrowser's own text now meets the 4.5:1 contrast that accessibility guidelines ask for - primary buttons, links and labels in your accent colour, whichever one you choose, plus warnings, errors and the green and amber status text in the light theme - and none of it is smaller than 11px. Small controls grew to at least 24 pixels to click without changing how they look: the mute button on a tab, the tab-group label, the download panel's links, the space colour dots and the transparency slider.
 - **Reduced motion covers scrolling too.** With your system set to reduce motion, Settings' section list and reader view's read-aloud jump instead of scrolling smoothly, as animations already did.
+- **Windows High Contrast themes are supported.** In a High Contrast theme, where Windows repaints everything in a few strong colours, keyboard focus is now drawn as a clear outline (it was invisible), the tab in front, the chosen option and the memory meter are marked in the theme's own highlight colour, and dropdowns keep their arrow.
 
 ### Fixed
 
