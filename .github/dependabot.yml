@@ -1,0 +1,22 @@
+# Weekly pull requests for out-of-date dependencies and actions. Electron is
+# left out: it comes from castLabs' Widevine builds, which electron-watch.yml
+# follows, and a Dependabot bump to upstream Electron would drop Widevine.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: electron
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

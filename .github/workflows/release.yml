@@ -220,6 +220,12 @@ jobs:
       # Every page measured against the rules that hold on every platform:
       # text at least 11px, 4.5:1 contrast, 24px targets (tools/audit-probe.js).
       # Both themes of the default design; `npm run audit` locally for any other.
+      # Known vulnerabilities in what ships (production dependencies). High or
+      # critical fails the build; anything less is printed for the record.
+      - name: Dependency audit
+        if: matrix.os == 'ubuntu-latest'
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Design audit
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -493,6 +499,11 @@ jobs:
               echo "$f: offered to $ROLLOUT% of installs"
             done
           fi
+
+      # What the release is made of, in a standard form (CycloneDX) that
+      # scanners read: every npm package shipped, with its version and licence.
+      - name: Software bill of materials
+        run: npm sbom --omit=dev --package-lock-only --sbom-format=cyclonedx > artifacts/debrowser-sbom.cdx.json
 
       - name: Checksums
         run: |
