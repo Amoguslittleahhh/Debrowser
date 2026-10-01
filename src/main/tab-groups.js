@@ -14,7 +14,7 @@
 
 const { COLOURS } = require('./spaces');
 
-const cleanName = (value, fallback) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 30) || fallback;
+const cleanName = (value, fallback) => (typeof value === 'string' ? value : '').replace(/\s+/g, ' ').trim().slice(0, 30) || fallback;
 const ID = /^g[a-z0-9]{1,12}$/;
 
 class TabGroups {

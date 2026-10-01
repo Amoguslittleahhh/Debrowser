@@ -65,6 +65,7 @@
 - **Ctrl and the scroll wheel zoom the page under the pointer** in split view, not the other half.
 - **Hiding something on a page tells you when it can't be kept,** instead of hiding it until the next visit after saying it was hidden.
 - **Smaller fixes:** the downloads list keeps your hundred newest, not the oldest; copying a link with a malformed address no longer fails; the welcome tour's Back and Skip work with Enter; Escape on the Passwords page no longer closes it while you fill in a card or passcode.
+- **Naming a space or a tab group can no longer fail on an odd value.** Found by new automated testing that sends every command junk input.
 
 ### Security
 

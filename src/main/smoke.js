@@ -84,6 +84,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
                           runCommand = () => {}, history = null, context = { model: null },
                           credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null }) {
   console.log('\n=== Debrowser smoke test ===\n');
+  // Cold start, measured as the speed test does: from this process starting to
+  // the first tab's first paint. Checked with the other budgets, at the end.
+  const startedAt = Date.now() - process.uptime() * 1000;
+  const firstPaint = (async () => {
+    const first = tabs.activeTab();
+    const at = first && first.wc ? await require('./speed').paintedAt(first.wc, 15_000).catch(() => null) : null;
+    return at ? Math.round(at - startedAt) : null;
+  })();
 
   fixtures = await fixtureServer.start();
   let siteIndex = 0;
@@ -4899,10 +4907,54 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     const newTabMs = median(newTab);
     const barMs = median(bar);
-    check('performance budgets: new tab, command bar, tab switching, idle chrome',
-      newTabMs < 100 * SLACK && barMs < 100 * SLACK && longest < 50 * SLACK && Number.isFinite(idleCpu) && idleCpu < 1 * SLACK,
-      `new tab ${Math.round(newTabMs)} ms (budget ${100 * SLACK}), command bar ${Math.round(barMs)} ms (${100 * SLACK}), ` +
+    const coldStartMs = await firstPaint;
+    check('performance budgets: cold start, new tab, command bar, tab switching, idle chrome',
+      Number.isFinite(coldStartMs) && coldStartMs < 600 * SLACK && newTabMs < 100 * SLACK && barMs < 100 * SLACK && longest < 50 * SLACK && Number.isFinite(idleCpu) && idleCpu < 1 * SLACK,
+      `cold start ${coldStartMs} ms (budget ${600 * SLACK}), new tab ${Math.round(newTabMs)} ms (budget ${100 * SLACK}), command bar ${Math.round(barMs)} ms (${100 * SLACK}), ` +
       `longest chrome task switching tabs ${Math.round(longest)} ms (${50 * SLACK}), idle chrome CPU ${idleCpu?.toFixed(2)}% (${SLACK})`);
+  }
+
+  // Fuzzing the command channel: every command the browser's own pages may
+  // send, with junk where its payload should be - nothing must throw, and the
+  // browser must still work after. Left out: what opens a system dialog,
+  // quits, or deletes the user's data, which junk could set off for real.
+  {
+    const skip = new Set(['new-incognito-window', 'panic', 'new-identity', 'close-tab', 'close-other-tabs',
+      'close-tabs-right', 'close-group', 'print', 'save-page', 'save-link', 'import-logins-file',
+      'import-bookmark-file', 'update-restart', 'make-default', 'clear-history', 'delete-history',
+      'toggle-fullscreen', 'toggle-devtools', 'reveal-download', 'open-download', 'delete-credential',
+      'vault-set', 'vault-remove', 'reveal-credential', 'site-clear-data', 'forget-site', 'delete-space',
+      'screenshot-page', 'hide-element', 'inspect', 'view-source', 'report-problem']);
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
+    const list = src.slice(src.indexOf('const COMMANDS = new Set(['), src.indexOf(']);', src.indexOf('const COMMANDS = new Set([')));
+    const commands = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).filter((c) => !skip.has(c));
+    const junk = [undefined, null, {}, 'x', 42, [],
+      { id: 'nope', url: 'javascript:alert(1)', key: 'constructor', value: {}, spaceId: '../..', groupId: '__proto__',
+        text: 'a'.repeat(100_000), name: { toString: null }, color: 'red', direction: 'sideways' },
+      { id: -1, index: 1e9, x: NaN, y: Infinity, delta: 'up', ratio: -5, on: 'yes' }];
+    const before = new Set(tabs.all().map((t) => t.id));
+    const savedPrefs = prefs.all();
+    const thrown = [];
+    const rejected = [];
+    const onRejection = (err) => rejected.push(String(err && err.message || err).slice(0, 80));
+    process.on('unhandledRejection', onRejection);
+    for (const command of commands) {
+      for (const payload of junk) {
+        try { runCommand(command, payload); } catch (err) { thrown.push(`${command}: ${err.message}`.slice(0, 120)); }
+      }
+    }
+    await sleep(1500);
+    process.off('unhandledRejection', onRejection);
+    // Back as it was: the tabs it opened closed, the preferences it changed restored.
+    shell.closeSheet && shell.closeSheet();
+    for (const t of tabs.all()) if (!before.has(t.id)) tabs.close(t.id);
+    for (const [key, value] of Object.entries(savedPrefs)) if (prefs.get(key) !== value) prefs.set(key, value);
+    await sleep(300);
+    const alive = !shell.window.isDestroyed() && tabs.all().length > 0;
+    check('every command survives junk payloads, and the browser still works after',
+      thrown.length === 0 && rejected.length === 0 && alive,
+      `${commands.length} commands x ${junk.length} payloads; thrown ${JSON.stringify(thrown.slice(0, 5))}, ` +
+      `rejected ${JSON.stringify(rejected.slice(0, 5))}, alive ${alive}`);
   }
 
   /* ---------------------------------------------------------------- */

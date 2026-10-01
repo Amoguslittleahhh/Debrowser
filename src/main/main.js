@@ -1707,7 +1707,21 @@ function main() {
           if (painted) startup = Math.round(painted - startedAt);
         }
         const runs = Number((argv.find((a) => a.startsWith('--speed-runs=')) || '').split('=')[1]) || 15;
+        // `--soak`: the same cycle many times over, and the browser process's
+        // memory compared before and after - a leak in tab handling shows as
+        // growth that a garbage collection does not give back.
+        const soak = argv.includes('--soak');
+        const heap = () => { if (global.gc) global.gc(); return process.memoryUsage().heapUsed; };
+        const heapBefore = soak ? heap() : 0;
         const report = await speed.runSpeed({ tabs, runCommand, log, runs });
+        if (soak) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const heapAfter = heap();
+          const growth = (heapAfter - heapBefore) / heapBefore;
+          console.log(`SOAK ${runs} runs: browser heap ${Math.round(heapBefore / 1048576)} MB -> ` +
+            `${Math.round(heapAfter / 1048576)} MB (${(growth * 100).toFixed(1)}%), ${tabs.all().length} tabs open`);
+          if (growth > 0.5) { console.error('SOAK FAILED: the browser process grew by more than half'); app.exit(1); return; }
+        }
         speed.print(report, startup);
         if (argv.includes('--speed-json')) console.log(`SPEED_JSON ${JSON.stringify({ startup, report })}`);
         app.exit(0);

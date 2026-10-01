@@ -25,7 +25,7 @@ const MAX_SPACES = 12;
 /** The accents Settings offers (settings.js, ACCENTS), which read on both themes. */
 const COLOURS = ['#2f857b', '#6f8f5f', '#a8694a', '#b08a3c', '#7b6a9c', '#5f7d9c', '#b0306a'];
 
-const cleanName = (value, fallback) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 40) || fallback;
+const cleanName = (value, fallback) => (typeof value === 'string' ? value : '').replace(/\s+/g, ' ').trim().slice(0, 40) || fallback;
 
 class Spaces {
   /**

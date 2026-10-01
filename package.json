@@ -10,6 +10,7 @@
     "start:performance": "electron . --profile=performance",
     "bench": "node bench/bench.js",
     "speed": "electron . --speed-test --disable-gpu",
+    "soak": "electron --js-flags=--expose-gc . --speed-test --soak --speed-runs=300 --disable-gpu",
     "smoke": "electron . --smoke-test --disable-gpu",
     "start:minimal": "electron . --profile=minimal",
     "build:ksm": "cc -O2 -Wall -o tools/ksm-launch tools/ksm-launch.c",
