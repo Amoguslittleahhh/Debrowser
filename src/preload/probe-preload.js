@@ -27,6 +27,19 @@
 
 const { ipcRenderer } = require('electron');
 
+/*
+ * In an iframe. A private window loads this preload into its subframes too
+ * (tab.js, nodeIntegrationInSubFrames) for one reason: a file dropped or
+ * pasted into an embedded upload widget is that frame's event, out of reach of
+ * the top frame's listener, and would reach the page with its metadata. The
+ * cleaner is installed and nothing else - the rest of this file is about the
+ * page as a whole and runs once, in the top frame.
+ */
+if (!process.isMainFrame) {
+  if (process.argv.includes('--debrowser-private')) installFileCleaner();
+  return;
+}
+
 /**
  * Sampling interval. Chromium throttles this to roughly once a minute once the
  * tab is hidden, and a frozen tab does not run it at all, so a background tab
@@ -399,7 +412,8 @@ ipcRenderer.on('debrowser:capture', (_event, requestId) => {
 });
 
 ipcRenderer.on('debrowser:restore-state', (_event, state) => {
-  if (!state) return;
+  // Only on the page it was captured from (tab.js checks too).
+  if (!state || state.page !== location.origin + location.pathname) return;
   const apply = () => {
     try {
       for (const field of state.fields || []) {
@@ -557,7 +571,7 @@ ipcRenderer.on('debrowser:payment-fill', (_event, record) => {
  * If cleaning fails the drop is dropped. A file that reached the page with
  * its metadata would be the failure this exists to prevent.
  */
-if (process.argv.includes('--debrowser-private')) {
+function installFileCleaner() {
   /* global DataTransfer, File, DragEvent, ClipboardEvent -- page-side constructors */
   const IMAGE = /\.(jpe?g|png|webp)$/i;
   const ours = new WeakSet();
@@ -636,6 +650,7 @@ if (process.argv.includes('--debrowser-private')) {
     bubbles: true, cancelable: true, composed: true, clipboardData: dt
   }));
 }
+if (process.argv.includes('--debrowser-private')) installFileCleaner();
 
 /*
  * Fetch the page behind a link the user is about to follow (see

@@ -49,6 +49,13 @@
 
 - **Windows Hello no longer waits for ever** if Debrowser's own prompt cannot report back. After five minutes without an answer it gives up and closes the prompt, so a second try does not open a prompt on top of the first.
 - **Settings' side list shows the last section when you reach the end of the page.** A section finishing loading as you got there could leave the page just short of its end, and the list naming the section before.
+- **A tab you just left is no longer put to sleep at once.** Debrowser counted a tab as idle from when you opened it, not from when you left it, so a page you had read for twenty minutes could be discarded the moment you switched away - and auto-archive and the order tabs sleep in used the same wrong figure.
+- **Calls and recordings are left alone.** A tab using your camera or microphone is no longer put to sleep, and neither is one that starts playing sound while it is being put away.
+- **An endless animation no longer stops memory being given back.** A spinner, carousel or animated ad in the tab in front used to hold off every memory limit indefinitely; now it does so for a minute at most, and never when memory is critically short.
+- **Spaces and tab groups:** closing a group that was all a space had no longer leaves an empty window; moving the tab in front to another space brings another of the space's tabs forward; Ctrl+Shift+T and Undo reopen a tab in the space it was closed from, and moving a tab between spaces no longer adds it to the reopen list; "Close other tabs" and "Close tabs to the right" are only offered when they would close something in the tab's own space.
+- **Ctrl and the scroll wheel zoom the page under the pointer** in split view, not the other half.
+- **Hiding something on a page tells you when it can't be kept,** instead of hiding it until the next visit after saying it was hidden.
+- **Smaller fixes:** the downloads list keeps your hundred newest, not the oldest; copying a link with a malformed address no longer fails; the welcome tour's Back and Skip work with Enter; Escape on the Passwords page no longer closes it while you fill in a card or passcode.
 
 ### Security
 
@@ -64,6 +71,12 @@
 - **Sites are tried over HTTPS first.** A plain-HTTP link, bookmark or address now loads the site's secure version where it has one, which the network between you and the site cannot read or change. Where it has none, the plain page loads as before - or, if you choose "Ask before a site without it" in Settings, a page says so and lets you decide. Addresses on your own network are left alone.
 - **Secure DNS.** Site addresses are looked up over HTTPS where your provider offers it, so the network cannot see which sites you visit; Settings can name Cloudflare, Quad9, Google or Mullvad instead, or turn it off.
 - **The menu shows which Chromium Debrowser is built on,** beside its own version, so you can tell at a glance whether a Chromium security fix has reached you.
+- **Typed text restored when a sleeping tab wakes goes only to the page it came from.** If the site sent you elsewhere meanwhile - an expired session redirected to a sign-in page on another site - what you had typed is no longer handed to that other site.
+- **HTTPS-first stays on for a site you open twice in a row.** Clicking the same plain-HTTP link twice within a few seconds was taken for a redirect loop, which switched secure connections off for that site until restart.
+- **Other sites' cookies are blocked between sites on shared hosting,** such as two different people's pages on github.io, herokuapp.com or blogspot.com, which were treated as one site.
+- **Site icons can no longer be used to look into your local network.** The icon fetcher now refuses addresses on your own network and checks every redirect, so a website cannot make Debrowser request your router's pages and learn what answers.
+- **Private windows:** files dropped or pasted into an upload box inside a frame are cleaned of their metadata too, as they already were on the page itself; and in split view each half reports only the fixed sizes, so dragging the divider no longer gives a site a distinctive window size.
+- **Release builds:** the build steps now run without permission to publish, so a compromised dependency could not alter a release, and a release whose version does not match its tag is refused.
 
 ### Known issues
 

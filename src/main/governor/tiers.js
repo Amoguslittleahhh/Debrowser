@@ -270,6 +270,13 @@ async function discard(tab, ctx) {
 
   tab.captureNavigation();
 
+  // Started playing sound, or was given the camera or microphone, while the
+  // snapshot was taken: no longer a tab to discard.
+  if (tab.audible || tab.capturing) {
+    log(`tab ${tab.id}: discard cancelled, now audible or capturing`);
+    return tab.tier;
+  }
+
   if (tab.hasDirtyInput) {
     // The snapshot revealed unsubmitted input after all. Freezing keeps the
     // page perfectly intact at near-zero CPU, so take that instead and lose

@@ -66,6 +66,9 @@ $('back').addEventListener('click', () => show(step - 1));
 $('skip').addEventListener('click', finish);
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' || event.target.closest('select, input, .list, .choices, .segmented, .swatches')) return;
+  // Any other button does its own thing on Enter: Back goes back, Skip skips.
+  const button = event.target.closest('button');
+  if (button && button.id !== 'next') return;
   event.preventDefault();
   $('next').click();
 });

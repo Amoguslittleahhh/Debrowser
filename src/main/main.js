@@ -770,7 +770,11 @@ function main() {
     // nothing, and it would sit at the top of the stack in front of the page
     // the user actually wants back.
     if (!tab || !tab.url || tab.url === pages.NEW_TAB_URL || tab.url === 'about:blank') return;
-    closedTabs.push({ url: tab.url, title: tab.title || '', index: tab.closedIndex ?? null, pinned: tab.pinned === true });
+    // Closed by the browser itself, reopened elsewhere at once (a move into or
+    // out of a space with its own cookies): not a tab the user closed.
+    if (tab.notClosedByUser) return;
+    closedTabs.push({ url: tab.url, title: tab.title || '', index: tab.closedIndex ?? null, pinned: tab.pinned === true,
+      spaceId: tab.spaceId || null });
     // Counted apart from the list, which stops growing at its cap.
     closedTabs.remembered = (closedTabs.remembered || 0) + 1;
     if (closedTabs.length > CLOSED_TABS_KEPT) closedTabs.shift();
@@ -1909,7 +1913,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     const last = closedTabs.pop();
     if (!last) return null;
     const index = Number.isInteger(last.index) ? Math.min(last.index, tabs.all().length) : null;
-    const tab = tabs.create({ url: last.url, index });
+    // Back in the space it was closed from - its own cookies, if it had them.
+    const spaceId = spaces && !INCOGNITO && last.spaceId ? spaces.resolve(last.spaceId) : undefined;
+    const tab = tabs.create({ url: last.url, index, spaceId });
     if (last.pinned && typeof tabs.setPinned === 'function') tabs.setPinned(tab.id, true);
     return tab;
   };
@@ -2282,6 +2288,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         for (const t of tabs.all().filter((x) => x.spaceId === id)) {
           if (container) {
             tabs.create({ url: t.url, activate: false, realise: false, spaceId: 'home' });
+            t.notClosedByUser = true;
             tabs.close(t.id);
           } else t.spaceId = 'home';
         }
@@ -2299,10 +2306,19 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const to = String(payload?.spaceId || '');
         if (!spaces || INCOGNITO || !tab || !spaces.byId(to) || tab.spaceId === to) break;
         tab.groupId = null;
+        const wasActive = tab === tabs.activeTab();
+        const from = tab.spaceId;
         if (spaces.partitionFor(to) === spaces.partitionFor(tab.spaceId)) tab.spaceId = to;
         else {
           tabs.create({ url: tab.url, activate: false, realise: false, spaceId: to });
+          tab.notClosedByUser = true;
           tabs.close(tab.id);
+        }
+        // The tab in front left this space: another of its tabs comes forward,
+        // rather than the moved one staying on screen unlisted.
+        if (wasActive && tabs.byId(tab.id)) {
+          const stay = tabs.all().filter((t) => t.spaceId === from && t !== tab).pop();
+          if (stay) goTo(stay.id);
         }
         ensureSpaceHasTab();
         publish();
@@ -2340,7 +2356,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!siteStyles || !host || !active.isLive) break;
         siteStyles.pick(active).then((selector) => {
           if (!selector) return;
-          siteStyles.hide(host, selector);
+          // Hidden only once it is saved: a selector the store refuses (too
+          // long, an odd character) used to vanish now and come back on the
+          // next load, after a toast said it was hidden.
+          if (!siteStyles.hide(host, selector)) {
+            toast('That part of the page can’t be hidden for good - try a larger area around it');
+            return;
+          }
           for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) siteStyles.add(t, selector);
           toast('Hidden on this site', 'Undo', () => {
             sitePrefs.set(host, 'hide', (sitePrefs.get(host, 'hide') || []).filter((sel) => sel !== selector));
@@ -2961,17 +2983,22 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!shell.window.isDestroyed()) shell.window.setFullScreen(!shell.window.isFullScreen());
         break;
 
-      case 'zoom':
+      case 'zoom': {
+        // The page the gesture came from, when it was a page: in split view
+        // that need not be the tab the address bar is about.
+        const from = sender && tabs.all().find((t) => t.isLive && t.wc.id === sender.id);
+        const target = from || active;
         if (payload?.direction === 'reset') {
           // Forgets the site's own zoom, so it follows the default again -
           // including a default changed later.
-          if (active?.isLive) siteZoom.reset(active.wc);
+          if (target?.isLive) siteZoom.reset(target.wc);
         } else {
-          stepZoom(active, payload?.direction === 'out' ? -1 : +1, siteZoom);
+          stepZoom(target, payload?.direction === 'out' ? -1 : +1, siteZoom);
         }
         // The badge in the address bar follows at once, not at the next tick.
         publish();
         break;
+      }
 
       // The page and what it needs to show - images, styles - saved beside
       // it, where the user chooses. Suggested under the page's title in the
@@ -3105,7 +3132,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'tab-menu': {
         const tab = tabs.byId(payload?.id);
         if (!tab) break;
-        const all = tabs.all();
+        // Counted within the tab's own space, as the two close commands act.
+        const all = tabs.all().filter((t) => t.spaceId === tab.spaceId);
         const at = all.indexOf(tab);
         const others = all.filter((t) => t !== tab && !t.pinned).length;
         const right = all.slice(at + 1).filter((t) => !t.pinned).length;
@@ -3373,7 +3401,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         for (const t of doomed.reverse()) tabs.close(t.id);
         tabGroups.prune(tabs.all());
         if (tabs.all().length === 0) lastTabClosed();
-        else offerUndoClose((closedTabs.remembered || 0) - before);
+        else {
+          // The group may have been all this space had: never an empty window.
+          ensureSpaceHasTab();
+          if (!tabs.activeTab()) {
+            const next = spaceTabs().pop();
+            if (next) goTo(next.id);
+          }
+          offerUndoClose((closedTabs.remembered || 0) - before);
+        }
         break;
       }
 

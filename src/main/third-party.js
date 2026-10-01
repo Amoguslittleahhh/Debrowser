@@ -26,7 +26,8 @@ function siteOf(url) {
   try {
     const { protocol, hostname } = new URL(url);
     if (!/^(https?|wss?):$/.test(protocol)) return null;
-    return getDomain(hostname) || hostname;
+    // Private suffixes count: alice.github.io and bob.github.io are two sites.
+    return getDomain(hostname, { allowPrivateDomains: true }) || hostname;
   } catch {
     return null;
   }

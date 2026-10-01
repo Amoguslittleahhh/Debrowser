@@ -233,6 +233,13 @@ class PermissionAsks {
     // Only the site in the address bar may ask. A frame from somewhere else
     // would be borrowing the trust the user gives that site.
     if (!origin || !tab || originOf(tab.url) !== origin) { callback(false); return; }
+    // A tab given the camera or microphone may be recording or in a call with
+    // nobody speaking - not audible, and still not to be discarded. Marked
+    // until it navigates away (tab.js), for the governor's protections.
+    if ([...kinds].some((k) => k === 'camera' || k === 'microphone')) {
+      const answer = callback;
+      callback = (ok) => { if (ok) tab.capturing = true; answer(ok); };
+    }
 
     const decision = this.store.decide(origin, kinds);
     if (decision !== 'ask') { callback(decision === 'allow'); return; }

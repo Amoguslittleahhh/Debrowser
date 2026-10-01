@@ -66,7 +66,8 @@ function unwrap(parsed) {
     if (!host.test(parsed.hostname) || !route.test(parsed.pathname)) continue;
     let target = null;
     if (param === null) {
-      const raw = decodeURIComponent(parsed.search.slice(1));
+      let raw = '';
+      try { raw = decodeURIComponent(parsed.search.slice(1)); } catch { /* malformed: left alone */ }
       target = /^https?:\/\//i.test(raw) ? raw : null;
     } else {
       for (const name of [].concat(param)) {

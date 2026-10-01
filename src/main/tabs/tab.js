@@ -94,6 +94,10 @@ function createTabView({ session, url }) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Private windows only: the preload also runs in iframes, where it
+      // installs the dropped-file cleaner and nothing else (probe-preload.js).
+      // Sandboxed, so this gives a frame no Node, only the preload.
+      nodeIntegrationInSubFrames: INCOGNITO && !pages.isInternal(url),
       // Chromium's own background throttling stays on; the governor layers
       // its harder tiers on top rather than replacing it.
       backgroundThrottling: true,
@@ -137,6 +141,11 @@ function sweepThumbnailsSync() {
   try {
     fs.rmSync(thumbnailDir(), { recursive: true, force: true });
   } catch { /* nothing there, or not ours to remove */ }
+}
+
+/** Origin and path of an address: the page a captured state belongs to. */
+function pageOf(url) {
+  try { const p = new URL(url); return p.origin + p.pathname; } catch { return null; }
 }
 
 class Tab {
@@ -527,6 +536,7 @@ class Tab {
     // to be a missing thumbnail rather than a leaked one.
     wc.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
       if (!isMainFrame || isInPlace) return;
+      this.capturing = false;               // camera/microphone ends with the page
       // White behind a website, our surface behind our own pages.
       try { this.view?.setBackgroundColor(palette.surfaceFor(url)); } catch { /* view going away */ }
       this.hasSensitiveFields = true;
@@ -719,10 +729,13 @@ class Tab {
       this.emit('updated');
     });
 
-    wc.once('did-finish-load', () => {
-      this.applySuspendedPageState();
+    // Until the page the state was captured on has loaded - not the private
+    // window's blank first page, which finishes loading before it.
+    const onLoaded = () => {
+      if (this.applySuspendedPageState() !== 'wait') wc.off('did-finish-load', onLoaded);
       this.emit('updated');
-    });
+    };
+    wc.on('did-finish-load', onLoaded);
 
     /*
      * Settings opens a notch larger than everything else.
@@ -916,8 +929,15 @@ class Tab {
     // moment a tab is hidden, before it can reach a state where it cannot.
     // A stopped page cannot run the script that answers, frozen or hibernated.
     if (!this.isLive || isStopped(this.tier)) return Promise.resolve(null);
+    const capturedOn = this.wc.getURL();
     return ipcHub.request(this.wc, timeoutMs).then((state) => {
+      // No answer: whatever was captured earlier belongs to an earlier page
+      // unless this is still that page.
+      if (!state && this.suspendedState?.state && this.suspendedState.state.page !== pageOf(capturedOn)) {
+        this.suspendedState.state = null;
+      }
       if (state) {
+        state.page = pageOf(capturedOn);
         this.hasDirtyInput = Boolean(state.dirty);
         this.hasSensitiveFields = Boolean(state.sensitive);
         this.suspendedState = { ...(this.suspendedState || {}), state, url: this.url };
@@ -1055,14 +1075,28 @@ class Tab {
     return false;
   }
 
-  /** Push scroll/form state back into the page once it has loaded. */
+  /**
+   * Push scroll/form state back into the page once it has loaded - only into
+   * the page it came from. A restore that lands somewhere else (an expired
+   * session redirected to a sign-in page on another site) must not hand that
+   * site what was typed into the first one. 'wait' while a blank page loads
+   * ahead of the real one.
+   */
   applySuspendedPageState() {
     const state = this.suspendedState?.state;
-    if (!state || !this.isLive) return;
+    if (!state || !this.isLive) return 'done';
+    let here;
+    try { here = new URL(this.wc.getURL()); } catch { return 'wait'; }
+    if (here.protocol === 'about:' || here.href === 'debrowser://blank/' || here.href === 'debrowser://blank') return 'wait';
+    if (!state.page || pageOf(here.href) !== state.page) {
+      this.suspendedState.state = null;
+      return 'done';
+    }
     this.sendToPage('debrowser:restore-state', state);
     // Consumed: keep navigation history, drop the one-shot page state.
     if (this.suspendedState) this.suspendedState.state = null;
     this.hasDirtyInput = false;
+    return 'done';
   }
 
   /* ---------------------------------------------------------------- */
@@ -1080,6 +1114,10 @@ class Tab {
       // stale "heavy" report from holding a boost on a tab nobody can see.
       this.reportedDemand = 'idle';
       this.demand = 'idle';
+      // Idle from the moment it was left, not from when it was opened: a tab
+      // read for twenty minutes was otherwise "idle twenty minutes" the instant
+      // you switched away, and discarded on the next tick.
+      if (this.everVisible) this.lastActiveAt = Date.now();
     }
     if (this.view) this.view.setVisible(visible);
   }

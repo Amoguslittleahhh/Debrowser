@@ -70,6 +70,16 @@ async function main() {
       'run `npm install`, and run the smoke suite before merging.');
     process.exit(1);
   }
+  // A newer major from castLabs: this line will stop getting Chromium fixes,
+  // and watching only it would report "up to date" for good once it does.
+  const newestMajor = Math.max(...tags.map((v) => parse(v)[0]));
+  if (newestMajor > major) {
+    const next = latestIn(tags, newestMajor);
+    console.log(`castLabs has moved on to Electron ${newestMajor} (${next}+wvcus), and ${major}.x will stop ` +
+      'receiving Chromium security fixes. Plan the move: set "electron" in package.json to ' +
+      `github:castlabs/electron-releases#v${next}+wvcus, run \`npm install\`, and run the smoke suite.`);
+    process.exit(1);
+  }
   console.log(`Electron is on castLabs' newest ${major}.x: ${current}+wvcus` +
     (ours ? `, Chromium ${ours.chrome}.` : '.'));
   if (top && ours && newer(top.version, current)) {

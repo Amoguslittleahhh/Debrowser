@@ -378,7 +378,12 @@ el.query.addEventListener('input', render);
 clearOnEscape(el.query);
 el.close.addEventListener('click', () => api.send('close-tab'));
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !event.defaultPrevented) api.send('close-tab');
+  if (event.key !== 'Escape' || event.defaultPrevented) return;
+  // Not mid-form: Escape in the card form or the passcode field (say, to
+  // dismiss autofill) used to close the tab and lose what was typed.
+  const t = event.target;
+  if (t !== el.query && t.closest && t.closest('input, textarea, select, #card-form, #locked')) return;
+  api.send('close-tab');
 });
 
 api.onState((state) => applyThemePrefs(state.prefs));

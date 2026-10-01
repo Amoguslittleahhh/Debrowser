@@ -64,10 +64,12 @@ class SiteStyles {
   }
 
   /** Remember a hidden thing for the tab's site; the most recent last. */
+  /** Remember a hidden element. Returns whether it was kept - the store refuses selectors it cannot trust. */
   hide(host, selector) {
     const list = (this.sitePrefs.get(host, 'hide') || []).filter((s) => s !== selector);
     list.push(selector);
     this.sitePrefs.set(host, 'hide', list.slice(-50));
+    return (this.sitePrefs.get(host, 'hide') || []).includes(selector);
   }
 }
 

@@ -1187,6 +1187,54 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     runCommand('copy-version-info');
     const info = String(await require('electron').clipboard.readText());
+    // Review fixes that need no network: each is the failure the review found.
+    {
+      const { siteOf } = require('./third-party');
+      const { clean } = require('./link-cleaner');
+      const { HttpsFirst } = require('./https-first');
+      const { Prefs } = require('./prefs');
+      // Private suffixes are separate sites.
+      const privateSites = siteOf('https://alice.github.io/') !== siteOf('https://bob.github.io/');
+      // A malformed escape in a redirect link does not throw.
+      let decoded = true;
+      try { clean('https://href.li/?https://x.com/%E0%A4'); } catch { decoded = false; }
+      // A second click on the same http link, once the first upgrade answered, is upgraded again.
+      const hf = new HttpsFirst(() => 'upgrade');
+      const first = hf.judge({ url: 'http://example.org/', resourceType: 'mainFrame' });
+      hf.answered({ url: 'https://example.org/', resourceType: 'mainFrame', statusCode: 200 });
+      const again = hf.judge({ url: 'http://example.org/', resourceType: 'mainFrame' });
+      const upgradedTwice = Boolean(first?.redirectURL && again?.redirectURL);
+      // A prefs file with an inherited key name loads.
+      const dir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'prefs-'));
+      const file = require('path').join(dir, 'prefs.json');
+      require('fs').writeFileSync(file, JSON.stringify({ constructor: 1, toString: 2, theme: 'dark' }));
+      let prefsLoad = false;
+      try { prefsLoad = new Prefs(() => {}, { file }).get('theme') === 'dark'; } catch { prefsLoad = false; }
+      // A tab is idle from when it was left, not from when it was opened.
+      const t = tabs.activeTab();
+      const prevVisible = t.visible;
+      t.lastActiveAt = Date.now() - 3600_000;
+      t.setVisible(false);
+      const idleFromLeaving = t.idleMs() < 5000;
+      t.setVisible(prevVisible);
+      // Saved form state is not handed to another page.
+      const restoreGuard = (() => {
+        const fake = Object.create(Object.getPrototypeOf(t));
+        let sent = 0;
+        Object.assign(fake, {
+          suspendedState: { state: { page: 'https://a.example/form', fields: [] } },
+          wc: { getURL: () => 'https://sso.example/login', isDestroyed: () => false },
+          sendToPage: () => { sent += 1; }
+        });
+        Object.defineProperty(fake, 'isLive', { value: true });
+        const result = fake.applySuspendedPageState();
+        return result === 'done' && sent === 0 && fake.suspendedState.state === null;
+      })();
+      check('review fixes: private suffixes, malformed links, HTTPS-first re-upgrade, inherited pref keys, idle time, restore origin',
+        privateSites && decoded && upgradedTwice && prefsLoad && idleFromLeaving && restoreGuard,
+        JSON.stringify({ privateSites, decoded, upgradedTwice, prefsLoad, idleFromLeaving, restoreGuard }));
+    }
+
     check('Copy version info puts the versions and system on the clipboard',
       info.includes(`Debrowser ${app.getVersion()}`) && info.includes(`Chromium ${process.versions.chrome}`) && /Design: /.test(info), info);
 

@@ -53,6 +53,9 @@ const HEAP_COLLECT_FLOOR_MS = 60_000;
 /** How long after start the hibernation probe waits: past the first paint. */
 const PROBE_DELAY_MS = 1500;
 
+/** The longest reclaiming waits on an animation in front (holdForAnimation). */
+const QUIESCE_MAX_MS = 60_000;
+
 class Governor {
   /**
    * @param {object} deps - { app, cfg, tabManager, ipcHub, log, onUpdate }
@@ -176,6 +179,9 @@ class Governor {
 
       const active = this.tabs.activeTab();
       this.boost.update(active, this.tabs.all());
+      // How long reclaiming has been held off for an animation (holdForAnimation).
+      if (this.boost.quiesceRequested) this.quiesceSince ??= Date.now();
+      else this.quiesceSince = null;
 
       await this.runPostAnimationSettle();
       await this.runIdleLadder();
@@ -304,9 +310,21 @@ class Governor {
    * Two things are never done here: collecting the visible tab, whose stall the
    * user would feel, and collecting while anything is animating anywhere.
    */
+  /**
+   * Whether reclaiming waits for an animation in front to finish. Not for
+   * ever: an endless spinner or carousel kept every budget, cap and heap limit
+   * off, at any pressure. So never at critical pressure, and never for more
+   * than a minute at a stretch.
+   */
+  holdForAnimation() {
+    if (!this.boost.quiesceRequested) return false;
+    if (this.pressure === Pressure.CRITICAL) return false;
+    return !(this.quiesceSince && Date.now() - this.quiesceSince > QUIESCE_MAX_MS);
+  }
+
   async runHeapLimits() {
     if (!this.cfg.heapLimit.enabled) return;
-    if (this.boost.quiesceRequested) return;
+    if (this.holdForAnimation()) return;
 
     for (const tab of this.tabs.all()) {
       if (!this.heapLimiter.worthMeasuring(tab)) continue;
@@ -511,7 +529,7 @@ class Governor {
   async enforceLiveTabCap() {
     const cap = this.cfg.maxLiveTabs;
     if (!cap) return;
-    if (this.boost.quiesceRequested) return; // never reclaim mid-animation
+    if (this.holdForAnimation()) return; // not mid-animation, within limits
 
     const liveCount = this.tabs.all().filter((tab) => tab.isLive).length;
     let excess = liveCount - cap;
@@ -547,7 +565,7 @@ class Governor {
 
   async enforceBudget() {
     if (this.pressure === Pressure.NONE) return;
-    if (this.boost.quiesceRequested) return; // never reclaim mid-animation
+    if (this.holdForAnimation()) return; // not mid-animation, within limits
 
     const discardAllowed =
       PRESSURE_RANK[this.pressure] >= PRESSURE_RANK[this.cfg.discardFromPressure];
@@ -671,6 +689,8 @@ class Governor {
     // warm - 46ms measured against 79ms cold.
     // Audio is the most noticeable thing a browser can take away.
     if (tab.audible) cap(Tier.WARM);
+    // So is a call or a recording: a tab with the camera or microphone.
+    if (tab.capturing) cap(Tier.WARM);
 
     // Unsubmitted input survives a freeze perfectly; it does not survive a
     // discard. The memory cost of holding it is not a close call.

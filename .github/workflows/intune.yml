@@ -41,7 +41,7 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read   # the build runs dependency install scripts; only the release job writes
 
 jobs:
   build:
@@ -141,6 +141,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 

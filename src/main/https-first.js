@@ -116,7 +116,22 @@ class HttpsFirst {
   }
 
   attach(session) {
-    WebHooks.for(session).onBeforeRequest((details) => this.judge(details));
+    const hooks = WebHooks.for(session);
+    hooks.onBeforeRequest((details) => this.judge(details));
+    hooks.onHeadersReceived((details) => this.answered(details));
+  }
+
+  /**
+   * The upgraded page answered. Anything but a redirect means HTTPS works, and
+   * the upgrade is forgotten - so the same http link clicked again moments
+   * later is upgraded again rather than taken for a loop, and a later failure
+   * of the https page is not taken for "this site has no HTTPS". A redirect is
+   * kept: if it leads back to http, that is the loop `judge` stops.
+   */
+  answered({ url, resourceType, statusCode }) {
+    if (resourceType !== 'mainFrame' || !this.upgraded.has(url)) return undefined;
+    if (!(statusCode >= 300 && statusCode < 400)) this.upgraded.delete(url);
+    return undefined;
   }
 }
 

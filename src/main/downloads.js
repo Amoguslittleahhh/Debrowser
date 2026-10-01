@@ -686,7 +686,8 @@ class DownloadManager {
     this.persist();
     // The list is sorted and sent on every progress report, so finished ones
     // beyond the most recent hundred go - oldest first, never a running one.
-    const finished = [...this.items.values()].filter((d) => d.state === 'done' || d.state === 'failed' || d.cancelled);
+    const finished = [...this.items.values()].filter((d) => d.state === 'done' || d.state === 'failed' || d.cancelled)
+      .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
     for (const old of finished.slice(0, Math.max(0, finished.length - 100))) this.items.delete(old.id);
     item.start();
     return item;

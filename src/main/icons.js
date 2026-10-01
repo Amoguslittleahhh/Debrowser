@@ -139,6 +139,10 @@ const DEFAULT_PATHS = new Set(['/favicon.ico', '/apple-touch-icon.png']);
 function allowed(raw) {
   const url = parse(raw);
   if (!url) return false;
+  // Never this machine or its network, not even at a default path: a website
+  // can name any address here, and whether an icon loads would tell it what
+  // answers on the user's network.
+  if (require('./incognito/policy').isLocalHost(url.hostname)) return false;
   if (DEFAULT_PATHS.has(url.pathname) && !url.search) return true;
   return seen.has(url.href);
 }
@@ -159,13 +163,26 @@ async function serve(request, log = () => {}) {
   }
 
   try {
-    const res = await fetcher(target, {
-      // No cookies, no identity. The whole point of routing through here.
-      credentials: 'omit',
-      referrerPolicy: 'no-referrer',
-      signal: AbortSignal.timeout(TIMEOUT_MS)
-    });
-    if (!res.ok) return new Response('Not found', { status: 404 });
+    // Redirects followed by hand, each hop checked: followed blindly, a public
+    // address could bounce the request to one on the user's own network.
+    const signal = AbortSignal.timeout(TIMEOUT_MS);
+    let at = target;
+    let res = null;
+    for (let hop = 0; hop < 4; hop++) {
+      res = await fetcher(at, {
+        // No cookies, no identity. The whole point of routing through here.
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
+        redirect: 'manual',
+        signal
+      });
+      if (res.status < 300 || res.status >= 400) break;
+      const next = parse(new URL(res.headers.get('location') || '', at).href);
+      if (!next || require('./incognito/policy').isLocalHost(next.hostname)) return new Response('Not found', { status: 404 });
+      at = next.href;
+      res = null;
+    }
+    if (!res || !res.ok) return new Response('Not found', { status: 404 });
 
     const type = res.headers.get('content-type') || '';
     if (!/^image\//i.test(type)) return new Response('Not found', { status: 404 });

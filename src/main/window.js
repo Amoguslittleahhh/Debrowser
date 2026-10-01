@@ -1094,9 +1094,13 @@ class BrowserShell {
     const active = this.tabs.activeTab();
     if (!s || !this.inSplit(active) || !this.tabs.byId(s.left) || !this.tabs.byId(s.right)) return null;
     const leftW = Math.round((area.width - SPLIT_GAP) * s.ratio);
+    const left = { x: area.x, y: area.y, width: leftW, height: area.height };
+    const right = { x: area.x + leftW + SPLIT_GAP, y: area.y, width: area.width - leftW - SPLIT_GAP, height: area.height };
     return {
-      left: { x: area.x, y: area.y, width: leftW, height: area.height },
-      right: { x: area.x + leftW + SPLIT_GAP, y: area.y, width: area.width - leftW - SPLIT_GAP, height: area.height },
+      // A private window's pages see whole steps only, half by half, so
+      // dragging the divider a few pixels changes nothing a site can read.
+      left: INCOGNITO ? letterbox(left) : left,
+      right: INCOGNITO ? letterbox(right) : right,
       divider: { x: area.x + leftW, y: area.y, width: SPLIT_GAP, height: area.height }
     };
   }
@@ -1307,8 +1311,12 @@ class BrowserShell {
       }
     });
     this.quick = { win, bar, page, spaceId };
-    // It belongs to this window: it goes when the browser does.
-    this.window.once('closed', () => this.closeQuick());
+    // It belongs to this window: it goes when the browser does. Added once,
+    // not on every link opened.
+    if (!this.quickWatched) {
+      this.quickWatched = true;
+      this.window.once('closed', () => this.closeQuick());
+    }
     place();
     wc.loadURL(url).catch(() => {});
     win.show();

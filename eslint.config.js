@@ -135,5 +135,11 @@ module.exports = [
       'no-undef': 'error',
       'no-unused-vars': ['error', { args: 'none', varsIgnorePattern: '^_' }]
     }
+  },
+  // Electron wraps a preload in a function, so a top-level `return` is legal
+  // there - and the probe uses one to stop early in a private window's iframes.
+  {
+    files: ['src/preload/probe-preload.js'],
+    languageOptions: { parserOptions: { ecmaFeatures: { globalReturn: true } } }
   }
 ];

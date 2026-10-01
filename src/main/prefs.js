@@ -431,7 +431,7 @@ class Prefs {
     if (!Object.hasOwn(raw, 'welcomeDone')) values.welcomeDone = true;
 
     for (const [key, value] of Object.entries(raw)) {
-      const spec = SCHEMA[key];
+      const spec = Object.hasOwn(SCHEMA, key) ? SCHEMA[key] : null;
       if (!spec) continue;                       // a key from a newer version
       // The palette moved, and a saved colour outlives it.
       //
@@ -480,7 +480,7 @@ class Prefs {
    * "rejected" from "applied and happened to look the same".
    */
   set(key, value) {
-    const spec = SCHEMA[key];
+    const spec = Object.hasOwn(SCHEMA, key) ? SCHEMA[key] : null;
     if (!spec || !spec.ok(value)) {
       this.log(`refusing preference "${key}" = ${JSON.stringify(value)}`);
       return false;
