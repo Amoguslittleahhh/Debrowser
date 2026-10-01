@@ -58,6 +58,7 @@ const MENU_ICONS = {
   forward: ['M6 3l5 5-5 5'],
   reload: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
   inspect: ['M2.5 2.5h5v5h-5z', 'M7.5 7.5l6 6', 'M9.5 13.5h4v-4'],
+  flag: ['M4 13.5V2.5', 'M4 3h7.5l-1.5 2.5 1.5 2.5H4'],
   // Drawn to the same 11px extent as the rest of the set, so a cross in a menu
   // is the weight of the glyph above it rather than whatever an X happens to be.
   close: ['M3.5 3.5l9 9', 'M12.5 3.5l-9 9'],

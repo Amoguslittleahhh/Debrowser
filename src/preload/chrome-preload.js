@@ -66,6 +66,7 @@ const COMMANDS = new Set([
   'picture-in-picture',
   'screenshot-page',
   'copy-version-info',
+  'report-problem',
   // The quick window (a Lab), from its bar.
   'quick-promote',
   'quick-close',

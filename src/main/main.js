@@ -31,6 +31,7 @@ const { Receipts } = require('./receipts');
 const WhatsNew = require('./whats-new');
 const { backupProfile } = require('./store-file');
 const { StartupGuard } = require('./startup-guard');
+const CrashReport = require('./crash-report');
 const { TabGroups } = require('./tab-groups');
 const { commandList } = require('./commands');
 const { Spaces, COLOURS } = require('./spaces');
@@ -305,6 +306,15 @@ if (!INCOGNITO && !OFFLINE_MODE) {
 // Starts of this version that never got going (startup-guard.js).
 const startupGuard = !INCOGNITO && !OFFLINE_MODE ? new StartupGuard(app.getPath('userData'), app.getVersion(), log) : null;
 const failedStarts = startupGuard ? startupGuard.begin() : 0;
+// An error nothing caught: written down for the next start to offer as a
+// report (crash-report.js), and logged. Electron's own response - a modal
+// error box, and carrying on - would show the user a stack trace and keep it.
+if (!INCOGNITO && !OFFLINE_MODE) {
+  process.on('uncaughtException', (err) => {
+    console.error('[debrowser] uncaught:', err && err.stack ? err.stack : err);
+    CrashReport.record(app.getPath('userData'), err, app.getVersion());
+  });
+}
 if (earlyPrefs.get('hardwareAcceleration') === false) {
   app.disableHardwareAcceleration();
   log('config', 'hardware acceleration disabled by preference');
@@ -1621,6 +1631,12 @@ function main() {
       setInterval(sweepArchive, 3600_000).unref?.();
     }
 
+    // The last run hit an error nothing caught: offered as a report, once.
+    const crash = !INCOGNITO && !OFFLINE_MODE ? CrashReport.take(app.getPath('userData')) : null;
+    if (crash) {
+      setTimeout(() => runCommand.toast('Debrowser hit a problem last time', 'Report it',
+        () => runCommand('report-problem', { crash }), 20_000), lost.length ? 21_000 : 0).unref?.();
+    }
     if (lost.length) {
       runCommand.toast('Debrowser didn’t close properly', `Restore ${lost.length} tab${lost.length === 1 ? '' : 's'}`, () => {
         for (const entry of lost) {
@@ -2730,17 +2746,15 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       }
 
       // What a bug report needs, in one paste (.github/ISSUE_TEMPLATE/bug.yml).
-      case 'copy-version-info': {
-        const os = require('os');
-        clipboard.writeText([
-          `Debrowser ${app.getVersion()}`,
-          `Chromium ${process.versions.chrome} · Electron ${process.versions.electron}`,
-          `${os.type()} ${os.release()} (${process.arch})`,
-          `Design: ${prefs.get('design')}, ${prefs.get('theme')} theme`
-        ].join('\n'));
+      case 'copy-version-info':
+        clipboard.writeText(versionInfo(prefs).join('\n'));
         toast('Version info copied');
         break;
-      }
+
+      // A GitHub issue, prefilled with the version info, to read and send.
+      case 'report-problem':
+        openLinkTab(tabs, prefs, active, CrashReport.issueUrl(versionInfo(prefs), payload?.crash || null));
+        break;
 
       // Straight to the download manager, which names the file - and asks where
       // to put it, if Settings says to - the same path a click on a download
@@ -4848,6 +4862,17 @@ function firstTabLoaded(tab) {
  * a launch argument is outside input, and a `javascript:` or custom-scheme
  * URL has no business arriving this way.
  */
+/** What a bug report needs: version, engine, system, design. */
+function versionInfo(prefs) {
+  const os = require('os');
+  return [
+    `Debrowser ${app.getVersion()}`,
+    `Chromium ${process.versions.chrome} · Electron ${process.versions.electron}`,
+    `${os.type()} ${os.release()} (${process.arch})`,
+    `Design: ${prefs.get('design')}, ${prefs.get('theme')} theme`
+  ];
+}
+
 /**
  * The accent colour the system is set to - Windows' personalisation colour,
  * or macOS's - as '#rrggbb', or null where there is none to follow (Linux).
@@ -5017,6 +5042,7 @@ function menuModel({ tabs, shell }) {
     { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
     { kind: 'separator' },
     { id: 'open-whats-new', label: 'What’s new', icon: 'notes' },
+    { id: 'report-problem', label: 'Report a problem…', icon: 'flag' },
     { id: 'copy-version-info', label: 'Copy version info', icon: 'copy' },
     { kind: 'note', label: `Debrowser ${app.getVersion()} · Chromium ${process.versions.chrome}` }
   ];

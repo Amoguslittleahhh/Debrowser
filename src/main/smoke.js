@@ -1252,7 +1252,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         guard.restore(guard.backup());
         const restored = JSON.parse(fs.readFileSync(p.join(d, 'preferences.json'), 'utf8')).theme === 'dark' &&
           fs.existsSync(p.join(d, 'Backups', '2.0.0-before-restore', 'preferences.json'));
-        return threw && kept && backedUp && once && troubled && restored;
+        // A crash is kept for one report, with addresses and the home folder taken out.
+        const CrashReport = require('./crash-report');
+        const err = new Error('boom at https://secret.example/path');
+        err.stack = `Error: boom\n    at ${require('os').homedir()}/x.js visiting https://secret.example/a`;
+        CrashReport.record(d, err, '2.0.0');
+        const crash = CrashReport.take(d);
+        const url = CrashReport.issueUrl(['Debrowser 2.0.0'], crash);
+        const reported = crash && !/secret\.example/.test(url) && !url.includes(encodeURIComponent(require('os').homedir())) &&
+          url.startsWith('https://github.com/') && CrashReport.take(d) === null;
+        return threw && kept && backedUp && once && troubled && restored && reported;
       })();
       check('review fixes: private suffixes, malformed links, HTTPS-first re-upgrade, inherited pref keys, idle time, restore origin, profile safety',
         privateSites && decoded && upgradedTwice && prefsLoad && idleFromLeaving && restoreGuard && profile,
