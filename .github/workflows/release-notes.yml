@@ -46,7 +46,7 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Same script the release workflow uses, so a republished body is
       # byte-identical to what a fresh release of that version would have said.

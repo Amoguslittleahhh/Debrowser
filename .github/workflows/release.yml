@@ -116,9 +116,9 @@ jobs:
       VMP_SIGNING: ${{ secrets.EVS_ACCOUNT_NAME != '' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -402,7 +402,7 @@ jobs:
             "{0}: {1} {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
           }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}
           path: ${{ matrix.artifacts }}
@@ -423,9 +423,9 @@ jobs:
       # Only for CHANGELOG.md, which becomes the release body. Generated notes
       # on a first release are the entire commit history, which is not what
       # anyone wants to read on a download page.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
@@ -511,7 +511,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         continue-on-error: true
         with:
           subject-path: artifacts/*
@@ -542,7 +542,7 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # On a hand-run the tag does not exist yet; the action creates it at
           # this run's commit.
