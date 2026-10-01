@@ -115,11 +115,13 @@ class Updater {
       return { available: false, reason: 'running from source – updates apply to installed builds only' };
     }
     if (process.platform === 'darwin') {
-      // Squirrel.Mac validates that the update is signed by the same identity
-      // as the running app, and refuses outright when there is no identity at
-      // all. This is not a missing feature, it is a signing prerequisite, and
-      // saying so is better than an updater that fails on every check forever.
-      return { available: false, reason: 'macOS updates need a signed app; this build is unsigned' };
+      // Squirrel.Mac only installs an update signed by the same Developer ID as
+      // the running app, and this build has none - only an ad-hoc signature,
+      // which is a hash of this exact build and so never matches the next one.
+      // Checking needs no signature, though: it reads latest-mac.yml. So macOS
+      // is told when a version is out and gets it from the releases page,
+      // rather than sitting on an old Chromium without knowing.
+      return { available: true, reason: null, manual: true };
     }
     // A machine-wide install cannot update itself, and must not try.
     //
@@ -218,7 +220,7 @@ class Updater {
       // able to ask is not the same as agreeing to a hundred megabytes arriving
       // unannounced, and someone who turned automatic updates off and then went
       // looking wants the answer, not the download.
-      if (!this.enabled()) {
+      if (!this.enabled() || this.snapshot().manual) {
         this.state = 'available';
         return;
       }
@@ -383,6 +385,8 @@ class Updater {
     return {
       available: cap.available,
       reason: cap.reason,
+      /** True where the update is found here but installed by hand (macOS). */
+      manual: cap.manual === true,
       state: this.state,
       version: this.info?.version || null,
       progress: this.progress,

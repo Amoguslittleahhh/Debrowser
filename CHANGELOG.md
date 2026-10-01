@@ -56,6 +56,8 @@
 
 ### Fixed
 
+- **macOS: a downloaded copy no longer reports itself as damaged on Apple silicon.** The app is now ad-hoc signed, so the first launch shows the ordinary prompt you can allow once in System Settings → Privacy & Security → Open Anyway, instead of a damaged-app message with no way past it.
+- **macOS: Debrowser tells you when a new version is out.** It could not update itself on macOS and so never checked. It now checks like everywhere else, and Settings → Updates offers a Download button for the new version.
 - **Windows Hello no longer waits for ever** if Debrowser's own prompt cannot report back. After five minutes without an answer it gives up and closes the prompt, so a second try does not open a prompt on top of the first.
 - **Settings' side list shows the last section when you reach the end of the page.** A section finishing loading as you got there could leave the page just short of its end, and the list naming the section before.
 - **A tab you just left is no longer put to sleep at once.** Debrowser counted a tab as idle from when you opened it, not from when you left it, so a page you had read for twenty minutes could be discarded the moment you switched away - and auto-archive and the order tabs sleep in used the same wrong figure.

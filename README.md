@@ -40,10 +40,14 @@ source, on GitHub's runners, and attached to each release.
 **Windows builds are signed through the SignPath Foundation** - free code
 signing provided by [SignPath.io](https://signpath.io), certificate by
 [SignPath Foundation](https://signpath.org) - once signing is switched on for
-a release; until then, and on macOS, the builds are unsigned. Windows
-SmartScreen then shows "Windows protected your PC" (More info → Run anyway) and
-macOS Gatekeeper refuses the first launch (right-click → Open, once). Those
-warnings are accurate: no certificate vouches for an unsigned binary. See the
+a release; until then the Windows builds are unsigned, and the macOS builds
+are ad-hoc signed but not notarized. Windows SmartScreen then shows "Windows
+protected your PC" (More info → Run anyway). macOS refuses the first launch
+with "Apple could not verify Debrowser": open System Settings → Privacy &
+Security, scroll down and choose **Open Anyway**, once. Those warnings are
+accurate: no certificate vouches for these builds. On macOS, Debrowser tells
+you when a new version is out, but you install it yourself (download, drag
+into Applications); updating itself needs a notarized build. See the
 [code signing policy](#code-signing-policy) below.
 
 The build is wired for signing — set two repository secrets and the release

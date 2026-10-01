@@ -210,10 +210,17 @@ portable:
 ## Both architectures, because an Intel-only build runs under Rosetta on Apple
 ## silicon and a browser is exactly the wrong place to pay that.
 ##
-## Unsigned and un-notarized, so Gatekeeper will refuse the first launch and the
-## user has to right-click -> Open, or clear the quarantine attribute. That is
-## documented rather than worked around: notarization needs an Apple Developer
-## account, and pretending otherwise would ship something that looks broken.
+## Ad-hoc signed and un-notarized. Notarization needs a paid Apple Developer
+## account; until there is one, Gatekeeper refuses the first launch and the
+## user allows it once in System Settings -> Privacy & Security -> Open Anyway.
+##
+## Ad-hoc ("-") rather than unsigned, and that is not cosmetic. Apple silicon
+## runs no unsigned code at all, and packaging (the app archive, the fuses, the
+## VMP signature) changes the bundle after Electron's own signature was made -
+## left like that, a downloaded copy is reported as "damaged and can't be
+## opened", with no Open Anyway to offer. An ad-hoc signature seals the bundle
+## as it ships, so the user gets the ordinary unidentified-developer prompt.
+## With a Developer ID, replace "-" with nothing and set CSC_LINK instead.
 mac:
   target:
     - target: dmg
@@ -222,6 +229,9 @@ mac:
       arch: [x64, arm64]
   category: public.app-category.productivity
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  ## Ad-hoc; see above. disable-library-validation in the entitlements is what
+  ## lets the hardened runtime load Electron's frameworks under it.
+  identity: '-'
   ## The browser opens network connections and spawns renderers; the hardened
   ## runtime needs to be told so if this is ever signed.
   hardenedRuntime: true

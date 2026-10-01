@@ -1085,8 +1085,9 @@ function renderUpdateState(u) {
 
   switch (u.state) {
     case 'checking':    el.textContent = 'Checking for a new version…'; break;
-    case 'available':   el.textContent =
-      `${u.version} is available. Turn on automatic updates to download it.`; break;
+    case 'available':   el.textContent = u.manual
+      ? `${u.version} is available. Download it and drag it into Applications over this one.`
+      : `${u.version} is available. Turn on automatic updates to download it.`; break;
     case 'downloading': el.textContent = `Downloading ${u.version} – ${u.progress}%.`; break;
     case 'ready':       el.textContent = `${u.version} is downloaded and installs when you restart.`; break;
     case 'error':       el.textContent = `Last check failed: ${u.error}`; break;
@@ -1099,10 +1100,17 @@ function renderUpdateState(u) {
     // Nothing to ask while an answer is already on its way, or while an update
     // is sitting downloaded waiting for a restart.
     button.disabled = u.state === 'checking' || u.state === 'downloading' || u.state === 'ready';
+    // On macOS the update is installed by hand, so the button fetches it.
+    button.dataset.download = String(Boolean(u.manual && u.state === 'available'));
+    button.textContent = button.dataset.download === 'true' ? 'Download' : 'Check now';
   }
 }
 
-document.getElementById('check-updates')?.addEventListener('click', async () => {
+document.getElementById('check-updates')?.addEventListener('click', async (event) => {
+  if (event.currentTarget.dataset.download === 'true') {
+    api.send('open-link-tab', { url: 'https://github.com/amoguslittleahhh/debrowser/releases/latest' });
+    return;
+  }
   renderUpdateState(await api.request('check-for-updates'));
 });
 
