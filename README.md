@@ -24,8 +24,10 @@ The interesting part is `src/main/governor/`.
 
 ## Installing it
 
-Prebuilt installers are produced by `.github/workflows/release.yml` on a tagged
-push, or on demand from the Actions tab, and attached to the release.
+**[Download the latest release](https://github.com/Amoguslittleahhh/Debrowser/releases/latest)**
+- or any earlier one from the [releases page](https://github.com/Amoguslittleahhh/Debrowser/releases).
+Installers are built by `.github/workflows/release.yml` from this repository's
+source, on GitHub's runners, and attached to each release.
 
 | | Download | Then |
 |---|---|---|
