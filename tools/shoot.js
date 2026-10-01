@@ -278,6 +278,7 @@ const THEME = process.argv.find((a) => a.startsWith('--theme='));
 // `--audit` measures each page against tools/audit-probe.js instead of only
 // photographing it, and exits non-zero when anything fails.
 const AUDIT = process.argv.includes('--audit');
+const AXE_SOURCE = AUDIT ? fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8') : '';
 // `--forced-colors` emulates a Windows High Contrast theme.
 const FORCED = process.argv.includes('--forced-colors');
 const auditFindings = [];
@@ -391,6 +392,17 @@ app.whenReady().then(async () => {
     if (AUDIT) {
       const found = await win.webContents.executeJavaScript(require('./audit-probe')).catch((e) => [{ kind: 'error', el: '', detail: e.message }]);
       for (const f of found) auditFindings.push({ shot: shot.name, ...f });
+      // axe-core: names, roles, labels and structure, as a screen reader meets
+      // them (WCAG 2.2 A and AA). Contrast is left to audit-probe.js, which
+      // measures it with this design's own composited colours.
+      const axe = await win.webContents.executeJavaScript(`${AXE_SOURCE};
+        axe.run(document, {
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+          rules: { 'color-contrast': { enabled: false } }
+        }).then((r) => r.violations.flatMap((v) => v.nodes.slice(0, 3).map((n) => ({
+          kind: 'a11y', el: String(n.target[0]).slice(0, 60), detail: v.id + ': ' + v.help
+        }))))`).catch((e) => [{ kind: 'error', el: 'axe', detail: e.message }]);
+      for (const f of axe) auditFindings.push({ shot: shot.name, ...f });
     }
     try {
       const img = await Promise.race([

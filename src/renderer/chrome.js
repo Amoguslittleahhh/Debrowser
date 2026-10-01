@@ -698,6 +698,9 @@ document.getElementById('tabstrip').addEventListener('mouseleave', releaseTabWid
 function createTabElement(id) {
   const root = document.createElement('div');
   root.className = 'tab';
+  root.setAttribute('role', 'tab');
+  root.setAttribute('aria-selected', 'false');
+  root.tabIndex = -1;
   // Its entrance plays once. Moved in the DOM - a drag dropping it somewhere
   // new - the animation would start again and the tab blink out and back.
   root.addEventListener('animationend', (e) => {
@@ -744,7 +747,7 @@ function createTabElement(id) {
   // A button, not a decoration: the thing you want when a tab starts talking is
   // to silence *that* tab, and the mark saying which one it is should be what
   // you press. Chrome does the same.
-  const audio = document.createElement('button');
+  const audio = document.createElement('span');
   audio.className = 'audio-dot';
   audio.type = 'button';
   audio.textContent = '\u25b6';
@@ -754,8 +757,11 @@ function createTabElement(id) {
 
   const title = document.createElement('span');
   title.className = 'tab-title';
+  // The tab's accessible name is its title.
+  title.id = `tab-title-${id}`;
+  root.setAttribute('aria-labelledby', title.id);
 
-  const close = document.createElement('button');
+  const close = document.createElement('span');
   close.className = 'tab-close';
   close.append(crossIcon());
   close.setAttribute('aria-label', 'Close tab');
@@ -764,7 +770,7 @@ function createTabElement(id) {
   // and colour, a click to fold, a double-click to rename, a right-click for
   // the group's own menu. Part of the tab rather than a node of its own, so
   // the strip's order and a drag's index stay a list of tabs.
-  const group = document.createElement('button');
+  const group = document.createElement('span');
   group.className = 'tab-group';
   group.type = 'button';
   group.hidden = true;
@@ -787,6 +793,13 @@ function createTabElement(id) {
 
   const bar = document.createElement('span');
   bar.className = 'tab-group-bar';
+
+  // A tab is one control to a screen reader and the keyboard: what is inside
+  // it - close, mute, the group label - is for the pointer, with Delete and the
+  // tab's menu as the keyboard's way to the same things.
+  // Plain elements rather than buttons: a control nested in a tab is two
+  // controls in one to a screen reader, which ARIA does not allow.
+  for (const inner of [group, audio, close]) inner.setAttribute('aria-hidden', 'true');
 
   root.append(group, tier, icon, title, audio, close, bar);
 
@@ -1132,6 +1145,10 @@ function updateTabElement(node, tab) {
 
   if (prev.active !== tab.visible) {
     node.root.classList.toggle('active', tab.visible);
+    // The tab in front is the strip's one stop in the Tab order (the arrow
+    // keys walk the rest), and what a screen reader calls selected.
+    node.root.setAttribute('aria-selected', String(tab.visible));
+    node.root.tabIndex = tab.visible ? 0 : -1;
     prev.active = tab.visible;
     // Now that the strip scrolls, the tab you switched to can be off the end of
     // it - Ctrl+Tab through thirty tabs and the highlight walks out of the
@@ -1784,6 +1801,30 @@ function renderPrivate(incognito) {
     el.privatePill.title = 'This site refused every Tor exit it was tried from. Ctrl+Shift+L tries another.';
   }
 }
+
+/*
+ * The strip from the keyboard, as a tab list works everywhere else: the arrow
+ * keys move between tabs (up and down when they run down the side), Home and
+ * End go to the ends, Enter or Space brings one forward, Delete closes it.
+ */
+el.tabs.addEventListener('keydown', (event) => {
+  const here = event.target.closest && event.target.closest('.tab');
+  if (!here) return;
+  const all = [...el.tabs.querySelectorAll('.tab:not(.closing):not(.group-folded)')];
+  const at = all.indexOf(here);
+  const side = document.body.dataset.layout === 'left';
+  const next = { [side ? 'ArrowDown' : 'ArrowRight']: at + 1, [side ? 'ArrowUp' : 'ArrowLeft']: at - 1,
+    Home: 0, End: all.length - 1 }[event.key];
+  if (next !== undefined) {
+    event.preventDefault();
+    const to = all[Math.max(0, Math.min(all.length - 1, next))];
+    if (to) { for (const t of all) t.tabIndex = t === to ? 0 : -1; to.focus(); }
+    return;
+  }
+  const id = Number(here.dataset.id);
+  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); api.send('activate-tab', { id }); }
+  else if (event.key === 'Delete') { event.preventDefault(); api.send('close-tab', { id }); }
+});
 
 el.onion.addEventListener('click', () => api.send('open-onion'));
 el.drm.addEventListener('click', () => api.send('open-drm-elsewhere'));

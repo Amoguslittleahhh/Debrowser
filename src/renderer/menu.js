@@ -66,6 +66,9 @@ function render(items) {
     if (item.kind === 'note') {
       const note = document.createElement('div');
       note.className = 'note';
+      // Read out as part of the menu, never chosen: an item that is disabled.
+      note.setAttribute('role', 'menuitem');
+      note.setAttribute('aria-disabled', 'true');
       note.textContent = item.label;
       el.sheet.append(note);
       continue;
@@ -125,6 +128,9 @@ function render(items) {
 function zoomRow(item) {
   const row = document.createElement('div');
   row.className = 'zoom';
+  // A menu holds items, groups and separators; this row is a group of items.
+  row.setAttribute('role', 'group');
+  row.setAttribute('aria-label', 'Zoom');
 
   const label = document.createElement('span');
   label.className = 'zoom-label';
@@ -132,6 +138,7 @@ function zoomRow(item) {
 
   const reset = document.createElement('button');
   reset.className = 'zoom-reset';
+  reset.setAttribute('role', 'menuitem');
   reset.type = 'button';
   reset.textContent = 'Reset';
   reset.dataset.zoom = 'reset';
@@ -140,6 +147,7 @@ function zoomRow(item) {
 
   const out = document.createElement('button');
   out.className = 'step';
+  out.setAttribute('role', 'menuitem');
   out.type = 'button';
   // Drawn, not typed: a text minus and plus sit wherever the face puts
   // them, and never on the same line as each other.
@@ -155,6 +163,7 @@ function zoomRow(item) {
 
   const into = document.createElement('button');
   into.className = 'step';
+  into.setAttribute('role', 'menuitem');
   into.type = 'button';
   into.append(menuIcon('plus'));
   into.dataset.zoom = 'in';

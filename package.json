@@ -31,6 +31,7 @@
     "lint": "eslint src tools bench test"
   },
   "devDependencies": {
+    "axe-core": "^4.13.0",
     "electron": "github:castlabs/electron-releases#v44.1.0+wvcus",
     "electron-builder": "^26.15.3",
     "eslint": "^9.0.0",
