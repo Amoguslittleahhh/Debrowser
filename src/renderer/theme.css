@@ -740,6 +740,21 @@ body:not([data-design="legacy"]) :is(.card, .sheet, .omnibox, #q, .continue, .ch
   corner-shape: superellipse(1.8);
 }
 
+/*
+ * Text a website wrote runs in its own direction.
+ *
+ * A title in Arabic or Hebrew was laid out left to right like the interface
+ * around it: aligned to the wrong edge, and cut with its ellipsis at the
+ * beginning of the title rather than the end. Each of these takes its
+ * direction from its own first letter, as Chrome's tab titles do - the
+ * browser's own labels keep the interface's.
+ */
+:is(.tab-title, .bookmark-label, .continue-title, .visit-title, .dl-name, .download-name, .row-title,
+  .tab-group-name, .space-name, .tile-label, .suggest .title, #title.page-title) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
 /* See applyThemePrefs: a theme switch does not animate. */
 body.switching-theme *, body.switching-theme *::before, body.switching-theme *::after {
   transition: none !important;

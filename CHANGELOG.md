@@ -76,6 +76,7 @@
 
 ### Fixed
 
+- **Titles in Arabic, Hebrew and other right-to-left languages read the right way.** In the tab strip, bookmarks, history, downloads, suggestions and "Continue with these tabs", such a title was aligned to the wrong edge and cut at its beginning; it now runs in its own direction and is cut at its end.
 - **Private windows: the connection page is centred.** It sat in the left half of the window with its scrollbar running down the middle.
 - **"See more" and the grey lines in "Continue with these tabs" are easier to read.** On the card's lifted surface they fell below the contrast text needs, in Ledger, Paper and Grid.
 - **A question no longer answers another for you.** A prompt such as Save password? arriving while a site's camera, microphone or location question was on screen closed it, which counted as a refusal. Questions now wait their turn.

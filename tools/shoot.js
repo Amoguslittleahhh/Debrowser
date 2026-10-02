@@ -329,6 +329,9 @@ app.on('window-all-closed', () => {});
 
 app.whenReady().then(async () => {
   for (const shot of WANTED) {
+    // SHOOT_W=600 photographs everything at another width: a window snapped to
+    // half a laptop screen is where layouts that only ever met 1280 break.
+    if (process.env.SHOOT_W) shot.w = Number(process.env.SHOOT_W);
     // A shot may serve a different model through the channel the page asks on.
     // Before the window, because the answers are serialised into its preload
     // arguments - set after it, and the page has already been given the old set.
@@ -349,6 +352,15 @@ app.whenReady().then(async () => {
       gread: { id: 'gread', name: 'Reading', color: '#7b6a9c', collapsed: false },
       gwatch: { id: 'gwatch', name: 'Later', color: '#a8694a', collapsed: true }
     } : undefined;
+    // SHOOT_TABS=40 crowds the strip with awkward titles - right-to-left,
+    // emoji, one very long - where tab layout and truncation give way.
+    if (process.env.SHOOT_TABS && STATE.tabs.length < Number(process.env.SHOOT_TABS)) {
+      const odd = ['مرحبا بالعالم – الأخبار', '🎉🎉 Party planning 🎉🎉', 'A'.repeat(180), '日本語のページタイトル', ''];
+      for (let i = STATE.tabs.length; i < Number(process.env.SHOOT_TABS); i++) {
+        STATE.tabs.push({ id: 100 + i, title: odd[i % odd.length], url: `https://site${i}.example/`, visible: false,
+          tier: ['warm', 'cold', 'frozen', 'discarded'][i % 4], rssMB: 10 + i, loading: false, favicon: null, audible: false, boosted: false });
+      }
+    }
     // SHOOT_ACTIVE=5 puts another tab in front - the new tab, for a picture
     // of the whole window where the address bar and the page agree.
     if (process.env.SHOOT_ACTIVE) {
