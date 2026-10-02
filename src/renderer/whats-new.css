@@ -17,7 +17,7 @@ ul { margin: 0; padding: 0; list-style: none; }
 li {
   padding: var(--s3) 0;
   border-top: 1px solid var(--border);
-  font-size: 14px;
+  font-size: var(--fs-body);
   line-height: 1.55;
 }
 li strong { font-weight: 600; }

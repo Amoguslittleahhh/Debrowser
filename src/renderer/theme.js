@@ -365,6 +365,10 @@ function readable(colour, against, need = 4.6) {
 function applyThemePrefs(prefs) {
   if (!prefs) return;
   const body = document.body;
+  // Which system this is, on every page rather than only the chrome: the
+  // stylesheet sets the Mac's own face from it (theme.css).
+  const platform = window.debrowser && window.debrowser.platform;
+  if (platform && body.dataset.platform !== platform) body.dataset.platform = platform;
 
   const flags = {
     theme: prefs.theme,

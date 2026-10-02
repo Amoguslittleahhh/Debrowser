@@ -906,6 +906,18 @@ function chromiumSwitches(cfg, incognito = null) {
   // castLabs' binary has the media code but not that registration, so the
   // key system never appears. Streaming views (streamview.js) are the route.
 
+  // Scrollbars that appear while you scroll and fade when you stop, as a Mac
+  // draws them, rather than a permanent trough down the side of every panel
+  // and page. Measured: with it, a scrolling page has no scrollbar pixels at
+  // rest in this Electron build; without it, a 252-grey track. A Mac already
+  // has them; Windows and Linux draw scrollbars through the same Aura code the
+  // feature switches, and if it were ignored the scrollbar would be as before.
+  // Not in a private window: a page can measure the scrollbar's width, and
+  // changing it there would change what the window looks like to a tracker.
+  if (process.platform !== 'darwin' && !incognito && !process.env.DEBROWSER_CLASSIC_SCROLLBARS) {
+    features.push('OverlayScrollbar');
+  }
+
   if (features.length) switches.push(['enable-features', features.join(',')]);
   if (disabledFeatures.length) switches.push(['disable-features', disabledFeatures.join(',')]);
 

@@ -314,6 +314,19 @@ body[data-theme="dark"] {
   --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
 }
 
+/*
+ * On a Mac, the Mac's own face: San Francisco, at the 13px macOS sets its
+ * interface in. The Calibri tuning above is for Windows; a Mac with Office
+ * installed has Calibri too, and was given it ahead of the system font - the
+ * one thing that most makes an app look like it was not made for the Mac.
+ * Grid keeps its grotesque and Paper its serif headings; this is the body face.
+ */
+body[data-platform="darwin"] {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --fs-body: 13px;
+  --ls-title: -0.015em;
+}
+
 /* Ledger: sage and pine by light, near-black green by dark. Soft corners. */
 body[data-design="ledger"] {
   color-scheme: dark;
@@ -445,7 +458,7 @@ body {
    * focus moves everything beside it, and a control that shifts as you tab onto
    * it is the clearest sign nobody tabbed onto it while building the thing.
    */
-  --ring: 0 0 0 2px color-mix(in srgb, var(--accent) 48%, transparent);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 42%, transparent);
 
   /*
    * Elevation, and there is exactly one shadow in this browser's own UI.
@@ -455,7 +468,11 @@ body {
    * opens and destroyed when it closes. A shadow on the chrome would be a blur
    * pass held for the life of the window.
    */
-  --shadow-menu: 0 14px 34px -12px rgba(18, 16, 12, 0.55), 0 2px 6px -2px rgba(18, 16, 12, 0.3);
+  /* Layered as macOS draws a popover: a hairline edge, a tight contact shadow
+     and a wide, faint one, so it lifts off any surface - light or dark -
+     without a heavy halo. */
+  --shadow-menu: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 2px 6px -1px rgba(18, 16, 12, 0.22),
+                 0 18px 44px -12px rgba(18, 16, 12, 0.5);
 }
 
 /* The shared close cross - see `crossIcon()` in theme.js. */
@@ -552,7 +569,9 @@ body .chip.has-icon {
  */
 :root {
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --ease-out: cubic-bezier(0.05, 0.7, 0.1, 1);
+  /* Apple's own arrival curve - the one its sheets and popovers settle on:
+     quick off the mark, then a long, soft landing with no overshoot. */
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-in: cubic-bezier(0.3, 0, 0.8, 0.15);
   --instant: 70ms;
   --fast: 120ms;

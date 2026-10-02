@@ -36,6 +36,10 @@
 
 ### Improved
 
+- **macOS: Debrowser is set in the Mac's own typeface.** San Francisco at the size macOS uses for its interface, on every page, in every design but Grid, which keeps its own. A Mac with Microsoft Office installed used to get Calibri.
+- **Scrollbars appear while you scroll and fade when you stop**, as on a Mac, instead of a permanent bar down the side of every page and panel. Private windows keep standard scrollbars, because a page can measure them.
+- **Softer, more natural motion and depth.** Panels and prompts settle in on Apple's own easing curve, floating sheets have a fine edge and a layered shadow, and the keyboard focus ring is a little fuller and easier to see.
+- **A long address ends in an ellipsis** when the address bar is not being edited, instead of a letter cut in half.
 - **Every question the browser asks is drawn in its own style.** Closing a window of tabs, saving a password, opening a downloaded program and a private window that could not open now ask in the same sheet as the update prompt, in your theme and accent, instead of in a system message box. Escape or a click outside is the cancel, as before.
 - **Windows: installing is one click.** The installer no longer walks through a wizard drawn in the system's style; it installs for you alone, with no questions, and opens Debrowser on its welcome tour. The install folder is the standard per-user one.
 - **macOS: the disk image has a designed window.** The app and the Applications folder sit side by side on the browser's own background, with the one instruction there is.
@@ -65,6 +69,7 @@
 
 ### Fixed
 
+- **Private windows: the .onion button is no longer hidden under the address bar.** The centred address bar now measures what is beside it, so the onion button, the private pill and Slow page? always have room. In Grid it was covered completely; in the other designs, half of it.
 - **macOS: copy, paste, cut, select all and undo work.** Without an Edit menu, Cmd+C, Cmd+V, Cmd+X, Cmd+A and Cmd+Z did nothing in the address bar or in any form on a page, and Cmd+Q, Cmd+H and Cmd+M did nothing either. Debrowser now has the standard app, Edit and Window menus in the macOS menu bar.
 - **macOS: History is Cmd+Y and the task manager Shift+Esc**, leaving Cmd+H to hide the app and Cmd+M to minimise the window, as on every other Mac app.
 - **No more broken-image icons in tabs and bookmarks.** A site icon still loading, or about to fail, could show as the broken-image symbol in place of the site's letter. The letter now stays until a real icon has loaded.

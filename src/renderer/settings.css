@@ -387,7 +387,10 @@ input[type="range"] {
 .ghost-btn:hover { background: var(--wash-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 /* A link inside a note: reads as text, acts as a button. */
 .link-btn {
-  padding: 0;
+  /* A 24px target in a line of text: padded up and down, and the padding
+     handed back, so the sentence keeps its line height. */
+  padding: 4px 0;
+  margin: -4px 0;
   border: 0;
   background: none;
   color: var(--accent-text);

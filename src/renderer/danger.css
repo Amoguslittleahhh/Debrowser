@@ -29,7 +29,7 @@ h1 { margin: 0 0 var(--s2); font-size: 24px; font-weight: 600; letter-spacing: -
 .host { margin: 0 0 var(--s5); font: 13px var(--font-mono); color: var(--dim-on-tint); word-break: break-all; }
 .actions { display: flex; gap: var(--s2); margin-bottom: var(--s5); }
 button { font: inherit; cursor: pointer; }
-.primary, .secondary { padding: 8px 18px; border-radius: var(--radius-pill); font-size: 14px; }
+.primary, .secondary { padding: 8px 18px; border-radius: var(--radius-pill); font-size: var(--fs-body); }
 .primary { border: 1px solid var(--accent); background: var(--accent-fill); color: #fff; }
 .primary:hover { filter: brightness(1.08); }
 .secondary { border: 1px solid var(--border); background: transparent; color: var(--text); }

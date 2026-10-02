@@ -713,6 +713,9 @@ body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: non
 #url {
   flex: 1;
   min-width: 0;
+  /* A long address ends in an ellipsis at rest rather than a letter sliced in
+     half against the star; while editing, the field scrolls as fields do. */
+  text-overflow: ellipsis;
   /* Fills the pill rather than sitting as a 20px line inside it. Centred text
      looked the same either way; the difference is that a click 8px below the
      baseline now lands on the field instead of on its container. */
@@ -2108,7 +2111,11 @@ body.incognito .omnibox { --omni-side-extra: 110px; }
     position: absolute;
     top: 50%;
     left: 50%;
-    width: min(760px, calc(100vw - 2 * (var(--omni-side) + var(--omni-side-extra, 0px))));
+    /* The allowance, or what is really beside it if that is wider - measured
+       by `fitOmnibox` in chrome.js, because the right side holds a private
+       pill whose words change and buttons that come and go. A constant alone
+       let the onion button slide under the bar in a private window. */
+    width: min(760px, calc(100vw - 2 * max(var(--omni-side) + var(--omni-side-extra, 0px), var(--omni-fit, 0px))));
     margin: 0;
     transform: translate(-50%, -50%);
   }
@@ -2123,7 +2130,9 @@ body.incognito .omnibox { --omni-side-extra: 110px; }
 
 /* The Protected video button, in the address bar with the page's other actions. */
 .omnibox .onion-btn {
-  height: 22px;
+  /* 24px: the smallest target there is, and in Grid, which sets its controls
+     edge to edge, there is no spacing to make up for less. */
+  height: 24px;
   margin-right: 4px;
   padding: 0 9px;
   font-size: 12px;

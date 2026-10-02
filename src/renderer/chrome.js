@@ -1461,6 +1461,50 @@ el.menu.addEventListener('click', () => {
   });
 });
 
+/*
+ * Keep the centred address bar clear of what is beside it.
+ *
+ * Centred on the window (chrome.css), it is sized from an allowance for the
+ * controls either side - and the right side is not a fixed width: a private
+ * window's pill says "Private · site refuses Tor" or less, and the onion and
+ * Slow page? buttons come and go. Photographed, the onion button sat entirely
+ * under the bar in Grid and half under it everywhere else. So the real
+ * clearance is measured whenever anything in the row changes size, and the
+ * bar takes the larger of the two.
+ */
+function fitOmnibox() {
+  const bar = el.omnibox;
+  const toolbar = bar && bar.parentElement;
+  if (!toolbar) return;
+  if (getComputedStyle(bar).position !== 'absolute') {
+    bar.style.removeProperty('--omni-fit');
+    return;
+  }
+  const gap = 12;
+  let left = 0;
+  let right = window.innerWidth;
+  for (const child of toolbar.children) {
+    if (child === bar || child.hidden) continue;
+    // Controls in the row only: a progress line or an overlay laid across the
+    // whole toolbar is not something beside the bar.
+    const position = getComputedStyle(child).position;
+    if (position === 'absolute' || position === 'fixed') continue;
+    const box = child.getBoundingClientRect();
+    if (!box.width || box.width > window.innerWidth / 2) continue;
+    // Before the bar's centre is its left side's; after, its right side's.
+    if (box.left + box.width / 2 < window.innerWidth / 2) left = Math.max(left, box.right);
+    else right = Math.min(right, box.left);
+  }
+  const side = Math.ceil(Math.max(left, window.innerWidth - right) + gap);
+  const value = `${side}px`;
+  if (bar.style.getPropertyValue('--omni-fit') !== value) bar.style.setProperty('--omni-fit', value);
+}
+if (el.omnibox && typeof ResizeObserver === 'function') {
+  const fit = new ResizeObserver(() => requestAnimationFrame(fitOmnibox));
+  fit.observe(el.omnibox.parentElement);
+  for (const child of el.omnibox.parentElement.children) if (child !== el.omnibox) fit.observe(child);
+}
+
 el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); api.send('sidebar-typing', { typing: true }); });
 el.url.addEventListener('blur', () => { urlFocused = false; api.send('sidebar-typing', { typing: false }); });
 
