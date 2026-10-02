@@ -1947,6 +1947,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
           chrome: null,
           brand: shown(document.querySelector('.brand')),
           tiles: shown(document.getElementById('tiles')),
+          label: [...document.querySelectorAll('.tile-label')].map((l) => l.textContent.replace(/\u200b/g, '')).join(','),
           card: shown(document.getElementById('continue')),
           rows: document.querySelectorAll('#continue-list .continue-row').length,
           dot: getComputedStyle(document.querySelector('.brand-dot')).fill
@@ -1961,11 +1962,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('every design reaches the chrome and the new tab page',
       Object.entries(seen).every(([d, r]) => r && r.design === d && r.chrome === d),
       Object.entries(seen).map(([d, r]) => `${d}: page=${r?.design} chrome=${r?.chrome}`).join(', '));
-    check('the new designs show the mark in the chosen accent, Legacy keeps its tiles',
-      fresh.every((d) => seen[d].brand && !seen[d].tiles && seen[d].dot === 'rgb(176, 48, 106)') &&
-      !seen.legacy.brand,
-      fresh.map((d) => `${d}: mark=${seen[d].brand} dot=${seen[d].dot}`).join(', ') +
-      `, legacy mark=${seen.legacy.brand}`);
+    // Favourites in the new designs, named for the site ("continue", not
+    // "continue.test"); Legacy keeps its own list of hostnames.
+    check('the new designs show the mark in the chosen accent and favourites by name; Legacy keeps its list',
+      fresh.every((d) => seen[d].brand && seen[d].tiles && seen[d].dot === 'rgb(176, 48, 106)' &&
+        seen[d].label.split(',').includes('continue')) &&
+      !seen.legacy.brand && seen.legacy.label.split(',').includes('continue.test'),
+      fresh.map((d) => `${d}: mark=${seen[d].brand} dot=${seen[d].dot} favourites=${seen[d].label}`).join(', ') +
+      `, legacy mark=${seen.legacy.brand} list=${seen.legacy.label}`);
     check('"Continue with these tabs" lists recent pages in the new designs and not in Legacy',
       fresh.every((d) => seen[d].card && seen[d].rows === 1) && !seen.legacy.card,
       fresh.map((d) => `${d}: ${seen[d].rows} row(s)`).join(', ') + `, legacy card=${seen.legacy.card}`);

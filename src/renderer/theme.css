@@ -539,6 +539,15 @@ body {
  * one shows through it and around it. `body` on the selector because the theme
  * blocks qualify their own chip rules and would otherwise win.
  */
+/* The browser's own mark (ownMark in theme.js): its outline in the text
+   colour, its dot in the accent, on no tile at all - it is not a site. */
+body :is(.chip, .tab-chip).own {
+  background: none;
+  color: var(--text);
+}
+:is(.chip, .tab-chip).own svg { width: 100%; height: 100%; display: block; }
+:is(.chip, .tab-chip).own circle { fill: var(--accent); }
+
 body .chip.has-icon {
   background: none;
   color: transparent;

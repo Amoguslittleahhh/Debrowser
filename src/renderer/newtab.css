@@ -225,12 +225,15 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) mai
   /* The field centred in the window, unless that pushes the card below the
      fold: then everything rises just enough to fit, down to 24px from the top.
      --fit is main's own height, kept by newtab.js. */
-  margin: max(24px, min(calc(50vh - 53px), calc(100vh - var(--fit, 0px) - 36px))) auto 36px;
+  /* The whole group - mark, field, today's line, favourites - centred, a
+     little above the middle where the eye rests, rather than the field alone
+     at the centre with everything else hanging below it. --fit is main's own
+     height, kept by newtab.js; a short window scrolls from 24px down. */
+  margin: max(24px, calc((100vh - var(--fit, 106px)) * 0.42)) auto 36px;
   padding: 0;
   text-align: left;
 }
-body[data-design="grid"] main { margin-top: max(24px, min(calc(50vh - 58px), calc(100vh - var(--fit, 0px) - 36px))); }
-body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is(#wordmark, .tiles, .stat) {
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is(#wordmark, .stat) {
   display: none;
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .brand {
@@ -395,3 +398,82 @@ body[data-design="ledger"] .go {
 body[data-design="ledger"] .go:hover { filter: brightness(1.08); }
 body[data-design="ledger"] .go:active { transform: translateY(-50%) scale(0.96); }
 .go svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/*
+ * Favourites, in every design but Legacy (which keeps its own list above).
+ *
+ * The page was a mark, a field and one line - a first screen with nothing to
+ * press but the keyboard. These are the sites you go to most, as Safari's
+ * start page sets them: a large mark on a quiet tile, the name under it. Each
+ * design's own tokens shape them - Ledger's soft corners, Paper's serif
+ * names, Grid's square edges and capitals - so they are its tiles, not a
+ * borrowed widget.
+ *
+ * The receipt line moves up under the field, where it reads as the field's
+ * caption, and the favourites sit below it.
+ */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
+  display: flex;
+  flex-direction: column;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .receipt { order: 1; align-self: center; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles:not([hidden]) {
+  order: 2;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 16px 6px;
+  margin: 30px 0 0;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles::before {
+  content: 'Favourites';
+  grid-column: 1 / -1;
+  /* In line with the first mark, which sits centred in a column wider than it. */
+  margin: 0 0 -6px calc((100% - 7 * 6px) / 16 - 28px);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-bold);
+  color: var(--text-dim);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open {
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px 6px;
+  border: 0;
+  text-align: center;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open:hover { background: var(--wash-soft); }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .chip {
+  width: 56px;
+  height: 56px;
+  border-radius: calc(var(--radius-lg) + 2px);
+  font-size: 22px;
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text) 14%, transparent);
+  transition: transform var(--fast) var(--ease-out);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open:hover .chip { transform: translateY(-1px); }
+/* A favicon is drawn for 16 to 32 pixels; stretched to the tile it blurs. So
+   the site's mark sits at the size it was made for, on a quiet surface. */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .chip.has-icon {
+  background: var(--bg-input);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .site-icon {
+  inset: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-label {
+  flex: none;
+  width: 100%;
+  text-align: center;
+  /* Two lines at most, broken at a dot (see favouriteName), then an ellipsis. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  line-height: 1.3;
+  min-height: 2.6em;
+}
+body[data-design="paper"] .tile-label { font-family: var(--font-display); font-size: 13px; }
+body[data-design="grid"] .tiles::before { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
+body[data-design="grid"] .tile-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-forget { top: 0; right: 8px; }

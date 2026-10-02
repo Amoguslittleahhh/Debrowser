@@ -280,6 +280,33 @@ function siteOf(url) {
 }
 
 /**
+ * The browser's own mark, for its own pages wherever a site's letter would go.
+ *
+ * `siteOf` folds every debrowser:// page into one "site", whose letter was a
+ * purple D on a tile - the New tab, Settings and History each labelled as if
+ * they were a website called D. They are the browser's, so they carry its mark:
+ * the rounded square and the accent dot the new tab page is headed with.
+ *
+ * @param {HTMLElement} chip - emptied and given the mark
+ */
+function ownMark(chip) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 64 64');
+  svg.setAttribute('aria-hidden', 'true');
+  const rect = document.createElementNS(ns, 'rect');
+  for (const [k, v] of Object.entries({ x: 10, y: 10, width: 44, height: 44, rx: 13, fill: 'none',
+    stroke: 'currentColor', 'stroke-width': 5.5 })) rect.setAttribute(k, String(v));
+  const dot = document.createElementNS(ns, 'circle');
+  for (const [k, v] of Object.entries({ cx: 26, cy: 26, r: 7 })) dot.setAttribute(k, String(v));
+  svg.append(rect, dot);
+  chip.replaceChildren(svg);
+  chip.classList.add('own');
+}
+
+/* exported ownMark */
+
+/**
  * The site mark: a letter on a coloured tile, with the site's own logo over it
  * once one loads.
  *
@@ -310,6 +337,11 @@ function siteChip(url, { icon = null, chipClass = 'chip', iconClass = 'site-icon
   chip.setAttribute('aria-hidden', 'true');
   chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
   chip.style.setProperty('--hue', String(siteHue(host)));
+  // The browser's own pages have no icon to fetch: they carry its mark.
+  if (host === 'debrowser') {
+    ownMark(chip);
+    return chip;
+  }
 
   const img = document.createElement('img');
   img.className = iconClass;

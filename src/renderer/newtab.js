@@ -44,6 +44,24 @@ window.addEventListener('DOMContentLoaded', () => {
  */
 const tiles = document.getElementById('tiles');
 
+/**
+ * What a favourite is called under its mark: the site, not its address.
+ *
+ * "github" rather than "github.com", "mail.google" rather than a truncated
+ * "mail.google.…" - the ending is the same on nearly every tile and says
+ * nothing. A break is allowed after each dot, so a long name wraps onto its
+ * second line at a sensible place instead of being cut. Legacy keeps its
+ * hostnames: its tiles are a list, with the room for them.
+ */
+function favouriteName(host) {
+  if (document.body.dataset.design === 'legacy' || !/\./.test(host) || /^[\d.]+$/.test(host)) return host;
+  const parts = host.split('.');
+  parts.pop();
+  // A second-level ending - .co.uk, .com.au - goes too.
+  if (parts.length > 1 && /^(co|com|org|net|ac|gov|edu)$/.test(parts[parts.length - 1])) parts.pop();
+  return parts.join('.\u200b');
+}
+
 function tile(item) {
   const host = siteOf(item.url);
 
@@ -64,7 +82,7 @@ function tile(item) {
   // four tiles all reading "127.0.0.1" said otherwise.
   let port = '';
   try { port = new URL(item.url).port; } catch { /* no URL, no port */ }
-  label.textContent = port ? `${host}:${port}` : host;
+  label.textContent = port ? `${host}:${port}` : favouriteName(host);
 
   open.append(chip, label);
   open.addEventListener('click', (event) => {

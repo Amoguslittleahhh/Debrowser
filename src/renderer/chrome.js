@@ -1130,7 +1130,9 @@ function updateTabElement(node, tab) {
   // URL: a page moving between paths on one host keeps its letter and colour,
   // and rewriting them on every navigation would be work for no visible change.
   if (prev.host !== site) {
-    node.chip.textContent = (site.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+    node.chip.classList.remove('own');
+    if (site === 'debrowser') ownMark(node.chip);
+    else node.chip.textContent = (site.replace(/^[^a-z0-9]+/i, '')[0] || '?');
     node.chip.style.setProperty('--hue', String(siteHue(site)));
     prev.host = site;
   }

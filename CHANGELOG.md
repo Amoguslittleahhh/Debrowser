@@ -36,6 +36,8 @@
 
 ### Improved
 
+- **The new tab page has your favourites.** In Ledger, Paper and Grid, the sites you visit most sit under the search field as large tiles with the site's name, in each design's own shapes and type, and the whole page is centred as one group. Legacy keeps its list.
+- **The browser's own pages carry its mark.** The New tab, Settings and History show the Debrowser mark in the tab strip, the bookmarks bar and history, instead of a purple D as if they were a website.
 - **macOS: Debrowser is set in the Mac's own typeface.** San Francisco at the size macOS uses for its interface, on every page, in every design but Grid, which keeps its own. A Mac with Microsoft Office installed used to get Calibri.
 - **Scrollbars appear while you scroll and fade when you stop**, as on a Mac, instead of a permanent bar down the side of every page and panel. Private windows keep standard scrollbars, because a page can measure them.
 - **Softer, more natural motion and depth.** Panels and prompts settle in on Apple's own easing curve, floating sheets have a fine edge and a layered shadow, and the keyboard focus ring is a little fuller and easier to see.

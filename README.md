@@ -1,5 +1,7 @@
 # Debrowser
 
+![Debrowser in its default design, Ledger, on a new tab](docs/screenshots/hero.png)
+
 A web browser built around a single idea: **a tab should hold the least memory
 and CPU it can get away with, and you should never be able to tell.**
 
@@ -21,6 +23,12 @@ The interesting part is `src/main/governor/`.
 [Limits worth knowing](#limits-worth-knowing)
 
 ---
+
+## Four designs
+
+Ledger, Paper, Grid and Legacy share one foundation and differ in shape, type and colour. Pick one in Settings → Appearance.
+
+![Debrowser's four designs side by side](docs/screenshots/designs.png)
 
 ## Installing it
 

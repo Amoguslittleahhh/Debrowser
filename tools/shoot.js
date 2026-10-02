@@ -15,6 +15,12 @@
 //    between runs. It does not happen on a real machine with a GPU. The
 //    address bar in the 240px sidebar hits this every time.
 const { app, BrowserWindow } = require('electron');
+
+// SHOOT_SCALE=2 for retina pictures. Only on a virtual screen big enough for
+// the doubled window (Xvfb -screen 0 3840x2400x24): on a 1920px screen the
+// window is clamped, the viewport comes out half-width, and the check below
+// refuses every shot - which is what happened when this was always on.
+if (process.env.SHOOT_SCALE) app.commandLine.appendSwitch('force-device-scale-factor', process.env.SHOOT_SCALE);
 const path = require('path');
 const fs = require('fs');
 
@@ -330,6 +336,17 @@ app.whenReady().then(async () => {
       gread: { id: 'gread', name: 'Reading', color: '#7b6a9c', collapsed: false },
       gwatch: { id: 'gwatch', name: 'Later', color: '#a8694a', collapsed: true }
     } : undefined;
+    // SHOOT_ACTIVE=5 puts another tab in front - the new tab, for a picture
+    // of the whole window where the address bar and the page agree.
+    if (process.env.SHOOT_ACTIVE) {
+      const front = Number(process.env.SHOOT_ACTIVE);
+      STATE.activeId = front;
+      for (const tab of STATE.tabs) {
+        tab.visible = tab.id === front;
+        if (tab.id === front) tab.tier = 'active';
+        else if (tab.tier === 'active') tab.tier = 'warm';
+      }
+    }
     for (const tab of STATE.tabs) {
       tab.groupId = shot.groups ? ({ 2: 'gread', 3: 'gread', 4: 'gwatch', 5: 'gwatch' })[tab.id] || null : null;
     }

@@ -111,6 +111,7 @@ module.exports = [
         iconSrc: 'readonly',
         showIcon: 'readonly',
         motionOk: 'readonly',
+        ownMark: 'readonly',
         anchorSheet: 'readonly',
         watchTransientInput: 'readonly',
         defaultIcon: 'readonly',
