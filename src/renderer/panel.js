@@ -206,7 +206,10 @@ function render(state) {
       'Deduplication is a known timing side channel – see the README.';
   }
 
+  // Before the governor's first sample there are no counts yet: the footer
+  // keeps its dash rather than the whole panel stopping on the missing figure.
   const s = state.stats;
+  if (!s) return;
   // Both counts, each under its own name.
   //
   // This said "N process(es)" and printed `rendererCount`, which counts only

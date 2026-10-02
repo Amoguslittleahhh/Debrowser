@@ -84,6 +84,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
                           runCommand = () => {}, history = null, context = { model: null },
                           credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null }) {
   console.log('\n=== Debrowser smoke test ===\n');
+  // Every uncaught error in the browser's own pages, for the whole run. A page
+  // that throws half-way through drawing looks finished in a screenshot -
+  // the task manager stopped on a missing count and showed a dash for a
+  // footer - and no check that reads one value would notice.
+  const pageErrors = [];
+  const watchConsole = (wc) => {
+    wc.on('console-message', (event) => {
+      const message = String(event.message || '');
+      const source = String(event.sourceId || '');
+      if (event.level !== 'error' || !message.startsWith('Uncaught')) return;
+      if (!/\/src\/renderer\/|^debrowser:/.test(source)) return;
+      pageErrors.push(`${source.split('/').pop()}:${event.lineNumber} ${message.slice(0, 160)}`);
+    });
+  };
+  for (const wc of require('electron').webContents.getAllWebContents()) watchConsole(wc);
+  app.on('web-contents-created', (_event, wc) => watchConsole(wc));
   // Cold start, measured as the speed test does: from this process starting to
   // the first tab's first paint. Checked with the other budgets, at the end.
   const startedAt = Date.now() - process.uptime() * 1000;
@@ -2555,6 +2571,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         escaped.drawn && escaped.result?.response === 1,
       `click: ${JSON.stringify(clicked)}, escape: ${JSON.stringify(escaped)}`);
 
+    // A question that arrives while another is on screen waits for it rather
+    // than closing it: closing the site panel would refuse its permission.
+    shell.openSheet('update');
+    await waitFor(() => shell.sheetPage === 'update', { timeoutMs: 8000 });
+    const queued = shell.ask({ title: 'Save password?', buttons: ['Save', 'Not now'], defaultId: 0, cancelId: 1 });
+    await new Promise((r) => setTimeout(r, 300));
+    const updateKept = shell.sheetPage === 'update';
+    shell.closeSheet();
+    const askShown = await waitFor(() => shell.sheetPage === 'ask', { timeoutMs: 8000 });
+    shell.closeSheet();
+    const queuedAnswer = await Promise.race([queued, new Promise((r) => setTimeout(() => r(null), 5000))]);
+    await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
+    check('a question waits for the one on screen instead of dismissing it',
+      updateKept && askShown && queuedAnswer?.response === 1,
+      `update kept=${updateKept}, then asked=${askShown}, answer=${JSON.stringify(queuedAnswer)}`);
+
     check('the downloads flyout takes over the sheet from the menu',
       menuUp && swapped, `menu up=${menuUp}, swapped to ${shell.sheetPage}`);
     check('the flyout reads the download list and not the credential store',
@@ -4977,6 +5009,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `${commands.length} commands x ${junk.length} payloads; thrown ${JSON.stringify(thrown.slice(0, 5))}, ` +
       `rejected ${JSON.stringify(rejected.slice(0, 5))}, alive ${alive}`);
   }
+
+  check('no page of the browser\'s own threw an uncaught error during the run',
+    pageErrors.length === 0, pageErrors.length ? pageErrors.slice(0, 5).join(' | ') : 'none');
 
   /* ---------------------------------------------------------------- */
   if (fixtures) await fixtures.close();

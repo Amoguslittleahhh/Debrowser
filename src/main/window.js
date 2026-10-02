@@ -176,6 +176,9 @@ const PLACEHOLDER_MAX_MS = 1500;
  * view with the chrome's preload, so what may go in it is a fixed list in the
  * browser process, not something a caller chooses.
  */
+/** Sheets that are asking the user something, which another question must not close. */
+const QUESTION_SHEETS = new Set(['ask', 'site', 'update']);
+
 const SHEET_PAGES = {
   menu: 'menu.html',
   downloads: 'flyout.html',
@@ -874,9 +877,16 @@ class BrowserShell {
    * cancel, which is what dismissing it would have done.
    */
   ask(spec) {
-    // Whatever is open goes first - a question already asked is answered with
-    // its cancel as it closes - so nothing closing later mistakes this one
-    // for the question it is dismissing.
+    // Another question on screen - a site's permission request, the update
+    // prompt, another of these - is not dismissed for this one: closing the
+    // site panel is a refusal, so a "Save password?" arriving under it would
+    // have answered the camera's question for the user. This waits its turn.
+    if (this.sheetView && QUESTION_SHEETS.has(this.sheetPage)) {
+      return new Promise((resolve) => {
+        (this.askQueue || (this.askQueue = [])).push(() => this.ask(spec).then(resolve));
+      });
+    }
+    // A menu or a panel is only in the way: it goes, as a click elsewhere would.
     this.closeSheet();
     const buttons = Array.isArray(spec.buttons) && spec.buttons.length ? spec.buttons.map(String) : ['OK'];
     const clamp = (n, fallback) => (Number.isInteger(n) && n >= 0 && n < buttons.length ? n : fallback);
@@ -937,6 +947,11 @@ class BrowserShell {
     // A question closed without an answer - Escape, a click outside, another
     // panel taking its place - is the cancel button.
     if (page === 'ask' && this.asking) this.answerAsk({ response: this.asking.spec.cancelId });
+    // A question waiting for this one to go has its turn.
+    if (!replacing && this.askQueue && this.askQueue.length) {
+      const next = this.askQueue.shift();
+      setImmediate(next);
+    }
     // A permission question closed without an answer is a refusal; main.js
     // decides that, since it holds the question.
     if (this.onSheetClosed) this.onSheetClosed(page);

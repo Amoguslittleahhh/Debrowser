@@ -38,10 +38,18 @@ const STATE = {
   privateTotalMB: 300, pressure: 'none', liveTabs: 6, maxLiveTabs: 12,
   rendererCount: 3, bookmarksBar: true, bookmarksRevision: 1,
   downloads: { count: 3, active: 1, progress: 0.42 },
+  // The task manager's footer line: what the governor has done this session.
+  processCount: 9,
+  stats: { freezes: 3, discards: 1, reclaimedMB: 842, heapCollections: 0, heapReclaimedMB: 0, hibernations: 0 },
+  latency: { restore: { p50: 180 }, switch: { p50: 12 } },
   sidebar: null,
   searchEngines: [{ id: 'google', name: 'Google' }, { id: 'ddg', name: 'DuckDuckGo' }],
   updates: { available: true, reason: null, state: 'ready', version: '1.5.0', progress: 100, error: null },
   prefs: {
+    // Every preference at its real default first, then the photograph's own
+    // choices: a fixture listing only some of them showed empty dropdowns for
+    // the rest, which would have hidden a real empty-dropdown bug among them.
+    ...Object.fromEntries(Object.entries(require('../src/main/prefs').SCHEMA).map(([key, spec]) => [key, spec.def])),
     incognitoBridges: 'custom', incognitoJsLevel: 'balanced', incognitoKeepTorState: true,
     incognitoPreferOnion: false, incognitoCamouflage: false, incognitoIdleWipeMinutes: 0,
     incognitoBridgeLines: 'obfs4 203.0.113.5:443 9A1B2C3D4E5F60718293A4B5C6D7E8F901234567 cert=kR3x4mHq9Wn2bV7cZ8yT1uP0sL5fG6hJ iat-mode=1',

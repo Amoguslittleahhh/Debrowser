@@ -69,6 +69,8 @@
 
 ### Fixed
 
+- **A question no longer answers another for you.** A prompt such as Save password? arriving while a site's camera, microphone or location question was on screen closed it, which counted as a refusal. Questions now wait their turn.
+- **The task manager finishes drawing straight after opening.** Opened before the browser's first memory reading, it stopped part-way and showed a dash where its summary line belongs.
 - **Private windows: the .onion button is no longer hidden under the address bar.** The centred address bar now measures what is beside it, so the onion button, the private pill and Slow page? always have room. In Grid it was covered completely; in the other designs, half of it.
 - **macOS: copy, paste, cut, select all and undo work.** Without an Edit menu, Cmd+C, Cmd+V, Cmd+X, Cmd+A and Cmd+Z did nothing in the address bar or in any form on a page, and Cmd+Q, Cmd+H and Cmd+M did nothing either. Debrowser now has the standard app, Edit and Window menus in the macOS menu bar.
 - **macOS: History is Cmd+Y and the task manager Shift+Esc**, leaving Cmd+H to hide the app and Cmd+M to minimise the window, as on every other Mac app.
