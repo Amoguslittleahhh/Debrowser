@@ -267,7 +267,9 @@ class History {
 
   /** Newest first, optionally filtered. `query` matches title or URL. */
   search(query = '', limit = 300) {
-    const needle = String(query || '').trim().toLowerCase();
+    // A string or nothing: `String()` on an object a page sent - one with no
+    // usable toString - throws, and took the History page's list down with it.
+    const needle = (typeof query === 'string' ? query : '').trim().toLowerCase();
     const max = Math.min(Math.max(1, Number(limit) || 300), MAX_ENTRIES);
     const out = [];
     for (const entry of this.items) {

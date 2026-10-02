@@ -35,7 +35,7 @@ class StartupGuard {
   }
 
   write(state) {
-    try { fs.writeFileSync(this.file, JSON.stringify(state)); } catch { /* read-only profile */ }
+    try { fs.writeFileSync(this.file, JSON.stringify(state), { mode: 0o600 }); } catch { /* read-only profile */ }
   }
 
   /** Count this start. Returns how many starts of this version failed before it. */

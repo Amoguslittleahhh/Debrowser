@@ -76,6 +76,7 @@
 
 ### Fixed
 
+- **Closing the window while the site panel is open asks at once.** Opened just to look at a site, the panel held back the close-window question until it was closed, so the window's close button seemed to do nothing. Only a panel asking for a permission makes other questions wait now.
 - **Titles in Arabic, Hebrew and other right-to-left languages read the right way.** In the tab strip, bookmarks, history, downloads, suggestions and "Continue with these tabs", such a title was aligned to the wrong edge and cut at its beginning; it now runs in its own direction and is cut at its end.
 - **Private windows: the connection page is centred.** It sat in the left half of the window with its scrollbar running down the middle.
 - **"See more" and the grey lines in "Continue with these tabs" are easier to read.** On the card's lifted surface they fell below the contrast text needs, in Ledger, Paper and Grid.
@@ -102,6 +103,7 @@
 
 ### Security
 
+- **The crash report and the startup record are readable by you alone**, like every other file in your profile. They were created readable by other accounts on the same computer.
 - **Forget a site when you close it.** The padlock can mark a site so that, when its last tab closes, everything it stored - cookies, saved data, caches - goes with it: you come back signed out and unknown, every time.
 - **Risky downloads are stopped or asked about.** A file fetched over plain HTTP by a secure page, which anyone on the way could have swapped, and a file from a site on the dangerous-sites lists are blocked, with "Download anyway" on the row. Opening a downloaded program now asks first.
 - **JavaScript hardening for every window, if you want it.** Settings → Advanced can turn off the JavaScript engine's optimising compilers everywhere, as private windows already do: most attacks on the engine go through them, everyday pages run as fast without them, and heavy ones - games, editors - run about half as fast. It takes effect at the next start, and is off by default.

@@ -881,7 +881,11 @@ class BrowserShell {
     // prompt, another of these - is not dismissed for this one: closing the
     // site panel is a refusal, so a "Save password?" arriving under it would
     // have answered the camera's question for the user. This waits its turn.
-    if (this.sheetView && QUESTION_SHEETS.has(this.sheetPage)) {
+    // The site panel only while it holds a permission request: opened just to
+    // look at a site, it is a panel like any other, and a close-window
+    // question waiting behind it would make the window's X seem dead.
+    const asking = this.sheetPage !== 'site' || (typeof this.siteIsAsking === 'function' && this.siteIsAsking());
+    if (this.sheetView && QUESTION_SHEETS.has(this.sheetPage) && asking) {
       return new Promise((resolve) => {
         (this.askQueue || (this.askQueue = [])).push(() => this.ask(spec).then(resolve));
       });

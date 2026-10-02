@@ -1309,6 +1309,7 @@ function main() {
     });
     browserShell = shell;
     shell.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
+    shell.siteIsAsking = () => Boolean(permissionAsks && permissionAsks.shown);
     // What the main process paints - an error page, the surface behind a tab -
     // takes the window's palette and accent, as our own pages do.
     palette.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent'), design: prefs.get('design') }));

@@ -32,7 +32,9 @@ function record(userData, err, version) {
     fs.writeFileSync(path.join(userData, FILE), JSON.stringify({
       version, at: Date.now(),
       message: scrub(err && err.message), stack: scrub(err && err.stack)
-    }));
+    // Owner-only, as every other profile file is: scrubbed or not, a crash
+    // describes what the browser was doing.
+    }), { mode: 0o600 });
   } catch { /* nothing more can be done from here */ }
 }
 

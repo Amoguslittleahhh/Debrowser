@@ -5016,6 +5016,37 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `rejected ${JSON.stringify(rejected.slice(0, 5))}, alive ${alive}`);
   }
 
+  // The other half of the channel: requests, which answer back. Sent from a
+  // real Settings tab through the real IPC and its policy, with the same junk -
+  // a handler that throws comes back to the page as a rejected promise.
+  {
+    const skipRequests = new Set(['clear-history', 'delete-history', 'delete-credential', 'reveal-credential',
+      'vault-set', 'vault-remove', 'vault-unlock', 'import-logins-file', 'import-bookmark-file', 'import-from-profile',
+      'make-default', 'forget-site', 'site-clear-data', 'safety-revoke', 'check-passwords', 'update-restart',
+      'save-payment', 'fill-payment', 'remove-bookmark', 'forget-bookmark', 'toggle-bookmark', 'delete-space',
+      'site-style-set', 'hide-element', 'show-hidden', 'screenshot-page', 'report-problem']);
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
+    const list = src.slice(src.indexOf('const COMMANDS = new Set(['), src.indexOf(']);', src.indexOf('const COMMANDS = new Set([')));
+    const names = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).filter((c) => !skipRequests.has(c));
+    const page = tabs.create({ url: pages.SETTINGS_URL, activate: false, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    const failures = await page.wc.executeJavaScript(`(async () => {
+      const junk = [undefined, null, {}, 'x', 42, [], { id: 'nope', url: 'javascript:alert(1)', key: '__proto__',
+        limit: -1, query: { toString: null }, text: 'a'.repeat(100000), index: 1e9 }];
+      const out = [];
+      for (const name of ${JSON.stringify(names)}) {
+        for (const payload of junk) {
+          try { await window.debrowser.request(name, payload); }
+          catch (err) { out.push(name + ': ' + String(err && err.message).slice(0, 90)); }
+        }
+      }
+      return out;
+    })()`).catch((err) => [`fuzz did not run: ${err.message}`]);
+    tabs.close(page.id);
+    check('every request survives junk payloads without a handler throwing',
+      failures.length === 0, `${names.length} requests; ${failures.length ? failures.slice(0, 5).join(' | ') : 'none threw'}`);
+  }
+
   check('no page of the browser\'s own threw an uncaught error during the run',
     pageErrors.length === 0, pageErrors.length ? pageErrors.slice(0, 5).join(' | ') : 'none');
 
