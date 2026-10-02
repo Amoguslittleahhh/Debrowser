@@ -156,6 +156,26 @@ function ago(at) {
   return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
+/**
+ * The query and the engine, when a recent page is a search results page.
+ * Read from the address, where the query is exact, rather than from the
+ * title, whose wording each engine sets.
+ */
+const ENGINES = [
+  { host: /(^|\.)google\.[a-z.]+$/, path: /^\/search/, param: 'q', name: 'Google' },
+  { host: /(^|\.)bing\.com$/, path: /^\/search/, param: 'q', name: 'Bing' },
+  { host: /(^|\.)duckduckgo\.com$/, path: /^\/$/, param: 'q', name: 'DuckDuckGo' },
+  { host: /(^|\.)search\.brave\.com$/, path: /^\/search/, param: 'q', name: 'Brave' },
+  { host: /(^|\.)ecosia\.org$/, path: /^\/search/, param: 'q', name: 'Ecosia' }
+];
+function searchOf(item) {
+  let url;
+  try { url = new URL(item.url); } catch { return null; }
+  const engine = ENGINES.find((e) => e.host.test(url.hostname) && e.path.test(url.pathname));
+  const query = engine && (url.searchParams.get(engine.param) || '').trim();
+  return query ? { query, engine: engine.name } : null;
+}
+
 function continueRow(item) {
   const row = document.createElement('button');
   row.type = 'button';
@@ -165,12 +185,20 @@ function continueRow(item) {
   text.className = 'continue-text';
   const title = document.createElement('span');
   title.className = 'continue-title';
-  title.textContent = item.title || siteOf(item.url);
   const meta = document.createElement('span');
   meta.className = 'continue-meta';
-  meta.textContent = `${siteOf(item.url)} · ${ago(item.visitedAt)}`;
+  // A search reads as what was searched for, not as "query - Google Search":
+  // the engine's name repeated down the card said nothing the second line
+  // could not, and pushed the query itself toward the ellipsis.
+  const searched = searchOf(item);
+  title.textContent = searched ? searched.query : (item.title || siteOf(item.url));
+  meta.textContent = searched ? `${searched.engine} search` : siteOf(item.url);
   text.append(title, meta);
-  row.append(siteChip(item.url, { icon: item.icon }), text);
+  // When, on its own at the end of the row, where a list's times line up.
+  const when = document.createElement('span');
+  when.className = 'continue-when';
+  when.textContent = ago(item.visitedAt);
+  row.append(siteChip(item.url, { icon: item.icon }), text, when);
   row.addEventListener('click', (event) => {
     if (event.ctrlKey || event.metaKey) api.send('new-tab', { url: item.url });
     else api.send('navigate', { url: item.url });
@@ -185,6 +213,10 @@ async function loadContinue() {
   const res = await api.request('recent-pages', { limit: 4 });
   const items = (res && res.items) || [];
   card.hidden = items.length === 0;
+  // The card is the page's second half when it has something to show; the
+  // favourites stand aside for it rather than stacking a third block between
+  // the field and the pages you were reading.
+  document.body.classList.toggle('with-continue', !card.hidden);
   cardList.replaceChildren(...items.map(continueRow));
   fitCard();
 }

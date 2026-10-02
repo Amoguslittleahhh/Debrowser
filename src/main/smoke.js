@@ -1964,8 +1964,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       Object.entries(seen).map(([d, r]) => `${d}: page=${r?.design} chrome=${r?.chrome}`).join(', '));
     // Favourites in the new designs, named for the site ("continue", not
     // "continue.test"); Legacy keeps its own list of hostnames.
-    check('the new designs show the mark in the chosen accent and favourites by name; Legacy keeps its list',
-      fresh.every((d) => seen[d].brand && seen[d].tiles && seen[d].dot === 'rgb(176, 48, 106)' &&
+    // With "Continue with these tabs" showing (history was planted above), the
+    // favourites stand aside for it - but are built, by name, underneath.
+    check('the new designs show the mark in the chosen accent, and favourites by name give way to Continue; Legacy keeps its list',
+      fresh.every((d) => seen[d].brand && !seen[d].tiles && seen[d].card && seen[d].dot === 'rgb(176, 48, 106)' &&
         seen[d].label.split(',').includes('continue')) &&
       !seen.legacy.brand && seen.legacy.label.split(',').includes('continue.test'),
       fresh.map((d) => `${d}: mark=${seen[d].brand} dot=${seen[d].dot} favourites=${seen[d].label}`).join(', ') +

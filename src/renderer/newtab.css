@@ -292,8 +292,11 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #q 
   font-size: 17px;
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #q:focus {
-  border-color: var(--accent);
-  box-shadow: var(--ring);
+  /* The field has the keyboard from the moment the page opens, so its focus
+     is a state it sits in, not an event: the accent edge says where typing
+     goes, without the halo glowing at someone who has not touched anything. */
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  box-shadow: none;
 }
 
 /* Paper: a serif in a barely rounded box. */
@@ -349,16 +352,43 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .co
   display: flex; align-items: center; gap: 14px; width: 100%;
   padding: 9px 12px; border: 0; border-radius: var(--radius);
   background: transparent; color: var(--text); font: inherit; text-align: left;
+  transition: background-color var(--fast) var(--ease);
 }
-.continue-row:hover { background: var(--wash-soft); }
-.continue-row .chip, .continue-row .site-icon { flex: none; }
-.continue-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.continue-row:hover { background: var(--wash-soft); transition-duration: var(--instant); }
+/* Each row's mark on a tile of one size - a favicon on its own floated at
+   whatever size it was drawn, beside two lines of text. */
+.continue-row .chip {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text) 14%, transparent);
+}
+.continue-row .chip.has-icon { background: var(--bg); }
+.continue-row .site-icon { inset: 8px; width: 18px; height: 18px; border-radius: 4px; }
+.continue-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.continue-when {
+  flex: none;
+  margin-left: 12px;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* With the card showing, the favourites give it the room (newtab.js). */
+body.with-continue .tiles { display: none !important; }
 .continue-title { font-size: var(--fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .continue-meta { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .continue-all {
   margin: 6px 12px 0; padding: 4px 0; border: 0; background: transparent;
-  color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600;
+  /* The accent, drawn toward the text colour: on the card's lifted surface the
+     plain accent text measured 3.7:1 - a link that is hard to read is one
+     nobody presses. */
+  color: color-mix(in srgb, var(--accent-text) 62%, var(--text)); font: inherit; font-size: 13px; font-weight: 600;
 }
+/* The card's secondary text, a step brighter than the page's: the card is
+   lifted off the page, and the page's dim grey fell just under 4.5:1 on it. */
+.continue :is(.continue-meta, .continue-when) { color: color-mix(in srgb, var(--text-dim) 88%, var(--text)); }
 .continue-all:hover { text-decoration: underline; }
 
 body[data-design="paper"] .continue-head h2 { font-family: var(--font-display); font-size: 21px; font-weight: 400; }

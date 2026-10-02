@@ -38,6 +38,13 @@ const TABS = [
   { id: 5, title: 'New tab',                                     url: 'debrowser://newtab', visible: false, tier: 'discarded', rssMB: 0, loading: false, favicon: null, audible: false, boosted: false }
 ];
 
+const RECENT = { items: [
+  { url: 'https://www.google.com/search?q=lisbon+in+october', title: 'lisbon in october - Google Search', visitedAt: Date.now() - 4 * 60_000 },
+  { url: 'https://github.com/Amoguslittleahhh/Debrowser/pulls', title: 'Pull requests · Amoguslittleahhh/Debrowser', visitedAt: Date.now() - 38 * 60_000 },
+  { url: 'https://www.nature.com/articles/perspective', title: 'Perspective-Taking: Emerging research on how we see others', visitedAt: Date.now() - 3 * 3600_000 },
+  { url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/color-mix', title: 'color-mix() - CSS | MDN', visitedAt: Date.now() - 26 * 3600_000 }
+] };
+
 const STATE = {
   receipt: { freedMB: 1290, slept: 14, blocked: 312, cleaned: 6, stopped: 0 },
   tabs: TABS, activeId: 1, totalMB: 1205, budgetMB: 6144, rssTotalMB: 512,
@@ -242,6 +249,9 @@ const SHOTS = [
   { name: 'history',  file: 'history.html',  w: 1280, h: 700 },
   { name: 'downloads', file: 'downloads.html', w: 1280, h: 700 },
   { name: 'newtab',   file: 'newtab.html',   w: 1280, h: 700 },
+  // The new tab with history: "Continue with these tabs", the layout most
+  // people see once they have browsed at all (continueCard is on by default).
+  { name: 'newtab-continue', file: 'newtab.html', w: 1280, h: 800, recent: true },
   { name: 'panel',    file: 'panel.html',    w: 360,  h: 700 },
   { name: 'flyout',   file: 'flyout.html',   w: 700,  h: 520 },
   { name: 'update',   file: 'update.html',   w: 900,  h: 560 },
@@ -323,6 +333,9 @@ app.whenReady().then(async () => {
     // Before the window, because the answers are serialised into its preload
     // arguments - set after it, and the page has already been given the old set.
     if (shot.answers) ANSWERS['context-model'] = ANSWERS[shot.answers];
+    // Recent pages only for the shot that wants the Continue card, so the plain
+    // new tab keeps photographing the favourites.
+    ANSWERS['recent-pages'] = shot.recent ? RECENT : { items: [] };
 
     STATE.incognito = shot.incognito || null;
     STATE.saver = shot.saver === true;

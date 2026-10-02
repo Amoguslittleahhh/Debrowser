@@ -36,6 +36,8 @@
 
 ### Improved
 
+- **"Continue with these tabs" reads as a list.** A search shows as what you searched for, with the engine underneath, instead of "query - Google Search"; each page's time sits at the end of its row; every icon is on a tile of one size. While the card is showing, the favourites give it the room.
+- **The new tab's search field no longer glows on its own.** It has the keyboard as soon as the page opens, so it now shows that with a quiet accent edge rather than a halo.
 - **The window reads as one surface.** In Ledger, Paper and Grid the toolbar and the bookmarks bar no longer have a line between them, and the new tab page is the toolbar's own colour, with its search field set into it as the address bar is set into the toolbar.
 - **The new tab page has your favourites.** In Ledger, Paper and Grid, the sites you visit most sit under the search field as large tiles with the site's name, in each design's own shapes and type, and the whole page is centred as one group. Legacy keeps its list.
 - **The browser's own pages carry its mark.** The New tab, Settings and History show the Debrowser mark in the tab strip, the bookmarks bar and history, instead of a purple D as if they were a website.
@@ -72,6 +74,7 @@
 
 ### Fixed
 
+- **"See more" and the grey lines in "Continue with these tabs" are easier to read.** On the card's lifted surface they fell below the contrast text needs, in Ledger, Paper and Grid.
 - **A question no longer answers another for you.** A prompt such as Save password? arriving while a site's camera, microphone or location question was on screen closed it, which counted as a refusal. Questions now wait their turn.
 - **The task manager finishes drawing straight after opening.** Opened before the browser's first memory reading, it stopped part-way and showed a dash where its summary line belongs.
 - **Private windows: the .onion button is no longer hidden under the address bar.** The centred address bar now measures what is beside it, so the onion button, the private pill and Slow page? always have room. In Grid it was covered completely; in the other designs, half of it.
