@@ -462,6 +462,37 @@ body:not([data-layout="left"]) .tab.pinned .tier,
 .tier[data-tier="hibernated"] { background: var(--accent); opacity: 0.55; }
 .tier[data-tier="discarded"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-dim); opacity: 0.6; }
 
+/*
+ * A tab going to sleep, seen happening.
+ *
+ * The browser's whole claim is that it gives memory back, and the moment it
+ * does was a dot changing colour between two frames - easy to miss, so the
+ * claim was easy to doubt. Now the dot breathes out: a small swell and a ring
+ * that spreads and fades, as the tab lets go. Waking is quicker and plainer -
+ * a tab coming back should feel immediate, not ceremonial.
+ *
+ * Only once the strip has settled (chrome.js): on launch every restored tab
+ * arrives asleep, and a row of dots all exhaling at once is noise.
+ */
+.tier {
+  transition: background-color var(--slow) var(--ease), opacity var(--slow) var(--ease);
+}
+body.settled .tier:is([data-tier="frozen"], [data-tier="hibernated"], [data-tier="discarded"]) {
+  animation: tier-exhale 1100ms var(--ease-out);
+}
+body.settled .tier:is([data-tier="active"], [data-tier="warm"]) {
+  animation: tier-wake 260ms var(--ease-out);
+}
+@keyframes tier-exhale {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  30%  { transform: scale(1.35); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 7px transparent; }
+}
+@keyframes tier-wake {
+  from { transform: scale(0.6); }
+  to   { transform: scale(1); }
+}
+
 .tab.boosted .tier {
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);

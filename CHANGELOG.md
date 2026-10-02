@@ -4,6 +4,8 @@
 
 ### New
 
+- **You can see a tab go to sleep.** When a tab sleeps, its dot in the tab strip breathes out – a small swell and a ring that fades – so the moment the browser hands memory back is something you notice. Waking is quick and plain. Off when your system asks for reduced motion.
+- **Continuous corners.** Cards, fields, tabs, buttons, menus and tiles are drawn with the smooth, squircle-style corners Apple uses in its own interfaces, rather than plain rounded corners. Circles stay circles, Grid stays square and Legacy keeps its shape.
 - **Links from other apps can go to a space of their own.** Settings → Spaces chooses where links from your mail, chat or documents open - the space you are in, or always Work, say.
 - **Tabs you stop opening can put themselves away.** Settings → Tabs can archive a tab you have not opened for a day, a week or a month: it leaves the strip, and tab search (Ctrl+Shift+A) still finds it by name and opens it again where it was. Pinned tabs and tabs playing sound are never archived. Off unless you turn it on.
 - **Hide something on a page, for good.** "Hide something on this page" in the padlock or the command bar lets you point at anything - a sidebar, a sticky video, a "recommended for you" box, a sign-up wall the blocker missed - and click it away; it stays hidden on that site from then on, with Undo straight after and "Show again" in the padlock.
@@ -74,6 +76,7 @@
 
 ### Fixed
 
+- **Private windows: the connection page is centred.** It sat in the left half of the window with its scrollbar running down the middle.
 - **"See more" and the grey lines in "Continue with these tabs" are easier to read.** On the card's lifted surface they fell below the contrast text needs, in Ledger, Paper and Grid.
 - **A question no longer answers another for you.** A prompt such as Save password? arriving while a site's camera, microphone or location question was on screen closed it, which counted as a refusal. Questions now wait their turn.
 - **The task manager finishes drawing straight after opening.** Opened before the browser's first memory reading, it stopped part-way and showed a dash where its summary line belongs.

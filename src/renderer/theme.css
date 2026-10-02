@@ -723,6 +723,23 @@ body {
   opacity: 1;                      /* Firefox-ism, harmless and explicit here */
 }
 
+/*
+ * Continuous corners: Debrowser's shape.
+ *
+ * A rounded rectangle on the web is a square with quarter-circles stuck on;
+ * where the straight edge meets the arc the curvature jumps, and the eye reads
+ * the joint. Apple draws its own surfaces as a superellipse, where the curve
+ * eases out of the straight - and almost nothing on the web can, so no other
+ * browser looks like this. Chromium can now (`corner-shape`, measured supported
+ * in this build). Only on surfaces: circles stay circles, and Grid's square
+ * cells have no radius to shape. Legacy keeps the shape it always had.
+ */
+body:not([data-design="legacy"]) :is(.card, .sheet, .omnibox, #q, .continue, .chip, .tab-chip, .tab,
+  .rows, .btn, .tile-open, .continue-row, .item, .toast, select, input[type="text"], input[type="search"],
+  .rail-item, .receipt, .total, .totals, .list, .status, .tile-forget, .continue-pop, .go) {
+  corner-shape: superellipse(1.8);
+}
+
 /* See applyThemePrefs: a theme switch does not animate. */
 body.switching-theme *, body.switching-theme *::before, body.switching-theme *::after {
   transition: none !important;

@@ -1510,6 +1510,11 @@ if (el.omnibox && typeof ResizeObserver === 'function') {
 el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); api.send('sidebar-typing', { typing: true }); });
 el.url.addEventListener('blur', () => { urlFocused = false; api.send('sidebar-typing', { typing: false }); });
 
+// The strip has settled once its first state has drawn and a moment has
+// passed: from then on a tab changing tier is something happening in front of
+// the user, and its dot shows it (chrome.css, "A tab going to sleep").
+setTimeout(() => document.body.classList.add('settled'), 2000);
+
 /** Preferences the strip reads for itself, from the preload's first copy and then each broadcast. */
 let chromePrefs = {};
 function applyChromePrefs(next) {

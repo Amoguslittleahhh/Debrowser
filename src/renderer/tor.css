@@ -3,7 +3,10 @@
  * settings.css; this is the status block and the table.
  */
 
-main { max-width: 720px; }
+/* The column is limited, not the scroller: with the width on <main> - which
+   settings.css makes the scrolling box - the page sat in the left half of the
+   window with its scrollbar running down the middle. */
+main > * { max-width: 720px; margin-left: auto; margin-right: auto; }
 
 .status {
   padding: var(--s4) var(--s5);
