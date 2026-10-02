@@ -60,6 +60,7 @@
 
 ### Fixed
 
+- **No more broken-image icons in tabs and bookmarks.** A site icon still loading, or about to fail, could show as the broken-image symbol in place of the site's letter. The letter now stays until a real icon has loaded.
 - **Settings opens at the section you asked for.** Opening it at Labs, Updates or another late section could land one or two sections short, because the lists above it finished loading after the jump and pushed it down.
 - **Pages open in their colours at once.** Each one briefly faded in from the default palette, which showed as a grey address bar on the first frame of a dark window.
 - **macOS: a downloaded copy no longer reports itself as damaged on Apple silicon.** The app is now ad-hoc signed, so the first launch shows the ordinary prompt you can allow once in System Settings → Privacy & Security → Open Anyway, instead of a damaged-app message with no way past it.

@@ -237,11 +237,20 @@ function showIcon(img, url, reported, { onLoad, onFail } = {}) {
       return;
     }
     img.hidden = false;
+    // Invisible until it decodes, so the letter underneath stays the picture:
+    // an address still in flight, or one about to fail, otherwise drew as the
+    // broken-image glyph in its place - photographed across a whole bookmarks
+    // bar. Visibility rather than `hidden`, which would stop a lazy image from
+    // ever loading at all.
+    img.style.visibility = 'hidden';
     img.src = sources[next++];
   };
 
   img.onerror = advance;
-  img.onload = () => { if (onLoad) onLoad(); };
+  img.onload = () => {
+    img.style.visibility = '';
+    if (onLoad) onLoad();
+  };
   advance();
   return sources.length > 0;
 }
