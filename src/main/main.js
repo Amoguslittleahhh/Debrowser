@@ -741,6 +741,16 @@ function main() {
    */
   const closedTabs = [];
   const CLOSED_TABS_KEPT = 10;
+  /**
+   * The last run's tabs, when Restore tabs is off and it closed normally.
+   *
+   * The session is saved either way (crash recovery reads it), but with the
+   * setting off a browser closed by accident - the wrong window's X, Ctrl+Q for
+   * Ctrl+W - had its tabs gone for good. Kept here, read once at start before
+   * this run's own saves overwrite the file, for Ctrl+Shift+T to bring back
+   * while nothing has been closed yet: what Chrome does after a restart.
+   */
+  const previousSession = { tabs: [] };
 
   /**
    * What the find bar is looking for.
@@ -1063,7 +1073,18 @@ function main() {
     // defines - there is no File to open, and Window manages windows we do not
     // have - so it was a row of screen spent on a menu that leads nowhere. Every
     // shortcut worth having is bound in the chrome renderer.
-    Menu.setApplicationMenu(null);
+    //
+    // Except on a Mac, where the menu is not a row of the window but the bar at
+    // the top of the screen, and where text editing goes through it: with no
+    // Edit menu, Cmd+C, Cmd+V, Cmd+X, Cmd+A and Cmd+Z do nothing - in the
+    // address bar and in every form on every page - and with no app menu
+    // neither do Cmd+Q, Cmd+H or Cmd+M. So a Mac gets the three standard menus,
+    // all roles, and nothing that duplicates the browser's own commands.
+    Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      { role: 'editMenu' },
+      { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'togglefullscreen' }] }
+    ]) : null);
     // `session-created` covers every session made from here on; the default one
     // may already exist, so it is configured by hand as well.
     if (INCOGNITO) {
@@ -1478,7 +1499,7 @@ function main() {
 
     runCommand = wireCommands({
       tabs, shell, governor, prefs, publish, log, prewarm,
-      bookmarks, closedTabs, context, find, quitState, siteZoom, circuits, slowJs,
+      bookmarks, closedTabs, previousSession, context, find, quitState, siteZoom, circuits, slowJs,
       sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
@@ -1559,6 +1580,11 @@ function main() {
     // Restore is off, but Debrowser crashed or the computer lost power: the
     // tabs are offered back once, rather than lost with the crash.
     const lost = unclean && !saved.tabs.length ? sessionStore.load().tabs : [];
+    // Not for someone who has history cleared on exit: last time's pages are
+    // exactly what they asked not to be shown again.
+    if (sessionStore && !unclean && !saved.tabs.length && !prefs.get('clearHistoryOnExit')) {
+      previousSession.tabs = sessionStore.load().tabs;
+    }
 
     if (saved.tabs.length) {
       tabGroups.load(saved.groups);
@@ -1842,7 +1868,9 @@ function main() {
       cancelId: 1,
       title: 'Close window?',
       message: `Close the window and its ${count} tabs?`,
-      detail: prefs.get('restoreTabs') ? 'They reopen the next time you start the browser.' : '',
+      detail: prefs.get('restoreTabs')
+        ? 'They reopen the next time you start the browser.'
+        : `${shortcuts.accelFor('reopen-closed-tab')} brings them back the next time you start the browser.`,
       checkboxLabel: 'Don\'t ask again'
     }).then(({ response, checkboxChecked }) => {
       quitState.asking = false;
@@ -1921,7 +1949,7 @@ function startIncognito({ prefs, log, warm = false }) {
  * one switch and two ways in rather than a second copy for shortcuts.
  */
 function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
-                       bookmarks = null, closedTabs = [], context = { model: null },
+                       bookmarks = null, closedTabs = [], previousSession = { tabs: [] }, context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
                        getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null }) {
@@ -2009,6 +2037,20 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
   /** Put the last closed tab back where it was. */
   const reopenClosed = () => {
+    // Nothing closed this run yet: the last run's tabs, all of them, once.
+    if (!closedTabs.length && previousSession.tabs.length) {
+      const entries = previousSession.tabs.splice(0);
+      let first = null;
+      for (const entry of entries) {
+        const spaceId = spaces && !INCOGNITO && entry.spaceId ? spaces.resolve(entry.spaceId) : undefined;
+        const tab = tabs.create({ url: entry.url, activate: false, realise: false, spaceId });
+        tab.title = entry.title || tab.title;
+        if (entry.pinned && typeof tabs.setPinned === 'function') tabs.setPinned(tab.id, true);
+        first = first || tab;
+      }
+      if (first) tabs.activate(first.id).catch((err) => log(`reopen failed: ${err.message}`));
+      return first;
+    }
     const last = closedTabs.pop();
     if (!last) return null;
     const index = Number.isInteger(last.index) ? Math.min(last.index, tabs.all().length) : null;
@@ -3302,10 +3344,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
             { kind: 'separator' },
             {
               id: 'reopen-closed-tab',
-              label: 'Reopen closed tab',
+              // Says which it will do: one tab, or all of last time's.
+              label: !closedTabs.length && previousSession.tabs.length
+                ? `Reopen last time’s ${previousSession.tabs.length === 1 ? 'tab' : `${previousSession.tabs.length} tabs`}`
+                : 'Reopen closed tab',
               icon: 'clock',
               accel: shortcuts.accelFor('reopen-closed-tab'),
-              enabled: closedTabs.length > 0
+              enabled: closedTabs.length > 0 || previousSession.tabs.length > 0
             }
           ]
         };

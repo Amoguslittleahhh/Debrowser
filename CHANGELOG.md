@@ -36,6 +36,8 @@
 
 ### Improved
 
+- **Ctrl+Shift+T brings back last time's tabs.** With Restore tabs off, closing the browser by accident used to lose every tab. Until you close a tab in the new session, Reopen closed tab now reopens all of last time's, as Chrome does after a restart. Not when history is cleared on exit.
+- **More of the keys other browsers have.** Ctrl+F4 closes a tab on Windows and Linux; Shift+F5 and Ctrl+F5 reload without the cache; Shift+Esc opens the task manager everywhere. macOS: Cmd+Shift+[ and ] switch tabs and Cmd+Option+I opens developer tools.
 - **The menu's Zoom row has its icon**, so its label lines up with every other row instead of starting a glyph's width out.
 - **JavaScript security's choices are named simply.** The options read Balanced, Maximum and Full speed; what each one costs is in the sentence above them, where the dropdown no longer cuts it off.
 - **The weekly receipt names a day with nothing freed** as None, rather than leaving a gap in the row of figures.
@@ -60,6 +62,8 @@
 
 ### Fixed
 
+- **macOS: copy, paste, cut, select all and undo work.** Without an Edit menu, Cmd+C, Cmd+V, Cmd+X, Cmd+A and Cmd+Z did nothing in the address bar or in any form on a page, and Cmd+Q, Cmd+H and Cmd+M did nothing either. Debrowser now has the standard app, Edit and Window menus in the macOS menu bar.
+- **macOS: History is Cmd+Y and the task manager Shift+Esc**, leaving Cmd+H to hide the app and Cmd+M to minimise the window, as on every other Mac app.
 - **No more broken-image icons in tabs and bookmarks.** A site icon still loading, or about to fail, could show as the broken-image symbol in place of the site's letter. The letter now stays until a real icon has loaded.
 - **Settings opens at the section you asked for.** Opening it at Labs, Updates or another late section could land one or two sections short, because the lists above it finished loading after the jump and pushed it down.
 - **Pages open in their colours at once.** Each one briefly faded in from the default palette, which showed as a grey address bar on the first frame of a dark window.

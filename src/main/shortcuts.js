@@ -57,11 +57,19 @@ const TABLE = [
   // The panic key: the private window, Tor and every file gone at once.
   { command: 'panic', mod: true, shift: true, key: 'delete', privateOnly: true },
   { command: 'close-tab', mod: true, key: 'w' },
+  // Windows' and Linux's other close-a-tab key, which every browser there takes.
+  ...(IS_MAC ? [] : [{ command: 'close-tab', mod: true, key: 'f4' }]),
   { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
   { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'tab' },
   { command: 'cycle-tab', payload: { delta: -1 }, mod: true, shift: true, key: 'tab' },
   { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'pagedown' },
   { command: 'cycle-tab', payload: { delta: -1 }, mod: true, key: 'pageup' },
+  // A Mac's tab keys, Safari's and Chrome's there: Cmd+Shift+] and Cmd+Shift+[.
+  // Both spellings, because shift turns the brackets into braces.
+  ...(IS_MAC ? [
+    { command: 'cycle-tab', payload: { delta: 1 }, mod: true, shift: true, keys: [']', '}'] },
+    { command: 'cycle-tab', payload: { delta: -1 }, mod: true, shift: true, keys: ['[', '{'] }
+  ] : []),
   ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
     { command: 'select-tab', payload: { index: n - 1 }, mod: true, key: String(n) })),
   // The ninth is the last tab, not the ninth tab, in every browser that has it.
@@ -71,6 +79,8 @@ const TABLE = [
   { command: 'reload', mod: true, key: 'r' },
   { command: 'reload', key: 'f5' },
   { command: 'reload-hard', mod: true, shift: true, key: 'r' },
+  { command: 'reload-hard', shift: true, key: 'f5' },
+  { command: 'reload-hard', mod: true, key: 'f5' },
   // Alt on a Mac is Option, and Option+arrows move by word and Option+D types
   // a character - taking them would break every text field. A Mac browser uses
   // Cmd+[ and Cmd+] for history, and Cmd+L alone for the address bar.
@@ -110,7 +120,8 @@ const TABLE = [
   { command: 'bookmark-page', mod: true, key: 'd' },
   { command: 'toggle-bookmarks-bar', mod: true, shift: true, key: 'b' },
   { command: 'open-bookmarks', mod: true, shift: true, key: 'o' },
-  { command: 'open-history', mod: true, key: 'h' },
+  // Cmd+H hides the app on a Mac, and a Mac browser's history is Cmd+Y.
+  { command: 'open-history', mod: true, key: IS_MAC ? 'y' : 'h' },
   { command: 'open-downloads', mod: true, key: 'j' },
   { command: 'open-settings', mod: true, key: ',' },
 
@@ -121,9 +132,14 @@ const TABLE = [
   // when the page leaves it alone. See `pageFirst` in main.js.
   { command: 'save-page', mod: true, key: 's', pageFirst: true },
   { command: 'view-source', mod: true, key: 'u' },
-  { command: 'toggle-panel', mod: true, key: 'm' },
+  // Cmd+M minimises a window on a Mac, so there it is Shift+Esc alone -
+  // Chrome's task manager key, which works everywhere.
+  ...(IS_MAC ? [] : [{ command: 'toggle-panel', mod: true, key: 'm' }]),
+  { command: 'toggle-panel', shift: true, key: 'escape' },
   { command: 'toggle-devtools', key: 'f12' },
   { command: 'toggle-devtools', mod: true, shift: true, key: 'i' },
+  // A Mac's developer tools key, as in Safari and Chrome there.
+  ...(IS_MAC ? [{ command: 'toggle-devtools', mod: true, alt: true, key: 'i' }] : []),
   { command: 'toggle-fullscreen', key: 'f11' },
   { command: 'show-shortcuts', mod: true, key: '/', pageFirst: true }
 ];
@@ -197,7 +213,7 @@ function labelFor(entry) {
 
   const key = entry.keys[0];
   const named = {
-    arrowleft: '←', arrowright: '→', pagedown: 'PgDn', pageup: 'PgUp',
+    arrowleft: '←', arrowright: '→', escape: 'Esc', pagedown: 'PgDn', pageup: 'PgUp',
     tab: 'Tab', '=': '+', '-': '−'
   };
   parts.push(named[key] || key.toUpperCase());
