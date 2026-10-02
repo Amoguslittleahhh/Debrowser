@@ -316,10 +316,9 @@ class Updater {
   /**
    * Ask, then restart. Never the other way round.
    *
-   * The installer for this app is assisted rather than one-click, so installing
-   * puts the full NSIS UI on screen. Doing that unannounced while someone is
-   * reading would be indefensible, and doing it silently at quit would lose the
-   * session to a restart they did not choose.
+   * Installing means the browser quitting for the installer. Doing that
+   * unannounced while someone is reading would be indefensible, and doing it
+   * silently at quit would lose the session to a restart they did not choose.
    */
   offerRestart(version) {
     if (this.promptOpen) return;

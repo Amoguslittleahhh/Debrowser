@@ -51,6 +51,7 @@ const config = {
     oneClick: true,                          // silent: no UI for nobody to click
     perMachine: true,                        // SYSTEM installs it for everyone
     allowToChangeInstallationDirectory: false,
+    runAfterFinish: false,                   // installed as SYSTEM: never start the browser as SYSTEM
     // Still keep the user's data on uninstall, for the same reason as the
     // normal build: settings and saved credentials are theirs, not the
     // installer's, and an uninstall-reinstall cycle during a deployment must

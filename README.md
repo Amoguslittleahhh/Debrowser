@@ -31,9 +31,9 @@ source, on GitHub's runners, and attached to each release.
 
 | | Download | Then |
 |---|---|---|
-| **Windows** | `Debrowser-<version>-win-x64.exe` | Run it. SmartScreen will warn — see below. |
+| **Windows** | `Debrowser-<version>-win-x64.exe` | Run it: it installs for you alone, with no questions, and opens Debrowser. SmartScreen will warn — see below. |
 | **Windows** (no install) | `...-win-x64-portable.exe` | Run it from anywhere. Installs nothing. |
-| **macOS** | `Debrowser-<version>-mac-arm64.dmg` (or `-x64` on Intel) | Drag to Applications, then right-click → Open the first time. |
+| **macOS** | `Debrowser-<version>-mac-arm64.dmg` (or `-x64` on Intel) | Open it and drag Debrowser into Applications. The first launch needs Open Anyway — see below. |
 | **Linux** | `Debrowser-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
 | **Debian/Ubuntu** | `Debrowser-<version>-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
 

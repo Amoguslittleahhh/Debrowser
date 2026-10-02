@@ -189,10 +189,19 @@ win:
     signingHashAlgorithms:
       - sha256
 
+## One click, as Chrome, Edge and Brave install.
+##
+## The assisted wizard was the one part of Debrowser in someone else's style:
+## NSIS draws its pages - install mode, folder, progress, finish - with the
+## system's dialog controls, which no stylesheet reaches, so a browser that
+## draws every pixel of itself opened on a Windows 2000 form. One click has no
+## pages to be out of place: a small progress window, then the browser itself,
+## on its own welcome tour. What it gives up is choosing the folder; it is the
+## per-user Programs folder, as every per-user browser's is.
 nsis:
-  oneClick: false
+  oneClick: true
   perMachine: false           # install per-user, so no UAC prompt
-  allowToChangeInstallationDirectory: true
+  runAfterFinish: true        # straight into the browser, and its welcome tour
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false   # keep the user's session and settings
@@ -253,8 +262,24 @@ mac:
     - from: vendor/streamview/${platform}-${arch}
       to: streamview
 
+## The disk image's window, drawn rather than Finder's blank one: the app and
+## the Applications folder side by side on the browser's own background, with
+## the one instruction there is. build/dmg-background.png (and @2x) is made by
+## tools/dmg-background.py from the Ledger palette.
 dmg:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  background: build/dmg-background.png
+  window:
+    width: 600
+    height: 400
+  iconSize: 96
+  contents:
+    - x: 170
+      y: 190
+    - x: 430
+      y: 190
+      type: link
+      path: /Applications
 
 ## ---------------------------------------------------------------------------
 ## Linux

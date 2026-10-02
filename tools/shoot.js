@@ -134,6 +134,11 @@ const ANSWERS = {
   // The tab strip's own menu. The sheet always asks for `context-model`, so
   // this is swapped in by the shot that wants it rather than served under a
   // name nothing requests.
+  // The browser's own question box, as the close-window prompt asks it.
+  'ask-spec': { title: 'Close window?', message: 'Close the window and its 14 tabs?',
+    detail: 'Ctrl+Shift+T brings them back the next time you start the browser.',
+    buttons: ['Close tabs', 'Cancel'], defaultId: 0, cancelId: 1, focusId: 0,
+    checkboxLabel: 'Don\u2019t ask again', danger: false },
   'tab-menu-model': { prefs: null, items: [
     { id: 'duplicate-tab', label: 'Duplicate', icon: 'copy' },
     { id: 'pin-tab', label: 'Pin', icon: 'star' },
@@ -247,6 +252,7 @@ const SHOTS = [
   // The same sheet holding the tab strip's menu, which is the other thing it
   // draws and has its own set of icons to get wrong.
   { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' },
+  { name: 'ask', file: 'ask.html', w: 900, h: 560 },
   // Incognito's first page, part-way through connecting - and after it has
   // given up, which is the state that has to explain itself.
   { name: 'tor', file: 'tor.html', w: 1280, h: 820,

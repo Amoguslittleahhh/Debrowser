@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Debrowser</title>
+  <link rel="stylesheet" href="theme.css">
+  <!-- The update prompt's sheet, backdrop and buttons: one prompt, drawn one way. -->
+  <link rel="stylesheet" href="menu.css">
+  <link rel="stylesheet" href="update.css">
+  <link rel="stylesheet" href="ask.css">
+</head>
+<body class="menu-body update-body">
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="sheet card" id="sheet" role="alertdialog" aria-modal="true"
+       aria-labelledby="title" aria-describedby="lead detail" tabindex="-1">
+    <h2 id="title"></h2>
+    <p class="lead" id="lead" hidden></p>
+    <p class="detail" id="detail" hidden></p>
+    <label class="check" id="check" hidden>
+      <input type="checkbox" id="checkbox">
+      <span id="check-label"></span>
+    </label>
+    <div class="actions" id="actions"></div>
+  </div>
+
+  <script src="theme.js"></script>
+  <script src="ask.js"></script>
+</body>
+</html>

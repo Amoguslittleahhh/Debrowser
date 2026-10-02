@@ -1307,6 +1307,7 @@ function main() {
         : null,
       held: WARM
     });
+    browserShell = shell;
     shell.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
     // What the main process paints - an error page, the surface behind a tab -
     // takes the window's palette and accent, as our own pages do.
@@ -1861,9 +1862,10 @@ function main() {
     if (quitState.asking || !shell || shell.window.isDestroyed()) return;
     quitState.asking = true;
     const count = tabs.all().length;
-    dialog.showMessageBox(shell.window, {
-      type: 'question',
+    ask(shell, {
       buttons: ['Close tabs', 'Cancel'],
+      // Asked because the user just pressed close: Enter confirms it.
+      focusId: 0,
       defaultId: 0,
       cancelId: 1,
       title: 'Close window?',
@@ -1898,6 +1900,20 @@ let quittingForGood = false;
 /** A private window gone this soon never got as far as showing itself. */
 const PRIVATE_START_MS = 15_000;
 
+/** The main window's shell, for code that runs outside the one that made it. */
+let browserShell = null;
+
+/**
+ * Ask something in the browser's own sheet (BrowserShell.ask), with the same
+ * spec and answer as `dialog.showMessageBox`. The system's box only when there
+ * is no window left to draw in - a question must still be answerable then.
+ */
+function ask(shell, spec) {
+  shell = shell || browserShell;
+  if (shell && shell.window && !shell.window.isDestroyed()) return shell.ask(spec);
+  return dialog.showMessageBox(spec);
+}
+
 /**
  * Start the private browser - or, with `warm`, one that connects Tor and keeps
  * its window back until Ctrl+Shift+N reaches it. A kept-ready one that ends,
@@ -1927,9 +1943,7 @@ function startIncognito({ prefs, log, warm = false }) {
       log('incognito', `private window exited with code ${code} after ${ranMs} ms`);
       if (quittingForGood || code === 70) return;
       const early = ranMs < PRIVATE_START_MS;
-      const parent = BaseWindow.getAllWindows().find((w) => !w.isDestroyed());
-      dialog.showMessageBox(parent, {
-        type: 'warning',
+      ask(null, {
         buttons: ['OK'],
         title: 'Private window',
         message: early ? 'The private window couldn’t open.' : 'The private window closed unexpectedly.',
@@ -3039,6 +3053,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       // From the browser's own update prompt. Restarting into the installer is
       // the updater's to do - this only carries the answer.
+      case 'ask-answer':
+        shell.answerAsk(payload || {});
+        break;
+
       case 'update-restart':
         shell.closeSheet();
         // The user already chose to restart; the tabs come back with the session.
@@ -3823,6 +3841,8 @@ const CHROME_REQUESTS = new Set([
   'suggest',
   // The site panel: the active tab's connection, permissions and zoom.
   'site-info',
+  // The question on screen in the ask sheet (BrowserShell.ask).
+  'ask-spec',
   // The keyboard shortcut sheet: labels and keys, nothing of the user's.
   'shortcut-list',
   // The downloads flyout is drawn in the sheet, which is one of the chrome's
@@ -4131,10 +4151,10 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
             tabs.create({ url: require('url').pathToFileURL(file).href });
             return { ok: true, inBrowser: true };
           }
-          const { response } = await dialog.showMessageBox(shell.window, {
-            type: 'warning',
+          const { response } = await ask(shell, {
             buttons: ['Cancel', 'Show in folder', 'Open anyway'],
-            defaultId: 0,
+            defaultId: 2,
+            danger: true,
             cancelId: 0,
             title: 'Open outside the private window?',
             message: `${path.basename(file)} would open in another program.`,
@@ -4148,11 +4168,11 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         // A program is asked about first, as every browser asks: it can do
         // anything the user can.
         if (!INCOGNITO && RUNS_AS_PROGRAM.test(file)) {
-          const { response } = await dialog.showMessageBox(shell.window, {
-            type: 'warning',
+          const { response } = await ask(shell, {
             buttons: ['Cancel', 'Open'],
-            defaultId: 0,
+            defaultId: 1,
             cancelId: 0,
+            danger: true,
             title: 'Open a program?',
             message: `${path.basename(file)} is a program.`,
             detail: 'Opening it runs it, and it can do anything you can on this computer. Only open it if you trust where it came from.'
@@ -4214,6 +4234,9 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       // What the site panel shows: always about the active tab, and the
       // question it is asking, if it is asking one.
+      case 'ask-spec':
+        return shell.askSpec();
+
       case 'site-info': {
         const active = tabs.activeTab();
         if (!active) return null;
@@ -4616,8 +4639,7 @@ async function askAndSave({ origin, offer, credentials, shell, log }) {
     .find((r) => r.username === offer.username);
   if (existing && existing.password === offer.password) return;
 
-  const { response } = await dialog.showMessageBox(shell.window, {
-    type: 'question',
+  const { response } = await ask(shell, {
     buttons: [existing ? 'Update' : 'Save', 'Not now'],
     defaultId: 0,
     cancelId: 1,

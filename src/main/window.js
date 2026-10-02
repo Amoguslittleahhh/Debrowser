@@ -184,6 +184,10 @@ const SHEET_PAGES = {
   // window, a backdrop that catches a click, the keyboard, and nothing held
   // while it is closed.
   update: 'update.html',
+  // Every other question the browser asks: closing a window of tabs, saving a
+  // password, opening a downloaded program. Drawn here rather than by the
+  // system for the reason update.html is - see `ask`.
+  ask: 'ask.html',
   // Right-click on a page. Same view, same dismissal, same styling as the app
   // menu - a context menu that looked like a different program's would be the
   // most obvious seam in the browser, and it is the menu people open most.
@@ -858,6 +862,61 @@ class BrowserShell {
     this.toChrome('overlay', { open });
   }
 
+  /**
+   * Ask something in the browser's own sheet, as `dialog.showMessageBox` would.
+   *
+   * The same spec and the same answer - `{ title, message, detail, buttons,
+   * defaultId, cancelId, checkboxLabel }` in, `{ response, checkboxChecked }`
+   * out - so a call site changes one word. A system message box was a Win32
+   * dialog in the middle of a window that draws everything else itself:
+   * light-themed over a dark browser, in another typeface, with the system's
+   * buttons. One question at a time; a second one answers the first with its
+   * cancel, which is what dismissing it would have done.
+   */
+  ask(spec) {
+    // Whatever is open goes first - a question already asked is answered with
+    // its cancel as it closes - so nothing closing later mistakes this one
+    // for the question it is dismissing.
+    this.closeSheet();
+    const buttons = Array.isArray(spec.buttons) && spec.buttons.length ? spec.buttons.map(String) : ['OK'];
+    const clamp = (n, fallback) => (Number.isInteger(n) && n >= 0 && n < buttons.length ? n : fallback);
+    const cancelId = clamp(spec.cancelId, buttons.length - 1);
+    const clean = {
+      title: String(spec.title || spec.message || ''),
+      message: spec.title && spec.message !== spec.title ? String(spec.message || '') : '',
+      detail: String(spec.detail || ''),
+      buttons,
+      defaultId: clamp(spec.defaultId, 0),
+      cancelId,
+      checkboxLabel: spec.checkboxLabel ? String(spec.checkboxLabel) : '',
+      // The safe answer has the keyboard unless the caller says otherwise:
+      // a question nobody asked for must not be answered by a stray Enter.
+      focusId: clamp(spec.focusId, cancelId),
+      danger: spec.danger === true
+    };
+    if (this.window.isDestroyed()) return Promise.resolve({ response: cancelId, checkboxChecked: false });
+    return new Promise((resolve) => {
+      this.asking = { spec: clean, resolve };
+      this.openSheet('ask');
+    });
+  }
+
+  /** The question on screen, for the sheet to draw. */
+  askSpec() {
+    return this.asking ? this.asking.spec : null;
+  }
+
+  /** The sheet's answer, or a dismissal's. Closes the sheet. */
+  answerAsk({ response, checked } = {}) {
+    const pending = this.asking;
+    if (!pending) return;
+    this.asking = null;
+    const n = Number(response);
+    const valid = Number.isInteger(n) && n >= 0 && n < pending.spec.buttons.length;
+    pending.resolve({ response: valid ? n : pending.spec.cancelId, checkboxChecked: checked === true });
+    if (this.sheetPage === 'ask') this.closeSheet();
+  }
+
   closeSheet({ blurred = false, replacing = false } = {}) {
     if (!this.sheetView) return;
     const view = this.sheetView;
@@ -875,6 +934,9 @@ class BrowserShell {
     // the session. Nothing is cancelled: the downloaded update is still there
     // and the prompt comes back on the next launch.
     if (page === 'update' && this.updater) this.updater.dismissPrompt();
+    // A question closed without an answer - Escape, a click outside, another
+    // panel taking its place - is the cancel button.
+    if (page === 'ask' && this.asking) this.answerAsk({ response: this.asking.spec.cancelId });
     // A permission question closed without an answer is a refusal; main.js
     // decides that, since it holds the question.
     if (this.onSheetClosed) this.onSheetClosed(page);

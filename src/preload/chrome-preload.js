@@ -197,6 +197,9 @@ const COMMANDS = new Set([
   'safe-copy',
   'open-downloads-page',
   'update-restart',
+  // The browser's own message box: the question, and the answer to it.
+  'ask-spec',
+  'ask-answer',
 
   // The single shortcut table lives in the browser process, so the keys the
   // chrome used to bind itself are commands now like any other.

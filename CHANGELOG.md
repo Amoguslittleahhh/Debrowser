@@ -36,6 +36,9 @@
 
 ### Improved
 
+- **Every question the browser asks is drawn in its own style.** Closing a window of tabs, saving a password, opening a downloaded program and a private window that could not open now ask in the same sheet as the update prompt, in your theme and accent, instead of in a system message box. Escape or a click outside is the cancel, as before.
+- **Windows: installing is one click.** The installer no longer walks through a wizard drawn in the system's style; it installs for you alone, with no questions, and opens Debrowser on its welcome tour. The install folder is the standard per-user one.
+- **macOS: the disk image has a designed window.** The app and the Applications folder sit side by side on the browser's own background, with the one instruction there is.
 - **Ctrl+Shift+T brings back last time's tabs.** With Restore tabs off, closing the browser by accident used to lose every tab. Until you close a tab in the new session, Reopen closed tab now reopens all of last time's, as Chrome does after a restart. Not when history is cleared on exit.
 - **More of the keys other browsers have.** Ctrl+F4 closes a tab on Windows and Linux; Shift+F5 and Ctrl+F5 reload without the cache; Shift+Esc opens the task manager everywhere. macOS: Cmd+Shift+[ and ] switch tabs and Cmd+Option+I opens developer tools.
 - **The menu's Zoom row has its icon**, so its label lines up with every other row instead of starting a glyph's width out.

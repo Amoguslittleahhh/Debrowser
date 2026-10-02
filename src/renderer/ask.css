@@ -1,0 +1,29 @@
+/*
+ * A question from the browser. Everything but these few rules is the update
+ * prompt's (update.css): the sheet, the dimmed window, the buttons.
+ */
+
+/* Room for a sentence of detail, a filename and three buttons in a row. */
+.card { width: min(440px, calc(100vw - 32px)); }
+
+/* The "Don't ask again" line: quiet, under the text, above the answers. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The label is the target: a 24px row, the box clickable anywhere along it. */
+  min-height: 24px;
+  margin: -8px 0 16px;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+.check input { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); }
+
+/* Whichever line of text comes last keeps the detail's distance from the
+   buttons: a question with no detail under it would otherwise crowd them. */
+.card .end { margin-bottom: 20px; }
+
+/* An answer that cannot be taken back - opening a program - in the colour
+   every other warning in the browser uses, not the accent's "go ahead". */
+.btn.primary.danger { background: var(--crit); }
+.btn.primary.danger:hover { background: color-mix(in srgb, #fff 10%, var(--crit)); }

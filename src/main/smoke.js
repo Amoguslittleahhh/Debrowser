@@ -2534,6 +2534,27 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.closeSheet();
     await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
 
+    // Every other question is the same sheet: the browser's ask, not the
+    // system's message box. Pressing the default button answers with its
+    // index; Escape is the cancel, as closing a message box was.
+    const askOnce = async (act) => {
+      const answer = shell.ask({ title: 'Close window?', message: 'Close 3 tabs?', buttons: ['Close tabs', 'Cancel'],
+        defaultId: 0, cancelId: 1, checkboxLabel: 'Don\u2019t ask again' });
+      const drawn = await waitFor(async () => shell.sheetPage === 'ask' && shell.sheetView &&
+        await shell.sheetView.webContents.executeJavaScript('document.querySelectorAll("#actions button").length === 2')
+          .catch(() => false), { timeoutMs: 8000 });
+      if (drawn) await shell.sheetView.webContents.executeJavaScript(act).catch(() => {});
+      const result = await Promise.race([answer, new Promise((r) => setTimeout(() => r(null), 5000))]);
+      await waitFor(() => shell.sheetView === null, { timeoutMs: 5000 });
+      return { drawn, result };
+    };
+    const clicked = await askOnce('document.getElementById("checkbox").click(); document.querySelector(".btn.primary").click()');
+    const escaped = await askOnce('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))');
+    check('the browser asks its questions in its own sheet, and Escape is the cancel',
+      clicked.drawn && clicked.result?.response === 0 && clicked.result?.checkboxChecked === true &&
+        escaped.drawn && escaped.result?.response === 1,
+      `click: ${JSON.stringify(clicked)}, escape: ${JSON.stringify(escaped)}`);
+
     check('the downloads flyout takes over the sheet from the menu',
       menuUp && swapped, `menu up=${menuUp}, swapped to ${shell.sheetPage}`);
     check('the flyout reads the download list and not the credential store',
