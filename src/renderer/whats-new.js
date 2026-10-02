@@ -15,7 +15,8 @@ function inline(text) {
       code.textContent = bit.slice(1, -1);
       out.append(code);
     } else if (bit) {
-      out.append(bit.replace(/\*\*/g, ''));
+      // The changelog is typed with a spaced hyphen for a dash; set it as one.
+      out.append(bit.replace(/\*\*/g, '').replace(/ - /g, ' – '));
     }
   });
   return out;

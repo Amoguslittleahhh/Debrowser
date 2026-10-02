@@ -348,7 +348,7 @@ class Tor {
       if (this.status.state === 'ready' || (!this.child && !this.attached)) return;
       this.set({
         warning: this.status.warning ||
-          `No progress for ${Math.round(STALL_MS / 1000)} seconds at ${this.status.progress}% - ` +
+          `No progress for ${Math.round(STALL_MS / 1000)} seconds at ${this.status.progress}% – ` +
           'the network may be blocking Tor'
       });
     }, STALL_MS);

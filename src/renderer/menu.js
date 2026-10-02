@@ -177,7 +177,7 @@ function zoomRow(item) {
   // a control: the eye reads "Zoom … Reset … − 110% +" and has to work out
   // which of the three things the Reset belongs to. At the end it reads as what
   // it is - the way back from wherever the stepper has got to.
-  row.append(label, out, value, into, reset);
+  row.append(menuIcon('zoom'), label, out, value, into, reset);
   return row;
 }
 

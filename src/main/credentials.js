@@ -72,7 +72,7 @@ function keystoreCapability() {
     if (backend === 'basic_text' || backend === 'unknown') {
       return {
         available: false,
-        reason: `the available keyring (${backend}) does not really encrypt - install gnome-keyring or kwallet`
+        reason: `the available keyring (${backend}) does not really encrypt – install gnome-keyring or kwallet`
       };
     }
   }

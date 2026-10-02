@@ -111,7 +111,7 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
   font-variant-numeric: tabular-nums;
 }
 
-.item svg {
+.item svg, .zoom > svg {
   width: var(--icon);
   height: var(--icon);
   flex: none;
@@ -169,12 +169,11 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
   align-items: center;
   gap: 8px;
   height: 34px;
-  /* Indented to the icon column, so "Zoom" starts where every other label in
-     the menu starts. It is the one row with no glyph, and left at the sheet's
-     own padding it sat a glyph's width to the left of the list it is part
-     of - the sort of half-alignment that reads as carelessness. */
-  padding: 0 10px 0 36px;
+  /* The icon column every other row has, so "Zoom" starts where the other
+     labels do: the glyph, then the items' 11px gap (8 here, plus 3). */
+  padding: 0 10px;
 }
+.zoom > svg { margin-right: 3px; }
 
 .zoom-label { flex: 1; color: var(--text); }
 

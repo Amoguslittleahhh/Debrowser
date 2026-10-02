@@ -36,6 +36,10 @@
 
 ### Improved
 
+- **The menu's Zoom row has its icon**, so its label lines up with every other row instead of starting a glyph's width out.
+- **JavaScript security's choices are named simply.** The options read Balanced, Maximum and Full speed; what each one costs is in the sentence above them, where the dropdown no longer cuts it off.
+- **The weekly receipt names a day with nothing freed** as None, rather than leaving a gap in the row of figures.
+- **Dates on the Safety check page follow your system's format**, as History's already did.
 - **A sleeping tab starts waking while you choose it.** Highlighting one in tab search begins bringing it back before you press Enter, as resting the pointer on it in the tab strip already did, so it is ready sooner; if you move on, it goes back to sleep.
 - **Downloads are remembered after a restart,** and a failed or cancelled one has a Retry button. A download cut off by closing Debrowser comes back as "Stopped when Debrowser closed", ready to retry, and a finished file you have since moved or deleted says so instead of offering to open it.
 - **A site's zoom is remembered after a restart,** instead of only until Debrowser closes.
@@ -56,6 +60,8 @@
 
 ### Fixed
 
+- **Settings opens at the section you asked for.** Opening it at Labs, Updates or another late section could land one or two sections short, because the lists above it finished loading after the jump and pushed it down.
+- **Pages open in their colours at once.** Each one briefly faded in from the default palette, which showed as a grey address bar on the first frame of a dark window.
 - **macOS: a downloaded copy no longer reports itself as damaged on Apple silicon.** The app is now ad-hoc signed, so the first launch shows the ordinary prompt you can allow once in System Settings → Privacy & Security → Open Anyway, instead of a damaged-app message with no way past it.
 - **macOS: Debrowser tells you when a new version is out.** It could not update itself on macOS and so never checked. It now checks like everywhere else, and Settings → Updates offers a Download button for the new version.
 - **Windows Hello no longer waits for ever** if Debrowser's own prompt cannot report back. After five minutes without an answer it gives up and closes the prompt, so a second try does not open a prompt on top of the first.

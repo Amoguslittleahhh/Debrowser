@@ -3696,7 +3696,8 @@ function whenDay(ms) {
   const ago = Math.round((day(Date.now()) - day(ms)) / 86_400_000);
   if (ago <= 0) return 'today';
   if (ago === 1) return 'yesterday';
-  return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  // The system's own order, as History writes its dates: not one country's.
+  return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 function senderPage(tabs, shell, sender) {

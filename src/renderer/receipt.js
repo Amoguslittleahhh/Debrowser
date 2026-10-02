@@ -41,7 +41,9 @@ async function load() {
     el.className = i === week.length - 1 ? 'day today' : 'day';
     const v = document.createElement('span');
     v.className = 'v';
-    v.textContent = d.freedMB ? size(d.freedMB) : '';
+    // A day with nothing freed still gets its figure, or the row of labels has a
+    // hole in it that reads as a value that failed to load.
+    v.textContent = d.freedMB ? size(d.freedMB) : 'None';
     const wrap = document.createElement('div');
     wrap.className = 'bar-wrap';
     const bar = document.createElement('div');

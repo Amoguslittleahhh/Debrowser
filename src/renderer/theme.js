@@ -372,7 +372,10 @@ function applyThemePrefs(prefs) {
   // A palette change is instant everywhere. Without this, anything with a
   // colour transition - Settings' rows, most buttons - faded through a
   // half-way mix for a moment while the page around it had already switched.
-  if (body.dataset.theme !== undefined && body.dataset.theme !== flags.theme) {
+  // The first application counts: every page opens in the stylesheet's default
+  // palette, and the address bar was photographed half-way through fading from
+  // it - a grey pill on the first frame of a dark window. So is a new design.
+  if (body.dataset.theme !== flags.theme || body.dataset.design !== flags.design) {
     body.classList.add('switching-theme');
     requestAnimationFrame(() => requestAnimationFrame(() => body.classList.remove('switching-theme')));
   }

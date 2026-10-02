@@ -16,8 +16,8 @@ if (params.get('secure') === 'first') {
   document.title = 'Not secure';
   document.querySelector('h1').textContent = 'This site doesn’t offer a secure connection';
   document.querySelector('.detail').textContent =
-    'Its pages come over plain HTTP, which anyone on the network between you and it - a café’s Wi-Fi, ' +
-    'your provider - can read and change, including what you type into it.';
+    'Its pages come over plain HTTP, which anyone on the network between you and it – a café’s Wi-Fi, ' +
+    'your provider – can read and change, including what you type into it.';
   document.getElementById('go').textContent = 'Continue to site';
   document.querySelector('.note').textContent =
     'Continuing allows plain HTTP for this site until Debrowser restarts. Settings can turn this check off.';

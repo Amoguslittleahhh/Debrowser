@@ -263,7 +263,7 @@ const SECTIONS = {
     {
       key: 'cleanLinks',
       label: 'Take tracking out of links',
-      hint: 'Removes the parts of an address that only say where you came from - utm_source, fbclid and the like - and skips the click-tracking stop some sites send links through. Copied links are cleaned too.',
+      hint: 'Removes the parts of an address that only say where you came from – utm_source, fbclid and the like – and skips the click-tracking stop some sites send links through. Copied links are cleaned too.',
       type: 'checkbox'
     },
     {
@@ -442,11 +442,11 @@ const SECTIONS = {
       // The costs are measured, by bench/js-levels: everyday page work (DOM,
       // JSON) runs the same at every level; heavy number-crunching and
       // WebAssembly are where the optimising compilers earn their keep.
-      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land: everyday pages run as fast, heavy computation about half as fast. Maximum runs the interpreter alone. Applies to new private windows.',
+      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land: everyday pages run as fast, heavy computation about half as fast. Maximum runs the interpreter alone, with no WebAssembly: text search about four times slower. Applies to new private windows.',
       type: 'select',
       options: [
-        { value: 'balanced', name: 'Balanced – heavy scripts ~2× slower' },
-        { value: 'maximum', name: 'Maximum – no WebAssembly, text search ~4× slower' },
+        { value: 'balanced', name: 'Balanced' },
+        { value: 'maximum', name: 'Maximum' },
         { value: 'full', name: 'Full speed' }
       ]
     },
@@ -498,12 +498,12 @@ const SECTIONS = {
     {
       key: 'hardenJavaScript',
       label: 'JavaScript security',
-      hint: 'The private window’s protection, for every window: Balanced turns off the optimising compilers, where most attacks on the engine land - everyday pages run as fast, heavy computation such as games and editors about half as fast. Applies when Debrowser next starts.',
+      hint: 'The private window’s protection, for every window: Balanced turns off the optimising compilers, where most attacks on the engine land – everyday pages run as fast, heavy computation such as games and editors about half as fast. Maximum runs the interpreter alone, with no WebAssembly. Applies when Debrowser next starts.',
       type: 'select',
       options: [
         { value: 'full', name: 'Full speed' },
-        { value: 'balanced', name: 'Balanced – heavy scripts ~2× slower' },
-        { value: 'maximum', name: 'Maximum – no WebAssembly, text search ~4× slower' }
+        { value: 'balanced', name: 'Balanced' },
+        { value: 'maximum', name: 'Maximum' }
       ]
     },
     {
@@ -541,7 +541,7 @@ const SECTIONS = {
     {
       key: 'labQuickWindow',
       label: 'A small window for links from other apps',
-      hint: 'A link from your mail or chat opens in a small window of its own, to read and close - or “Open in Debrowser” to keep it as a tab.',
+      hint: 'A link from your mail or chat opens in a small window of its own, to read and close – or “Open in Debrowser” to keep it as a tab.',
       type: 'checkbox'
     }
   ],
@@ -558,7 +558,7 @@ const SECTIONS = {
     {
       key: 'updateChannel',
       label: 'Update channel',
-      hint: 'Beta gets each release a few weeks before everyone else, so you can try what is new - and tell us when something is not right.',
+      hint: 'Beta gets each release a few weeks before everyone else, so you can try what is new – and tell us when something is not right.',
       type: 'select',
       options: [
         { value: 'stable', name: 'Stable' },
@@ -730,10 +730,33 @@ function revealSection() {
   const section = document.querySelector(`section[data-section="${CSS.escape(wanted)}"]`);
   if (!section) return;
   section.scrollIntoView({ block: 'start', behavior: 'auto' });
+  holdInView(section);
   section.classList.add('landed');
   // Removed rather than left on the element: it is an arrival, not a state, and
   // a highlight that never goes away is just a differently coloured section.
   setTimeout(() => section.classList.remove('landed'), 1400);
+}
+
+/**
+ * Keep a section where the jump put it while the page finishes filling in.
+ *
+ * Passwords, bookmarks and downloads draw their lists a moment after the page
+ * is built, above most sections, and each one pushed the section down by its
+ * own height: `#labs` opened at Private windows, two sections short. So for a
+ * moment the section is put back whenever the page changes size - until the
+ * user scrolls themselves, which is their answer and not ours to undo.
+ */
+function holdInView(section) {
+  const observer = new ResizeObserver(() => section.scrollIntoView({ block: 'start', behavior: 'auto' }));
+  const stop = () => {
+    observer.disconnect();
+    for (const type of ['wheel', 'keydown', 'pointerdown', 'touchstart']) window.removeEventListener(type, stop, true);
+  };
+  // The sections, not <main>: main is the scroller, so its own box never
+  // changes size however much its content grows.
+  for (const el of document.querySelectorAll('main > section')) observer.observe(el);
+  for (const type of ['wheel', 'keydown', 'pointerdown', 'touchstart']) window.addEventListener(type, stop, true);
+  setTimeout(stop, 2000);
 }
 
 // Asked for a section while already open - the passwords page's "Set a
