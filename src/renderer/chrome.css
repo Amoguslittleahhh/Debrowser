@@ -1820,6 +1820,13 @@ body[data-design="grid"][data-layout="left"] .meter { font-family: var(--font-mo
 :is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .bookmarks {
   background: var(--bar);
 }
+/* One surface, one edge: with the bookmarks bar showing, the toolbar's own
+   bottom line went across the middle of it and the window read as three
+   stacked strips. The bar's line under both is the only one, as Safari draws
+   its favourites bar as part of the toolbar. */
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]).with-bookmarks .toolbar {
+  border-bottom-color: transparent;
+}
 :is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab {
   height: 34px;
   border-radius: var(--radius) var(--radius) 0 0;

@@ -36,6 +36,7 @@
 
 ### Improved
 
+- **The window reads as one surface.** In Ledger, Paper and Grid the toolbar and the bookmarks bar no longer have a line between them, and the new tab page is the toolbar's own colour, with its search field set into it as the address bar is set into the toolbar.
 - **The new tab page has your favourites.** In Ledger, Paper and Grid, the sites you visit most sit under the search field as large tiles with the site's name, in each design's own shapes and type, and the whole page is centred as one group. Legacy keeps its list.
 - **The browser's own pages carry its mark.** The New tab, Settings and History show the Debrowser mark in the tab strip, the bookmarks bar and history, instead of a purple D as if they were a website.
 - **macOS: Debrowser is set in the Mac's own typeface.** San Francisco at the size macOS uses for its interface, on every page, in every design but Grid, which keeps its own. A Mac with Microsoft Office installed used to get Calibri.

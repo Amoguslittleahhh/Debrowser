@@ -407,7 +407,8 @@ app.whenReady().then(async () => {
         ]);
       } catch (err) { console.log('forced colours not emulated:', err.message); }
     }
-    await new Promise((r) => setTimeout(r, 1400));
+    // Longer at 2x: software rendering at twice the pixels was caught mid-fade.
+    await new Promise((r) => setTimeout(r, process.env.SHOOT_SCALE ? 3000 : 1400));
 
     // The viewport is asserted, not assumed. `force-device-scale-factor` was in
     // this harness to get crisp text and it made the CSS viewport half the

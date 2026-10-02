@@ -217,7 +217,10 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) {
      through the body, came on top of the full height and always scrolled. */
   height: auto;
   padding: 0 0 32px;
-  background: var(--bg-raised);
+  /* The toolbar's own colour: the tab in front, the toolbar and this page are
+     one surface, as Safari's start page is - a shade darker, the page read as
+     a hole under the window's chrome. The field below is the recess. */
+  background: var(--tint-2);
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
   box-sizing: border-box;
@@ -283,7 +286,8 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #q 
   padding: 0 96px 0 48px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--bg-input);
+  /* Cut into the page as the address bar is cut into the toolbar above it. */
+  background: var(--bg);
   font-family: var(--font-ui);
   font-size: 17px;
 }
@@ -320,7 +324,7 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .co
   margin: 0 auto;
   padding: 6px 8px 12px;
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--text) 4%, var(--bg-raised));
+  background: color-mix(in srgb, var(--text) 4%, var(--tint-2));
 }
 .continue-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px; }
 .continue-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
@@ -453,7 +457,7 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .ti
 /* A favicon is drawn for 16 to 32 pixels; stretched to the tile it blurs. So
    the site's mark sits at the size it was made for, on a quiet surface. */
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .chip.has-icon {
-  background: var(--bg-input);
+  background: var(--bg);
 }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .site-icon {
   inset: 14px;
