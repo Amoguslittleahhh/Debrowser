@@ -747,14 +747,27 @@ function revealSection() {
  * user scrolls themselves, which is their answer and not ours to undo.
  */
 function holdInView(section) {
-  const observer = new ResizeObserver(() => section.scrollIntoView({ block: 'start', behavior: 'auto' }));
+  const main = document.querySelector('main');
+  // Where this put the page last. Any scroll that lands somewhere else came
+  // from the reader - a wheel, a key, the scrollbar dragged, a trackpad, a
+  // script - and ends the hold at once: holding against it snapped the page
+  // back for two seconds after someone had scrolled it themselves.
+  let placed = main ? main.scrollTop : 0;
+  const put = () => {
+    section.scrollIntoView({ block: 'start', behavior: 'auto' });
+    if (main) placed = main.scrollTop;
+  };
+  const observer = new ResizeObserver(put);
+  const moved = () => { if (main && Math.abs(main.scrollTop - placed) > 1) stop(); };
   const stop = () => {
     observer.disconnect();
+    if (main) main.removeEventListener('scroll', moved);
     for (const type of ['wheel', 'keydown', 'pointerdown', 'touchstart']) window.removeEventListener(type, stop, true);
   };
   // The sections, not <main>: main is the scroller, so its own box never
   // changes size however much its content grows.
   for (const el of document.querySelectorAll('main > section')) observer.observe(el);
+  if (main) main.addEventListener('scroll', moved, { passive: true });
   for (const type of ['wheel', 'keydown', 'pointerdown', 'touchstart']) window.addEventListener(type, stop, true);
   setTimeout(stop, 2000);
 }
