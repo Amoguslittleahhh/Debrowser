@@ -1,5 +1,11 @@
 # Debrowser
 
+> [!IMPORTANT]
+> **Windows 11: if Smart App Control blocks the installer or uninstaller, run it again a minute later.**
+> Debrowser is not code-signed yet, so Windows checks each new file with Microsoft first, and the first
+> run can be blocked while that check finishes. If SmartScreen says "Windows protected your PC" instead,
+> choose More info → Run anyway. [Why the builds are unsigned](#code-signing-policy)
+
 ![Debrowser in its default design, Ledger, on a new tab](docs/screenshots/hero.png)
 
 A web browser built around a single idea: **a tab should hold the least memory
@@ -39,7 +45,7 @@ source, on GitHub's runners, and attached to each release.
 
 | | Download | Then |
 |---|---|---|
-| **Windows** | `Debrowser-<version>-win-x64.exe` | Run it: it installs for you alone, with no questions, and opens Debrowser. SmartScreen will warn — see below. |
+| **Windows** | `Debrowser-<version>-win-x64.exe` | Run it: it installs for you alone, with no questions, and opens Debrowser. SmartScreen or Smart App Control may stop it once — see the note above. |
 | **Windows** (no install) | `...-win-x64-portable.exe` | Run it from anywhere. Installs nothing. |
 | **macOS** | `Debrowser-<version>-mac-arm64.dmg` (or `-x64` on Intel) | Open it and drag Debrowser into Applications. The first launch needs Open Anyway — see below. |
 | **Linux** | `Debrowser-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
