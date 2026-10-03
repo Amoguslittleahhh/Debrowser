@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **Settings, one section at a time.** Settings now shows one section at a time, picked from the list beside it, as Chrome's does. A search still shows matching settings from every section. If you prefer everything on one long page, choose it under Appearance → Settings layout.
+- **Resize developer tools.** Drag the edge between the page and the docked developer tools to give either more room; double-click it to go back to the usual split. The size is remembered.
+- **Turn off the Undo note for closed tabs.** "Offer Undo when a tab closes" in Tabs and windows turns off the "Tab closed · Undo" note. Ctrl+Shift+T still reopens a closed tab.
+
+### Improved
+
+- **The tab strip comes out and goes away faster.** With the tabs tucked away down the side, the strip now slides in in 140 ms instead of 210 ms, and leaves sooner once the pointer has gone.
+- **A line under the address bar.** With the tabs tucked away, a faint line now separates the address bar from the page below, so the two no longer run together when they are the same colour.
+- **Settings in a narrow window.** Beside docked developer tools, or in a window snapped to half the screen, the section list now opens from a button at the top left instead of being squeezed into a row where most names were cut off.
+
+### Fixed
+
+- **Report a problem now opens.** It opened the report in a background tab, so nothing seemed to happen, especially with the tabs tucked away. It now opens in front, as do the release-notes and Labs feedback links in Settings.
+- **No more stray lines in Settings.** In the Paper design, an empty list drew a double line (under "Nothing saved yet" in Bookmarks), and two lists next to each other each drew their own rule (in Passwords and payment).
+
 ## 2.0.0
 
 Debrowser 2.0 is the browser that shows what it costs your computer, and gives it back. Spaces keep sets of tabs apart and put the others to sleep; a receipt on the new tab page says what was freed and blocked today; ads, trackers and dangerous sites are stopped by the browser itself. Around that: split view, Peek, reader view, a command bar on Ctrl+K, undo for closed tabs, crash recovery, history and password import, and a design pass across every surface - in four designs, light and dark, on a foundation drawn the way a Mac draws its own windows.

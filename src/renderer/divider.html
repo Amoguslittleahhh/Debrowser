@@ -11,10 +11,14 @@
     body { display: grid; place-items: center; }
     .grip { width: 4px; height: 36px; border-radius: 2px; background: var(--border); transition: background-color var(--fast) var(--ease), height var(--fast) var(--ease); }
     body:hover .grip, body.dragging .grip { background: var(--accent); height: 56px; }
+    body.row { cursor: row-resize; }
+    body.row .grip { width: 36px; height: 4px; transition: background-color var(--fast) var(--ease), width var(--fast) var(--ease); }
+    body.row:hover .grip, body.row.dragging .grip { width: 56px; height: 4px; }
   </style>
 </head>
 <body>
-  <!-- Between two tabs side by side (window.js, split view): drag to share the width out differently. -->
+  <!-- Between two tabs side by side (window.js, split view), or a page and its
+       docked inspector: drag to share the room out differently. -->
   <div class="grip"></div>
   <script src="theme.js"></script>
   <script src="divider.js"></script>

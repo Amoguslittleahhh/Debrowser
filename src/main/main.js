@@ -18,7 +18,7 @@ const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
-const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB } = require('./prefs');
+const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB, SCHEMA } = require('./prefs');
 const { Updater } = require('./updater');
 const { SiteZoom } = require('./zoom');
 const { SitePrefs } = require('./site-prefs');
@@ -2082,7 +2082,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
    */
   const offerUndoClose = (remembered) => {
     remembered = Math.min(remembered, closedTabs.length);
-    if (remembered <= 0 || tabs.all().length === 0) return;
+    if (remembered <= 0 || tabs.all().length === 0 || !prefs.get('closedTabToast')) return;
     toast(remembered === 1 ? 'Tab closed' : `Closed ${remembered} tabs`, 'Undo', () => {
       for (let i = 0; i < remembered; i++) reopenClosed();
       publish();
@@ -2635,6 +2635,19 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (shell.split) shell.setSplit({ ...shell.split, ratio: 0.5 });
         break;
 
+      // The edge between a page and its docked inspector, the same way.
+      case 'devtools-drag':
+        shell.dragDevTools();
+        break;
+      case 'devtools-drag-end':
+        prefs.set('devToolsShare', Math.round(shell.devToolsShare * 1000) / 1000);
+        break;
+      case 'devtools-even':
+        shell.devToolsShare = SCHEMA.devToolsShare.def;
+        prefs.set('devToolsShare', shell.devToolsShare);
+        shell.layout();
+        break;
+
       // Ctrl+K: the address bar as a command bar.
       case 'command-bar':
         shell.bringSidebarOut();
@@ -2803,7 +2816,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // front is the same one unless something switched tabs meanwhile.
         // From the bookmarks bar there is no menu behind it: the tab in front.
         const opener = (!payload?.fromBar && context.model?.tabId && tabs.byId(context.model.tabId)) || active;
-        if (openableUrl(url)) openLinkTab(tabs, prefs, opener, url);
+        // A link the browser's own page offers (release notes, feedback) opens
+        // in front: it is what was asked for, not a page to read later.
+        if (openableUrl(url)) openLinkTab(tabs, prefs, opener, url, payload?.foreground === true ? { foreground: true } : {});
         break;
       }
 
@@ -2822,9 +2837,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         toast('Version info copied');
         break;
 
-      // A GitHub issue, prefilled with the version info, to read and send.
+      // A GitHub issue, prefilled with the version info, to read and send. In
+      // front, whatever links do: it was asked for from the menu, and in the
+      // background - the default for links - nothing seemed to happen at all,
+      // least of all with the tabs tucked away.
       case 'report-problem':
-        openLinkTab(tabs, prefs, active, CrashReport.issueUrl(versionInfo(prefs), payload?.crash || null));
+        tabs.create({ url: CrashReport.issueUrl(versionInfo(prefs), payload?.crash || null), activate: true, realise: true });
         break;
 
       // Straight to the download manager, which names the file - and asks where
@@ -4802,8 +4820,7 @@ function openInternalPage(tabs, url) {
  * Placed and focused as Settings says. "After the current tab" also skips the
  * tabs this opener already opened, so links opened in order read left to right.
  */
-function openLinkTab(tabs, prefs, opener, url) {
-  const foreground = prefs?.get('linkTabsInBackground') === false;
+function openLinkTab(tabs, prefs, opener, url, { foreground = prefs?.get('linkTabsInBackground') === false } = {}) {
   let index = null;
   if (opener && prefs?.get('newTabPosition') === 'after-current') {
     const list = tabs.all();

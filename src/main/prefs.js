@@ -204,11 +204,19 @@ const SCHEMA = {
    */
   defaultZoom: { def: 1, ok: (v) => ZOOM_STEPS.includes(v) },
 
+  // Settings shows one section at a time, picked from the list beside it, as
+  // Chrome's does; 'scroll' is every section on one long page.
+  settingsLayout: { def: 'pages', ok: (v) => v === 'pages' || v === 'scroll' },
+
   /* --- Tabs and windows ------------------------------------------- */
 
   // 'quit' is what every browser does; 'new-tab' keeps the window for
   // someone who closes tabs faster than they mean to close the browser.
   lastTabCloses: { def: 'quit', ok: (v) => ['quit', 'new-tab'].includes(v) },
+
+  // The "Tab closed - Undo" note. Off for someone who closes tabs on purpose
+  // and finds it in the way; Ctrl+Shift+T reopens them either way.
+  closedTabToast: { def: true, ok: (v) => typeof v === 'boolean' },
 
   // On by default now that tabs are not reopened by default: closing a window
   // of twenty tabs by accident would otherwise lose all twenty.
@@ -345,6 +353,9 @@ const SCHEMA = {
   // browser's own, beside or under the page; `window` hands it to Chromium to
   // put in a window of its own, which is what it used to do unconditionally.
   devToolsDock: { def: 'right',  ok: (v) => ['right', 'bottom', 'window'].includes(v) },
+  // How much of the page's room a docked inspector takes, as the edge between
+  // them was last dragged to.
+  devToolsShare: { def: 0.42, ok: (v) => Number.isFinite(v) && v >= 0.1 && v <= 0.9 },
 
   /* --- Bookmarks --------------------------------------------------- */
   // The strip of saved sites under the toolbar. On by default, because a

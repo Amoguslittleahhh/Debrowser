@@ -77,7 +77,7 @@ const STATE = {
     devToolsDock: 'right', showBookmarksBar: true, sidebarPinned: false,
     requirePresence: false, restoreSession: true, bookmarkOpensIn: 'new-tab',
     inlineAutocomplete: true, defaultZoom: 1, clearHistoryOnExit: false,
-    newTabPosition: 'end', linkTabsInBackground: true, lastTabCloses: 'quit',
+    newTabPosition: 'end', linkTabsInBackground: true, lastTabCloses: 'quit', closedTabToast: true, settingsLayout: process.env.SHOOT_SETTINGS || 'pages',
     confirmCloseTabs: false, tabCloseButton: 'hover', hoverPrefetch: true,
     rememberWindowBounds: true, downloadDir: '', askWhereToSave: false
   }
@@ -243,6 +243,7 @@ const SHOTS = [
   // than from the settings descriptors, so nothing else photographs them.
   { name: 'settings-bookmarks', file: 'settings.html', w: 1280, h: 860, hash: 'bookmarks' },
   { name: 'settings-private', file: 'settings.html', w: 1280, h: 860, hash: 'private' },
+  { name: 'settings-credentials', file: 'settings.html', w: 1280, h: 860, hash: 'credentials' },
   // Startup, then the tab and window behaviours - the rows people come to
   // Settings to change most, and several of them selects of unequal width.
   { name: 'settings-browsing', file: 'settings.html', w: 1280, h: 860, hash: 'browsing' },

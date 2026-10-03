@@ -101,11 +101,11 @@ const CONTENT_RADIUS = 10;
  * out of the view for a moment. Short enough to feel like it is following the
  * pointer rather than lagging behind it.
  */
-const SIDEBAR_CLOSE_MS = 220;
+const SIDEBAR_CLOSE_MS = 150;
 const SIDEBAR_OPEN_MS = 60;    // enough to tell a brush past the edge from a visit, short enough not to feel
 
 /** How long a detached strip takes to slide back out; see setSidebarOpen. */
-const DETACH_SLIDE_MS = 200;   // chrome.css, .sliding-out
+const DETACH_SLIDE_MS = 120;   // chrome.css, .sliding-out
 
 /**
  * How much of the content area a docked inspector takes, and the least it may
@@ -116,6 +116,10 @@ const DETACH_SLIDE_MS = 200;   // chrome.css, .sliding-out
  */
 const DEVTOOLS_SHARE = 0.42;
 const DEVTOOLS_MIN = 320;
+/** The least the page keeps beside it, however far the edge is dragged. */
+const DEVTOOLS_PAGE_MIN = 240;
+/** How wide the edge between them is to the pointer: astride the boundary. */
+const DEVTOOLS_GRIP = 8;
 
 /**
  * How long to wait before reopening the inspector somewhere else.
@@ -384,6 +388,10 @@ class BrowserShell {
     this.devToolsTab = null;
     /** The dock mode in force when it was opened, so a change can re-dock it. */
     this.devToolsMode = null;
+    /** Its share of the room, which dragging the edge beside it changes. */
+    this.devToolsShare = (prefs && prefs.get('devToolsShare')) || DEVTOOLS_SHARE;
+    /** That edge: a divider view, as split view's, over the page's side of it. */
+    this.devToolsDivider = null;
     this.devToolsRedock = null;
 
     /**
@@ -1640,6 +1648,7 @@ class BrowserShell {
       }
     }
 
+    this.placeDevToolsDivider(null);
     if (view) {
       try {
         this.window.contentView.removeChildView(view);
@@ -1688,15 +1697,84 @@ class BrowserShell {
   dockBounds(content) {
     if (!this.devToolsView || !this.devToolsTab || !this.devToolsTab.visible) return null;
 
+    // As dragged, but never so much that the page or the inspector is a sliver.
+    const share = (room) => Math.min(room - DEVTOOLS_PAGE_MIN,
+      Math.max(DEVTOOLS_MIN, Math.round(room * this.devToolsShare)));
     if (this.dockMode() === 'bottom') {
-      const height = Math.max(DEVTOOLS_MIN, Math.round(content.height * DEVTOOLS_SHARE));
-      if (height >= content.height) return null;  // no room worth splitting
+      const height = share(content.height);
+      if (height < DEVTOOLS_MIN) return null;  // no room worth splitting
       return { x: content.x, y: content.y + content.height - height, width: content.width, height };
     }
 
-    const width = Math.max(DEVTOOLS_MIN, Math.round(content.width * DEVTOOLS_SHARE));
-    if (width >= content.width) return null;
+    const width = share(content.width);
+    if (width < DEVTOOLS_MIN) return null;
     return { x: content.x + content.width - width, y: content.y, width, height: content.height };
+  }
+
+  /**
+   * The edge between the page and a docked inspector, which the pointer drags
+   * (divider.js, `?for=devtools`). Astride the boundary and just above the
+   * inspector, so its own toolbar keeps every click beside it. Made the first
+   * time it is needed and kept, hidden, while there is no dock; gone with the
+   * inspector itself.
+   */
+  placeDevToolsDivider(dock) {
+    const root = this.window.contentView;
+    if (!dock) {
+      if (this.devToolsDivider && !this.devToolsView) {
+        const view = this.devToolsDivider;
+        this.devToolsDivider = null;
+        try { root.removeChildView(view); view.webContents.close(); } catch { /* window going */ }
+      } else if (this.devToolsDivider) {
+        this.devToolsDivider.setVisible(false);
+      }
+      return;
+    }
+    const row = this.dockMode() === 'bottom';
+    if (this.devToolsDivider && this.devToolsDivider.axis !== (row ? 'row' : 'col')) {
+      try { root.removeChildView(this.devToolsDivider); this.devToolsDivider.webContents.close(); } catch { /* gone */ }
+      this.devToolsDivider = null;
+    }
+    if (!this.devToolsDivider) {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          additionalArguments: preloadArgs(this.prefs),
+          transparent: true
+        }
+      });
+      try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+      view.axis = row ? 'row' : 'col';
+      view.webContents.loadFile(path.join(RENDERER_DIR, 'divider.html'),
+        { query: row ? { for: 'devtools', axis: 'row' } : { for: 'devtools' } }).catch(() => {});
+      this.devToolsDivider = view;
+    }
+    const at = root.children.indexOf(this.devToolsView);
+    if (root.children.indexOf(this.devToolsDivider) !== at + 1) {
+      if (root.children.includes(this.devToolsDivider)) root.removeChildView(this.devToolsDivider);
+      root.addChildView(this.devToolsDivider, root.children.indexOf(this.devToolsView) + 1);
+    }
+    const half = DEVTOOLS_GRIP / 2;
+    this.devToolsDivider.setBounds(row
+      ? { x: dock.x, y: dock.y - half, width: dock.width, height: DEVTOOLS_GRIP }
+      : { x: dock.x - half, y: dock.y, width: DEVTOOLS_GRIP, height: dock.height });
+    this.devToolsDivider.setVisible(true);
+  }
+
+  /** The edge is being dragged: the inspector's share follows the pointer. */
+  dragDevTools() {
+    if (!this.devToolsView || this.window.isDestroyed()) return;
+    const area = this.contentArea();
+    const at = screen.getCursorScreenPoint();
+    const win = this.window.getContentBounds();
+    const row = this.dockMode() === 'bottom';
+    const room = row ? area.height : area.width;
+    const taken = row ? area.y + area.height - (at.y - win.y) : area.x + area.width - (at.x - win.x);
+    this.devToolsShare = Math.min(0.9, Math.max(0.1, taken / Math.max(1, room)));
+    this.layout();
   }
 
   /* ---------------------------------------------------------------- */
@@ -1771,6 +1849,7 @@ class BrowserShell {
     send(this.crashView, 'debrowser:state', { prefs });
     send(this.toastView, 'debrowser:state', { prefs });
     send(this.dividerView, 'debrowser:state', { prefs });
+    send(this.devToolsDivider, 'debrowser:state', { prefs });
 
     // Pinned at 1, and set rather than skipped.
     //
@@ -2603,6 +2682,7 @@ class BrowserShell {
       // it, which is switch to another tab and come back.
       this.devToolsView.setVisible(Boolean(dock));
       if (dock) this.devToolsView.setBounds(dock);
+      this.placeDevToolsDivider(dock);
       // Tucked away, the strip floats over the page, and a dock across the
       // bottom covered its lower part - and the edge that opens it. The strip
       // goes just above the inspector; anything above that stays above.
@@ -2645,7 +2725,7 @@ class BrowserShell {
   isChromeSender(sender) {
     if (!sender) return false;
     for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
-      this.toastView, this.dividerView, this.peek && this.peek.backdrop, this.quick && this.quick.bar]) {
+      this.toastView, this.dividerView, this.devToolsDivider, this.peek && this.peek.backdrop, this.quick && this.quick.bar]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }

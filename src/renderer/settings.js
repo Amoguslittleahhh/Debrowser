@@ -74,6 +74,16 @@ const SECTIONS = {
       ]
     },
     {
+      key: 'settingsLayout',
+      label: 'Settings layout',
+      hint: 'One section at a time, picked from the list, or every section on one long page.',
+      type: 'select',
+      options: [
+        { value: 'pages', name: 'One section at a time' },
+        { value: 'scroll', name: 'All on one page' }
+      ]
+    },
+    {
       key: 'continueCard',
       label: 'Show recent pages on the new tab page',
       hint: '"Continue with these tabs", your last few pages under the search. Not in Legacy, and never in private windows.',
@@ -305,6 +315,12 @@ const SECTIONS = {
         { value: 'quit', name: 'Closes the window' },
         { value: 'new-tab', name: 'Leaves a new tab open' }
       ]
+    },
+    {
+      key: 'closedTabToast',
+      label: 'Offer Undo when a tab closes',
+      hint: 'A note at the foot of the window for a few seconds. Ctrl+Shift+T reopens a closed tab either way.',
+      type: 'checkbox'
     },
     {
       key: 'confirmCloseTabs',
@@ -726,11 +742,14 @@ function defaultBrowserRow() {
  */
 function revealSection() {
   const wanted = decodeURIComponent(location.hash.slice(1));
-  if (!wanted) return;
-  const section = document.querySelector(`section[data-section="${CSS.escape(wanted)}"]`);
+  const section = wanted && document.querySelector(`section[data-section="${CSS.escape(wanted)}"]`);
+  // A section at a time: that one, or the first when none was asked for.
+  if (pagesLayout()) showPage(section ? wanted : currentPage);
   if (!section) return;
-  section.scrollIntoView({ block: 'start', behavior: 'auto' });
-  holdInView(section);
+  if (!pagesLayout()) {
+    section.scrollIntoView({ block: 'start', behavior: 'auto' });
+    holdInView(section);
+  }
   section.classList.add('landed');
   // Removed rather than left on the element: it is an arrival, not a state, and
   // a highlight that never goes away is just a differently coloured section.
@@ -1144,7 +1163,7 @@ function renderUpdateState(u) {
 
 document.getElementById('check-updates')?.addEventListener('click', async (event) => {
   if (event.currentTarget.dataset.download === 'true') {
-    api.send('open-link-tab', { url: 'https://github.com/amoguslittleahhh/debrowser/releases/latest' });
+    api.send('open-link-tab', { url: 'https://github.com/amoguslittleahhh/debrowser/releases/latest', foreground: true });
     return;
   }
   renderUpdateState(await api.request('check-for-updates'));
@@ -1153,7 +1172,8 @@ document.getElementById('check-updates')?.addEventListener('click', async (event
 // Labs feedback: a new GitHub issue, labelled so experiments' reports stay together.
 document.getElementById('labs-feedback')?.addEventListener('click', () => {
   api.send('open-link-tab', {
-    url: 'https://github.com/amoguslittleahhh/debrowser/issues/new?labels=labs&title=Labs%3A%20'
+    url: 'https://github.com/amoguslittleahhh/debrowser/issues/new?labels=labs&title=Labs%3A%20',
+    foreground: true
   });
 });
 
@@ -1353,6 +1373,7 @@ function renderSystemAccent(state) {
 
 api.onState((state) => {
   applyThemePrefs(state.prefs);
+  if (state.prefs) applyLayout(state.prefs.settingsLayout);
   renderUpdateState(state.updates);
   renderSpaces(state.incognito ? null : state.spaces || null, state.prefs || {});
   if (!state.prefs) return;
@@ -1433,6 +1454,13 @@ function buildRail() {
     button.type = 'button';
     button.textContent = heading ? heading.textContent : name;
     button.addEventListener('click', () => {
+      setDrawer(false);
+      // A section at a time, unless a search is showing every match: then the
+      // list is a way down the results, as on the long page.
+      if (pagesLayout() && !document.body.classList.contains('searching')) {
+        showPage(name);
+        return;
+      }
       section.scrollIntoView({ block: 'start', behavior: motionOk() ? 'smooth' : 'auto' });
       // Marked immediately rather than waiting for the observer: a smooth
       // scroll takes a few hundred milliseconds, and a rail that lights up
@@ -1446,6 +1474,59 @@ function buildRail() {
 
   watchSections();
 }
+
+/*
+ * One section at a time (`settingsLayout: 'pages'`, the default), as Chrome's
+ * settings are: the list picks the section, and the page is only that one. A
+ * search still shows every match from every section, since that is the point
+ * of searching. `scroll` is the one long page, with the list following along.
+ */
+let currentPage = 'appearance';
+const pagesLayout = () => document.body.dataset.settingsLayout === 'pages';
+
+function showPage(name) {
+  const section = sections.find((s) => s.dataset.section === name) || sections[0];
+  if (!section) return;
+  currentPage = section.dataset.section;
+  for (const s of sections) s.classList.toggle('on', s === section);
+  const main = document.querySelector('main');
+  if (main) main.scrollTop = 0;
+  markRail(currentPage);
+}
+
+/** The layout preference arrived, or changed while the page was open. */
+function applyLayout(layout) {
+  const next = layout === 'scroll' ? 'scroll' : 'pages';
+  if (document.body.dataset.settingsLayout === next) return;
+  // Wherever the reader was, they stay: the section they were on becomes the
+  // page, or the long page opens at it.
+  const here = document.querySelector('.rail-item.current');
+  const name = [...railButtons].find(([, b]) => b === here)?.[0] || currentPage;
+  document.body.dataset.settingsLayout = next;
+  if (!sections.length) return;
+  if (next === 'pages') showPage(name);
+  else sections.find((s) => s.dataset.section === name)?.scrollIntoView({ block: 'start' });
+  remarkRail();
+}
+
+/** The section list as a drawer, in a window too narrow to keep it beside the page. */
+function setDrawer(open) {
+  document.body.classList.toggle('rail-open', open);
+  document.getElementById('rail-toggle')?.setAttribute('aria-expanded', String(open));
+  if (open) document.querySelector('.rail-item.current, .rail-item')?.focus();
+}
+document.getElementById('rail-toggle')?.addEventListener('click', () =>
+  setDrawer(!document.body.classList.contains('rail-open')));
+// Away from it closes it, and Escape does before it closes Settings.
+document.querySelector('main')?.addEventListener('pointerdown', () => setDrawer(false));
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || !document.body.classList.contains('rail-open')) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  setDrawer(false);
+  document.getElementById('rail-toggle')?.focus();
+}, true);
+matchMedia('(max-width: 860px)').addEventListener('change', (q) => { if (!q.matches) setDrawer(false); });
 
 function markRail(name) {
   for (const [key, button] of railButtons) {
@@ -1487,6 +1568,12 @@ function watchSections() {
   const atEnd = () => main.scrollTop + main.clientHeight >= main.scrollHeight - 2;
   const mark = () => {
     queued = false;
+    // A section at a time: the list says which, and nothing scrolls past it.
+    if (pagesLayout() && !document.body.classList.contains('searching')) {
+      if (main.style.paddingBottom) main.style.paddingBottom = '';
+      markRail(currentPage);
+      return;
+    }
     const shown = sections.filter((s) => !s.hidden);
     if (!shown.length) return;
     const line = main.clientHeight * 0.25;
@@ -1539,6 +1626,13 @@ function watchSections() {
 function filterSettings(query) {
   requestAnimationFrame(() => remarkRail());
   const needle = query.trim().toLowerCase();
+  // Searching shows every section's matches, whichever layout this is; done
+  // searching, a section at a time again, the one that was open.
+  const searching = Boolean(needle);
+  if (document.body.classList.contains('searching') !== searching) {
+    document.body.classList.toggle('searching', searching);
+    if (!searching && pagesLayout()) showPage(currentPage);
+  }
   let shown = 0;
 
   for (const section of sections) {

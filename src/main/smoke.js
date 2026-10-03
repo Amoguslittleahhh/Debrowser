@@ -1822,9 +1822,41 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // the rail sat on "Passwords and payment" with Advanced and Updates both on
   // screen. Asserted at the bottom of the scroll, which is the only place the
   // defect exists.
+  //
+  // Settings opens a section at a time, as Chrome's does: the list picks the
+  // section and the page is only that one, a search shows every section's
+  // matches, and clearing it goes back to the section that was open.
+  {
+    if (!settingsTab.visible) { await tabs.activate(settingsTab.id); await sleep(300); }
+    const paged = await settingsTab.wc.executeJavaScript(`(async () => {
+      const shown = () => [...document.querySelectorAll('main > section')]
+        .filter((s) => getComputedStyle(s).display !== 'none').map((s) => s.dataset.section);
+      const first = shown();
+      [...document.querySelectorAll('.rail-item')].find((b) => b.textContent === 'Downloads').click();
+      await new Promise((r) => setTimeout(r, 100));
+      const picked = shown();
+      const q = document.getElementById('q');
+      q.value = 'tor'; q.dispatchEvent(new Event('input'));
+      await new Promise((r) => setTimeout(r, 100));
+      const searched = shown();
+      q.value = ''; q.dispatchEvent(new Event('input'));
+      await new Promise((r) => setTimeout(r, 100));
+      return { layout: document.body.dataset.settingsLayout, first, picked, searched, cleared: shown() };
+    })()`).catch((err) => ({ error: err.message }));
+    check('settings shows one section at a time, and a search shows every match',
+      paged && paged.layout === 'pages' && paged.first.length === 1 &&
+      paged.picked.join() === 'downloads' && paged.searched.length > 1 && paged.cleared.join() === 'downloads',
+      JSON.stringify(paged));
+  }
+
+  // The long page is still there for those who want it, and its rail keeps up.
   {
     // In front: a page out of sight is not laid out or scrolled as one on screen.
     if (!settingsTab.visible) { await tabs.activate(settingsTab.id); await sleep(300); }
+    prefs.set('settingsLayout', 'scroll');
+    shell.publish(governor.snapshot());
+    await waitFor(async () => (await settingsTab.wc.executeJavaScript('document.body.dataset.settingsLayout')
+      .catch(() => null)) === 'scroll', { timeoutMs: 4000 });
     const railAtEnd = await settingsTab.wc.executeJavaScript(`(async () => {
       const main = document.querySelector('main');
       // Again until it holds: sections that fill in from requests (updates,
@@ -1854,6 +1886,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         ? railAtEnd.error
         : `scrolled to the end (${railAtEnd.atBottom}), rail says ${JSON.stringify(railAtEnd.marked)}, ` +
           `last section is ${railAtEnd.section}`);
+    prefs.set('settingsLayout', 'pages');
   }
 
   tabs.close(settingsTab.id);
@@ -2390,6 +2423,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       governor.shouldSkip(target) === true,
       `devToolsOpen=${target.devToolsOpen}, chromium says ${target.wc.isDevToolsOpened()}`);
 
+    // The edge between them drags: a divider astride it, and the share it
+    // sets is what the page and the inspector get.
+    {
+      const share = shell.devToolsShare;
+      const divider = shell.devToolsDivider;
+      const edge = divider && divider.getBounds();
+      const dock = shell.dockBounds(shell.contentArea());
+      shell.devToolsShare = 0.6;
+      shell.layout();
+      const wider = shell.dockBounds(shell.contentArea());
+      shell.devToolsShare = share;
+      shell.layout();
+      check('a docked inspector has an edge to drag, and dragging it resizes both',
+        Boolean(edge && dock) && edge.x < dock.x && edge.x + edge.width > dock.x &&
+        wider.width > dock.width && shell.contentBounds().width === dockedWidth,
+        `edge ${JSON.stringify(edge)}, dock ${dock && dock.width}px -> ${wider && wider.width}px at 60%`);
+    }
 
     // The dock belongs to one tab and goes away when you leave it.
     //
@@ -3040,7 +3090,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       await sleep(250);
       const byGutter = shell.sidebarOpen;
       await leave();
-      await sleep(300);   // the close delay, then partway into the slide
+      await sleep(200);   // the close delay (150ms), then partway into the 120ms slide
       const slid = await inChrome(`document.body.classList.contains('sliding-out')`);
       await settle();
       check('the left edge opens the side strip, and it slides away',
