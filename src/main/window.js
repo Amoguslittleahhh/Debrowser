@@ -116,6 +116,9 @@ const DETACH_SLIDE_MS = 120;   // chrome.css, .sliding-out
  */
 const DEVTOOLS_SHARE = 0.42;
 const DEVTOOLS_MIN = 320;
+/** The title band's whole page (placeTitleBand): drag region, and nothing else. */
+const TITLE_BAND_PAGE = '<style>html{height:100%;-webkit-app-region:drag}</style>';
+
 /** The least the page keeps beside it, however far the edge is dragged. */
 const DEVTOOLS_PAGE_MIN = 240;
 /** How wide the edge between them is to the pointer: astride the boundary. */
@@ -392,6 +395,8 @@ class BrowserShell {
     this.devToolsShare = (prefs && prefs.get('devToolsShare')) || DEVTOOLS_SHARE;
     /** That edge: a divider view, as split view's, over the page's side of it. */
     this.devToolsDivider = null;
+    /** The title bar over the page, with the tabs pinned down the side (placeTitleBand). */
+    this.titleBand = null;
     this.devToolsRedock = null;
 
     /**
@@ -871,6 +876,51 @@ class BrowserShell {
     if (this.overlayOpen === open) return;
     this.overlayOpen = open;
     this.toChrome('overlay', { open });
+    this.placeTitleBand();
+  }
+
+  /**
+   * The title bar beside a pinned strip: the band above the page, which drags
+   * the window as any title bar does - double-click maximises, and on Windows
+   * a drag to the screen's edge snaps it.
+   *
+   * Nothing drew there. The strip's view is its column and the page starts
+   * below the band, so the band was bare window, and only a web view can mark
+   * part of a window as one to drag by: the window moved only from the empty
+   * foot of the tab list, which nobody thinks to try. A clear view the band's
+   * size, all drag region and nothing else.
+   *
+   * Hidden while a menu or the suggestions lie over it, for the same reason
+   * the chrome stops dragging then (syncOverlay): drag regions are hit-tested
+   * whatever is on top, and the menu over the band would take no clicks.
+   */
+  placeTitleBand() {
+    if (this.window.isDestroyed()) return;
+    const want = this.vertical() && !this.detached() && !this.fullScreen();
+    if (!want) {
+      if (this.titleBand) {
+        const view = this.titleBand;
+        this.titleBand = null;
+        try { this.window.contentView.removeChildView(view); view.webContents.close(); } catch { /* window going */ }
+      }
+      return;
+    }
+    if (!this.titleBand) {
+      const view = new WebContentsView({
+        webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, javascript: false }
+      });
+      try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+      view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      view.webContents.on('will-navigate', (event) => event.preventDefault());
+      view.webContents.loadURL(`data:text/html,${encodeURIComponent(TITLE_BAND_PAGE)}`).catch(() => {});
+      // Under everything: a menu or sheet that opens later lies over it.
+      this.window.contentView.addChildView(view, 0);
+      this.titleBand = view;
+    }
+    const { width } = this.window.getContentBounds();
+    const left = this.sidebarWidth();
+    this.titleBand.setBounds({ x: left, y: 0, width: Math.max(0, width - left), height: SIDEBAR_TOP_BAND });
+    this.titleBand.setVisible(!this.overlayOpen);
   }
 
   /**
@@ -2645,6 +2695,7 @@ class BrowserShell {
     // against the window's own edge does not, and rounding one would leave four
     // notches of window background at the screen's corners.
     this.layStrip(width, height);
+    this.placeTitleBand();
     const chromeRadius = this.chromeFloats() ? FLOAT_RADIUS : 0;
     if (this.laidOutChromeRadius !== chromeRadius) {
       this.laidOutChromeRadius = chromeRadius;

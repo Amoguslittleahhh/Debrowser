@@ -4739,9 +4739,24 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   prefs.set('tabBarPosition', 'left');
   shell.applyWindowPrefs();
   const sideBounds = shell.contentBounds();
+  // Pinned, the band above the page is the title bar, and it drags: there is
+  // a view across it - the strip's column is the only other one up there, and
+  // a window drags only where a view says it may. It was bare, and the window
+  // could not be moved by the place anyone would grab it.
+  const band = shell.titleBand && shell.titleBand.getVisible() && shell.titleBand.getBounds();
+  // Its page runs no script, so the drag region is read from what it loads.
+  if (band) await waitFor(() => shell.titleBand.webContents.getURL() !== '', { timeoutMs: 4000 });
+  const bandDrags = band && decodeURIComponent(shell.titleBand.webContents.getURL())
+    .includes('-webkit-app-region:drag') ? 'drag' : null;
   prefs.set('tabBarPosition', 'top');
   shell.applyWindowPrefs();
   const backBounds = shell.contentBounds();
+  check('with the tabs pinned down the side, the band above the page drags the window',
+    Boolean(band) && band.y === 0 && band.x > 0 && band.x < sideBounds.x &&
+    band.x + band.width === shell.window.getContentBounds().width && band.height > 0 &&
+    band.height <= sideBounds.y && bandDrags === 'drag' && !shell.titleBand,
+    `band ${JSON.stringify(band)}, region ${bandDrags}, page at x=${sideBounds.x} y=${sideBounds.y}, ` +
+    `gone across the top: ${!shell.titleBand}`);
 
   check('moving the tab strip to the side makes room for it, and moving it back gives it up',
     topBounds.x === 0 && sideBounds.x > 0 && sideBounds.y < topBounds.y &&
