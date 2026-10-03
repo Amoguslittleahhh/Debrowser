@@ -442,6 +442,10 @@ app.whenReady().then(async () => {
     // looked broken because at that width it genuinely is cramped. Twice I was
     // one step from "fixing" a strip that measured perfectly correct.
     const seen = await win.webContents.executeJavaScript('window.innerWidth').catch(() => 0);
+    // SHOOT_EVAL prints what an expression says about the page as photographed.
+    if (process.env.SHOOT_EVAL) {
+      console.log('EVAL', shot.name, JSON.stringify(await win.webContents.executeJavaScript(process.env.SHOOT_EVAL).catch((e) => e.message)));
+    }
     if (seen !== shot.w) {
       console.log('WRONG VIEWPORT', shot.name, 'wanted', shot.w, 'got', seen);
       win.destroy();

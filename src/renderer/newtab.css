@@ -228,11 +228,12 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) mai
   /* The field centred in the window, unless that pushes the card below the
      fold: then everything rises just enough to fit, down to 24px from the top.
      --fit is main's own height, kept by newtab.js. */
-  /* The whole group - mark, field, today's line, favourites - centred, a
-     little above the middle where the eye rests, rather than the field alone
-     at the centre with everything else hanging below it. --fit is main's own
-     height, kept by newtab.js; a short window scrolls from 24px down. */
-  margin: max(24px, calc((100vh - var(--fit, 106px)) * 0.42)) auto 36px;
+  /* The whole group - mark, field, today's line, favourites or the Continue
+     card - in the middle of the page, as much room above as below. It sat a
+     little above the middle (0.42 of the spare height), which read as not
+     centred. --fit is the group's own height, kept by newtab.js; a short
+     window scrolls from 24px down. */
+  margin: max(24px, calc((100vh - var(--fit, 106px)) / 2)) auto 24px;
   padding: 0;
   text-align: left;
 }

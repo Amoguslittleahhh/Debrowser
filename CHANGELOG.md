@@ -17,6 +17,7 @@
 ### Fixed
 
 - **The window moves again with the tabs pinned down the side.** The band above the page is the title bar there, but nothing in it could move the window: only the empty space at the bottom of the tab list did. It now drags like any title bar: double-click maximises or restores the window, and on Windows dragging it to the edge of the screen snaps it.
+- **The new tab page is centred.** The search field and the Continue card sat a little above the middle of the page; they are now centred, with as much space above as below.
 - **Report a problem now opens.** It opened the report in a background tab, so nothing seemed to happen, especially with the tabs tucked away. It now opens in front, as do the release-notes and Labs feedback links in Settings.
 - **No more stray lines in Settings.** In the Paper design, an empty list drew a double line (under "Nothing saved yet" in Bookmarks), and two lists next to each other each drew their own rule (in Passwords and payment).
 
