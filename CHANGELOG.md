@@ -95,6 +95,7 @@ Debrowser 2.0 is the browser that shows what it costs your computer, and gives i
 
 ### Security
 
+- **Private windows run on Tor from Tor Browser 15.0.24,** the Tor Project's current release, checked against its signing key as every Tor update is.
 - **The crash report and the startup record are readable by you alone**, like every other file in your profile. They were created readable by other accounts on the same computer.
 - **Forget a site when you close it.** The padlock can mark a site so that, when its last tab closes, everything it stored - cookies, saved data, caches - goes with it: you come back signed out and unknown, every time.
 - **Risky downloads are stopped or asked about.** A file fetched over plain HTTP by a secure page, which anyone on the way could have swapped, and a file from a site on the dangerous-sites lists are blocked, with "Download anyway" on the row. Opening a downloaded program now asks first.
