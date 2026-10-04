@@ -118,9 +118,10 @@ class Governor {
 
   start() {
     if (this.timer) return;
+    this.tickEvery = this.tickInterval();
     this.timer = setInterval(() => {
       this.tick().catch((err) => this.log(`governor tick failed: ${err.stack || err.message}`));
-    }, this.cfg.tickMs);
+    }, this.tickEvery);
     if (typeof this.timer.unref === 'function') this.timer.unref();
     this.log(`governor started: budget ${this.cfg.memoryBudgetMB}MB, profile ${this.cfg.profile}`);
     // Not now: the probe spawns a process, which blocks this thread for ~8 ms
@@ -160,6 +161,25 @@ class Governor {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * How often to tick: less often in battery mode. Each tick reads every
+   * process's memory - on Linux the kernel walks each one's page tables for
+   * it, and that read was nearly all of the browser process's idle CPU - and
+   * sends the result to every view that draws it, waking each renderer.
+   */
+  tickInterval() {
+    return this.saver ? (this.cfg.saverTickMs || this.cfg.tickMs) : this.cfg.tickMs;
+  }
+
+  /** Battery mode came or went: tick at the matching pace. */
+  setSaver(on) {
+    this.saver = on;
+    if (this.timer && this.tickEvery !== this.tickInterval()) {
+      this.stop();
+      this.start();
+    }
   }
 
   /* ---------------------------------------------------------------- */

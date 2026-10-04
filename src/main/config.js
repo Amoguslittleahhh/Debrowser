@@ -75,6 +75,8 @@ const BASE = {
 
   /** How often the governor re-evaluates every tab. */
   tickMs: 2000,
+  /** The tick in battery mode (governor, tickInterval): fewer wakeups, for a ladder that is coarser by seconds. */
+  saverTickMs: 5000,
 
   /**
    * Hard ceiling on how many tabs may hold a renderer process at once.

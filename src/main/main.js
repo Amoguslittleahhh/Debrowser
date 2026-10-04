@@ -1445,11 +1445,34 @@ function main() {
         try { onBattery = powerMonitor.isOnBatteryPower(); } catch { onBattery = false; }
         const saver = mode === 'always' || (mode === 'auto' && onBattery);
         if (saver !== governor.saver) {
-          governor.saver = saver;
+          governor.setSaver(saver);
+          shell.saver = saver;
           log('governor', `battery mode ${saver ? 'on' : 'off'}`);
           publish();
+          for (const tab of tabs.all()) if (tab.isLive && !tab.internal) steadyCaret(tab.wc);
         }
       };
+      // The same steady cursor in websites as in the browser's own pages
+      // (theme.css), while battery mode is on: in every page open when it comes
+      // on, and every page loaded while it lasts. Each document needs its own,
+      // so it is laid again as each loads. When battery mode goes, pages loaded
+      // after blink as ever and pages already open keep a steady cursor until
+      // they next load - `removeInsertedCSS` was measured leaving the rule in
+      // place in this build, so taking it back is not something to promise.
+      // Not in a private window, where a page that could read it would see a
+      // browser unlike every other copy.
+      const caretLaid = new WeakSet();
+      const steadyCaret = (wc) => {
+        if (INCOGNITO || !governor.saver || !wc || wc.isDestroyed() || caretLaid.has(wc)) return;
+        caretLaid.add(wc);
+        wc.insertCSS('* { caret-animation: manual !important; }', { cssOrigin: 'user' }).catch(() => {});
+      };
+      app.on('web-contents-created', (_event, contents) => {
+        contents.on('dom-ready', () => {
+          caretLaid.delete(contents);
+          if (tabs.all().some((t) => t.wc === contents && !t.internal)) steadyCaret(contents);
+        });
+      });
       applySaver();
       powerMonitor.on('on-battery', applySaver);
       powerMonitor.on('on-ac', applySaver);

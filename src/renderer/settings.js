@@ -390,7 +390,7 @@ const SECTIONS = {
     {
       key: 'batteryMode',
       label: 'Battery mode',
-      hint: 'Tabs you are not using go to sleep about three times sooner when sleeping is automatic, and a background tab still using the processor is paused, so a laptop lasts longer. A leaf in the memory meter shows it is on.',
+      hint: 'Tabs you are not using go to sleep about three times sooner when sleeping is automatic, a background tab still using the processor is paused, the text cursor stops blinking and the browser checks on its tabs less often, so a laptop lasts longer. A leaf in the memory meter shows it is on.',
       type: 'select',
       options: [
         { value: 'auto', name: 'On battery' },

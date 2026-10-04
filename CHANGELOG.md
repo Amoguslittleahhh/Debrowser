@@ -11,6 +11,7 @@
 
 ### Improved
 
+- **Battery mode does more to save power.** While it is on, the text cursor stays steady instead of blinking - in the address bar, the browser's own pages and websites - and the browser checks on its tabs every 5 seconds instead of every 2. Measured with the browser sitting idle on a new tab: the processor wakes about 22 times a second instead of 77, and idle processor use falls from about 1.7% to 0.6%. Websites already open when battery mode goes off keep a steady cursor until they next load.
 - **Much less memory when the blocker updates its lists.** The ad and tracker lists are rebuilt once a week (and on first start), and the dangerous-site lists once a day. That work now happens in a separate process that closes when it is done, instead of inside the browser. Measured on the real lists: the browser used to grow by about 235 MB while rebuilding and still held about 200 MB of that afterwards; it now grows by about 25 MB, the size of the finished lists. The window also no longer freezes for a moment while it happens.
 - **Turning the ad blocker off frees its memory.** About 8 MB of rules stayed loaded until the browser was restarted; they are now released straight away, and loaded again when you turn the blocker back on.
 - **The tab strip comes out and goes away faster.** With the tabs tucked away down the side, the strip now slides in in 140 ms instead of 210 ms, and leaves sooner once the pointer has gone.

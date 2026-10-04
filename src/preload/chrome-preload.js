@@ -265,6 +265,26 @@ function initialPrefs() {
   }
 }
 
+/**
+ * Battery mode, marked on the document (`data-saver`) for theme.css: it keeps
+ * the text cursor steady instead of blinking. Each blink is a frame drawn
+ * twice a second, and the compositor keeps waking for several frames after
+ * each - measured, a focused search field on the new tab page took the GPU
+ * process from 7 wakeups a second to 33, and that page's renderer from 6 to
+ * 31. Watched once, from the first page that listens for state.
+ */
+let saverWatched = false;
+function watchSaver() {
+  if (saverWatched) return;
+  saverWatched = true;
+  ipcRenderer.on('debrowser:state', (_event, state) => {
+    if (!state || typeof state.saver !== 'boolean' || !document.documentElement) return;
+    if (document.documentElement.hasAttribute('data-saver') !== state.saver) {
+      document.documentElement.toggleAttribute('data-saver', state.saver);
+    }
+  });
+}
+
 contextBridge.exposeInMainWorld('debrowser', {
   /** What the palette was when this view was created. See `initialPrefs`. */
   prefs: initialPrefs(),
@@ -309,6 +329,7 @@ contextBridge.exposeInMainWorld('debrowser', {
    */
   onState(handler) {
     if (typeof handler !== 'function') return () => {};
+    watchSaver();
     const listener = (_event, state) => handler(state);
     ipcRenderer.on('debrowser:state', listener);
     return () => ipcRenderer.removeListener('debrowser:state', listener);

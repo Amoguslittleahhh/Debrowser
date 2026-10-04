@@ -475,6 +475,11 @@ body {
                  0 18px 44px -12px rgba(18, 16, 12, 0.5);
 }
 
+/* Battery mode: a steady text cursor rather than a blinking one, which
+   redraws twice a second for as long as a field has focus (chrome-preload.js,
+   watchSaver). */
+:root[data-saver] * { caret-animation: manual; }
+
 /* The shared close cross - see `crossIcon()` in theme.js. */
 .x-icon {
   display: block;

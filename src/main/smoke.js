@@ -1360,6 +1360,38 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('battery mode turns the saver on and off from the setting', on && off, `on ${on}, off ${off}`);
   }
 
+  // And what battery mode saves: a slower tick, and a steady text cursor - in
+  // the browser's own views (marked from the state) and in a website (laid by
+  // the browser) - each gone again when it is turned off. A blinking cursor
+  // measured 33 GPU wakeups a second against 4 for a steady one.
+  if (governor.applySaver) {
+    const was = prefs.get('batteryMode');
+    const page = tabs.create({ url: pageUrl('form.html'), activate: true, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    const read = async () => ({
+      site: await page.wc.executeJavaScript("getComputedStyle(document.querySelector('input')).caretAnimation").catch(() => null),
+      chrome: await shell.chromeView.webContents.executeJavaScript(
+        "document.documentElement.hasAttribute('data-saver') && getComputedStyle(document.querySelector('#url')).caretAnimation").catch(() => null),
+      tick: governor.tickInterval()
+    });
+    runCommand('set-pref', { key: 'batteryMode', value: 'always' });
+    await sleep(800);
+    const on = await read();
+    runCommand('set-pref', { key: 'batteryMode', value: 'off' });
+    await sleep(800);
+    // A site keeps it until it next loads (main.js, steadyCaret).
+    page.wc.reload();
+    await waitFor(() => !page.loading, { timeoutMs: 10_000 });
+    await sleep(300);
+    const off = await read();
+    runCommand('set-pref', { key: 'batteryMode', value: was });
+    check('battery mode steadies the text cursor and slows the tick, and undoes both',
+      on.site === 'manual' && on.chrome === 'manual' && on.tick > off.tick &&
+      off.site !== 'manual' && off.chrome === false,
+      `on: ${JSON.stringify(on)}, off: ${JSON.stringify(off)}`);
+    tabs.close(page.id);
+  }
+
   // "Put tabs to sleep": a tab left under a timed choice stays awake until its
   // time; under "as soon as I leave them" it sleeps within a tick or two, the
   // minute's grace for a tab just left included.

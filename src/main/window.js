@@ -2416,7 +2416,9 @@ class BrowserShell {
         }
       }
       if (this.window.isDestroyed() || this.sidebarOpen || this.edgeTimer) return;
-      this.edgeTimer = setTimeout(tick, near || this.edgeHeld ? 25 : 150);
+      // Battery mode reads it less often far from the edge (400ms): the
+      // pointer still has the 25ms pace once it is near.
+      this.edgeTimer = setTimeout(tick, near || this.edgeHeld ? 25 : this.saver ? 400 : 150);
       this.edgeTimer.unref?.();
     };
     this.edgeTimer = setTimeout(tick, 25);
