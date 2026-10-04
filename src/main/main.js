@@ -1809,15 +1809,19 @@ function main() {
     }
   });
 
-  app.on('second-instance', (_event, secondArgv) => {
+  app.on('second-instance', (_event, secondArgv, _cwd, data) => {
     // Uninstalling while the browser is open: the window is shown here, so
-    // that confirming closes the browser the ordinary way (uninstall.js).
+    // that confirming closes the browser the ordinary way (uninstall.js) -
+    // but only for this copy. Another copy shares the profile, so its request
+    // arrives here too; it shows its own window, and this one does nothing.
+    if (uninstall.requested(secondArgv) && !(!INCOGNITO && uninstall.forThisCopy(secondArgv, data))) return;
     if (!INCOGNITO && uninstall.requested(secondArgv)) {
       uninstall.show({
         prefs: (prefs || earlyPrefs).all(),
         browserOpen: true,
         onConfirmed: () => { quitState.confirmed = true; app.quit(); },
-        log
+        log,
+        owner: shell && shell.window
       });
       return;
     }
@@ -1861,7 +1865,7 @@ function main() {
   // per version, after the window has settled (install.js).
   app.whenReady().then(() => {
     if (INCOGNITO || OFFLINE_MODE || !prefs) return;
-    setTimeout(() => installer.offer({ prefs, log }), 4000).unref();
+    setTimeout(() => installer.offer({ prefs, log, owner: shell && shell.window }), 4000).unref();
   });
 
   app.on('before-quit', (event) => {
@@ -3191,7 +3195,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       // uninstall.js). Uninstalling closes the browser the ordinary way.
       case 'install-browser':
         if (INCOGNITO) break;
-        installer.offer({ prefs, log, force: true });
+        installer.offer({ prefs, log, force: true, owner: shell.window });
         break;
 
       case 'uninstall-browser':
@@ -3200,7 +3204,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           prefs: prefs.all(),
           browserOpen: true,
           onConfirmed: () => { if (quitState) quitState.confirmed = true; app.quit(); },
-          log
+          log,
+          owner: shell.window
         });
         break;
 

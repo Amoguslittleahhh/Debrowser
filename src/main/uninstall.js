@@ -93,10 +93,74 @@ function removeAfterExit(paths) {
     String(process.pid), ...safe], { detached: true, stdio: 'ignore' }).unref();
 }
 
+/** Exit code (-1 when it could not start) and what it printed. */
 function run(file, args) {
   return new Promise((resolve) => {
-    execFile(file, args, (err) => resolve(err ? (typeof err.code === 'number' ? err.code : -1) : 0));
+    execFile(file, args, { windowsHide: true }, (err, stdout, stderr) => resolve({
+      code: err ? (typeof err.code === 'number' ? err.code : -1) : 0,
+      stdout: String(stdout || ''),
+      stderr: String(stderr || '')
+    }));
   });
+}
+
+/**
+ * Other processes running this very executable, as [pid, args] - this copy,
+ * not another copy of Debrowser. Electron's helpers (`--type=`) are left out:
+ * they go with the process that started them.
+ */
+async function processesOfThisCopy() {
+  const found = [];
+  const keep = (pid, args) => {
+    if (pid !== process.pid && !args.some((a) => a.startsWith('--type='))) found.push([pid, args]);
+  };
+  if (process.platform === 'linux') {
+    for (const name of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(name)) continue;
+      try {
+        if (fs.readlinkSync(`/proc/${name}/exe`) !== process.execPath) continue;
+        // Split on spaces too: Chromium rewrites its helpers' command lines
+        // into one space-joined string. Only flags are compared, so a space
+        // in a path splitting it does no harm.
+        keep(Number(name), fs.readFileSync(`/proc/${name}/cmdline`, 'utf8').split(/[\0 ]/));
+      } catch { /* gone, or not ours to read */ }
+    }
+  } else if (process.platform === 'darwin') {
+    const out = await new Promise((resolve) => execFile('/bin/ps', ['-axo', 'pid=,args='],
+      (err, stdout) => resolve(err ? '' : String(stdout))));
+    for (const line of out.split('\n')) {
+      const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+      if (m && m[2].startsWith(`${process.execPath} `)) keep(Number(m[1]), m[2].slice(process.execPath.length).split(' '));
+    }
+  } else if (process.platform === 'win32') {
+    // WQL quotes with ', and wants each \ in the path doubled.
+    const exe = process.execPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `Get-CimInstance Win32_Process -Filter "ExecutablePath='${exe}'" | ForEach-Object { "$($_.ProcessId)\t$($_.CommandLine)" }`]);
+    for (const line of stdout.split(/\r?\n/)) {
+      const [pid, cmd = ''] = line.split('\t');
+      if (/^\d+$/.test(pid)) keep(Number(pid), cmd.split(' '));
+    }
+  }
+  return found;
+}
+
+/**
+ * Close this copy's private windows, and wait for them to go.
+ *
+ * Each is a process of its own (`--incognito`, incognito/launch.js) with its
+ * own single-instance lock, so quitting this browser does not end it - and it
+ * would go on running from the files about to be removed. Windows has the
+ * uninstaller do the same for Debrowser-Incognito.exe (packaging/installer.nsh),
+ * a name of its own this search would not find.
+ */
+async function closePrivateWindows() {
+  const pids = (await processesOfThisCopy()).filter(([, args]) => args.includes('--incognito')).map(([pid]) => pid);
+  for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
+  // A private window wipes its profile on the way out; give it the time.
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let waited = 0; waited < 5000 && pids.some(alive); waited += 100) await new Promise((r) => setTimeout(r, 100));
+  for (const pid of pids.filter(alive)) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
 }
 
 /**
@@ -125,6 +189,7 @@ function plan() {
     return {
       does: 'be moved to the Trash',
       async remove({ removeData }) {
+        await closePrivateWindows();
         await trash(bundle);
         if (removeData) removeAfterExit(dataPaths());
       }
@@ -136,14 +201,19 @@ function plan() {
       does: 'be removed from this computer',
       note: 'Your system will ask for your password.',
       async remove({ removeData }) {
+        await closePrivateWindows();
         // dpkg rather than apt: nothing depends on this package, so there is
         // nothing to resolve, and no apt lock to wait on. Purged, so its
         // AppArmor profile in /etc goes too: nothing of it is left behind.
-        const code = await run('pkexec', ['/usr/bin/dpkg', '--purge', 'debrowser']);
+        const { code, stderr } = await run('pkexec', ['/usr/bin/dpkg', '--purge', 'debrowser']);
         const instead = 'Remove Debrowser with your software manager, or with: sudo apt remove debrowser';
-        // pkexec: 126 is a refused or dismissed prompt, 127 (or no pkexec at
-        // all) is no prompt to show; anything else is dpkg's own answer.
+        // pkexec: 126 is a dismissed prompt. 127 is either a refusal - a wrong
+        // password, or an account that may not - or no prompt to show at all,
+        // and only its message tells them apart. Anything else is dpkg's.
         if (code === 126) throw new Error('The password was not given, so nothing was removed.');
+        if (code === 127 && /not authori[sz]ed/i.test(stderr)) {
+          throw new Error('The password was not accepted, or this account may not remove programs, so nothing was removed.');
+        }
         if (code === 127 || code < 0) throw new Error(`Your system could not ask for a password. ${instead}`);
         if (code !== 0) throw new Error(`Removing the package failed (dpkg ${code}). ${instead}`);
         if (removeData) removeAfterExit(dataPaths());
@@ -151,7 +221,7 @@ function plan() {
     };
   }
   if (kind === 'appimage' || kind === 'folder') {
-    const target = kind === 'appimage' ? process.env.APPIMAGE : path.dirname(process.execPath);
+    const target = kind === 'appimage' ? install.appImage() : path.dirname(process.execPath);
     // A folder is only removed when it is unmistakably ours: named for us,
     // with the app archive in it.
     if (kind === 'folder' && !(/debrowser/i.test(path.basename(target)) &&
@@ -161,6 +231,7 @@ function plan() {
         ? 'be moved to the Trash and taken out of your apps menu'
         : `be moved to the Trash with its folder, ${install.tilde(target)}, and taken out of your apps menu`,
       async remove({ removeData }) {
+        await closePrivateWindows();
         install.removeEntry();
         await trash(target);
         if (removeData) removeAfterExit(dataPaths());
@@ -181,13 +252,15 @@ function plan() {
  * @param {() => void} opts.onConfirmed - quit, once the removal is done or on its way
  * @param {() => void} [opts.onCancelled]
  * @param {(...args: any[]) => void} [opts.log]
+ * @param {Electron.BaseWindow} [opts.owner] - the browser window; the question closes with it
  */
-function show({ prefs, browserOpen, onConfirmed, onCancelled = () => {}, log = () => {} }) {
+function show({ prefs, browserOpen, onConfirmed, onCancelled = () => {}, log = () => {}, owner = null }) {
   const how = plan();
   const lead = !how ? NOT_INSTALLED
     : [`Debrowser will ${browserOpen ? 'close, then ' : ''}${how.does}.`, how.note].filter(Boolean).join(' ');
   return showSetupWindow({
     prefs,
+    owner,
     spec: {
       title: 'Uninstall Debrowser?',
       lead,
@@ -212,27 +285,47 @@ function show({ prefs, browserOpen, onConfirmed, onCancelled = () => {}, log = (
   });
 }
 
+/** Sent with `--uninstall` to a running browser, so it acts only for its own copy. */
+const lockData = () => ({ uninstallFor: process.execPath });
+
 /**
- * The standalone case: nothing running, so show the window and quit when it
- * closes. Returns true when it has taken over this launch.
+ * Whether a second launch's `--uninstall` is for the browser that received it.
+ * The single-instance lock is the profile's, which every copy of Debrowser
+ * shares - so a request from another copy reaches this one too, and must not
+ * uninstall it.
+ */
+function forThisCopy(argv, data) {
+  if (!requested(argv) || !data || typeof data.uninstallFor !== 'string') return false;
+  try {
+    return fs.realpathSync(data.uninstallFor) === fs.realpathSync(process.execPath);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The standalone case: `--uninstall` started a process of its own. If this
+ * copy's browser is open, the request is handed to it (`second-instance`) so
+ * it closes the ordinary way; otherwise this shows the window, and quits when
+ * it closes. Returns true when it has taken over this launch.
  */
 function runStandalone({ prefs, log }) {
   if (!requested(process.argv)) return false;
-  // Held while the window is up, so a browser started meanwhile is not left
-  // holding files about to be removed - it focuses this instead. Losing it
-  // means the browser is open: it has been handed this launch
-  // (`second-instance`) and shows the window itself.
-  if (!app.requestSingleInstanceLock()) {
-    app.quit();
-    return true;
-  }
   let win = null;
   app.on('second-instance', () => { if (win && !win.isDestroyed()) win.focus(); });
   app.on('window-all-closed', () => app.quit());
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    const browser = (await processesOfThisCopy())
+      .some(([, args]) => !args.includes('--incognito') && !args.includes(FLAG));
+    // Asked of the lock either way. Open here, it is handed the request; free,
+    // holding it stops this copy's browser starting while its files go. Held
+    // by another copy, which ignores a request that is not its own, it changes
+    // nothing: this copy is not running, so the window is shown here.
+    const got = app.requestSingleInstanceLock(lockData());
+    if (browser && !got) { app.quit(); return; }
     win = show({ prefs, browserOpen: false, onConfirmed: () => app.quit(), onCancelled: () => app.quit(), log });
   });
   return true;
 }
 
-module.exports = { run: runStandalone, show, requested, plan, FLAG };
+module.exports = { run: runStandalone, show, requested, forThisCopy, plan, FLAG };

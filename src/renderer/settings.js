@@ -632,7 +632,10 @@ function buildAll(state = {}) {
   if (!state.incognito) {
     document.querySelector('[data-rows="appearance"]').prepend(welcomeRow());
     document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow(), safetyRow());
-    setupRows(document.querySelector('[data-rows="advanced"]'));
+    const advanced = document.querySelector('[data-rows="advanced"]');
+    setupRows(advanced);
+    window.addEventListener('focus', () => setupRows(advanced));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) setupRows(advanced); });
   }
   built = true;
 }
@@ -734,10 +737,12 @@ function safetyRow() {
  * Installing and uninstalling, last in Advanced. Each opens its own window
  * (src/main/setup-window.js); the rows appear only when there is something to
  * do - nothing to install on Windows or from the .deb, nothing to remove from
- * a copy that was never installed.
+ * a copy that was never installed. Asked again whenever Settings comes back
+ * into view, since an install done meanwhile leaves nothing to install.
  */
 async function setupRows(host) {
   const status = await api.request('setup-status').catch(() => null);
+  for (const old of host.querySelectorAll('.setup-row')) old.remove();
   if (!status) return;
   if (status.install) {
     const { row, control } = simpleRow('Install Debrowser',
@@ -746,6 +751,7 @@ async function setupRows(host) {
     const go = smallButton(status.install);
     go.addEventListener('click', () => api.send('install-browser'));
     control.append(go);
+    row.classList.add('setup-row');
     host.append(row);
   }
   if (status.uninstall) {
@@ -753,6 +759,7 @@ async function setupRows(host) {
     const go = smallButton('Uninstall…');
     go.addEventListener('click', () => api.send('uninstall-browser'));
     control.append(go);
+    row.classList.add('setup-row');
     host.append(row);
   }
 }

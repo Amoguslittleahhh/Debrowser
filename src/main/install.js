@@ -32,13 +32,27 @@ const dataHome = () => process.env.XDG_DATA_HOME || path.join(os.homedir(), '.lo
 const desktopFile = () => path.join(dataHome(), 'applications', 'debrowser.desktop');
 const iconFile = () => path.join(dataHome(), 'icons', 'hicolor', '512x512', 'apps', 'debrowser.png');
 const APPIMAGE_HOME = () => path.join(os.homedir(), 'Applications', 'Debrowser.AppImage');
-/** Marks the entry as written by this, so uninstalling removes only what it made. */
-const OURS = 'X-Debrowser-Integrated=true';
+/**
+ * Marks the entry as written by this, and for which program, as it was given:
+ * uninstalling a copy removes its own entry and never another copy's.
+ */
+const OURS = 'X-Debrowser-Exec=';
+
+/**
+ * The AppImage file this runs from, or null. APPIMAGE alone is not enough: it
+ * is inherited, so a Debrowser opened from another AppImage's link would take
+ * that program's file for its own. Ours is the one whose mount (APPDIR) holds
+ * the executable that is running.
+ */
+function appImage() {
+  const { APPIMAGE, APPDIR } = process.env;
+  return APPIMAGE && APPDIR && process.execPath.startsWith(path.resolve(APPDIR) + path.sep) ? APPIMAGE : null;
+}
 
 /** How this copy is installed: 'appimage', 'deb', 'folder', or null when unpackaged or not Linux. */
 function linuxKind() {
   if (process.platform !== 'linux' || !app.isPackaged) return null;
-  if (process.env.APPIMAGE) return 'appimage';
+  if (appImage()) return 'appimage';
   if (process.execPath.startsWith('/opt/') && fs.existsSync('/var/lib/dpkg/info/debrowser.list')) return 'deb';
   return 'folder';
 }
@@ -47,16 +61,33 @@ function linuxKind() {
 const tilde = (p) => (p.startsWith(os.homedir() + path.sep) ? `~${p.slice(os.homedir().length)}` : p);
 
 /** The program a menu entry should start: the AppImage file, or the executable. */
-const launcher = () => process.env.APPIMAGE || process.execPath;
+const launcher = () => appImage() || process.execPath;
 
-/** Whether the apps menu already starts this copy, through an entry of ours. */
-function integrated() {
+/** The program our menu entry starts, or null when there is no entry of ours. */
+function entryProgram() {
   try {
-    const entry = fs.readFileSync(desktopFile(), 'utf8');
-    return entry.includes(OURS) && entry.includes(`Exec="${launcher()}"`);
+    const line = fs.readFileSync(desktopFile(), 'utf8').split('\n').find((l) => l.startsWith(OURS));
+    return line ? line.slice(OURS.length) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Whether the apps menu already starts this copy, through an entry of ours - by any spelling of its path. */
+function integrated() {
+  const program = entryProgram();
+  return program !== null && (program === launcher() || sameFile(program, launcher()));
+}
+
+/**
+ * A path as one argument of an Exec line. The Desktop Entry spec quotes it,
+ * backslash-escapes " ` $ and \ inside the quotes, then escapes every
+ * backslash again as a string value - and a literal % is %%.
+ */
+function execArg(p) {
+  if (/[\n\r]/.test(p)) throw new Error('Debrowser is in a folder whose name a menu entry cannot hold.');
+  const quoted = `"${p.replace(/["`$\\]/g, (c) => `\\${c}`)}"`;
+  return quoted.replace(/\\/g, '\\\\').replace(/%/g, '%%');
 }
 
 function writeEntry(exe) {
@@ -75,22 +106,22 @@ function writeEntry(exe) {
     'Type=Application',
     'Name=Debrowser',
     'Comment=A web browser that keeps out of the way of your computer.',
-    `Exec="${exe}" %U`,
+    `Exec=${execArg(exe)} %U`,
     `Icon=${icon ? iconFile() : 'debrowser'}`,
     'Terminal=false',
     'Categories=Network;WebBrowser;',
     'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;',
     'StartupWMClass=Debrowser',
     'Actions=new-private-window;uninstall;',
-    OURS,
+    `${OURS}${exe}`,
     '',
     '[Desktop Action new-private-window]',
     'Name=New private window',
-    `Exec="${exe}" --new-private-window`,
+    `Exec=${execArg(exe)} --new-private-window`,
     '',
     '[Desktop Action uninstall]',
     'Name=Uninstall Debrowser',
-    `Exec="${exe}" --uninstall`,
+    `Exec=${execArg(exe)} --uninstall`,
     ''
   ].join('\n');
   fs.mkdirSync(path.dirname(desktopFile()), { recursive: true });
@@ -99,14 +130,22 @@ function writeEntry(exe) {
   require('child_process').execFile('update-desktop-database', [path.dirname(desktopFile())], () => {});
 }
 
-/** The menu entry and icon this wrote, if any. Used by uninstall.js. */
+/** This copy's menu entry and icon, if it has one; another copy's is left. Used by uninstall.js. */
 function removeEntry() {
+  if (!integrated()) return;
+  fs.rmSync(desktopFile(), { force: true });
+  fs.rmSync(iconFile(), { force: true });
+}
+
+/** Whether two paths name one file - through a symlink, a hard link or a second spelling. */
+function sameFile(a, b) {
   try {
-    if (fs.readFileSync(desktopFile(), 'utf8').includes(OURS)) {
-      fs.rmSync(desktopFile(), { force: true });
-      fs.rmSync(iconFile(), { force: true });
-    }
-  } catch { /* none of ours */ }
+    const x = fs.statSync(a);
+    const y = fs.statSync(b);
+    return x.dev === y.dev && x.ino === y.ino;
+  } catch {
+    return false;
+  }
 }
 
 /* ---- What can be offered here ------------------------------------------- */
@@ -166,9 +205,11 @@ async function install({ log }) {
   }
   const kind = linuxKind();
   if (kind === 'appimage') {
-    const from = process.env.APPIMAGE;
+    const from = appImage();
     const to = APPIMAGE_HOME();
-    if (from !== to) {
+    // Compared as files, not strings: copying a file onto itself and then
+    // deleting "the original" would delete the only copy.
+    if (!sameFile(from, to)) {
       fs.mkdirSync(path.dirname(to), { recursive: true });
       // Copied, then the original removed: a rename fails across file systems,
       // and Downloads is often on another one. The running copy reads from its
@@ -196,7 +237,7 @@ async function install({ log }) {
  * Ask, if there is anything to ask and it was not declined for this version.
  * `force` (from Settings) asks regardless.
  */
-function offer({ prefs, log, force = false }) {
+function offer({ prefs, log, force = false, owner = null }) {
   const spec = offerFor();
   if (!spec) return null;
   if (!force && prefs.get('installAskedVersion') === app.getVersion()) return null;
@@ -204,6 +245,7 @@ function offer({ prefs, log, force = false }) {
   win = showSetupWindow({
     spec,
     prefs: prefs.all(),
+    owner,
     onConfirm: async () => {
       await install({ log });
       // Linux needs no restart: done, and the window has said all it needs
@@ -217,4 +259,4 @@ function offer({ prefs, log, force = false }) {
   return win;
 }
 
-module.exports = { offer, offerFor, linuxKind, removeEntry, tilde };
+module.exports = { offer, offerFor, linuxKind, removeEntry, appImage, tilde };

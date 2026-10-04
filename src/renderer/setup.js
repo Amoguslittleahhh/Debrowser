@@ -17,6 +17,9 @@ function fit() {
 }
 
 function answer() {
+  // Not before the question has arrived: the window can be shown by its
+  // fallback timer first, with nothing yet to answer.
+  if (!spec) return;
   document.body.classList.add('working');
   $('error').hidden = true;
   $('confirm').textContent = spec.busy || spec.confirm;

@@ -111,6 +111,17 @@ Var pid
       ${EndIf}
     !endif
   !endif
+  ; A private window runs as Debrowser-Incognito.exe, which electron-builder's
+  ; check below does not look for when PowerShell is unavailable, and which
+  ; quitting the browser does not end. Asked to close, then made to: its files
+  ; are about to be replaced or removed. It sweeps its profile next time.
+  nsExec::Exec '"$CmdPath" /C taskkill /IM "${INCOGNITO_EXE}" /FI "USERNAME eq %USERNAME%"'
+  Pop $R0
+  ${If} $R0 == 0
+    Sleep 2000
+    nsExec::Exec '"$CmdPath" /C taskkill /F /IM "${INCOGNITO_EXE}" /FI "USERNAME eq %USERNAME%"'
+    Pop $R0
+  ${EndIf}
   !insertmacro _CHECK_APP_RUNNING
 !macroend
 
