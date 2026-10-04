@@ -1,12 +1,12 @@
 /*
- * Uninstalling (src/main/uninstall.js): a window of its own, so the page is
- * the card. The whole window drags, as a dialog with no title bar should;
+ * Installing and uninstalling (src/main/setup-window.js): a window of its
+ * own, so the page is the card. The whole window drags, as a dialog with no title bar should;
  * the controls opt out.
  */
 
 html, body { height: auto; }
 
-.uninstall-body {
+.setup-body {
   margin: 0;
   background: var(--bg-raised);
   color: var(--text);
@@ -22,12 +22,12 @@ html, body { height: auto; }
   border: 1px solid var(--border);
   /* The window's own edge: a rule rather than nothing, on a palette where the
      card and the desktop behind it can be the same dark. The window is sized
-     to this box (uninstall-size), border included. */
+     to this box (setup-size), border included. */
   box-sizing: border-box;
-  animation: uninstall-in 200ms var(--ease);
+  animation: setup-in 200ms var(--ease);
 }
 
-@keyframes uninstall-in {
+@keyframes setup-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: none; }
 }
@@ -67,12 +67,13 @@ h1 {
   background: var(--bg);
   -webkit-app-region: no-drag;
 }
-.choice input { width: 17px; height: 17px; margin: 1px 0 0; flex: none; accent-color: var(--crit); }
+.choice input { width: 17px; height: 17px; margin: 1px 0 0; flex: none; accent-color: var(--accent); }
+.choice.danger input { accent-color: var(--crit); }
 .choice > span { display: grid; gap: 3px; }
 .choice-title { line-height: var(--lh-body); }
 .choice-detail { font-size: var(--fs-small); line-height: var(--lh-body); color: var(--text-dim); }
 /* Deleting is the step that cannot be taken back, so it says so once chosen. */
-.choice:has(input:checked) { border-color: color-mix(in srgb, var(--crit) 55%, var(--border)); }
+.choice.danger:has(input:checked) { border-color: color-mix(in srgb, var(--crit) 55%, var(--border)); }
 
 .error {
   margin: -8px 0 16px;
@@ -83,9 +84,9 @@ h1 {
 
 .actions button { -webkit-app-region: no-drag; }
 
-/* Confirmed: the window stays until the browser closes, and says what is happening. */
-body.leaving .actions button { pointer-events: none; }
-body.leaving #confirm { opacity: 0.7; }
+/* Answered: the window stays while the work runs, and says what is happening. */
+body.working .actions button { pointer-events: none; }
+body.working #confirm { opacity: 0.7; }
 
 /* Removing a program is not the accent's "go ahead": the warning colour,
    deepened so white text on it reads at 4.5:1 - the dark palettes' --crit is

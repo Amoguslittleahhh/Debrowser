@@ -186,6 +186,10 @@ const COMMANDS = new Set([
   'welcome-done',
   'make-default',
   'default-browser-status',
+  // Settings → Advanced: install where the system has no installer, and uninstall.
+  'install-browser',
+  'uninstall-browser',
+  'setup-status',
   'open-welcome',
   'import-from-profile',
   'import-bookmark-file',

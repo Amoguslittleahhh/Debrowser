@@ -5193,8 +5193,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   }
 
   // The uninstall window (uninstall.js), as an open browser shows it: drawn in
-  // the current design, measured to its content, and harmless here - with no
-  // uninstaller beside this executable, confirming says so and quits nothing.
+  // the current design, measured to its content, and harmless here - a
+  // checkout was never installed, so confirming says so and quits nothing.
   {
     const { BrowserWindow: BW } = require('electron');
     const uninstall = require('./uninstall');
@@ -5207,14 +5207,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const [, contentHeight] = win.getContentSize();
     await win.webContents.executeJavaScript("document.getElementById('confirm').click()");
     const refused = await waitFor(() => win.webContents.executeJavaScript(
-      "!document.getElementById('error').hidden && !document.body.classList.contains('leaving')"), { timeoutMs: 3000 });
+      "!document.getElementById('error').hidden && !document.body.classList.contains('working')"), { timeoutMs: 3000 });
     const again = uninstall.show({ prefs: prefs.all(), browserOpen: true, onConfirmed: () => { quit = true; } });
     await win.webContents.executeJavaScript("document.getElementById('cancel').click()");
     const closed = await waitFor(() => win.isDestroyed(), { timeoutMs: 3000 });
-    check('the uninstall window draws in the browser\'s design, and confirming without an uninstaller quits nothing',
-      shown && page.design === prefs.get('design') && /is open/.test(page.lead || '') &&
+    check('the uninstall window draws in the browser\'s design, and confirming on a copy never installed quits nothing',
+      shown && page.design === prefs.get('design') && /not installed/.test(page.lead || '') &&
         Math.abs(contentHeight - Math.ceil(page.height)) <= 1 && refused && !quit && again === win && closed &&
-        !BW.getAllWindows().some((w) => !w.isDestroyed() && w.getTitle() === 'Uninstall Debrowser'),
+        !BW.getAllWindows().some((w) => !w.isDestroyed() && w.getTitle() === 'Uninstall Debrowser?'),
       `shown ${shown}, ${JSON.stringify(page)}, window ${contentHeight}px, refused ${refused}, quit ${quit}, ` +
       `one window ${again === win}, closed ${closed}`);
   }
@@ -5229,7 +5229,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       'import-bookmark-file', 'update-restart', 'make-default', 'clear-history', 'delete-history',
       'toggle-fullscreen', 'toggle-devtools', 'reveal-download', 'open-download', 'delete-credential',
       'vault-set', 'vault-remove', 'reveal-credential', 'site-clear-data', 'forget-site', 'delete-space',
-      'screenshot-page', 'hide-element', 'inspect', 'view-source', 'report-problem']);
+      'screenshot-page', 'hide-element', 'inspect', 'view-source', 'report-problem', 'install-browser',
+      'uninstall-browser']);
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
     const list = src.slice(src.indexOf('const COMMANDS = new Set(['), src.indexOf(']);', src.indexOf('const COMMANDS = new Set([')));
     const commands = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).filter((c) => !skip.has(c));

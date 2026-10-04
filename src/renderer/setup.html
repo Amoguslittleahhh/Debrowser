@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
-  <title>Uninstall Debrowser</title>
+  <title>Debrowser</title>
   <link rel="stylesheet" href="theme.css">
   <!-- The buttons are the update prompt's, so they are every prompt's. -->
   <link rel="stylesheet" href="update.css">
-  <link rel="stylesheet" href="uninstall.css">
+  <link rel="stylesheet" href="setup.css">
 </head>
-<body class="uninstall-body">
+<body class="setup-body">
   <main id="card" role="alertdialog" aria-modal="true" aria-labelledby="title" aria-describedby="lead">
     <div class="brand" aria-hidden="true">
       <svg class="brand-mark" viewBox="0 0 64 64" width="28" height="28">
@@ -20,26 +20,26 @@
       <span class="brand-name">debrowser</span>
     </div>
 
-    <h1 id="title">Uninstall Debrowser?</h1>
-    <p id="lead">Debrowser will be removed from this computer.</p>
+    <h1 id="title"></h1>
+    <p id="lead"></p>
 
-    <label class="choice" id="keep-row">
-      <input type="checkbox" id="remove-data">
+    <label class="choice" id="choice" hidden>
+      <input type="checkbox" id="check">
       <span>
-        <span class="choice-title">Also delete your browsing data</span>
-        <span class="choice-detail" id="data-detail">History, bookmarks, saved passwords, cookies and settings. Leave this off to keep them for a reinstall.</span>
+        <span class="choice-title" id="check-label"></span>
+        <span class="choice-detail" id="check-detail" hidden></span>
       </span>
     </label>
 
     <p id="error" class="error" role="alert" hidden></p>
 
     <div class="actions">
-      <button type="button" class="btn ghost" id="cancel">Cancel</button>
-      <button type="button" class="btn primary danger" id="confirm">Uninstall</button>
+      <button type="button" class="btn ghost" id="cancel"></button>
+      <button type="button" class="btn primary" id="confirm"></button>
     </div>
   </main>
 
   <script src="theme.js"></script>
-  <script src="uninstall.js"></script>
+  <script src="setup.js"></script>
 </body>
 </html>

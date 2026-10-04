@@ -323,6 +323,10 @@ linux:
         - ksm-launch.c
     - from: vendor/tor/${platform}-${arch}
       to: tor
+    # The icon for the apps-menu entry Debrowser writes for an AppImage or an
+    # unpacked folder (src/main/install.js); the .deb installs its own.
+    - from: build/icon.png
+      to: icon.png
   target:
     - target: AppImage
       arch: [x64]

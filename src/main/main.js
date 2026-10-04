@@ -74,6 +74,7 @@ const { suggest, TAB_SCOPE } = require('./suggest');
 const { classifyAddress } = require('./address');
 const palette = require('./palette');
 const uninstall = require('./uninstall');
+const installer = require('./install');
 const { SitePermissions, PermissionAsks } = require('./site-permissions');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
@@ -1855,6 +1856,14 @@ function main() {
     setTimeout(() => startIncognito({ prefs, log, warm: true }), 2000);
   });
 
+  // macOS and Linux have no installer of ours: a copy running from a disk
+  // image, Downloads or an unpacked AppImage is offered a proper place, once
+  // per version, after the window has settled (install.js).
+  app.whenReady().then(() => {
+    if (INCOGNITO || OFFLINE_MODE || !prefs) return;
+    setTimeout(() => installer.offer({ prefs, log }), 4000).unref();
+  });
+
   app.on('before-quit', (event) => {
     // A quit from the OS arrives here before the window hears of it, and what
     // follows empties the tab list, so the question has to be asked first.
@@ -3178,6 +3187,23 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         publish();
         break;
 
+      // Installing and uninstalling, in the setup window (install.js,
+      // uninstall.js). Uninstalling closes the browser the ordinary way.
+      case 'install-browser':
+        if (INCOGNITO) break;
+        installer.offer({ prefs, log, force: true });
+        break;
+
+      case 'uninstall-browser':
+        if (INCOGNITO) break;
+        uninstall.show({
+          prefs: prefs.all(),
+          browserOpen: true,
+          onConfirmed: () => { if (quitState) quitState.confirmed = true; app.quit(); },
+          log
+        });
+        break;
+
       // Ask the system to make this the default browser. None of them let an
       // app simply take it any more; each has its own way of asking the user.
       case 'make-default':
@@ -3893,7 +3919,7 @@ const INCOGNITO_REFUSED = new Set([
   'list-history', 'delete-history', 'clear-history', 'forget-site',
   'toggle-bookmark', 'remove-bookmark', 'forget-bookmark', 'bookmark-page', 'bookmark-profiles',
   'import-from-profile', 'import-bookmark-file', 'open-safety', 'safety-status', 'safety-revoke', 'open-receipt', 'receipt-week', 'hide-element', 'show-hidden', 'open-site-style', 'site-style-set', 'site-style-get',
-  'check-for-updates', 'update-restart', 'presence-capability',
+  'check-for-updates', 'update-restart', 'presence-capability', 'install-browser', 'uninstall-browser', 'setup-status',
   'prefetch-tab', 'prefetch-new-tab'
 ]);
 
@@ -4446,6 +4472,13 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
 
       case 'bookmark-profiles':
         return { profiles: findProfiles() };
+
+      // What Settings → Advanced offers: the install question's answer, if
+      // there is anything to install, and whether there is anything to remove.
+      case 'setup-status': {
+        const offer = installer.offerFor();
+        return { install: offer ? offer.confirm : null, uninstall: Boolean(uninstall.plan()) };
+      }
 
       case 'default-browser-status': {
         let isDefault = false;

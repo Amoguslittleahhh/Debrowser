@@ -261,6 +261,9 @@ const SCHEMA = {
   externalLinksSpace: { def: 'current', ok: (v) => typeof v === 'string' && /^(current|[a-z0-9-]{1,24})$/.test(v) },
   // The version last started, so an update is noticed once (whats-new.js).
   seenVersion: { def: '', ok: (v) => typeof v === 'string' && v.length <= 32 },
+  // The version whose "Move to Applications" / "Add to your apps" was answered
+  // Not now (install.js): asked once per version, never every launch.
+  installAskedVersion: { def: '', ok: (v) => typeof v === 'string' && v.length <= 32 },
   // Tabs unopened this many days go to the archive (archive.js); 0 is never.
   autoArchiveDays: { def: 0, ok: (v) => [0, 1, 7, 30].includes(v) },
   // Battery mode: tabs sleep sooner to save power - 'auto' on battery only.

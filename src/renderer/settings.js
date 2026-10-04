@@ -632,6 +632,7 @@ function buildAll(state = {}) {
   if (!state.incognito) {
     document.querySelector('[data-rows="appearance"]').prepend(welcomeRow());
     document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow(), safetyRow());
+    setupRows(document.querySelector('[data-rows="advanced"]'));
   }
   built = true;
 }
@@ -727,6 +728,33 @@ function safetyRow() {
   open.addEventListener('click', () => api.send('open-safety'));
   control.append(open);
   return row;
+}
+
+/**
+ * Installing and uninstalling, last in Advanced. Each opens its own window
+ * (src/main/setup-window.js); the rows appear only when there is something to
+ * do - nothing to install on Windows or from the .deb, nothing to remove from
+ * a copy that was never installed.
+ */
+async function setupRows(host) {
+  const status = await api.request('setup-status').catch(() => null);
+  if (!status) return;
+  if (status.install) {
+    const { row, control } = simpleRow('Install Debrowser',
+      api.platform === 'darwin' ? 'Running from outside Applications, it cannot keep itself up to date.'
+        : 'Add it to your apps menu, so it starts like any other app.');
+    const go = smallButton(status.install);
+    go.addEventListener('click', () => api.send('install-browser'));
+    control.append(go);
+    host.append(row);
+  }
+  if (status.uninstall) {
+    const { row, control } = simpleRow('Uninstall Debrowser', 'Remove it from this computer, keeping or deleting your browsing data.');
+    const go = smallButton('Uninstall…');
+    go.addEventListener('click', () => api.send('uninstall-browser'));
+    control.append(go);
+    host.append(row);
+  }
 }
 
 function defaultBrowserRow() {
