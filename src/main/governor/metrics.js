@@ -137,8 +137,16 @@ class Metrics {
     const now = Date.now();
     const raw = this.app.getAppMetrics();
     this.refreshProbes(raw);
+    // Renderers that hold a tab. Electron calls every renderer a 'Tab', the
+    // browser's own interface among them - the toolbar, a spare new tab page,
+    // a menu - and those are overhead like the GPU process: no tab row shows
+    // them and acting on tabs cannot reclaim them. Counted as neither, they
+    // were 37MB of a total that the rows and the overhead line did not add up to.
+    const tabPids = new Set();
+    for (const tab of this.getTabs()) if (tab.isLive && tab.pid) tabPids.add(tab.pid);
     const seen = new Set();
     let total = 0;
+    let totalNow = 0;
     let overhead = 0;
     let rssTotal = 0;
     let privateTotal = 0;
@@ -178,6 +186,13 @@ class Metrics {
             type: proc.type
           }
         : { rssMB: footprint, cpu, type: proc.type };
+      // And as measured this tick, for the task manager. The smoothed figures
+      // are for decisions, which must not flap on one sample; a display that
+      // lags shows a page that has quietened as still busy - measured, a tab
+      // paused at once was shown at 5%, 3%, 2%, 1% CPU over the next 8 seconds.
+      smoothed.memNowMB = footprint;
+      smoothed.cpuNow = cpu;
+      smoothed.hostsTab = proc.type === 'Tab' && tabPids.has(pid);
       // Left null where the platform cannot report it, rather than falling back
       // to the footprint. Private bytes and PSS are different quantities, and
       // the one consumer of this field screens on it *because* it is not PSS -
@@ -187,7 +202,8 @@ class Metrics {
 
       this.byPid.set(pid, smoothed);
       total += smoothed.rssMB;
-      if (proc.type !== 'Tab') overhead += smoothed.rssMB;
+      totalNow += footprint;
+      if (!smoothed.hostsTab) overhead += smoothed.rssMB;
 
       // Unsmoothed on purpose: this is the yardstick the proportional figure is
       // measured against, and smoothing it would let the comparison drift with
@@ -215,11 +231,17 @@ class Metrics {
     // zygotes, ~29MB that does not grow with tab count. Counting them is the
     // difference between a budget compared against this browser's real
     // footprint and one compared against most of it.
-    const unreported = unreportedProcessesMB(seen).mb;
+    const left = unreportedProcessesMB(seen);
+    const unreported = left.mb;
+    // Counted as well as weighed: the total held them while the count did not,
+    // which left "8 processes" beside a total eleven processes add up to.
+    this.unreportedCount = Array.isArray(left.processes) ? left.processes.length : 0;
     total += unreported;
+    totalNow += unreported;
     overhead += unreported;
 
     this.totalMB = total;
+    this.totalNowMB = totalNow;
     this.browserOverheadMB = overhead;
     this.rssTotalMB = rssTotal;
     this.privateTotalMB = privateKnown ? privateTotal : null;
@@ -310,6 +332,8 @@ class Metrics {
         for (const tab of tabs) {
           tab.rssMB = 0;
           tab.cpu = 0;
+          tab.memNowMB = 0;
+          tab.cpuNow = 0;
           tab.privateMB = null;
           tab.sharesProcess = false;
         }
@@ -320,6 +344,8 @@ class Metrics {
         tabs[0].rssMB = proc.rssMB;
         tabs[0].privateMB = proc.privateMB ?? null;
         tabs[0].cpu = proc.cpu;
+        tabs[0].memNowMB = proc.memNowMB;
+        tabs[0].cpuNow = proc.cpuNow;
         tabs[0].sharesProcess = false;
         continue;
       }
@@ -331,6 +357,7 @@ class Metrics {
       tabs.forEach((tab, i) => {
         const share = weights[i] / weightSum;
         tab.rssMB = proc.rssMB * share;
+        tab.memNowMB = proc.memNowMB * share;
         tab.privateMB = proc.privateMB == null ? null : proc.privateMB * share;
         tab.sharesProcess = true;
         tab.processTabCount = tabs.length;
@@ -342,6 +369,7 @@ class Metrics {
         // main-thread time, measured per document over CDP; fall back to the
         // split only until the first sample lands.
         tab.cpu = tab.taskCpu != null ? tab.taskCpu : proc.cpu * share;
+        tab.cpuNow = tab.taskCpu != null ? tab.taskCpu : proc.cpuNow * share;
       });
     }
 
@@ -349,6 +377,8 @@ class Metrics {
     for (const tab of this.getTabs()) {
       if (!tab.pid) {
         tab.rssMB = 0;
+        tab.memNowMB = 0;
+        tab.cpuNow = 0;
         tab.privateMB = null;
         tab.cpu = 0;
         tab.sharesProcess = false;
@@ -364,7 +394,7 @@ class Metrics {
   reclaimableMB() {
     let sum = 0;
     for (const [, proc] of this.byPid) {
-      if (proc.type === 'Tab') sum += proc.rssMB;
+      if (proc.hostsTab) sum += proc.rssMB;
     }
     return sum;
   }
@@ -411,10 +441,13 @@ class Metrics {
       pageMerging: pageMergingStatus(),
       compression: compressionStatus(),
       totalMB: Math.round(this.totalMB),
+      // As measured this tick, for display (see `memNowMB`).
+      totalNowMB: Math.round(this.totalNowMB ?? this.totalMB),
       overheadMB: Math.round(this.browserOverheadMB),
       reclaimableMB: Math.round(this.reclaimableMB()),
-      processCount: this.byPid.size,
-      rendererCount: [...this.byPid.values()].filter((p) => p.type === 'Tab').length
+      processCount: this.byPid.size + (this.unreportedCount || 0),
+      // Renderers holding tabs; the browser's own interface is counted in the processes, not here.
+      rendererCount: [...this.byPid.values()].filter((p) => p.hostsTab).length
     };
   }
 }

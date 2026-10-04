@@ -1185,6 +1185,10 @@ class Tab {
       demand: this.demand,
       rssMB: Math.round(this.rssMB),
       cpu: Math.round((this.cpu || 0) * 10) / 10,
+      // As measured this tick, for the task manager: memory, and CPU as a
+      // share of the whole machine, as the system's own task manager shows it.
+      memNowMB: Math.round(this.memNowMB ?? this.rssMB ?? 0),
+      cpuNow: Math.round((this.cpuNow ?? this.cpu ?? 0) * 10) / 10,
       sharesProcess: this.sharesProcess,
       idleMs: this.idleMs(),
       hasDirtyInput: this.hasDirtyInput,

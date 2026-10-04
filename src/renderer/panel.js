@@ -82,7 +82,8 @@ const PRESSURE_TEXT = {
 };
 
 function render(state) {
-  el.total.textContent = `${state.totalMB} MB`;
+  // As measured this tick; the smoothed figure is the governor's, for its decisions.
+  el.total.textContent = `${state.totalNowMB ?? state.totalMB} MB`;
 
   // Say which quantity this is. The same label sits over two different
   // measurements depending on the platform: proportional set size on Linux,
@@ -144,7 +145,7 @@ function render(state) {
   // is what someone checking this by hand will have in front of them.
   if (state.privateTotalMB != null && state.rssTotalMB) {
     el.totalLabel.title =
-      `${state.totalMB} MB reported · ${state.rssTotalMB} MB summed working set · ` +
+      `${state.totalNowMB ?? state.totalMB} MB reported · ${state.rssTotalMB} MB summed working set · ` +
       `${state.privateTotalMB} MB private. Private is what Task Manager's Memory ` +
       'column shows and involves no shared pages at all, so the gap between it and ' +
       'the total is the shared memory being attributed to this browser.';
@@ -393,7 +394,7 @@ function updateRow(row, tab) {
     prev.favicon = tab.favicon;
   }
 
-  const mem = tab.tier === 'discarded' ? '—' : `${tab.rssMB} MB`;
+  const mem = tab.tier === 'discarded' ? '—' : `${tab.memNowMB ?? tab.rssMB} MB`;
   if (prev.mem !== mem) {
     row.mem.textContent = mem;
     prev.mem = mem;
@@ -422,7 +423,9 @@ function describe(tab) {
   if (tab.audible) parts.push('playing audio');
   if (tab.hasDirtyInput) parts.push('unsaved input · protected');
   if (tab.sharesProcess) parts.push('shares a process');
-  if (tab.cpu >= 1) parts.push(`${tab.cpu}% CPU`);
+  // A share of the whole machine, as the system's own task manager shows it.
+  const cpu = tab.cpuNow ?? tab.cpu;
+  if (cpu >= 1) parts.push(`${Math.round(cpu)}% of CPU`);
 
   return parts.join(' · ');
 }

@@ -1201,9 +1201,9 @@ function updateTabElement(node, tab) {
 function tierLabel(tab) {
   switch (tab.tier) {
     case 'active': return tab.boosted ? 'Active – boosted for animation' : 'Active';
-    case 'warm': return `Background – ${tab.rssMB}MB`;
-    case 'cold': return `Idle, may be discarded to save memory – ${tab.rssMB}MB`;
-    case 'frozen': return `Frozen – no CPU, ${tab.rssMB}MB retained`;
+    case 'warm': return `Background – ${tab.memNowMB ?? tab.rssMB}MB`;
+    case 'cold': return `Idle, may be discarded to save memory – ${tab.memNowMB ?? tab.rssMB}MB`;
+    case 'frozen': return `Frozen – no CPU, ${tab.memNowMB ?? tab.rssMB}MB retained`;
     case 'hibernated': return 'Hibernated – memory compressed, opens instantly';
     case 'discarded': return 'Discarded – reloads when opened';
     default: return tab.tier;
@@ -1377,18 +1377,19 @@ function renderMeter(state) {
   // Moved only when the change can be seen. Under half a percent is under half
   // a pixel of the bar, and each move is a transition to composite: on every
   // governor tick, that was most of what an idle chrome spent.
-  const ratio = Math.min(1, Math.max(0, state.budgetMB ? state.totalMB / state.budgetMB : 0));
+  const shownMB = state.totalNowMB ?? state.totalMB;
+  const ratio = Math.min(1, Math.max(0, state.budgetMB ? shownMB / state.budgetMB : 0));
   if (Math.abs(ratio - meterRatio) >= 0.005 || (ratio === 0) !== (meterRatio === 0)) {
     meterRatio = ratio;
     el.meterFill.style.transform = `scaleX(${ratio})`;
   }
   if (el.meter.dataset.pressure !== state.pressure) el.meter.dataset.pressure = state.pressure;
-  const text = `${state.totalMB} MB`;
+  const text = `${shownMB} MB`;
   if (el.meterText.textContent !== text) el.meterText.textContent = text;
   // An SVG element has no `hidden` property to set; the attribute itself.
   document.getElementById('meter-leaf').toggleAttribute('hidden', !state.saver);
   el.meter.title = (state.saver ? 'Battery mode: tabs sleep sooner to save power\n' : '') +
-    `${state.totalMB} MB of ${state.budgetMB} MB budget\n` +
+    `${shownMB} MB of ${state.budgetMB} MB budget\n` +
     `${state.liveTabs} tabs holding a renderer ` +
     `(${state.rendererCount} process(es)), ${state.tabs.length} tab(s) open\n` +
     `Pressure: ${state.pressure} – click for the task manager`;

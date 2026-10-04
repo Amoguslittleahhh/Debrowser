@@ -345,6 +345,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   check('a background tab that is still working gets frozen', busyFroze,
     `busy tab reached ${busy.tier}`);
 
+  // What the task manager shows for it: this tick's CPU, so a paused tab
+  // reads as paused within a couple of ticks, while the smoothed figure the
+  // governor decides on is still on its way down.
+  {
+    const quietShown = await waitFor(() => busy.toJSON().cpuNow < 1, { timeoutMs: cfg.tickMs * 4 + 1000 });
+    check('the task manager shows a paused tab\'s CPU as it is now, not as it was',
+      busyFroze && quietShown,
+      `shown ${busy.toJSON().cpuNow}% of CPU, smoothed ${Math.round(busy.cpu * 10) / 10}%`);
+  }
+
   // Waited for, not read once, for the same reason as the gap above: this is a
   // smoothed average and a fixed number of samples asserts a rate of decay
   // rather than the property. Given time to settle, a frozen tab's CPU is zero
@@ -1358,6 +1368,34 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const off = governor.saver === false;
     runCommand('set-pref', { key: 'batteryMode', value: was });
     check('battery mode turns the saver on and off from the setting', on && off, `on ${on}, off ${off}`);
+  }
+
+  // The task manager adds up and matches the system. Every megabyte of the
+  // total is a tab's row or overhead (the browser's own interface processes
+  // were neither, and 37MB went unexplained); a tab's figure is its process's
+  // proportional size as the kernel reports it; and the CPU it shows is this
+  // tick's, not a smoothed tail - a paused tab read 5%, 3%, 2%, 1% after it
+  // had stopped.
+  {
+    const page = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    await sleep(cfg.tickMs * 3);
+    const snap = governor.snapshot();
+    const rows = governor.metrics.byPid.size ? tabs.all().reduce((sum, t) => sum + (t.rssMB || 0), 0) : 0;
+    const unexplained = Math.abs(snap.totalMB - rows - snap.overheadMB);
+    const shown = page.toJSON().memNowMB;
+    let kernel = null;
+    if (process.platform === 'linux') {
+      try {
+        kernel = Number(/^Pss:\s+(\d+)/m.exec(require('fs').readFileSync(`/proc/${page.pid}/smaps_rollup`, 'utf8'))[1]) / 1024;
+      } catch { kernel = null; }
+    }
+    const matches = kernel == null || Math.abs(shown - kernel) <= Math.max(2, kernel * 0.1);
+    check('the task manager adds up, and a tab\'s memory is what the system says',
+      unexplained <= 2 && matches && typeof snap.totalNowMB === 'number',
+      `total ${snap.totalMB}MB = rows ${Math.round(rows)}MB + overhead ${snap.overheadMB}MB (off by ${Math.round(unexplained)}MB); ` +
+      `tab shown ${shown}MB, kernel ${kernel == null ? 'n/a' : Math.round(kernel)}MB`);
+    tabs.close(page.id);
   }
 
   // Efficiency mode (platform.setEfficiency) for a background tab in battery

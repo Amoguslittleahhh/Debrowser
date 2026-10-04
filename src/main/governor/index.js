@@ -33,6 +33,8 @@ const { Tier, Pressure, tierRank, TIER_ORDER, isStopped, MB } = require('../conf
 const { Metrics } = require('./metrics');
 const { BoostController } = require('./boost');
 const { applyTier, refreshPriority } = require('./tiers');
+/** Logical processors, for CPU figures as a share of the whole machine. */
+const CORES = Math.max(1, require('os').cpus().length);
 const { HeapLimiter } = require('./heap-limit');
 const { readProcessMemory } = require('../memory');
 const platform = require('../platform');
@@ -289,13 +291,18 @@ class Governor {
 
       if (metrics.jsHeapBytes != null) tab.jsHeapMB = metrics.jsHeapBytes / MB;
 
-      // Differentiate cumulative task time into a percentage of one core.
+      // Differentiate cumulative task time into a percentage of the whole
+      // machine - the unit `getAppMetrics` reports every other CPU figure in
+      // (measured: a renderer spinning one core of four reads 24.7). As a
+      // percentage of one core, a tab sharing a process read four times
+      // busier than a tab with its own, on a four-core machine, in the same
+      // column - and was frozen four times sooner for it.
       if (metrics.taskDurationSec != null) {
         if (tab.lastTaskSec != null && tab.lastTaskAt) {
           const elapsedSec = (now - tab.lastTaskAt) / 1000;
           if (elapsedSec > 0) {
             const busySec = Math.max(0, metrics.taskDurationSec - tab.lastTaskSec);
-            tab.taskCpu = (busySec / elapsedSec) * 100;
+            tab.taskCpu = (busySec / elapsedSec) * 100 / CORES;
           }
         }
         tab.lastTaskSec = metrics.taskDurationSec;
