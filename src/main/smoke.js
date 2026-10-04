@@ -4226,10 +4226,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const drawn = await waitFor(async () => tab.isLive && !tab.loading &&
       await tab.wc.executeJavaScript('document.querySelector("h1")?.textContent || ""').catch(() => '') !== '');
     const heading = drawn ? await tab.wc.executeJavaScript('document.querySelector("h1").textContent') : '';
+    // What else the page offers, read off the page: something to try, the
+    // engine's code tucked under Details, and the right button first.
+    const page = drawn ? await tab.wc.executeJavaScript(`({
+      tips: document.querySelectorAll('.tips li').length,
+      first: document.querySelector('.actions button')?.textContent,
+      details: document.querySelector('details .code')?.textContent || '',
+      focused: document.activeElement?.textContent
+    })`).catch(() => null) : null;
     const entries = tab.isLive ? tab.wc.navigationHistory.length() : -1;
     check('a failed load says why in words, and keeps the address that failed',
       drawn && heading === '127.0.0.1 refused to connect' && tab.url === failing,
       `heading "${heading}", tab url ${tab.url}`);
+    {
+      const words = require('./error-page').explain;
+      const lost = words(-105, 'ERR_NAME_NOT_RESOLVED', 'https://www.exmaple.com/');
+      const forged = words(-202, 'ERR_CERT_AUTHORITY_INVALID', 'https://bank.example/');
+      check('a failed load says what to try, offers a search for a name it cannot find, and does not urge a forged site',
+        page && page.tips > 0 && page.first === 'Try again' && page.focused === 'Try again' &&
+        page.details.includes('ERR_CONNECTION_REFUSED') && page.details.includes(failing) &&
+        lost.search === true && lost.tips.length > 0 && forged.safe === false && forged.retryOnline === false,
+        `page ${JSON.stringify(page)}, not found offers search: ${lost.search}, certificate safe: ${forged.safe}`);
+    }
 
     const server = http.createServer((_q, res) => res.end('<title>Back up</title>ok'));
     await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));

@@ -268,6 +268,16 @@ const SHOTS = [
   { name: 'quick', file: 'quick.html', w: 900, h: 44,
     message: { kind: 'quick', url: 'https://www.bbc.co.uk/news/articles/x', title: 'The story behind the headline', loading: false } },
   { name: 'settings-labs', file: 'settings.html', w: 1280, h: 860, hash: 'labs' },
+  // The page a tab shows when a load fails (src/main/error-page.js), drawn
+  // into a blank page the way the browser draws it into Chromium's error entry.
+  { name: 'error-offline', file: 'blank.html', w: 1100, h: 720,
+    error: { code: -106, description: 'ERR_INTERNET_DISCONNECTED', url: 'https://www.bbc.co.uk/news' } },
+  { name: 'error-not-found', file: 'blank.html', w: 1100, h: 720,
+    error: { code: -105, description: 'ERR_NAME_NOT_RESOLVED', url: 'https://www.exmaple.com/' } },
+  { name: 'error-insecure', file: 'blank.html', w: 1100, h: 720,
+    error: { code: -202, description: 'ERR_CERT_AUTHORITY_INVALID', url: 'https://bank-login.example/' } },
+  { name: 'error-refused', file: 'blank.html', w: 1100, h: 720,
+    error: { code: -102, description: 'ERR_CONNECTION_REFUSED', url: 'http://localhost:3000/' } },
   { name: 'reader', file: 'reader.html', w: 1100, h: 760, query: { t: 'x' } },
   { name: 'danger', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://paypa1.com/login', kind: 'lookalike', like: 'paypal.com' } },
   { name: 'danger-phish', file: 'danger.html', w: 1100, h: 640, query: { url: 'https://secure-login.bank-verify.example/', kind: 'phishing' } },
@@ -422,7 +432,10 @@ app.whenReady().then(async () => {
         : shot.query ? { query: shot.query } : {};
     // The promise rejects spuriously on some of these while the page loads
     // perfectly well, so the paint is what is waited on, not the promise.
-    win.loadFile(path.join(R, shot.file), opts).catch(() => {});
+    // The error page draws into Chromium's own error entry, which has no
+    // policy against inline style; blank.html does, so it is drawn on about:blank.
+    if (shot.error) win.loadURL('about:blank').catch(() => {});
+    else win.loadFile(path.join(R, shot.file), opts).catch(() => {});
     if (FORCED) {
       try {
         win.webContents.debugger.attach('1.3');
@@ -436,6 +449,21 @@ app.whenReady().then(async () => {
     }
     // Longer at 2x: software rendering at twice the pixels was caught mid-fade.
     await new Promise((r) => setTimeout(r, process.env.SHOOT_SCALE ? 3000 : 1400));
+    if (shot.error) {
+      const palette = require('../src/main/palette');
+      palette.useTheme(() => ({ light: STATE.prefs.theme === 'light', accent: STATE.prefs.accent, design: STATE.prefs.design }));
+      const errorPage = require('../src/main/error-page');
+      errorPage.useSearch((q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`);
+      // A hidden window runs no animations, so the fade-in would be caught
+      // part-way: drawn as with reduced motion, which the page honours.
+      try {
+        win.webContents.debugger.attach('1.3');
+        await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',
+          { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+      } catch { /* drawn with the fade, then */ }
+      await errorPage.show(win.webContents, shot.error);
+      await new Promise((r) => setTimeout(r, 500));
+    }
 
     // The viewport is asserted, not assumed. `force-device-scale-factor` was in
     // this harness to get crisp text and it made the CSS viewport half the
