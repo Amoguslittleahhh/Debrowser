@@ -86,6 +86,32 @@ function distance(a, b, max = 1) {
   return prev[b.length];
 }
 
+/**
+ * Both lists, fetched and compiled: a count, then the sorted hashes, then
+ * each one's kind - the file the browser keeps, and what it reads back.
+ * Run in a helper process (list-worker.js) where it can be, since the parse is
+ * sixty-odd megabytes the browser process would be slow to give back.
+ */
+async function compileThreats() {
+  const entries = [];
+  for (const list of LISTS) {
+    const res = await net.fetch(list.url);
+    if (!res.ok) throw new Error(`${list.url}: HTTP ${res.status}`);
+    for (const d of domainsIn(await res.text())) entries.push({ d, kind: list.kind });
+  }
+  const { hashes, kinds } = indexOf(entries);
+  const head = Buffer.alloc(8);
+  head.writeUInt32LE(hashes.length, 0);
+  return Buffer.concat([head, Buffer.from(hashes.buffer), Buffer.from(kinds.buffer)]);
+}
+
+/** Hashes sorted for a binary search, and each one's kind beside it. */
+function indexOf(entries) {
+  const pairs = entries.map(({ d, kind }) => [hash64(d), kind === 'malware' ? 0 : 1]);
+  pairs.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  return { hashes: BigUint64Array.from(pairs.map((p) => p[0])), kinds: Uint8Array.from(pairs.map((p) => p[1])) };
+}
+
 /** Letters people and attackers swap for one another. */
 const LOOKALIKE = { 0: 'o', 1: 'l', 3: 'e', 5: 's', 7: 't', rn: 'm', vv: 'w' };
 const unconfuse = (s) => s.replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/[01357]/g, (c) => LOOKALIKE[c]);
@@ -119,10 +145,14 @@ class Threats {
   get file() { return this.dir ? path.join(this.dir, FILE) : null; }
 
   index(entries) {
-    const pairs = entries.map(({ d, kind }) => [hash64(d), kind === 'malware' ? 0 : 1]);
-    pairs.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
-    this.hashes = BigUint64Array.from(pairs.map((p) => p[0]));
-    this.kinds = Uint8Array.from(pairs.map((p) => p[1]));
+    ({ hashes: this.hashes, kinds: this.kinds } = indexOf(entries));
+  }
+
+  /** Take a compiled list (compileThreats) as the one in force. */
+  use(buf) {
+    const n = buf.readUInt32LE(0);
+    this.hashes = new BigUint64Array(buf.buffer.slice(buf.byteOffset + 8, buf.byteOffset + 8 + n * 8));
+    this.kinds = new Uint8Array(buf.buffer.slice(buf.byteOffset + 8 + n * 8, buf.byteOffset + 8 + n * 9));
   }
 
   /** The list from disk if it is today's, else fetched again; yesterday's beats none. */
@@ -131,28 +161,22 @@ class Threats {
     let fresh = false;
     if (file) {
       try {
-        const buf = fs.readFileSync(file);
-        const n = buf.readUInt32LE(0);
-        this.hashes = new BigUint64Array(buf.buffer.slice(buf.byteOffset + 8, buf.byteOffset + 8 + n * 8));
-        this.kinds = new Uint8Array(buf.buffer.slice(buf.byteOffset + 8 + n * 8, buf.byteOffset + 8 + n * 9));
+        this.use(fs.readFileSync(file));
         this.updatedAt = fs.statSync(file).mtimeMs;
         fresh = Date.now() - this.updatedAt < MAX_AGE_MS;
       } catch { /* none yet */ }
     }
     if (fresh) return;
     try {
-      const entries = [];
-      for (const list of LISTS) {
-        const res = await net.fetch(list.url);
-        if (!res.ok) throw new Error(`${list.url}: HTTP ${res.status}`);
-        for (const d of domainsIn(await res.text())) entries.push({ d, kind: list.kind });
-      }
-      this.index(entries);
+      // In a helper process; here only if one could not be started.
+      const buf = await require('./list-helper').compileInHelper('threats').catch((err) => {
+        this.log(`threats: compiling here (${err.message})`);
+        return compileThreats();
+      });
+      this.use(buf);
       if (file) {
-        const head = Buffer.alloc(8);
-        head.writeUInt32LE(this.hashes.length, 0);
         fs.mkdirSync(path.dirname(file), { recursive: true });
-        fs.writeFileSync(`${file}.tmp`, Buffer.concat([head, Buffer.from(this.hashes.buffer), Buffer.from(this.kinds.buffer)]));
+        fs.writeFileSync(`${file}.tmp`, buf);
         fs.renameSync(`${file}.tmp`, file);
       }
       this.updatedAt = Date.now();
@@ -250,4 +274,4 @@ class Threats {
   }
 }
 
-module.exports = { Threats, hash64, domainsIn, distance };
+module.exports = { Threats, hash64, domainsIn, distance, compileThreats };

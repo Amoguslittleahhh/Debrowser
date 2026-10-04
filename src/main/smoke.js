@@ -956,6 +956,21 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       allowed.seen && allowed.seen.ran && allowed.seen.shown, JSON.stringify(allowed.seen));
     sitePrefs.set(host, 'blocking', null);
     tabs.close(allowed.tab.id);
+
+    // The lists are compiled in a helper process that exits after, not in the
+    // browser process, which parsing the real ones took 235MB higher. And off
+    // means off: the engine goes, and comes back when blocking is turned on.
+    const compiledIn = blocker.compiledIn;
+    const wasOn = prefs.get('blockAds');
+    prefs.set('blockAds', false);
+    blocker.refresh();
+    const freed = blocker.engine === null;
+    prefs.set('blockAds', wasOn);
+    blocker.refresh();
+    await blocker.loading;
+    check('the blocker compiles its lists apart from the browser, and lets go of them when turned off',
+      compiledIn === 'helper' && freed && blocker.engine !== null,
+      `compiled in the ${compiledIn}, freed when off: ${freed}, back when on: ${blocker.engine !== null}`);
     if (wasActive && tabs.all().includes(wasActive)) await tabs.activate(wasActive.id);
     await sleep(200);
   }

@@ -80,6 +80,8 @@ class ContentBlocker {
     if (this.loading) return this.loading;
     const cookies = this.cookieBanners() !== false;
     this.loading = this.build(cookies).then((engine) => {
+      // Turned off while it was loading: not kept (refresh).
+      if (this.enabled() === false) return null;
       this.engine = engine;
       this.engineCookies = cookies;
       this.loadedAt = Date.now();
@@ -91,9 +93,33 @@ class ContentBlocker {
     return this.loading;
   }
 
+  /**
+   * Compiled bytes for a list, from a helper process (list-worker.js) that
+   * exits when it is done: parsing the real lists here took the browser
+   * 235MB higher and still held 200MB of it seconds later, and stopped every
+   * tab and the window while it ran. `here` is the old way, for when a helper
+   * cannot be started. `compiledIn` says which it was.
+   */
+  async compile(job, here) {
+    try {
+      const bytes = await require('./list-helper').compileInHelper('blocker', job);
+      this.compiledIn = 'helper';
+      return bytes;
+    } catch (err) {
+      this.log(`blocker: compiling here (${err.message})`);
+      this.compiledIn = 'browser';
+      return Buffer.from((await here()).serialize());
+    }
+  }
+
   async build(cookies) {
     const { ElectronBlocker } = lib();
-    if (this.rules !== null) return ElectronBlocker.parse(this.rules, { loadCosmeticFilters: true });
+    // A list given as text (the tests): compiled the same way as the real ones.
+    if (this.rules !== null) {
+      const bytes = await this.compile({ rules: this.rules },
+        () => ElectronBlocker.parse(this.rules, { loadCosmeticFilters: true }));
+      return ElectronBlocker.deserialize(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+    }
 
     const file = this.file;
     const meta = file ? `${file}.json` : null;
@@ -110,11 +136,16 @@ class ContentBlocker {
     }
     try {
       // Chromium's network stack, not Node's: it follows the system's proxy.
-      const engine = await ElectronBlocker.fromLists((url, init) => net.fetch(url, init), listsFor(cookies),
-        { loadCosmeticFilters: true });
+      const bytes = await this.compile({ urls: listsFor(cookies) },
+        () => ElectronBlocker.fromLists((url, init) => net.fetch(url, init), listsFor(cookies),
+          { loadCosmeticFilters: true }));
+      const engine = ElectronBlocker.deserialize(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+      // The last week's engine, if there was one, goes now rather than at the
+      // next collection: it is the other 8MB.
+      stale = null;
       if (file) {
         fs.mkdirSync(this.dir, { recursive: true });
-        fs.writeFileSync(`${file}.tmp`, engine.serialize());
+        fs.writeFileSync(`${file}.tmp`, bytes);
         fs.renameSync(`${file}.tmp`, file);
         fs.writeFileSync(meta, JSON.stringify({ built: Date.now(), cookies }));
       }
@@ -200,7 +231,9 @@ class ContentBlocker {
 
   /** A setting changed: build an engine if there is none, or if the cookie lists came or went. */
   refresh() {
-    if (this.enabled() === false) return;
+    // Off: the engine goes (8MB and more), rather than staying for the rest
+    // of the session for nothing. On again, it is read back from disk.
+    if (this.enabled() === false) { this.engine = null; return; }
     if (!this.engine || this.engineCookies !== (this.cookieBanners() !== false)) this.load();
   }
 }

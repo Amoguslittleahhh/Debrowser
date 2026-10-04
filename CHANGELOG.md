@@ -10,6 +10,8 @@
 
 ### Improved
 
+- **Much less memory when the blocker updates its lists.** The ad and tracker lists are rebuilt once a week (and on first start), and the dangerous-site lists once a day. That work now happens in a separate process that closes when it is done, instead of inside the browser. Measured on the real lists: the browser used to grow by about 235 MB while rebuilding and still held about 200 MB of that afterwards; it now grows by about 25 MB, the size of the finished lists. The window also no longer freezes for a moment while it happens.
+- **Turning the ad blocker off frees its memory.** About 8 MB of rules stayed loaded until the browser was restarted; they are now released straight away, and loaded again when you turn the blocker back on.
 - **The tab strip comes out and goes away faster.** With the tabs tucked away down the side, the strip now slides in in 140 ms instead of 210 ms, and leaves sooner once the pointer has gone.
 - **A line under the address bar.** With the tabs tucked away, a faint line now separates the address bar from the page below, so the two no longer run together when they are the same colour.
 - **Settings in a narrow window.** Beside docked developer tools, or in a window snapped to half the screen, the section list now opens from a button at the top left instead of being squeezed into a row where most names were cut off.
