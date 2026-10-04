@@ -460,7 +460,12 @@ class Governor {
       // it gets revisited; the reload when it does is cheaper than carrying
       // that indefinitely, and it is the only reclaim that returns the whole
       // renderer rather than a fraction of a heap.
-      if (idle >= this.cfg.discardAfterMs * accel) target = Tier.DISCARDED;
+      //
+      // Or when the user said (Settings, "Put tabs to sleep"): at once, or
+      // after the minutes they chose - exactly, not shortened by pressure or
+      // battery, which still hurry everything before this step.
+      const chosen = this.cfg.sleepAfterMs;
+      if (chosen != null ? idle >= chosen : idle >= this.cfg.discardAfterMs * accel) target = Tier.DISCARDED;
 
       target = this.clampToProtections(tab, target);
       if (tierRank(target) > tierRank(tab.tier)) {
@@ -658,6 +663,16 @@ class Governor {
    * Cap how far a tab may be demoted. Returns the lowest tier permitted for
    * this tab right now, which may be higher than the tier requested.
    */
+  /**
+   * How long a tab just left is spared a discard. A minute, unless the user
+   * chose to have tabs sleep sooner than that: then their choice, and at once
+   * means at once.
+   */
+  graceMs() {
+    const chosen = this.cfg.sleepAfterMs;
+    return chosen != null ? Math.min(this.cfg.minLifetimeMs, chosen) : this.cfg.minLifetimeMs;
+  }
+
   clampToProtections(tab, requested, { discardAllowed = true, ignoreGrace = false } = {}) {
     let floor = requested;
 
@@ -714,7 +729,7 @@ class Governor {
     // minute. And `ignoreGrace` lets the live-tab cap through, because there
     // the candidates are already ordered least-recently-used: the tab being
     // discarded is the Nth least recent, never one just left.
-    if (tab.everVisible && !ignoreGrace && tab.idleMs() < this.cfg.minLifetimeMs) {
+    if (tab.everVisible && !ignoreGrace && tab.idleMs() < this.graceMs()) {
       cap(Tier.HIBERNATED);
     }
 

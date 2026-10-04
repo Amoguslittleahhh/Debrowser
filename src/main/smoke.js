@@ -1360,6 +1360,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('battery mode turns the saver on and off from the setting', on && off, `on ${on}, off ${off}`);
   }
 
+  // "Put tabs to sleep": a tab left under a timed choice stays awake until its
+  // time; under "as soon as I leave them" it sleeps within a tick or two, the
+  // minute's grace for a tab just left included.
+  {
+    const was = prefs.get('tabSleep');
+    const back = tabs.activeTab();
+    const left = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    await waitFor(() => left.isLive && !left.loading, { timeoutMs: 10_000 });
+    runCommand('set-pref', { key: 'tabSleep', value: '5' });
+    if (back) await tabs.activate(back.id);
+    await sleep(4500);
+    const awakeUnderFive = left.isLive && left.tier !== Tier.DISCARDED;
+    runCommand('set-pref', { key: 'tabSleep', value: 'instant' });
+    const sleptAtOnce = await waitFor(() => left.tier === Tier.DISCARDED && !left.isLive, { timeoutMs: 8000 });
+    runCommand('set-pref', { key: 'tabSleep', value: was });
+    check('tabs sleep when the setting says: not before a chosen time, and at once when asked',
+      awakeUnderFive && sleptAtOnce && governor.cfg.sleepAfterMs === null,
+      `awake 4.5s into "after 5 minutes": ${awakeUnderFive}, asleep under "as soon as I leave": ${sleptAtOnce}, ` +
+      `back to automatic: ${governor.cfg.sleepAfterMs === null}`);
+    tabs.close(left.id);
+  }
+
   // Receipts: what changed since the last look is added to today, a counter
   // that restarts is not taken as negative, and the week has seven days.
   {

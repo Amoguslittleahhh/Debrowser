@@ -4,6 +4,7 @@
 
 ### New
 
+- **Choose when tabs go to sleep.** Settings → Memory → Put tabs to sleep: Automatically (as before - after about 15 minutes out of sight, sooner when memory is short or on battery), as soon as you leave a tab, or after a time you pick from 1 minute to 2 hours. A sleeping tab gives back its memory and reloads when you return to it. Tabs playing sound, on a call, pinned, holding text you have not sent or kept awake for their site stay awake whatever you choose.
 - **Settings, one section at a time.** Settings now shows one section at a time, picked from the list beside it, as Chrome's does. A search still shows matching settings from every section. If you prefer everything on one long page, choose it under Appearance → Settings layout.
 - **Resize developer tools.** Drag the edge between the page and the docked developer tools to give either more room; double-click it to go back to the usual split. The size is remembered.
 - **Turn off the Undo note for closed tabs.** "Offer Undo when a tab closes" in Tabs and windows turns off the "Tab closed · Undo" note. Ctrl+Shift+T still reopens a closed tab.

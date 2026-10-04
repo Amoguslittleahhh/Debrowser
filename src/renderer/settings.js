@@ -371,9 +371,26 @@ const SECTIONS = {
 
   resources: [
     {
+      key: 'tabSleep',
+      label: 'Put tabs to sleep',
+      hint: 'A sleeping tab gives back its memory and reloads when you return. Automatically is after about 15 minutes, sooner when memory is short. Tabs playing sound, on a call, pinned, holding unsent text or kept awake for their site stay awake.',
+      type: 'select',
+      options: [
+        { value: 'auto', name: 'Automatically' },
+        { value: 'instant', name: 'As soon as I leave them' },
+        { value: '1', name: 'After 1 minute' },
+        { value: '5', name: 'After 5 minutes' },
+        { value: '10', name: 'After 10 minutes' },
+        { value: '15', name: 'After 15 minutes' },
+        { value: '30', name: 'After 30 minutes' },
+        { value: '60', name: 'After 1 hour' },
+        { value: '120', name: 'After 2 hours' }
+      ]
+    },
+    {
       key: 'batteryMode',
       label: 'Battery mode',
-      hint: 'Tabs you are not using go to sleep about three times sooner, and a background tab still using the processor is paused, so a laptop lasts longer. A leaf in the memory meter shows it is on.',
+      hint: 'Tabs you are not using go to sleep about three times sooner when sleeping is automatic, and a background tab still using the processor is paused, so a laptop lasts longer. A leaf in the memory meter shows it is on.',
       type: 'select',
       options: [
         { value: 'auto', name: 'On battery' },

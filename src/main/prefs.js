@@ -44,6 +44,9 @@ const RETIRED_STRIP_COLOURS = {
   '#2a1c22': '#231a1a'    // Wine   -> Oxblood
 };
 
+/** The choices for when an unused tab sleeps: automatic, at once, or after so many minutes. */
+const TAB_SLEEP = ['auto', 'instant', '1', '5', '10', '15', '30', '60', '120'];
+
 /** The zoom ladder, shared with main.js so a saved default is always a step. */
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
 
@@ -262,6 +265,11 @@ const SCHEMA = {
   autoArchiveDays: { def: 0, ok: (v) => [0, 1, 7, 30].includes(v) },
   // Battery mode: tabs sleep sooner to save power - 'auto' on battery only.
   batteryMode: { def: 'auto', ok: (v) => v === 'auto' || v === 'always' || v === 'off' },
+  // When a tab you are not using is put to sleep - its page let go of, and
+  // loaded again when you come back (governor, runIdleLadder): 'auto' as time
+  // and memory call for, 'instant' as soon as you switch away, or after that
+  // many minutes out of sight. The tabs the governor protects stay protected.
+  tabSleep: { def: 'auto', ok: (v) => typeof v === 'string' && TAB_SLEEP.includes(v) },
   // JavaScript hardening for the ordinary browser, at the next start:
   // 'full' leaves the engine as it is; 'balanced' and 'maximum' are the
   // private window's levels (incognito/mode.js JS_LEVELS).
@@ -594,6 +602,9 @@ function applyPrefs(cfg, prefs, log = () => {}) {
   if (!pinned.maxLiveTabs) {
     cfg.maxLiveTabs = liveTabs != null ? liveTabs : cfg.autoLiveTabs;
   }
+  // When an unused tab sleeps: null is the governor's own timing.
+  const sleep = prefs.get('tabSleep');
+  cfg.sleepAfterMs = sleep === 'instant' ? 0 : /^\d+$/.test(sleep) ? Number(sleep) * 60_000 : null;
 
   log('prefs', `budget=${cfg.memoryBudgetMB}MB liveTabs=${cfg.maxLiveTabs} ` +
                `theme=${prefs.get('theme')} search=${prefs.get('searchEngine')}`);
