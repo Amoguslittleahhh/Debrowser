@@ -21,7 +21,7 @@ const fs = require('fs');
 const dir = __dirname;
 const NAME = process.argv[2];
 if (!NAME || !/^[a-z-]+$/.test(NAME)) {
-  console.error('usage: node tools/build-helper.js <mem-probe|mem-trim|net-watch>');
+  console.error('usage: node tools/build-helper.js <mem-probe|mem-trim|net-watch|setup-ui>');
   process.exit(2);
 }
 const src = path.join(dir, `${NAME}.c`);
@@ -43,20 +43,30 @@ if (process.platform === 'win32') {
   // MSVC first, because that is what the release runner has; MinGW second, so
   // a developer machine with it works too.
   // What each helper links against. psapi is where QueryWorkingSet lives;
-  // net-watch reads the connection table from the IP helper API.
-  const LIBS = { 'net-watch': ['iphlpapi', 'ws2_32'] }[NAME] || ['psapi'];
+  // net-watch reads the connection table from the IP helper API; setup-ui,
+  // the installer's window, draws with GDI and GDI+.
+  const LIBS = {
+    'net-watch': ['iphlpapi', 'ws2_32'],
+    'setup-ui': ['user32', 'gdi32', 'gdiplus', 'shell32', 'advapi32']
+  }[NAME] || ['psapi'];
+  // A window, not a console program: no console flashes up behind it.
+  const GUI = NAME === 'setup-ui';
   if (have('cl')) {
-    ok = run('cl', ['/nologo', '/O2', '/W3', src, '/link', ...LIBS.map((l) => `${l}.lib`), `/OUT:${out}`]);
+    ok = run('cl', ['/nologo', '/O2', '/W3', src, '/link', ...LIBS.map((l) => `${l}.lib`),
+      ...(GUI ? ['/SUBSYSTEM:WINDOWS'] : []), `/OUT:${out}`]);
     for (const junk of [`${NAME}.obj`]) {
       try { fs.unlinkSync(path.join(process.cwd(), junk)); } catch { /* nothing to clean */ }
     }
   } else if (have('gcc')) {
-    ok = run('gcc', ['-O2', '-Wall', src, '-o', out, ...LIBS.map((l) => `-l${l}`)]);
+    ok = run('gcc', ['-O2', '-Wall', ...(GUI ? ['-mwindows'] : []), src, '-o', out, ...LIBS.map((l) => `-l${l}`)]);
   } else {
     console.error(`build ${NAME}: no compiler found. Open a Visual Studio developer prompt, ` +
                   'or run this from a job that has run ilammy/msvc-dev-cmd.');
     process.exit(1);
   }
+} else if (NAME === 'setup-ui') {
+  console.error('build setup-ui: Windows only - it is the Windows installer\'s window.');
+  process.exit(1);
 } else if (process.platform === 'darwin') {
   // Universal, because one macOS runner builds both the x64 and the arm64
   // artifact and would otherwise put its own architecture into each. The Intel

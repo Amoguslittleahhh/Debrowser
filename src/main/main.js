@@ -73,6 +73,7 @@ const { Camouflage } = require('./incognito/camouflage');
 const { suggest, TAB_SCOPE } = require('./suggest');
 const { classifyAddress } = require('./address');
 const palette = require('./palette');
+const uninstall = require('./uninstall');
 const { SitePermissions, PermissionAsks } = require('./site-permissions');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
@@ -296,15 +297,19 @@ if (!INCOGNITO && (SMOKE_TEST || SPEED_TEST || (argv.includes('--bench-test') &&
 const earlyPrefs = INCOGNITO
   ? new Prefs(log, { file: path.join(incognitoCtx.normalUserData, 'preferences.json'), readOnly: true })
   : new Prefs(log);
+// `--uninstall`: the uninstall window and nothing else (uninstall.js). It
+// reads the preferences for the design and writes nothing in the profile - no
+// backup, no start counted - so cancelling it leaves the profile as it was.
+const UNINSTALL = !INCOGNITO && !OFFLINE_MODE && uninstall.requested(process.argv);
 // Before this version writes to the profile for the first time, a copy of it
 // as the last version left it (store-file.js): what an update that goes wrong
 // can be rolled back to. Not in a private window, or a test run.
-if (!INCOGNITO && !OFFLINE_MODE) {
+if (!INCOGNITO && !OFFLINE_MODE && !UNINSTALL) {
   const seen = earlyPrefs.get('seenVersion');
   if (seen && seen !== app.getVersion()) backupProfile(app.getPath('userData'), seen, log);
 }
 // Starts of this version that never got going (startup-guard.js).
-const startupGuard = !INCOGNITO && !OFFLINE_MODE ? new StartupGuard(app.getPath('userData'), app.getVersion(), log) : null;
+const startupGuard = !INCOGNITO && !OFFLINE_MODE && !UNINSTALL ? new StartupGuard(app.getPath('userData'), app.getVersion(), log) : null;
 const failedStarts = startupGuard ? startupGuard.begin() : 0;
 // An error nothing caught: written down for the next start to offer as a
 // report (crash-report.js), and logged. Electron's own response - a modal
@@ -343,6 +348,9 @@ const STREAMVIEW_TEST = !INCOGNITO && require('./streamview-probe').run();
 // and a second incognito launch lands in the first incognito process.
 if (STREAMVIEW_TEST) {
   // Nothing else to start.
+} else if (UNINSTALL) {
+  // The window, or - if the browser is open - handing it this launch.
+  uninstall.run({ prefs: earlyPrefs.all(), log });
 } else if (!app.requestSingleInstanceLock()) {
   // A private window is already open and gets a new tab instead. Anything the
   // launcher made for this run - its directory, a Tor already starting - goes
@@ -1801,6 +1809,17 @@ function main() {
   });
 
   app.on('second-instance', (_event, secondArgv) => {
+    // Uninstalling while the browser is open: the window is shown here, so
+    // that confirming closes the browser the ordinary way (uninstall.js).
+    if (!INCOGNITO && uninstall.requested(secondArgv)) {
+      uninstall.show({
+        prefs: (prefs || earlyPrefs).all(),
+        browserOpen: true,
+        onConfirmed: () => { quitState.confirmed = true; app.quit(); },
+        log
+      });
+      return;
+    }
     // A window kept ready is shown, with the tab it already has.
     if (shell && shell.held) {
       shell.release();

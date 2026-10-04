@@ -198,6 +198,10 @@ win:
 ## pages to be out of place: a small progress window, then the browser itself,
 ## on its own welcome tour. What it gives up is choosing the folder; it is the
 ## per-user Programs folder, as every per-user browser's is.
+##
+## Even that progress window is ours (tools/setup-ui.c, in the browser's own
+## palette), and uninstalling asks in a browser window (src/main/uninstall.js)
+## instead of a message box. packaging/installer.nsh wires both in.
 nsis:
   oneClick: true
   perMachine: false           # install per-user, so no UAC prompt

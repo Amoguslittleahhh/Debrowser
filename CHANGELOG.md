@@ -8,6 +8,7 @@
 - **Settings, one section at a time.** Settings now shows one section at a time, picked from the list beside it, as Chrome's does. A search still shows matching settings from every section. If you prefer everything on one long page, choose it under Appearance → Settings layout.
 - **Resize developer tools.** Drag the edge between the page and the docked developer tools to give either more room; double-click it to go back to the usual split. The size is remembered.
 - **Turn off the Undo note for closed tabs.** "Offer Undo when a tab closes" in Tabs and windows turns off the "Tab closed · Undo" note. Ctrl+Shift+T still reopens a closed tab.
+- **Windows: installing and uninstalling, in Debrowser's own design.** The installer shows its own window in place of the standard Windows progress box, and opens Debrowser when it is done. If Debrowser is running, the same window asks before closing it. Uninstalling from Settings → Apps opens a Debrowser window that asks whether to keep or delete your browsing data, and the removal shows its progress in the same style. Silent installs and uninstalls (/S), which updates and management tools use, still show no window.
 
 ### Improved
 

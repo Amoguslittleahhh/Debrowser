@@ -5192,6 +5192,33 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `longest chrome task switching tabs ${Math.round(longest)} ms (${50 * SLACK}), idle chrome CPU ${idleCpu?.toFixed(2)}% (${SLACK})`);
   }
 
+  // The uninstall window (uninstall.js), as an open browser shows it: drawn in
+  // the current design, measured to its content, and harmless here - with no
+  // uninstaller beside this executable, confirming says so and quits nothing.
+  {
+    const { BrowserWindow: BW } = require('electron');
+    const uninstall = require('./uninstall');
+    let quit = false;
+    const win = uninstall.show({ prefs: prefs.all(), browserOpen: true, onConfirmed: () => { quit = true; } });
+    const shown = await waitFor(() => win.isVisible(), { timeoutMs: 5000 });
+    const page = await win.webContents.executeJavaScript(`({
+      design: document.body.dataset.design, lead: document.getElementById('lead').textContent,
+      height: document.getElementById('card').getBoundingClientRect().height })`).catch(() => ({}));
+    const [, contentHeight] = win.getContentSize();
+    await win.webContents.executeJavaScript("document.getElementById('confirm').click()");
+    const refused = await waitFor(() => win.webContents.executeJavaScript(
+      "!document.getElementById('error').hidden && !document.body.classList.contains('leaving')"), { timeoutMs: 3000 });
+    const again = uninstall.show({ prefs: prefs.all(), browserOpen: true, onConfirmed: () => { quit = true; } });
+    await win.webContents.executeJavaScript("document.getElementById('cancel').click()");
+    const closed = await waitFor(() => win.isDestroyed(), { timeoutMs: 3000 });
+    check('the uninstall window draws in the browser\'s design, and confirming without an uninstaller quits nothing',
+      shown && page.design === prefs.get('design') && /is open/.test(page.lead || '') &&
+        Math.abs(contentHeight - Math.ceil(page.height)) <= 1 && refused && !quit && again === win && closed &&
+        !BW.getAllWindows().some((w) => !w.isDestroyed() && w.getTitle() === 'Uninstall Debrowser'),
+      `shown ${shown}, ${JSON.stringify(page)}, window ${contentHeight}px, refused ${refused}, quit ${quit}, ` +
+      `one window ${again === win}, closed ${closed}`);
+  }
+
   // Fuzzing the command channel: every command the browser's own pages may
   // send, with junk where its payload should be - nothing must throw, and the
   // browser must still work after. Left out: what opens a system dialog,

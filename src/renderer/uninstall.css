@@ -1,0 +1,94 @@
+/*
+ * Uninstalling (src/main/uninstall.js): a window of its own, so the page is
+ * the card. The whole window drags, as a dialog with no title bar should;
+ * the controls opt out.
+ */
+
+html, body { height: auto; }
+
+.uninstall-body {
+  margin: 0;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  -webkit-app-region: drag;
+  user-select: none;
+  overflow: hidden;
+}
+
+#card {
+  padding: 24px 24px 20px;
+  border: 1px solid var(--border);
+  /* The window's own edge: a rule rather than nothing, on a palette where the
+     card and the desktop behind it can be the same dark. The window is sized
+     to this box (uninstall-size), border included. */
+  box-sizing: border-box;
+  animation: uninstall-in 200ms var(--ease);
+}
+
+@keyframes uninstall-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: var(--text);
+}
+.brand-mark { display: block; }
+.brand-dot { fill: var(--accent); }
+.brand-name { font-weight: var(--fw-bold); letter-spacing: -0.01em; }
+
+h1 {
+  margin: 0 0 6px;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-title, normal);
+}
+
+#lead {
+  margin: 0 0 18px;
+  line-height: var(--lh-body);
+  color: var(--text-dim);
+}
+
+.choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg);
+  -webkit-app-region: no-drag;
+}
+.choice input { width: 17px; height: 17px; margin: 1px 0 0; flex: none; accent-color: var(--crit); }
+.choice > span { display: grid; gap: 3px; }
+.choice-title { line-height: var(--lh-body); }
+.choice-detail { font-size: var(--fs-small); line-height: var(--lh-body); color: var(--text-dim); }
+/* Deleting is the step that cannot be taken back, so it says so once chosen. */
+.choice:has(input:checked) { border-color: color-mix(in srgb, var(--crit) 55%, var(--border)); }
+
+.error {
+  margin: -8px 0 16px;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+  color: var(--crit);
+}
+
+.actions button { -webkit-app-region: no-drag; }
+
+/* Confirmed: the window stays until the browser closes, and says what is happening. */
+body.leaving .actions button { pointer-events: none; }
+body.leaving #confirm { opacity: 0.7; }
+
+/* Removing a program is not the accent's "go ahead": the warning colour,
+   deepened so white text on it reads at 4.5:1 - the dark palettes' --crit is
+   a text colour, too light to carry white. */
+.btn.primary.danger { background: color-mix(in srgb, var(--crit) 70%, #000); }
+.btn.primary.danger:hover { background: color-mix(in srgb, var(--crit) 80%, #000); }

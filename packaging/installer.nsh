@@ -1,3 +1,119 @@
+; The installer's and uninstaller's own window, in the browser's design
+; (tools/setup-ui.c), instead of NSIS's: its one-click progress box is drawn
+; with the system's dialog controls, which nothing restyles, and its uninstall
+; question is a system message box.
+;
+; Install: .onInit starts the window, and only if that worked makes the
+; installer silent - which is what stops NSIS drawing its own. A window that
+; cannot start (not built, or refused by the system as an unsigned program)
+; leaves the stock one in place, so there is always something on screen. A
+; silent install (/S, and every update) stays as it was: no window at all.
+;
+; Uninstall: Windows' Apps list runs `UninstallString`, which customInstall
+; points at the browser itself (`--uninstall`, src/main/uninstall.js) - the
+; question in the browser's own window. That starts this uninstaller with /S
+; and --wait-pid, and the window here shows the progress.
+;
+; Embedded only when built (npm run build:setupui; the release workflow does);
+; a local package without it gets the stock windows and the stock uninstaller.
+!if /FileExists "${PROJECT_DIR}\tools\setup-ui.exe"
+  !define SETUP_UI "${PROJECT_DIR}\tools\setup-ui.exe"
+!endif
+!define SETUP_UI_CLASS "DebrowserSetup"
+!define SETUP_UI_ASK 0x8001    ; WM_APP + 1: "Debrowser is open" - answers 1 to go on
+!define SETUP_UI_DONE 0x8002   ; WM_APP + 2: fade out and close
+
+!ifdef SETUP_UI
+  ; Start the window for this process. Leaves the error flag set if it could not.
+  !macro setupUiStart MODE
+    Push $0
+    InitPluginsDir
+    ClearErrors
+    File "/oname=$PLUGINSDIR\setup-ui.exe" "${SETUP_UI}"
+    ${IfNot} ${Errors}
+      ; Lets it come to the front: started by a program the user just opened,
+      ; it is entitled to, but Windows only believes that when told.
+      System::Call 'user32::AllowSetForegroundWindow(i -1)'
+      System::Call 'kernel32::GetCurrentProcessId() i .r0'
+      Exec '"$PLUGINSDIR\setup-ui.exe" ${MODE} $0'
+    ${EndIf}
+    Pop $0
+  !macroend
+
+  ; The window's handle into OUT, waiting up to three seconds for it to open; 0 if it never does.
+  !macro setupUiWindow OUT
+    Push $R9
+    StrCpy ${OUT} 0
+    ${For} $R9 1 30
+      FindWindow ${OUT} "${SETUP_UI_CLASS}"
+      ${If} ${OUT} != 0
+        ${ExitFor}
+      ${EndIf}
+      Sleep 100
+    ${Next}
+    Pop $R9
+  !macroend
+!endif
+
+!macro customInit
+  !ifdef SETUP_UI
+    ${IfNot} ${Silent}
+      !insertmacro setupUiStart install
+      ${IfNot} ${Errors}
+        SetSilent silent
+      ${EndIf}
+    ${EndIf}
+  !endif
+!macroend
+
+; Replaces electron-builder's check, then runs it: what differs is who asks.
+; Defining this makes electron-builder leave out what its own check needs
+; (allowOnlyOneInstallerInstance.nsh), so it is brought in here.
+!include "getProcessInfo.nsh"
+Var pid
+!macro customCheckAppRunning
+  !insertmacro IS_POWERSHELL_AVAILABLE
+  !ifdef BUILD_UNINSTALLER
+    ; Started by the browser's uninstall window, which quits as this starts:
+    ; wait for it to be gone, so the check below finds nothing to close.
+    ClearErrors
+    ${GetParameters} $R0
+    ${GetOptions} $R0 "--wait-pid=" $R1
+    ${IfNot} ${Errors}
+      !ifdef SETUP_UI
+        !insertmacro setupUiStart uninstall
+      !endif
+      System::Call 'kernel32::OpenProcess(i 0x00100000, i 0, i $R1) p .R2'
+      ${If} $R2 != 0
+        System::Call 'kernel32::WaitForSingleObject(p $R2, i 15000)'
+        System::Call 'kernel32::CloseHandle(p $R2)'
+      ${EndIf}
+    ${EndIf}
+  !else
+    !ifdef SETUP_UI
+      ; Our window is up, so the installer is silent and the stock check would
+      ; close a running Debrowser without asking. Asked in our window instead.
+      ${If} ${FileExists} "$PLUGINSDIR\setup-ui.exe"
+      ${AndIfNot} ${isUpdated}
+        !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
+        ${If} $R0 == 0
+          !insertmacro setupUiWindow $R2
+          ${If} $R2 != 0
+            SendMessage $R2 ${SETUP_UI_ASK} 0 0 $R3
+            ${If} $R3 != 1
+              Quit
+            ${EndIf}
+          ${Else}
+            MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" IDOK +2
+            Quit
+          ${EndIf}
+        ${EndIf}
+      ${EndIf}
+    !endif
+  !endif
+  !insertmacro _CHECK_APP_RUNNING
+!macroend
+
 ; Incognito's kill switch on Windows.
 ;
 ; A private window runs as its own executable name, Debrowser-Incognito.exe - a
@@ -74,6 +190,24 @@
   ${If} $0 != 0
     ExecShellWait "runas" "netsh" 'advfirewall firewall add rule name="${INCOGNITO_RULE}" dir=out action=block program="$INSTDIR\${INCOGNITO_EXE}" remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff profile=any enable=yes' SW_HIDE
   ${EndIf}
+
+  ; Uninstalling from Windows' Apps list opens the browser's own window
+  ; (src/main/uninstall.js) rather than the uninstaller's message box. The
+  ; quiet string, which management tools use, still runs it with /S.
+  WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" UninstallString '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --uninstall'
+
+  !ifdef SETUP_UI
+    ${If} ${FileExists} "$PLUGINSDIR\setup-ui.exe"
+      ; Our window made this install silent, and electron-builder starts the
+      ; app after a silent install only when told to (--force-run): started
+      ; here, as the window fades.
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" ""
+      FindWindow $0 "${SETUP_UI_CLASS}"
+      ${If} $0 != 0
+        SendMessage $0 ${SETUP_UI_DONE} 0 0 /TIMEOUT=2000
+      ${EndIf}
+    ${EndIf}
+  !endif
 !macroend
 
 !macro customUnInstall
