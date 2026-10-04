@@ -22,6 +22,7 @@
  *   measure <pid>   ->  ok <pid> <proportional-bytes> <private-bytes>
  *                   ->  err <pid> <errno>
  *   caps            ->  caps <mechanism> <0|1>
+ *   eco <pid> <0|1> ->  ok <pid> 1  |  err <pid> <errno>   (macOS; see set_eco)
  *
  * Every reply names what it answers, which is the correlation the driver needs
  * to drop a late reply to a request that already timed out.
@@ -199,6 +200,30 @@ static int measure_pid(unsigned long pid, unsigned long long *pss,
 
 #endif
 
+/*
+ * eco <pid> <0|1> - efficiency mode for one process, on battery.
+ *
+ * macOS: the Darwin background band, what `taskpolicy -b` sets - lowest CPU
+ * and I/O priority, and on Apple silicon the efficiency cores. Allowed on a
+ * process of one's own user. Windows and Linux do this in mem-trim, which
+ * runs there already; here it answers so the protocol stays one shape.
+ */
+#if defined(__APPLE__)
+static int set_eco(unsigned long pid, int on, unsigned long *err) {
+  if (setpriority(PRIO_DARWIN_PROCESS, (id_t)pid, on ? PRIO_DARWIN_BG : 0) != 0) {
+    *err = (unsigned long)errno;
+    return -1;
+  }
+  return 0;
+}
+#else
+static int set_eco(unsigned long pid, int on, unsigned long *err) {
+  (void)pid; (void)on;
+  *err = 38;   /* ENOSYS: not this helper's job on this platform */
+  return -1;
+}
+#endif
+
 static int supported(void) {
   return strcmp(MECHANISM, MECHANISM_NONE) == 0 ? 0 : 1;
 }
@@ -244,6 +269,17 @@ int main(void) {
       } else {
         printf("ok %lu %llu %llu\n", pid, pss, priv);
       }
+      fflush(stdout);
+      continue;
+    }
+
+    if (strncmp(line, "eco ", 4) == 0) {
+      unsigned long pid = 0;
+      int on = 0;
+      unsigned long err = 0;
+      if (sscanf(line + 4, "%lu %d", &pid, &on) != 2 || pid == 0) { printf("err 0 22\n"); fflush(stdout); continue; }
+      if (set_eco(pid, on != 0, &err) != 0) printf("err %lu %lu\n", pid, err);
+      else printf("ok %lu 1\n", pid);
       fflush(stdout);
       continue;
     }

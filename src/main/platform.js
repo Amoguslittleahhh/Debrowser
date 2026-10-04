@@ -586,6 +586,58 @@ function probeBinaryPath() {
   return PROBE_BINARY;
 }
 
+/* ------------------------------------------------------------------ */
+/* Efficiency mode                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Each process's efficiency mode as last set, so a command goes out only on a
+ * change: the governor re-asserts priorities every tick, and a helper round
+ * trip per tab per tick would cost the very power this is meant to save.
+ */
+const ecoState = new Map();
+/** How efficiency mode has been refused, logged once each. */
+const ecoRefused = new Set();
+
+/**
+ * Put a process into the operating system's efficiency mode, or take it out.
+ *
+ *   Windows  EcoQoS (power throttling), as Task Manager's Efficiency mode
+ *   macOS    the Darwin background band, as `taskpolicy -b`
+ *   Linux    a utilisation clamp and idle-class I/O on every thread
+ *
+ * Through the helper that already runs on each: mem-trim on Windows and Linux,
+ * mem-probe on macOS. Never rejects; resolves whether it took. Advisory, like
+ * priority - a refusal leaves the process as it was.
+ */
+async function setEfficiency(pid, on, log = () => {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  on = on === true;
+  if ((ecoState.get(pid) ?? false) === on) return true;
+  ecoState.set(pid, on);
+  if (ecoState.size > TRIM_MAP_LIMIT) ecoState.delete(ecoState.keys().next().value);
+  const helperFor = isMac ? getMeasureHelper(log) : (isLinux || isWindows) ? trimHelper(log) : null;
+  if (!helperFor) return false;
+  // The helper was made with the governor's log; a caller without one uses it.
+  if (log.length === 0 && helperFor.log) log = helperFor.log;
+  const reply = await helperFor.request(`eco ${pid} ${on ? 1 : 0}`).catch(() => null);
+  const ok = typeof reply === 'string' && reply.startsWith('ok ');
+  if (!ok) {
+    ecoState.delete(pid);
+    const why = typeof reply === 'string' ? reply.split(' ').slice(2).join(' ') : 'no answer';
+    if (!ecoRefused.has(why)) {
+      ecoRefused.add(why);
+      log(`efficiency mode refused for pid ${pid}: ${why || reply}`);
+    }
+  }
+  return ok;
+}
+
+/** What efficiency mode was last set to for a process (false if never). */
+function efficiencyOf(pid) {
+  return ecoState.get(pid) === true;
+}
+
 function measureCapability(log) {
   return getMeasureHelper(log).capability();
 }
@@ -632,6 +684,7 @@ function trimBackoffMs(pid) {
  */
 function forgetProcess(pid) {
   if (helper && pid) helper.forgetProcess(pid);
+  ecoState.delete(pid);
 }
 
 /** Release the trim helper. Called from `before-quit`. */
@@ -932,6 +985,8 @@ module.exports = {
   isWindows,
   setProcessPriority,
   getProcessPriority,
+  setEfficiency,
+  efficiencyOf,
   trimProcessMemory,
   untrimProcessMemory,
   trimBackoffMs,

@@ -376,6 +376,85 @@ static void available_bytes(long long *avail, long long *backing_total,
 #define TRIM_PID_T pid_t
 #endif
 
+/*
+ * eco <pid> <0|1> - efficiency mode for one process, on battery.
+ *
+ * Windows: EcoQoS - PROCESS_POWER_THROTTLING_EXECUTION_SPEED, half of what Task
+ * Manager's "Efficiency mode" sets (the other half, the low priority class,
+ * the governor already gives background tabs). The scheduler then prefers
+ * efficient cores and low clock speeds for the process.
+ *
+ * Linux: the nearest things the kernel has, on every thread of the process -
+ * a utilisation clamp (uclamp_max, a quarter of full speed: the hint that keeps
+ * a task on low frequencies and little cores) and idle-class I/O. Nice is
+ * already the lowest, from the governor. Both are allowed on one's own
+ * processes without privilege; a kernel without uclamp just says so.
+ *
+ * Replies `ok <pid> <threads changed>` or `err <pid> <errno>`.
+ */
+#if defined(_WIN32)
+static long set_eco(unsigned long pid, int on, int *err) {
+    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION, FALSE, (DWORD)pid);
+    if (!h) { *err = (int)GetLastError(); return -1; }
+    PROCESS_POWER_THROTTLING_STATE state;
+    memset(&state, 0, sizeof(state));
+    state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    state.StateMask = on ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+    BOOL ok = SetProcessInformation(h, ProcessPowerThrottling, &state, sizeof(state));
+    if (!ok) *err = (int)GetLastError();
+    CloseHandle(h);
+    return ok ? 1 : -1;
+}
+#else
+#include <dirent.h>
+
+struct eco_sched_attr {
+    unsigned int size, sched_policy;
+    unsigned long long sched_flags;
+    int sched_nice;
+    unsigned int sched_priority;
+    unsigned long long sched_runtime, sched_deadline, sched_period;
+    unsigned int sched_util_min, sched_util_max;
+};
+#define ECO_KEEP_POLICY 0x08
+#define ECO_KEEP_PARAMS 0x10
+#define ECO_UTIL_CLAMP_MAX 0x40
+#define ECO_IOPRIO_WHO_PROCESS 1
+#define ECO_IOPRIO_CLASS_SHIFT 13
+#define ECO_IOPRIO_CLASS_IDLE 3
+
+static long set_eco(pid_t pid, int on, int *err) {
+    char dir[64];
+    snprintf(dir, sizeof(dir), "/proc/%d/task", (int)pid);
+    DIR *d = opendir(dir);
+    if (!d) { *err = errno; return -1; }
+    long changed = 0;
+    int last = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        long tid = strtol(e->d_name, NULL, 10);
+        if (tid <= 0) continue;
+        struct eco_sched_attr a;
+        memset(&a, 0, sizeof(a));
+        a.size = sizeof(a);
+        a.sched_flags = ECO_KEEP_POLICY | ECO_KEEP_PARAMS | ECO_UTIL_CLAMP_MAX;
+        a.sched_util_max = on ? 256 : 1024;   /* of 1024: a quarter, or no clamp */
+        int clamped = syscall(SYS_sched_setattr, (pid_t)tid, &a, 0) == 0;
+        if (!clamped) last = errno;
+        /* Off is class none (0): back to the default every process starts
+           with, which follows its nice value - not a fixed best-effort level. */
+        int io = on ? (ECO_IOPRIO_CLASS_IDLE << ECO_IOPRIO_CLASS_SHIFT) : 0;
+        int quiet = syscall(SYS_ioprio_set, ECO_IOPRIO_WHO_PROCESS, (int)tid, io) == 0;
+        if (!quiet) last = errno;
+        if (clamped || quiet) changed++;
+    }
+    closedir(d);
+    if (changed == 0) { *err = last ? last : ESRCH; return -1; }
+    return changed;
+}
+#endif
+
 int main(void) {
     char line[128];
 
@@ -422,6 +501,15 @@ int main(void) {
             long long advised = trim_process((TRIM_PID_T)pid, &err);
             if (advised < 0) printf("err %ld %d\n", pid, err);
             else printf("ok %ld %lld\n", pid, advised);
+            continue;
+        }
+        int on = 0;
+        if (sscanf(line, "eco %ld %d", &pid, &on) == 2 && pid > 0) {
+            int err = 0;
+            long changed = set_eco((TRIM_PID_T)pid, on != 0, &err);
+            if (changed < 0) printf("err %ld %d\n", pid, err);
+            else printf("ok %ld %ld\n", pid, changed);
+            fflush(stdout);
             continue;
         }
         printf("err 0 %d\n", EINVAL);

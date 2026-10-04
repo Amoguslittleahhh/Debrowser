@@ -173,9 +173,34 @@ class Governor {
     return this.saver ? (this.cfg.saverTickMs || this.cfg.tickMs) : this.cfg.tickMs;
   }
 
+  /**
+   * The operating system's efficiency mode for background tabs, in battery
+   * mode (platform.setEfficiency: EcoQoS on Windows, the background band on
+   * macOS, a utilisation clamp and idle I/O on Linux). By process, since a
+   * renderer can hold several tabs: one in front, playing sound, or on a call
+   * keeps its whole process at full speed - EcoQoS on an audio renderer is
+   * how a song starts to stutter. A command goes out only on a change.
+   */
+  applyEfficiency() {
+    const awake = new Set();
+    const all = this.tabs.all();
+    const pids = new Map();
+    for (const tab of all) {
+      if (!tab.isLive) continue;
+      const pid = tab.pid;
+      if (!pid) continue;
+      pids.set(tab, pid);
+      if (tab.visible || tab.tier === Tier.ACTIVE || tab.audible || tab.capturing || tab.boosted) awake.add(pid);
+    }
+    for (const pid of new Set(pids.values())) {
+      platform.setEfficiency(pid, this.saver === true && !awake.has(pid), this.log);
+    }
+  }
+
   /** Battery mode came or went: tick at the matching pace. */
   setSaver(on) {
     this.saver = on;
+    this.applyEfficiency();
     if (this.timer && this.tickEvery !== this.tickInterval()) {
       this.stop();
       this.start();
@@ -212,6 +237,7 @@ class Governor {
       await this.runHeapLimits();
       await this.enforceLiveTabCap();
       await this.enforceBudget();
+      this.applyEfficiency();
 
       this.onUpdate(this.snapshot());
     } finally {

@@ -1360,6 +1360,35 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('battery mode turns the saver on and off from the setting', on && off, `on ${on}, off ${off}`);
   }
 
+  // Efficiency mode (platform.setEfficiency) for a background tab in battery
+  // mode, never for the one in front, and off again with battery mode. On
+  // Linux the kernel is asked what it now holds - the I/O class - rather than
+  // the browser's own record of what it asked for.
+  if (governor.applySaver) {
+    const was = prefs.get('batteryMode');
+    const front = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    const back = tabs.create({ url: pageUrl('article.html'), activate: false, realise: true });
+    await waitFor(() => front.isLive && back.isLive && !front.loading && !back.loading, { timeoutMs: 10_000 });
+    const ioClass = (pid) => {
+      if (process.platform !== 'linux' || !pid) return null;
+      try { return require('child_process').execFileSync('ionice', ['-p', String(pid)], { encoding: 'utf8' }).split(':')[0].trim(); } catch { return null; }
+    };
+    const separate = front.pid && back.pid && front.pid !== back.pid;
+    runCommand('set-pref', { key: 'batteryMode', value: 'always' });
+    await sleep(1500);
+    const on = { back: platform.efficiencyOf(back.pid), front: platform.efficiencyOf(front.pid), io: ioClass(back.pid), frontIo: ioClass(front.pid) };
+    runCommand('set-pref', { key: 'batteryMode', value: 'off' });
+    await sleep(1500);
+    const off = { back: platform.efficiencyOf(back.pid), io: ioClass(back.pid) };
+    runCommand('set-pref', { key: 'batteryMode', value: was });
+    const kernelAgrees = process.platform !== 'linux' || on.io === null || (on.io === 'idle' && off.io !== 'idle' && on.frontIo !== 'idle');
+    check('battery mode puts background tabs, and only those, in the system\'s efficiency mode',
+      separate && on.back === true && on.front === false && off.back === false && kernelAgrees,
+      `separate processes ${separate}; on: ${JSON.stringify(on)}; off: ${JSON.stringify(off)}`);
+    tabs.close(back.id);
+    tabs.close(front.id);
+  }
+
   // And what battery mode saves: a slower tick, and a steady text cursor - in
   // the browser's own views (marked from the state) and in a website (laid by
   // the browser) - each gone again when it is turned off. A blinking cursor

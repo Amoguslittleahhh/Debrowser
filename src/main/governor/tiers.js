@@ -138,6 +138,11 @@ async function promote(tab, target, ctx) {
     tab.cdp.detach();
   }
 
+  // Out of efficiency mode at once, not at the next tick (governor,
+  // applyEfficiency): on battery that is up to five seconds of a page in
+  // front of the user running throttled.
+  if (target === Tier.ACTIVE && tab.pid) platform.setEfficiency(tab.pid, false);
+
   // Note: background throttling is deliberately left to Chromium, which
   // already throttles a hidden page's timers and rAF on its own. Toggling
   // `setBackgroundThrottling` at runtime would add nothing on top of that -

@@ -23,6 +23,9 @@ function compileInHelper(kind, payload = {}, { timeoutMs = 120_000 } = {}) {
       reject(err);
       return;
     }
+    // Background work by nature, on battery or not: efficiency mode
+    // (platform.setEfficiency) from the moment it starts.
+    child.once('spawn', () => { if (child.pid) require('./platform').setEfficiency(child.pid, true); });
     let done = false;
     const finish = (fn, value) => {
       if (done) return;
