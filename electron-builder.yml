@@ -136,6 +136,13 @@ win:
   ## process. Shipping a second path to the same number would be one more thing
   ## to keep honest.
   extraResources:
+    # The private window's own icon, for its taskbar button and the jump
+    # list entry that opens one (src/main/private-icon.js). Outside the
+    # archive: the shell reads the file itself.
+    - from: build/icon-private.ico
+      to: icon-private.ico
+    - from: build/icon-private.png
+      to: icon-private.png
     - from: native/helpers
       to: tools
       filter:
@@ -256,6 +263,9 @@ mac:
   ## Same helper, macOS build. `proc_pid_rusage` needs no task port and no
   ## debugger entitlement, so the hardened runtime above does not block it.
   extraResources:
+    # The private window's own icon, for its Dock tile (src/main/private-icon.js).
+    - from: build/icon-private.png
+      to: icon-private.png
     - from: native/helpers
       to: tools
       filter:
@@ -314,6 +324,10 @@ linux:
   ## that platform.js will never look for on a platform where trimming is not
   ## implemented.
   extraResources:
+    # The private window's own icon, for its window and the menu entry's
+    # "New private window" action (src/main/private-icon.js).
+    - from: build/icon-private.png
+      to: icon-private.png
     - from: native/helpers
       to: tools
       filter:

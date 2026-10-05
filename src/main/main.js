@@ -123,6 +123,18 @@ if (incognito.INCOGNITO) {
   }
 }
 const INCOGNITO = Boolean(incognitoCtx);
+// A private window is a taskbar button of its own, with its own icon
+// (private-icon.js): on Windows an app ID of its own, or it joins Debrowser's
+// button and shows Debrowser's icon; on macOS, its Dock tile.
+if (INCOGNITO) {
+  if (process.platform === 'win32') app.setAppUserModelId('dev.debrowser.app.private');
+  if (process.platform === 'darwin') {
+    app.whenReady().then(() => {
+      const file = require('./private-icon').privateIconPath('png');
+      if (file && app.dock) app.dock.setIcon(file);
+    });
+  }
+}
 /**
  * A private window kept ready (Settings: "Keep a private window ready"):
  * started with the ordinary browser, Tor connecting, the window built but not
@@ -1715,7 +1727,8 @@ function main() {
         app.setUserTasks([
           { program: process.execPath, arguments: '--new-tab', iconPath: process.execPath, iconIndex: 0,
             title: 'New tab', description: 'Open a new tab' },
-          { program: process.execPath, arguments: '--new-private-window', iconPath: process.execPath, iconIndex: 0,
+          { program: process.execPath, arguments: '--new-private-window',
+            iconPath: require('./private-icon').privateIconPath('ico') || process.execPath, iconIndex: 0,
             title: 'New private window', description: 'Browse through Tor, keeping nothing' }
         ]);
       } catch (err) { log(`jump list: ${err.message}`); }

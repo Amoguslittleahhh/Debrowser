@@ -320,6 +320,11 @@ class BrowserShell {
       minWidth: 620,
       minHeight: 420,
       title: 'Debrowser',
+      // A private window wears its own icon on Windows and Linux, where the
+      // window's icon is the taskbar's (private-icon.js). macOS takes the
+      // Dock's, set in main.js.
+      ...(INCOGNITO && process.platform !== 'darwin' && require('./private-icon').privateIconPath()
+        ? { icon: require('./private-icon').privateIconPath() } : {}),
       // The theme's own surface from the first frame. A fixed dark one flashed
       // on every launch in the light theme.
       backgroundColor: this.surface(),

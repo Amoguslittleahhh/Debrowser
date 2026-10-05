@@ -4,6 +4,7 @@
 
 ### New
 
+- **Private windows have their own icon.** The Debrowser frame on a violet tile, with an open ring where the dot is, on the private window's taskbar button, its Dock tile and the New private window entries in the jump list and Linux menu, so a private window is told apart from an ordinary one at a glance. On Windows a private window now has a taskbar button of its own.
 - **Windows: passkeys in Debrowser's own list.** Signing in with a passkey now lists your accounts for the site in Debrowser itself, as Chrome and Edge do: under the address bar, or as a dropdown under the sign-in field on sites that offer one. Pick an account and Windows Hello only confirms it is you. Use a different passkey still opens Windows' own dialog, for a phone or a security key. Needs Windows 11 22H2 or later; on earlier versions Windows' dialog appears as before. The site never sees your account list, only the one you pick.
 - **Passkeys on macOS and Linux, kept by Debrowser.** Sites that offer to make a passkey now can: Debrowser asks whether to save it, and keeps it encrypted with your saved passwords, behind your passcode. Signing in shows it in the same list as on Windows. Touch ID confirms it is you where the Mac has it, otherwise your Debrowser passcode, which is not asked again for five minutes. Passkeys are listed under Passwords, where you can delete them. They stay on this device and are not shared with iCloud Keychain or other browsers.
 

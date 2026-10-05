@@ -101,6 +101,16 @@ function writeEntry(exe) {
     fs.mkdirSync(path.dirname(iconFile()), { recursive: true });
     fs.copyFileSync(icon, iconFile());
   }
+  // The private window's own, for its action (private-icon.js).
+  let privateIcon = null;
+  const privateSource = require('../private-icon').privateIconPath('png');
+  if (privateSource) {
+    privateIcon = path.join(path.dirname(iconFile()), 'debrowser-private.png');
+    try {
+      fs.mkdirSync(path.dirname(privateIcon), { recursive: true });
+      fs.copyFileSync(privateSource, privateIcon);
+    } catch { privateIcon = null; }
+  }
   const entry = [
     '[Desktop Entry]',
     'Type=Application',
@@ -118,6 +128,7 @@ function writeEntry(exe) {
     '[Desktop Action new-private-window]',
     'Name=New private window',
     `Exec=${execArg(exe)} --new-private-window`,
+    ...(privateIcon ? [`Icon=${privateIcon}`] : []),
     '',
     '[Desktop Action uninstall]',
     'Name=Uninstall Debrowser',
@@ -135,6 +146,7 @@ function removeEntry() {
   if (!integrated()) return;
   fs.rmSync(desktopFile(), { force: true });
   fs.rmSync(iconFile(), { force: true });
+  fs.rmSync(path.join(path.dirname(iconFile()), 'debrowser-private.png'), { force: true });
 }
 
 /** Whether two paths name one file - through a symlink, a hard link or a second spelling. */
