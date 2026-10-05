@@ -47,6 +47,12 @@ const LIST_TIMEOUT_MS = 4000;
 /** How long the dropdown outlives the field's blur, for a click on itself. */
 const BLUR_GRACE_MS = 150;
 
+/** How long one listing of a site's passkeys answers every request for it. */
+const LISTING_FRESH_MS = 2000;
+
+/** No second "Save a passkey?" from a tab for this long after the last. */
+const SAVE_QUIET_MS = 10_000;
+
 /**
  * Windows' passkeys for a site, from the helper; null where it cannot say.
  * Returns null - not a lister - where there is no helper to ask.
@@ -139,6 +145,10 @@ class PasskeyBroker {
   constructor({ list = null, store = null, shellFor, ask = null, log = () => {} }) {
     this.store = store;
     this.list = list || (store ? (rpId) => store.list(rpId) : null);
+    /** A site's listing, shared by requests made while it is under way. */
+    this.listing = new Map();
+    /** Tabs whose "Save a passkey?" is up, or was just refused: tab id -> until. */
+    this.saveQuiet = new Map();
     this.shellFor = shellFor;
     this.ask = ask;
     this.log = log;
@@ -160,7 +170,7 @@ class PasskeyBroker {
     // A page naming its passkeys is Windows' to answer: it asks only Hello.
     // Kept here, the named one has to come from here.
     if (allow && !this.store) return null;
-    let accounts = await this.list(site).catch(() => null);
+    let accounts = await this.accountsFor(site);
     if (accounts && allow) accounts = accounts.filter((a) => allow.includes(a.id));
     if (!accounts || !accounts.length) return null;
     // Still the page that asked: a listing takes a moment, and the tab may
@@ -175,6 +185,23 @@ class PasskeyBroker {
       if (!req.conditional) this.show(req, null);
       else if (tab.passkeyField) this.show(req, tab.passkeyField);
     });
+  }
+
+  /**
+   * A site's passkeys, asked of the list once for every request that arrives
+   * while it is being answered and for a moment after: a page calling get()
+   * in a loop otherwise started a helper process per call on Windows.
+   */
+  accountsFor(site) {
+    // Kept here, a listing is a read of the file already in memory - and one
+    // held for a moment would hide a passkey saved in that moment.
+    if (this.store) return Promise.resolve().then(() => this.list(site)).catch(() => null);
+    const held = this.listing.get(site);
+    if (held && Date.now() - held.at < LISTING_FRESH_MS) return held.promise;
+    const promise = Promise.resolve().then(() => this.list(site)).catch(() => null);
+    this.listing.set(site, { promise, at: Date.now() });
+    if (this.listing.size > 32) this.listing.delete(this.listing.keys().next().value);
+    return promise;
   }
 
   /** Answer a tab's request, if it has one, and take its list away. */
@@ -250,8 +277,11 @@ class PasskeyBroker {
   /** From the list: an account. */
   async pick(id) {
     const req = this.shown;
-    if (!req || req.verifying || !req.accounts.some((a) => a.id === id)) return;
+    if (!req || req.verifying || req.picking || !req.accounts.some((a) => a.id === id)) return;
     if (!this.store) { this.answer(req, { id }); return; }
+    // One at a time: a second row clicked while Touch ID is up is not a
+    // second sign-in.
+    req.picking = true;
     // Kept here: it is you (Touch ID or the passcode), then the passkey goes
     // into the tab's authenticator for this one request.
     if (!(await this.confirm(req, `sign in to ${req.site}`))) {
@@ -271,6 +301,18 @@ class PasskeyBroker {
     if (!this.store || !this.store.available() || !this.ask) return null;
     const shell = this.shellFor(tab);
     if (!shell) return null;
+    // One question at a time per tab, and none for a little while after "Not
+    // now": a page calling create() in a loop otherwise stacked dialogs.
+    if ((this.saveQuiet.get(tab.id) || 0) > Date.now()) return { cancel: true };
+    this.saveQuiet.set(tab.id, Infinity);
+    try {
+      return await this.saveAsked(tab, frameUrl, site, shell, { name, exclude });
+    } finally {
+      this.saveQuiet.set(tab.id, Date.now() + SAVE_QUIET_MS);
+    }
+  }
+
+  async saveAsked(tab, frameUrl, site, shell, { name, exclude }) {
     const mine = new Set(((await this.store.list(site)) || []).map((a) => a.id));
     if (exclude.some((id) => mine.has(id))) return { exists: true };
     const who = name ? `${name} on ${site}` : site;

@@ -92,8 +92,14 @@ class PasskeyStore {
     if (!cdp || !tab.wc || tab.wc.isDestroyed()) return null;
     // Kept attached while the request is in flight: the governor's tidy-up
     // detach on a tab switch would take the authenticator with it.
-    tab.passkeyHeld = { keepAttached: cdp.keepAttached };
+    // Only the first time: a second request before the first was released
+    // would otherwise record `true` here, and the tab would stay attached for
+    // good once both were done.
+    if (!tab.passkeyHeld) tab.passkeyHeld = { keepAttached: cdp.keepAttached };
     cdp.keepAttached = true;
+    // Whatever an earlier request left behind goes first.
+    if (tab.passkeyOp) { clearTimeout(tab.passkeyOp.timer); tab.passkeyOp = null; }
+    await cdp.send('WebAuthn.disable');
     if (!(await cdp.send('WebAuthn.enable', { enableUI: false }))) return null;
     const made = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
       protocol: 'ctap2', transport: 'internal', hasResidentKey: true,
