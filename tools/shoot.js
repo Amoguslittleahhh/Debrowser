@@ -68,7 +68,7 @@ const STATE = {
     incognitoBridgeLines: 'obfs4 203.0.113.5:443 9A1B2C3D4E5F60718293A4B5C6D7E8F901234567 cert=kR3x4mHq9Wn2bV7cZ8yT1uP0sL5fG6hJ iat-mode=1',
     // Ledger, the design a new install has; SHOOT_DESIGN photographs another.
     design: process.env.SHOOT_DESIGN || 'ledger',
-    theme: 'dark', accent: '#2f857b', tabWidth: 'roomy', tabBarColor: 'default',
+    theme: process.env.SHOOT_THEME_PREF || 'dark', accent: '#2f857b', tabWidth: 'roomy', tabBarColor: 'default',
     windowOpacity: 1, tabBarPosition: 'top', backgroundMaterial: 'none',
     reduceMotion: false, showMemoryMeter: true, showTierDots: true,
     searchEngine: 'google', homepage: '', saveHistory: true, memoryBudgetMB: null,

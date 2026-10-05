@@ -147,6 +147,10 @@ function renderFingerprint(result) {
 el.retry.addEventListener('click', () => api.send('tor-retry'));
 
 api.onState((state) => {
-  applyThemePrefs(state.prefs);
+  // Dark unless light was chosen outright. This page fills a private window
+  // as it opens - often at night, in a dark room - and following a light
+  // system theme put a white screen in the face of anyone opening one.
+  const prefs = state.prefs && state.prefs.theme === 'system' ? { ...state.prefs, theme: 'dark' } : state.prefs;
+  applyThemePrefs(prefs);
   render(state.incognito || null);
 });

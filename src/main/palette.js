@@ -67,6 +67,9 @@ function current() {
 function surfaceFor(url) {
   if (!pages.isInternal(url)) return '#ffffff';
   const { p, design } = current();
+  // The private connection page is dark unless light was chosen outright
+  // (tor.js), so what shows before it paints is too.
+  if (pages.pageName(url) === 'tor' && source().chosen !== 'light') return paletteFor(design, false).bg;
   return design !== 'legacy' && pages.pageName(url) === 'newtab' ? p.raised : p.bg;
 }
 

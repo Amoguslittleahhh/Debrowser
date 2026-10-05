@@ -1324,7 +1324,7 @@ function main() {
     shell.siteIsAsking = () => Boolean(permissionAsks && permissionAsks.shown);
     // What the main process paints - an error page, the surface behind a tab -
     // takes the window's palette and accent, as our own pages do.
-    palette.useTheme(() => ({ light: shell.lightTheme(), accent: prefs.get('accent'), design: prefs.get('design') }));
+    palette.useTheme(() => ({ light: shell.lightTheme(), chosen: prefs.get('theme'), accent: prefs.get('accent'), design: prefs.get('design') }));
     // A site the browser cannot find can be searched for instead, with the chosen engine.
     require('./error-page').useSearch((q) => prefs.searchTemplate().replace('%s', encodeURIComponent(q)));
 
