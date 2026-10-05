@@ -2004,6 +2004,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         if (end()) break;
       }
       await new Promise((r) => setTimeout(r, 400));
+      // The wait for the rail can see a section fill in and the page grow:
+      // back to the end once more, then read both.
+      if (!end()) { main.scrollTop = main.scrollHeight; await new Promise((r) => setTimeout(r, 400)); }
       const marked = document.querySelector('.rail-item.current');
       const last = [...document.querySelectorAll('section[data-section]')]
         .filter((s) => !s.hidden).pop();

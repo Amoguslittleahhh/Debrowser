@@ -1283,8 +1283,11 @@ function main() {
       });
       browsingSetup.push((ses) => blocker.attach(ses));
       // After the window is up: a first build parses the lists, which is work
-      // no start should wait for.
-      if (prefs.get('blockAds') !== false) setTimeout(() => blocker.load(), OFFLINE_MODE ? 0 : 3000).unref?.();
+      // no start should wait for. A test starts it once the first tab has
+      // loaded (below) - sooner than a user's three seconds, but never on top
+      // of the first paint the startup budget measures: the build starts a
+      // helper process, which on Windows cost that paint 700ms.
+      if (prefs.get('blockAds') !== false && !OFFLINE_MODE) setTimeout(() => blocker.load(), 3000).unref?.();
     }
 
     // Everything above, on the browsing session - and on each container
@@ -1710,6 +1713,7 @@ function main() {
       }, 20_000);
     }
     if (prewarm) prewarm.holdUntil(firstTabLoaded(tabs.activeTab()));
+    if (OFFLINE_MODE && blocker && prefs.get('blockAds') !== false) firstTabLoaded(tabs.activeTab()).then(() => blocker.load());
 
     // Once after an update, a quiet word and the way to the notes - never a
     // tab opened by itself. A new install has nothing to compare, so it only
