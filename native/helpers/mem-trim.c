@@ -464,6 +464,33 @@ static long set_eco(pid_t pid, int on, int *err) {
 }
 #endif
 
+#if !defined(_WIN32)
+/*
+ * Whether `pid` belongs to whoever runs this helper. The guide has the helper
+ * given CAP_SYS_NICE, which is exactly what lifts the kernel's own same-owner
+ * check on sched_setattr and ioprio_set - so without this, any local user
+ * could pipe `eco <pid> 1` into it and throttle another user's processes, a
+ * root daemon's included. Real and effective uid both, as the kernel would
+ * have compared before the capability.
+ */
+static int owned(pid_t pid) {
+    char path[64], line[256];
+    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int ok = 0;
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long ruid, euid;
+        if (sscanf(line, "Uid: %lu %lu", &ruid, &euid) == 2) {
+            ok = ruid == (unsigned long)getuid() && euid == (unsigned long)getuid();
+            break;
+        }
+    }
+    fclose(f);
+    return ok;
+}
+#endif
+
 int main(void) {
     char line[128];
 
@@ -504,6 +531,9 @@ int main(void) {
         long pid = 0;
         if (sscanf(line, "trim %ld", &pid) == 1 && pid > 0) {
             int err = 0;
+#if !defined(_WIN32)
+            if (!owned((pid_t)pid)) { printf("err %ld %d\n", pid, EPERM); fflush(stdout); continue; }
+#endif
             /* One signature for both halves: the Linux one takes pid_t, the
                Windows one a DWORD, and both are what an unsigned long converts
                to cleanly. */
@@ -515,6 +545,9 @@ int main(void) {
         int on = 0;
         if (sscanf(line, "eco %ld %d", &pid, &on) == 2 && pid > 0) {
             int err = 0;
+#if !defined(_WIN32)
+            if (!owned((pid_t)pid)) { printf("err %ld %d\n", pid, EPERM); fflush(stdout); continue; }
+#endif
             long changed = set_eco((TRIM_PID_T)pid, on != 0, &err);
             if (changed < 0) printf("err %ld %d\n", pid, err);
             else printf("ok %ld %ld\n", pid, changed);

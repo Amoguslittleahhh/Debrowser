@@ -363,13 +363,15 @@ function siteChip(url, { icon = null, chipClass = 'chip', iconClass = 'site-icon
 }
 
 /**
- * Whether movement is welcome: false when the system asks for reduced motion.
- * CSS animations follow it through theme.css; this is for motion started from
- * script, such as a smooth scroll, which that rule cannot reach.
+ * Whether movement is welcome: false when the system asks for reduced motion,
+ * or Debrowser's own Reduce motion setting does (`calm`, set from the prefs
+ * above). CSS animations follow both through theme.css; this is for motion
+ * started from script, such as a smooth scroll, which that rule cannot reach.
  */
 /* exported motionOk */
 function motionOk() {
-  return !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  return !matchMedia('(prefers-reduced-motion: reduce)').matches &&
+    !(document.body && document.body.classList.contains('calm'));
 }
 
 /**

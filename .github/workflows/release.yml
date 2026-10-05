@@ -110,10 +110,6 @@ jobs:
     # right and silently never matches.
     env:
       AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
-      # castLabs EVS, for Widevine's production VMP signature: see
-      # build/vmp-sign.js. Free; without it the build still plays DRM wherever a
-      # development signature is accepted.
-      VMP_SIGNING: ${{ secrets.EVS_ACCOUNT_NAME != '' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -144,7 +140,7 @@ jobs:
       # have looked for a compiler that was not on PATH yet.
       - name: Set up MSVC
         if: matrix.os == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5   # v1.9.0
 
       # The trim helper has a backend on Linux and on Windows; macOS has no
       # public API to force its compressor, so there it is neither built nor
@@ -321,6 +317,11 @@ jobs:
             echo "The macOS artifact was built anyway; this gate is advisory. See .github/workflows/release.yml." >> $GITHUB_STEP_SUMMARY
           fi
 
+      # No castLabs EVS login: EVS denies every build with Electron fuses set,
+      # so build/vmp-sign.js skips VMP signing whatever is set up, and the step
+      # only handed a password to an unpinned package for nothing. Bring it
+      # back, with castlabs-evs pinned, if the fuses ever go.
+
       # Signing is driven entirely by secrets, and their absence is a supported
       # state rather than an error: electron-builder treats an empty CSC_LINK as
       # "no certificate" and produces the same unsigned build as before. So this
@@ -331,25 +332,6 @@ jobs:
       # what an individual developer can actually get since the 2023 rule that
       # code-signing keys live on certified hardware - set the AZURE_* secrets
       # instead and the step below takes over. docs/PACKAGING.md has both.
-      # Logs in to castLabs EVS so the packaging hook can VMP-sign. Windows and
-      # macOS only; Linux has no VMP.
-      - name: Log in to castLabs EVS
-        if: ${{ matrix.os != 'ubuntu-latest' && env.VMP_SIGNING == 'true' }}
-        shell: bash
-        env:
-          EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
-          EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
-        run: |
-          # In a virtual environment of its own: the macOS runner's Homebrew
-          # Python refuses a system-wide pip install (PEP 668). Its bin goes on
-          # PATH so the packaging hook's `python`/`python3` is this one.
-          if [ "$RUNNER_OS" = "Windows" ]; then PY=python; BIN="$RUNNER_TEMP/evs/Scripts"; else PY=python3; BIN="$RUNNER_TEMP/evs/bin"; fi
-          $PY -m venv "$RUNNER_TEMP/evs"
-          "$BIN/python" -m pip install --upgrade castlabs-evs
-          "$BIN/python" -m castlabs_evs.account reauth -A "$EVS_ACCOUNT_NAME" -P "$EVS_PASSWD"
-          echo "$BIN" >> "$GITHUB_PATH"
-          echo "DEBROWSER_VMP_SIGN=1" >> "$GITHUB_ENV"
-
       - name: Package
         env:
           # WIN_CSC_LINK, not CSC_LINK, and the distinction is load-bearing.
@@ -557,7 +539,7 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64   # v3.0.3
         with:
           # On a hand-run the tag does not exist yet; the action creates it at
           # this run's commit.

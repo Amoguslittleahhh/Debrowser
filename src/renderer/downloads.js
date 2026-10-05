@@ -176,11 +176,13 @@ function updateRow(node, item) {
   // after the row was drawn.
   node.safe.hidden = !(privateWindow && item.state === 'done' && /\.pdf$/i.test(item.filename || ''));
 
+  // Only a file that finished, and is still there, can be opened. Outside the
+  // change check too: a file deleted since it finished leaves the state at
+  // "done", and the button stayed, opening nothing.
+  node.open.hidden = item.state !== 'done' || item.missing === true;
+
   if (prev.state !== item.state) {
     node.root.dataset.state = item.state;
-    // Only a file that finished can be opened. A cancelled or failed download
-    // has nothing on disk worth handing to the system.
-    node.open.hidden = item.state !== 'done' || item.missing === true;
     node.retry.hidden = item.state !== 'failed' && item.state !== 'cancelled';
     node.retry.textContent = item.blocked ? 'Download anyway' : 'Retry';
     node.open.title = `Open ${item.filename || 'file'} · middle-click to show it in its folder`;

@@ -221,7 +221,12 @@ you choose another engine for them.
   window runs in a network namespace with nothing but loopback, and Tor
   outside it; on Windows a firewall rule blocks the private copy of the
   browser from everything but Tor. A request that ignored every setting would
-  have nowhere to go. macOS has no such control without root, and says so: a
+  have nowhere to go. Both come with the installers: the Windows installer
+  adds the firewall rule (after one administrator prompt), and on Ubuntu the
+  `.deb` adds the AppArmor profile that lets the namespace be made. The
+  portable Windows build, the AppImage and the `.tar.gz` do without, as does
+  macOS, which has no such control without root. The private window says
+  which applies; where the system does not keep it off the network, a
   tripwire that watches every socket and closes the window is what it has.
 - **A Tor circuit per tab**, a new one on request (Ctrl+Shift+L), and new
   identity (Ctrl+Shift+U). A site that blocks one exit is retried from others
@@ -269,7 +274,7 @@ npm run bench              # memory benchmark
 npm run speed              # how long new tabs, typed addresses and links take
 ```
 
-Needs Node 18+ and runs on Windows, macOS and Linux. `npm run smoke` drives a
+Needs Node 22.13+ and runs on Windows, macOS and Linux. `npm run smoke` drives a
 real browser, so it wants a display; on a headless Linux box or in CI use
 `npm run smoke:headless`, which wraps it in `xvfb-run` and adds `--no-sandbox`
 for running as root in a container. **A normal desktop install must never pass

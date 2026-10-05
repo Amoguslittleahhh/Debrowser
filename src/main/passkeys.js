@@ -259,6 +259,9 @@ class PasskeyBroker {
       : { x: b.x + b.width / 2, y: b.y, width: 0 };
     shell.showPasskeys({
       mode: rect ? 'dropdown' : 'chooser',
+      // Kept by Debrowser (macOS, Linux) rather than by Windows Hello: the
+      // list says which.
+      kept: Boolean(this.store),
       site: req.site,
       accounts: req.accounts,
       anchor

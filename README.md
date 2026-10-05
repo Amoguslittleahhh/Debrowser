@@ -59,7 +59,7 @@ npm start          # run it
 npm run smoke      # the end-to-end test suite, against real pages
 ```
 
-Needs Node 18 or later, on Windows, macOS or Linux.
+Needs Node 22.13 or later, on Windows, macOS or Linux.
 
 ## More
 

@@ -86,7 +86,8 @@ function render(model) {
     const meta = document.createElement('span');
     meta.className = 'meta';
     // The username under the name, where they differ; otherwise what it is.
-    meta.textContent = account.name && account.name !== label ? account.name : 'Passkey · Windows Hello';
+    meta.textContent = account.name && account.name !== label ? account.name
+      : model.kept ? 'Passkey · on this device' : 'Passkey · Windows Hello';
     text.append(name, meta);
     row.append(avatar, text);
     row.addEventListener('click', () => api.send('passkey-pick', { id: account.id }));

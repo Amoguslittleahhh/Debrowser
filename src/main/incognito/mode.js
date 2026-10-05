@@ -110,7 +110,11 @@ function killSwitch() {
  * without its rule is just a second name for an unprotected program.
  */
 function windowsFirewall() {
+  // Named for the install's folder since rules are machine-wide and each
+  // user's install has its own (build/installer.nsh); the plain name is what
+  // installs before that made, and is still accepted - for this executable.
   const RULE = 'Debrowser private window';
+  const named = `${RULE} (${path.dirname(process.execPath)})`.replace(/'/g, "''");
   if (!/incognito/i.test(path.basename(process.execPath))) {
     return { available: false, mechanism: null, reason: 'not running as the firewalled executable (installed builds only)' };
   }
@@ -120,13 +124,14 @@ function windowsFirewall() {
   // direction 2 is outbound. The rule is asked for by name: piping every rule
   // through PowerShell took long enough on a busy machine to time out.
   const { spawnSync } = require('child_process');
-  const script = `(New-Object -ComObject HNetCfg.FwPolicy2).Rules.Item('${RULE}') | ` +
+  const script = `$r = (New-Object -ComObject HNetCfg.FwPolicy2).Rules; ` +
+    `@(foreach ($n in @('${named}', '${RULE}')) { try { $r.Item($n) } catch { } }) | ` +
     'Select-Object Enabled, Action, Direction, ApplicationName | ConvertTo-Json -Compress';
   const ask = (timeout) => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
     { encoding: 'utf8', windowsHide: true, timeout });
   // A check that did not finish is not an answer: once more, with longer, and
   // if that cannot finish either, say so - never "missing" for a rule that
-  // was simply slow to read. (A missing rule makes Item() throw: an answer.)
+  // was simply slow to read. (A missing rule is caught and leaves nothing: an answer.)
   const unfinished = (out) => Boolean(out.error) || out.signal !== null;
   let out = ask(8000);
   if (unfinished(out)) out = ask(20000);

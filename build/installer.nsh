@@ -202,11 +202,18 @@ Var pid
   nsExec::ExecToLog 'cmd /c mklink /H "$INSTDIR\${INCOGNITO_EXE}" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
   Pop $0
 
-  nsExec::ExecToStack 'netsh advfirewall firewall show rule name="${INCOGNITO_RULE}"'
+  ; Named for this install's path, not just "Debrowser private window": rules
+  ; are machine-wide and each user's install has a path of its own, so a rule
+  ; found by name alone could be another account's, covering another file -
+  ; and this user would never be asked for one. Not asked during a silent
+  ; update: a rule from before this naming still covers this path, and the
+  ; browser accepts either name (incognito/mode.js).
+  nsExec::ExecToStack 'netsh advfirewall firewall show rule name="${INCOGNITO_RULE} ($INSTDIR)"'
   Pop $0
   Pop $1
   ${If} $0 != 0
-    ExecShellWait "runas" "netsh" 'advfirewall firewall add rule name="${INCOGNITO_RULE}" dir=out action=block program="$INSTDIR\${INCOGNITO_EXE}" remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff profile=any enable=yes' SW_HIDE
+  ${AndIfNot} ${isUpdated}
+    ExecShellWait "runas" "netsh" 'advfirewall firewall add rule name="${INCOGNITO_RULE} ($INSTDIR)" dir=out action=block program="$INSTDIR\${INCOGNITO_EXE}" remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff profile=any enable=yes' SW_HIDE
   ${EndIf}
 
   ; Uninstalling from Windows' Apps list opens the browser's own window

@@ -499,16 +499,30 @@ static unsigned long long cpu_us(void) {
 /* Reaper                                                               */
 /* ------------------------------------------------------------------ */
 
-/* Only ever an incognito session directory: .../debrowser-incognito-<who>/s-<pid> */
-static int safe_target(const char *dir) {
-    const char *last = strrchr(dir, '/');
+/*
+ * Only ever an incognito session directory: .../debrowser-incognito-<who>/s-<pid>.
+ * The parent must be the private profile itself, and no part of the path may
+ * be "..": "debrowser-incognito" appearing anywhere before the last part let
+ * /tmp/debrowser-incognito-x/../../home/u/s-work through.
+ */
+static int is_sep(char c) {
 #if defined(_WIN32)
-    const char *back = strrchr(dir, '\\');
-    if (!last || (back && back > last)) last = back;
+    return c == '/' || c == '\\';
+#else
+    return c == '/';
 #endif
-    if (!last || strncmp(last + 1, "s-", 2) != 0) return 0;
-    const char *hit = strstr(dir, "debrowser-incognito");
-    return hit != NULL && hit < last;
+}
+
+static int safe_target(const char *dir) {
+    const char *last = NULL, *parent = NULL;
+    for (const char *p = dir; *p; p++) {
+        if (!is_sep(*p)) continue;
+        if (p[1] == '.' && p[2] == '.' && (p[3] == '\0' || is_sep(p[3]))) return 0;
+        parent = last;
+        last = p;
+    }
+    if (!last || !parent || strncmp(last + 1, "s-", 2) != 0 || last[3] == '\0') return 0;
+    return strncmp(parent + 1, "debrowser-incognito", 19) == 0;
 }
 
 #if defined(_WIN32)

@@ -67,7 +67,14 @@ def header(version):
     commit = os.environ.get('COMMIT', '')[:7]
     if version:
         parts.append(f'**{version}**' + (f' ({commit})' if commit else ''))
-    parts.append(datetime.date.today().strftime('%-d %B %Y'))
+    # The release's own date when the notes of one already out are rebuilt
+    # (release-notes.yml), so fixing a typo does not move it to today.
+    day = datetime.date.today()
+    try:
+        day = datetime.date.fromisoformat(os.environ.get('RELEASE_DATE', '').strip()[:10]) or day
+    except ValueError:
+        pass
+    parts.append(day.strftime('%-d %B %Y'))
     chromium = os.environ.get('CHROMIUM', '').strip()
     if chromium:
         parts.append(f'Chromium {chromium}')

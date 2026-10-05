@@ -47,15 +47,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the tags, for the release's commit and the one before
 
-      # Same script the release workflow uses, so a republished body is
-      # byte-identical to what a fresh release of that version would have said.
+      # Same script the release workflow uses. For a release that is already
+      # out, the header and footer it was published with are rebuilt from the
+      # release itself - its commit, date, checksum file, build run and
+      # Chromium - since the body is replaced whole: given the version alone,
+      # fixing a typo stripped the checksums and the build link from the
+      # download page.
       - name: Build the release body
         # Through the environment, not pasted into the script: an input
         # holding a quote or $(...) would have run as shell.
         env:
           VERSION: ${{ inputs.version }}
+          TAG_INPUT: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
+          set -euo pipefail
+          TAG="${TAG_INPUT:-v${VERSION#v}}"
+          if gh release view "$TAG" --json tagName > /dev/null 2>&1 && git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            export COMMIT=$(git rev-list -n1 "$TAG")
+            export RELEASE_DATE=$(gh release view "$TAG" --json publishedAt -q .publishedAt)
+            if gh release download "$TAG" -p SHA256SUMS.txt --clobber 2> /dev/null; then export CHECKSUMS=SHA256SUMS.txt; fi
+            export GITHUB_RUN_URL=$(gh release view "$TAG" --json body -q .body | grep -oE "$REPO_URL/actions/runs/[0-9]+" | head -1 || true)
+            electron=$(git show "$TAG:package.json" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const m=(JSON.parse(s).devDependencies.electron||'').match(/v(\d+\.\d+\.\d+)/);process.stdout.write(m?m[1]:'')})")
+            export CHROMIUM=$(curl -fsSL https://releases.electronjs.org/releases.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s).find(x=>x.version==='$electron');process.stdout.write(r?r.chrome:'')})" || true)
+            prev=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | awk -v t="$TAG" '$0 == t { print last; exit } { last = $0 }')
+            if [ -n "$prev" ]; then export COMPARE_URL="$REPO_URL/compare/$prev...$COMMIT"; fi
+          fi
           python3 .github/scripts/release-notes.py "$VERSION" > RELEASE_NOTES.md
           echo "--- release body ---"
           cat RELEASE_NOTES.md
