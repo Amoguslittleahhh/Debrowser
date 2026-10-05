@@ -289,6 +289,10 @@ const SHOTS = [
   // draws and has its own set of icons to get wrong.
   { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' },
   { name: 'ask', file: 'ask.html', w: 900, h: 560 },
+  // The passwords page locked, on a machine with Windows Hello.
+  { name: 'passwords-locked', file: 'passwords.html', w: 1280, h: 720,
+    replies: { 'vault-status': { available: true, configured: true, unlocked: false },
+               'presence-capability': { available: true, mechanism: 'Windows Hello' } } },
   // Incognito's first page, part-way through connecting - and after it has
   // given up, which is the state that has to explain itself.
   { name: 'tor', file: 'tor.html', w: 1280, h: 820,
@@ -348,6 +352,7 @@ app.whenReady().then(async () => {
     // Before the window, because the answers are serialised into its preload
     // arguments - set after it, and the page has already been given the old set.
     if (shot.answers) ANSWERS['context-model'] = ANSWERS[shot.answers];
+    Object.assign(ANSWERS, shot.replies);
     // Recent pages only for the shot that wants the Continue card, so the plain
     // new tab keeps photographing the favourites.
     ANSWERS['recent-pages'] = shot.recent ? RECENT : { items: [] };

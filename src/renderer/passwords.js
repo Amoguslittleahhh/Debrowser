@@ -19,7 +19,7 @@ const $ = (id) => document.getElementById(id);
 const el = {
   query: $('q'), lock: $('lock'), close: $('close'),
   off: $('off'), unavailable: $('unavailable'), unavailableWhy: $('unavailable-why'),
-  locked: $('locked'), lockedNote: $('locked-note'), presence: $('presence'),
+  locked: $('locked'), lockedNote: $('locked-note'), presence: $('presence'), or: $('or'),
   passcode: $('passcode'), unlock: $('unlock'), unlockError: $('unlock-error'),
   open: $('open'), logins: $('logins'), loginsEmpty: $('logins-empty'),
   cards: $('cards'), cardsEmpty: $('cards-empty'),
@@ -31,10 +31,7 @@ function show(state) {
   for (const name of ['off', 'unavailable', 'locked', 'open']) el[name].hidden = name !== state;
   el.lock.hidden = state !== 'open';
   el.query.hidden = state !== 'open';
-  if (state === 'locked') {
-    el.passcode.value = '';
-    requestAnimationFrame(() => el.passcode.focus());
-  }
+  if (state === 'locked') el.passcode.value = '';
 }
 
 /* ------------------------------------------------------------------ */
@@ -73,7 +70,17 @@ async function refresh() {
 async function offerPresence() {
   if (presence === null) presence = (await api.request('presence-capability')) || { available: false };
   el.presence.hidden = !presence.available;
+  el.or.hidden = !presence.available;
+  // One primary action: Windows Hello where there is one, the passcode where
+  // there is not. Focus goes to it, so Enter does the obvious thing - the
+  // field took focus even beside Windows Hello, and its ring was the loudest
+  // thing on the page.
+  el.unlock.classList.toggle('primary', !presence.available);
   if (presence.available) el.presence.textContent = `Unlock with ${presence.mechanism}`;
+  // Not on the half-minute check, while someone is typing their passcode.
+  if (!el.locked.contains(document.activeElement)) {
+    requestAnimationFrame(() => (presence.available ? el.presence : el.passcode).focus());
+  }
 }
 
 let waitTimer = null;
