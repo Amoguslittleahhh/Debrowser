@@ -451,11 +451,14 @@ class BrowserShell {
     // Full screen changes which rectangle everything gets, in both layouts, so
     // it is a relayout like a resize - and a publish, because the chrome draws
     // itself differently as a floating panel and only the window knows.
-    this.window.on('enter-full-screen', () => { this.layout(); this.publishSidebar(); });
+    // The window's background too: tucked away, full screen has no band to see
+    // through (translucentNow).
+    this.window.on('enter-full-screen', () => { this.applyWindowPrefs(); this.layout(); this.publishSidebar(); });
     // Laid out again a moment later too: the event can arrive before the
     // window's final size, and the views kept the full-screen size - wider
     // than the window, clipping the menu button - until the next resize.
     this.window.on('leave-full-screen', () => {
+      this.applyWindowPrefs();
       this.layout();
       this.publishSidebar();
       setTimeout(() => { if (!this.window.isDestroyed()) this.layout(); }, 150);
@@ -2556,15 +2559,17 @@ class BrowserShell {
   /**
    * Whether translucency is in force in the layout the window is in now.
    *
-   * Not down the side while the strip slides over the page - tucked away or
-   * detached. What is behind that strip is the page, not the desktop, so it
-   * has to be opaque, and a window of glass round it looked like a mistake:
-   * the band and margins see-through to the wallpaper beside a solid column.
    * Pinned, or across the top, the strip sits on the window and can show it.
+   * Tucked away in a window, so does the band across the top with the address
+   * bar in it, and the margins round the page: only the panel of tabs slides
+   * over the page, and that paints its own opaque card (chrome.css). Leaving
+   * the whole layout opaque made the setting and the window material do
+   * nothing at all there. Not full screen, where there is no band, only the
+   * panel over the page.
    */
   translucentNow() {
     if (!(this.prefs.get('windowOpacity') < 1)) return false;
-    return !this.vertical() || !this.detached();
+    return !this.vertical() || !this.detached() || this.band();
   }
 
   /**

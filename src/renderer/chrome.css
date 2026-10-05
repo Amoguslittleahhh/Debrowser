@@ -2117,6 +2117,10 @@ body[data-band="true"][data-layout="left"] {
   grid-template-rows: 48px auto minmax(0, 1fr) 16px;
 }
 body[data-band="true"][data-layout="left"] .toolbar { grid-area: 1 / 1 / 2 / -1; align-self: start; background: var(--strip); }
+/* Translucent, the window behind is tinted with the strip's colour and
+   translucency (window.js), as down the side pinned: a coat of its own here
+   made the band solid while the margins beside it were glass. */
+body[data-band="true"][data-layout="left"][data-translucent="on"] .toolbar { background: transparent; }
 /* A hairline between the band and the page under it: with both the same dark,
    the address bar sat on the page with nothing to say where one ended. Inset,
    so it takes no height from the band. */

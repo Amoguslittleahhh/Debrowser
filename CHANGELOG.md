@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **Translucency and window material work with the tabs tucked away down the left.** The bar across the top with the address bar, and the margins round the page, now show the window's material and see-through tint on Windows and macOS, as the tab bar does when it sits beside the page. The tabs that slide out over the page stay solid so they stay readable.
 - **A downloaded update can be installed after you dismiss its prompt.** Choosing Later left no way back to the restart until Debrowser was opened again. Now the menu shows Restart to update at the top, with a dot on the menu button, and the button under Settings → Updates becomes Restart to update.
 - **Windows: installing an update shows that it is installing.** After Restart to update, a small Debrowser window says it is updating until the new version opens, instead of nothing on screen while the browser was closed.
 - **An update already downloaded is no longer shown downloading again.** Opening Debrowser with an update downloaded but not yet installed showed it downloading from 0%; it now says it is getting the update ready, then offers the restart.
