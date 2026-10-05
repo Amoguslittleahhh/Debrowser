@@ -3134,6 +3134,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.setSidebarOpen(true, { now: true });
     const panel = shell.chromeView.getBounds();
     const pageWhileOut = shell.contentBounds();
+    // Read now, with the rest of the layout: opening is synchronous, and the
+    // pointer-edge poll reads the real pointer, which on a CI runner is
+    // nowhere near the strip - it can start the 150ms close before the wait
+    // below is over, and the strip read after it was then already gone.
+    const strip = shell.stripView && shell.stripView.getVisible() ? shell.stripView.getBounds() : null;
     // Zen's compact mode: the page is a card under a slim toolbar across the
     // top - which is also where the window buttons are, so they no longer sit
     // over the page - and the tabs come out under that band when the pointer
@@ -3143,7 +3148,6 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(150);   // the chrome is told its shape by message
     const bandWhileOut = await shell.chromeView.webContents.executeJavaScript(
       `document.getElementById('url').getBoundingClientRect().bottom <= ${SIDEBAR_TOP_BAND}`);
-    const strip = shell.stripView && shell.stripView.getVisible() ? shell.stripView.getBounds() : null;
     check('tucked away, the page is a card under a toolbar band and the tabs come out under the band',
       whole.x === CONTENT_GAP && whole.y === SIDEBAR_TOP_BAND && whole.width === winW - CONTENT_GAP * 2 &&
       whole.y + whole.height === winH - CONTENT_GAP &&
