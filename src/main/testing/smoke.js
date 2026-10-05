@@ -2101,6 +2101,27 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const accentBefore = prefs.get('accent');
     const designBefore = prefs.get('design');
     runCommand('set-pref', { key: 'accent', value: '#b0306a' });
+    // Nothing to continue: the card stays, saying so, and the favourites stay
+    // aside - one layout for the page, whatever history holds.
+    const keptHistory = history.items;
+    history.items = [];
+    runCommand('set-pref', { key: 'design', value: 'ledger' });
+    {
+      const page = tabs.create({ url: pages.NEW_TAB_URL, activate: true, realise: true });
+      await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+      const readEmpty = () => page.wc.executeJavaScript(`(() => ({
+        card: !document.getElementById('continue').hidden,
+        empty: Boolean(document.querySelector('#continue-list .continue-empty')),
+        tiles: getComputedStyle(document.getElementById('tiles')).display !== 'none'
+      }))()`).catch(() => null);
+      await waitFor(async () => ((await readEmpty()) || {}).empty, { timeoutMs: 5000 });
+      const empty = await readEmpty();
+      tabs.close(page.id);
+      check('"Continue with these tabs" stays on the new tab page with no history to show',
+        Boolean(empty && empty.card && empty.empty && !empty.tiles), JSON.stringify(empty));
+    }
+    history.items = keptHistory;
+
     const planted = history.normalise({ url: 'https://continue.test/page', title: 'A page to come back to',
       visitedAt: Date.now() - 5 * 60_000, visits: 1 });
     history.items.unshift(planted);

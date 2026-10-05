@@ -212,12 +212,21 @@ function continueRow(item) {
 async function loadContinue() {
   const res = await api.request('recent-pages', { limit: 4 });
   const items = (res && res.items) || [];
-  card.hidden = items.length === 0;
+  // Shown whenever it is on, empty or not, so the page has one layout whether
+  // or not there is anything to continue (main.js `recent-pages`).
+  card.hidden = !(res && res.shown);
   // The card is the page's second half when it has something to show; the
   // favourites stand aside for it rather than stacking a third block between
   // the field and the pages you were reading.
   document.body.classList.toggle('with-continue', !card.hidden);
-  cardList.replaceChildren(...items.map(continueRow));
+  if (items.length) {
+    cardList.replaceChildren(...items.map(continueRow));
+  } else {
+    const empty = document.createElement('p');
+    empty.className = 'continue-empty';
+    empty.textContent = 'The pages you visit will be here to come back to.';
+    cardList.replaceChildren(empty);
+  }
   fitCard();
 }
 

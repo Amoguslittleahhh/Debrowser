@@ -4219,10 +4219,11 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         return { items: topSites(history, bookmarks, Number(payload?.limit) || 8, prefs.get('hiddenTiles')) };
 
       // "Continue with these tabs": the last pages visited that are not open
-      // now, newest first. Nothing when the card is off, and nothing in a
-      // private window, which has no history to give.
+      // now, newest first. `shown` false when the card is off, or in a
+      // private window, which has no history to give; otherwise the card
+      // stays, empty or not, so the new tab page keeps one layout.
       case 'recent-pages': {
-        if (!history || !prefs.get('continueCard')) return { items: [] };
+        if (!history || INCOGNITO || !prefs.get('continueCard')) return { items: [], shown: false };
         const open = new Set(tabs.all().map((t) => t.url));
         const limit = Math.min(Math.max(Number(payload?.limit) || 4, 1), 12);
         const items = [];
@@ -4231,7 +4232,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           items.push({ url: e.url, title: e.title || '', visitedAt: e.visitedAt, icon: e.icon || null });
           if (items.length >= limit) break;
         }
-        return { items };
+        return { items, shown: true };
       }
 
       case 'hide-continue-card':

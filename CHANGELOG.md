@@ -9,6 +9,7 @@
 
 ### Improved
 
+- **The new tab page keeps its layout.** "Continue with these tabs" now stays under the search whenever it is on, with a short note when there is nothing to continue, instead of disappearing and leaving the search alone in the middle of the page. It lists your last four pages from history, which is kept when you close Debrowser unless you turn on clearing it on exit. Hide this card, or Settings, turns it off.
 - **The private connection page is dark.** The page a private window opens on is now dark from its first frame, even when your system uses a light theme, so opening a private window in a dark room no longer fills the screen with white. Choosing Light under Settings → Appearance still makes it light.
 - **A clearer lock on saved passwords.** The locked Passwords page is now one card: Unlock with Windows Hello (or Touch ID) first and ready for Enter, with the passcode below it for when that is not available, and a note that it locks again after five minutes without use.
 - **Smoother tab animations.** The tabs down the side slide out and away evenly instead of jumping most of the way in the first frame, including the first time after Debrowser opens, and they no longer disappear before they have finished sliding away. They also close when the pointer moves straight off them. A new tab grows into the tab bar and the tabs beside it slide over to make room, as they already did when a tab closed, and closing a tab no longer jerks its neighbours.
