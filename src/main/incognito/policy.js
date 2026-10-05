@@ -73,7 +73,10 @@ const NAVIGATIONS = new Set(['mainFrame', 'subFrame']);
  * The verdict for one request, in the shape `onBeforeRequest` takes.
  * Exported for the test suite, which checks the rules without a network.
  */
-function judge({ url, resourceType }) {
+function judge(details) {
+  const { url, resourceType } = details;
+  // A website asking for our pages' files, which would mark this browser out.
+  if (require('../pages').fromWebPage(details)) return { cancel: true };
   let parsed;
   try {
     parsed = new URL(url);

@@ -23,13 +23,19 @@
 
 const shortcuts = require('./shortcuts');
 
-/** Addresses a menu item may act on. Anything else is not offered. */
-const OPENABLE = new Set(['http:', 'https:', 'debrowser:']);
+/**
+ * Addresses a menu item may act on. Anything else is not offered. The
+ * browser's own pages only from one of them: a website's link to
+ * debrowser://danger/?url=... opened the real warning page with the site's
+ * own words in it - and its "Open anyway".
+ */
+const OPENABLE = new Set(['http:', 'https:']);
 
-function openable(url) {
+function openable(url, fromInternal = false) {
   if (typeof url !== 'string' || !url) return false;
   try {
-    return OPENABLE.has(new URL(url).protocol);
+    const protocol = new URL(url).protocol;
+    return OPENABLE.has(protocol) || (fromInternal && protocol === 'debrowser:');
   } catch {
     return false;
   }
@@ -60,7 +66,7 @@ function buildModel(params = {}, state = {}) {
   // which is what appending would produce - is the thing people complain about
   // in other browsers, and the one under the pointer is usually the one item
   // they came for.
-  if (openable(link)) {
+  if (openable(link, state.internal === true)) {
     items.push(
       { id: 'open-link-tab', label: 'Open link in new tab', icon: 'plus',
         payload: { url: link } },
@@ -77,7 +83,7 @@ function buildModel(params = {}, state = {}) {
     if (items.length) items.push(sep());
     items.push(
       { id: 'open-link-tab', label: 'Open image in new tab', icon: 'plus',
-        enabled: openable(media), payload: { url: media } },
+        enabled: openable(media, state.internal === true), payload: { url: media } },
       { id: 'save-link', label: 'Save image as…', icon: 'download',
         payload: { url: media } });
     // The picture itself, as a copy-and-paste into a chat or a document

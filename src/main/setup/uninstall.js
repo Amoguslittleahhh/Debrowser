@@ -37,6 +37,7 @@ const os = require('os');
 const path = require('path');
 const { showSetupWindow } = require('./setup-window');
 const install = require('./install');
+const { POWERSHELL, PKEXEC } = require('../system-tools');
 
 const FLAG = '--uninstall';
 /** electron-builder's name for it: `Uninstall ${productName}.exe`, beside the app. */
@@ -135,7 +136,7 @@ async function processesOfThisCopy() {
   } else if (process.platform === 'win32') {
     // WQL quotes with ', and wants each \ in the path doubled.
     const exe = process.execPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    const { stdout } = await run(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command',
       `Get-CimInstance Win32_Process -Filter "ExecutablePath='${exe}'" | ForEach-Object { "$($_.ProcessId)\t$($_.CommandLine)" }`]);
     for (const line of stdout.split(/\r?\n/)) {
       const [pid, cmd = ''] = line.split('\t');
@@ -205,7 +206,7 @@ function plan() {
         // dpkg rather than apt: nothing depends on this package, so there is
         // nothing to resolve, and no apt lock to wait on. Purged, so its
         // AppArmor profile in /etc goes too: nothing of it is left behind.
-        const { code, stderr } = await run('pkexec', ['/usr/bin/dpkg', '--purge', 'debrowser']);
+        const { code, stderr } = await run(PKEXEC, ['/usr/bin/dpkg', '--purge', 'debrowser']);
         const instead = 'Remove Debrowser with your software manager, or with: sudo apt remove debrowser';
         // pkexec: 126 is a dismissed prompt. 127 is either a refusal - a wrong
         // password, or an account that may not - or no prompt to show at all,

@@ -430,15 +430,8 @@ async function main() {
       .map((l) => { const [name, slot] = l.split(' '); return { name, slot: Number(slot) }; })
     : stub.seen;
   const asked = arrivals.map((a) => a.name);
-  /**
-   * The slot - the Tor circuit - a host's page first arrived on. Slot 1 is
-   * skipped for every host but `icon`: that is the site's icon, fetched over
-   * the icon circuit, and the tab strip can ask for it before the page itself
-   * has started (a private tab loads a blank page first, for its fingerprint
-   * overrides).
-   */
-  const slotOf = (host) => (arrivals.find((a) => a.name.startsWith(`${host}.test:`) &&
-    (host === 'icon' || a.slot !== 1)) || {}).slot;
+  /** The slot - the Tor circuit - a host's page first arrived on. */
+  const slotOf = (host) => (arrivals.find((a) => a.name.startsWith(`${host}.test:`)) || {}).slot;
   const names = [...new Set(asked.map((h) => h.replace(/:\d+$/, '')))];
   const foreign = names.filter((n) => !n.endsWith('.test'));
   check('every request reached the proxy by name, and only test names were asked for',
@@ -466,15 +459,18 @@ async function main() {
     `link on port ${link}, its opener on ${t1}`);
   check('"new circuit" moves the tab to another circuit', moved != null && moved !== t1,
     `before ${t1}, after ${moved}`);
-  check('site icons use a circuit no tab uses', icon === 1 && icon !== t1 && icon !== t2, `icons on port ${icon}`);
+  // Every request for icon.test - its page and its icon - on one circuit, that
+  // tab's, and none on slot 1, the shared icon circuit this replaced.
+  const iconSlots = [...new Set(arrivals.filter((a) => a.name.startsWith('icon.test:')).map((a) => a.slot))];
+  check('a site\'s icon comes over the circuit of the tab showing it',
+    iconSlots.length === 1 && icon !== 1 && icon !== t1 && icon !== t2 && !arrivals.some((a) => a.slot === 1),
+    `icon.test on ports ${iconSlots.join(', ')}`);
   check('"new identity" closes every tab and clears every cookie',
     s.newIdentity && s.newIdentity.tabsAfter === 1 && s.newIdentity.cookiesLeft === 0,
     JSON.stringify(s.newIdentity));
 
-  // A site refusing Tor: each attempt on a fresh circuit, then a stop. Slot 1
-  // is left out: that is the site's icon, fetched on the icon circuit.
-  const slotsOf = (host) => [...new Set(arrivals.filter((a) => a.name.startsWith(`${host}.test:`) && a.slot !== 1)
-    .map((a) => a.slot))];
+  // A site refusing Tor: each attempt on a fresh circuit, then a stop.
+  const slotsOf = (host) => [...new Set(arrivals.filter((a) => a.name.startsWith(`${host}.test:`)).map((a) => a.slot))];
   const ch = slotsOf('ch');
   const chx = slotsOf('chx');
   check('a page that refuses Tor is retried on new circuits until it loads',

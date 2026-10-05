@@ -100,6 +100,10 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
 
   // The favicon route. It runs in the browser process with its own fetch, in
   // the default session - the path a naive design leaves outside the proxy.
+  // Over the circuit of the tab showing that site, so a tab on it first: with
+  // none, there is no circuit to use and the route answers 404.
+  const iconTab = tabs.create({ url: url('icon', 'idle.html') });
+  await waitFor(() => iconTab.isLive && !iconTab.loading && /icon\.test/.test(iconTab.url), 15_000);
   const icon = await within(
     // Its own host name, so the proxy's log says whether *this* fetch arrived -
     // a page on t1.test asks for t1.test's favicon itself, and a check keyed on

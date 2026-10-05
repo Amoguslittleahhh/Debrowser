@@ -20,6 +20,13 @@
 - **A downloaded update can be installed after you dismiss its prompt.** Choosing Later left no way back to the restart until Debrowser was opened again. Now the menu shows Restart to update at the top, with a dot on the menu button, and the button under Settings → Updates becomes Restart to update.
 - **Windows: installing an update shows that it is installing.** After Restart to update, a small Debrowser window says it is updating until the new version opens, instead of nothing on screen while the browser was closed.
 - **An update already downloaded is no longer shown downloading again.** Opening Debrowser with an update downloaded but not yet installed showed it downloading from 0%; it now says it is getting the update ready, then offers the restart.
+- **Mouse back and forward buttons, and links opened from Peek or the quick window, work.** Those commands reached the window and were then dropped, so pressing them did nothing.
+- **A question queued behind another is shown.** When Debrowser had two questions to ask in a row, closing the first by clicking away dropped the second; a Close window? question lost this way left the window unable to close.
+- **A file opened while Debrowser is running is found.** Opening a file with Debrowser from another folder, with Debrowser already open, looked for it in the folder Debrowser was started from and opened nothing.
+- **Windows: screenshots of a page on an IPv6 address are saved.** The address put a colon in the file name, which Windows refuses.
+- **Open goes from a download whose file was deleted.** The downloads list kept offering Open for a file no longer there, and it opened nothing.
+- **Reduce motion also stops scrolling animations.** With Reduce motion turned on in Debrowser, but not in the system, a page of Debrowser's own still scrolled smoothly to a section.
+- **macOS and Linux: the passkey list names where passkeys are kept.** It said Windows Hello, which these systems do not have.
 
 ### Security
 
@@ -27,6 +34,20 @@
 - **Private windows: nothing playing appears in the system's media controls.** The page's title, site and artwork no longer show on the Windows lock screen and volume flyout, in macOS's Now Playing or in Linux media applets, where they stayed after the window closed.
 - **Private windows: permissions and devices are refused, and say so.** A page asking whether it has any permission is now told no, matching what it gets when it asks for one, instead of a "granted" that was untrue and set this browser apart. USB, HID, serial and Bluetooth devices are refused outright.
 - **Chromium 152.0.7977.130.** Up from 152.0.7977.65, through Electron 44.5.1 with Widevine, bringing a month of Chromium's security fixes. Tor stays on 15.0.24, already the newest.
+- **Downloads are marked as from the internet.** Since Debrowser started downloading over several connections, finished files lacked the mark Windows and macOS put on downloads, so an installer opened without the SmartScreen check, an Office file outside Protected View, and an app without Gatekeeper's first-open question. Each finished download is marked again; from a private window, without the address it came from.
+- **Websites cannot load Debrowser's own pages' files.** A page could ask for an image or script from Debrowser's internal pages and learn from whether it loaded that you use Debrowser, which in a private window sets you apart from other Tor users. Those requests are now refused unless one of Debrowser's own pages makes them.
+- **Private windows: each site's icon comes over that site's own Tor circuit.** Icons for every open site were fetched over one shared circuit, so its exit relay could see the sites side by side. Each now comes through the circuit of the tab showing that site.
+- **Clearing history clears the copy kept for updates.** Before an update Debrowser keeps a copy of your data to roll back to, and the history in it stayed after you cleared your history. Clearing or deleting history now removes it there too.
+- **Saved passwords are kept when the passcode file cannot be read.** If the file holding your passcode could not be read for a moment, the passwords page offered to set a first passcode, and doing so deleted everything saved. It now says to try again.
+- **Wrong passcode guesses still count after a restart.** The wait after several wrong passcodes was forgotten when Debrowser restarted; it is now kept.
+- **Your settings are no longer on show to other programs.** Each part of the window was started with all your settings on its command line, which other programs and accounts on the computer can read, including private window bridge lines, hidden new tab sites and the download folder. Only what is needed to draw the window is passed that way now.
+- **Tab previews are private to you.** The small pictures of your tabs are kept in a folder only your account can open, written so only you can read them, instead of a folder other accounts on the computer could list. A private window no longer clears the ordinary window's previews when it closes.
+- **Websites' link menus cannot open Debrowser's own pages.** Choosing Open link in new tab on a link a website made to one of Debrowser's internal pages now does nothing, as a click on it already did.
+- **The quick window has every protection of its space.** A link opened in the quick window for a container space with no tabs yet skipped that space's setup, so it opened without the ad blocker, dangerous site warnings or the permission prompts.
+- **Windows: Debrowser runs the system's PowerShell and no other.** It ran powershell.exe by name, which Windows looks for first in Debrowser's own folder; it now runs it from the Windows folder.
+- **Linux: the memory helper acts only on your own programs.** With the permission the guide had it given, the helper that trims memory and slows background tabs could be used by any account to slow down any program on the computer.
+- **Linux: closing a private window removes only its own files.** The helper that cleans up after a private window could be pointed at a folder outside the private profile.
+- **Windows: each install of Debrowser has its own firewall rule for private windows.** The rule was named the same for every install, so a second account's install found the first's rule and was never asked to create one.
 
 ### Known issues
 

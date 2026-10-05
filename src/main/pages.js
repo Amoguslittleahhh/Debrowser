@@ -228,6 +228,34 @@ function serveSession(ses, log = () => {}) {
   }
 }
 
+/**
+ * Whether a request for one of our pages' files came from a website.
+ *
+ * Any page can name a `debrowser://` address in an `<img>`, a fetch or a
+ * frame, and whether it loads tells the site this is Debrowser - in a private
+ * window, a mark that sets the user apart from every other Tor user. The
+ * handler cannot tell who asked: measured, the request reaches it with no
+ * Referer, Origin or Sec-Fetch header at all, from our pages and a website
+ * alike. The network hooks can, from the frame that made the request, which a
+ * page has no way to set. Our own pages are `debrowser:` and the browser's
+ * chrome is `file:`; nothing else asks for these files.
+ *
+ * A navigation of the whole tab is not judged here: typing an address is the
+ * user's to do, and links from websites are refused before they get this far.
+ */
+function fromWebPage(details) {
+  if (!isInternal(details.url) || details.resourceType === 'mainFrame') return false;
+  let from = '';
+  try {
+    const frame = details.frame;
+    from = (details.resourceType === 'subFrame' ? frame?.parent?.url : frame?.url) || '';
+    if (!from && details.webContents && !details.webContents.isDestroyed()) from = details.webContents.getURL();
+  } catch {
+    from = '';
+  }
+  return Boolean(from) && !/^(debrowser|file|devtools):/.test(from);
+}
+
 /** Is this one of ours? */
 function isInternal(url) {
   return typeof url === 'string' && url.startsWith(`${SCHEME}://`);
@@ -266,5 +294,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
-  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor
+  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor, fromWebPage
 };

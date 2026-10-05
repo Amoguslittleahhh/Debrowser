@@ -47,6 +47,7 @@
 
 const { systemPreferences } = require('electron');
 const { spawn } = require('child_process');
+const { POWERSHELL } = require('./system-tools');
 
 /** Longest a person is asked to wait at a prompt before it is treated as refused. */
 const PROMPT_TIMEOUT_MS = 60_000;
@@ -312,7 +313,7 @@ function runPowerShell(script, timeoutMs) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn('powershell.exe',
+      child = spawn(POWERSHELL,
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
         { windowsHide: true });
     } catch {

@@ -48,7 +48,7 @@ const icons = require('./icons');
 const presence = require('./presence');
 const { Vault } = require('./data/vault');
 const { Speculation } = require('./speculation');
-const { DownloadManager } = require('./downloads');
+const { DownloadManager, sanitiseName } = require('./downloads');
 const { Governor } = require('./governor');
 const { Prewarm } = require('./prewarm');
 const { IpcHub } = require('./ipc');
@@ -492,7 +492,10 @@ function main() {
     // The quick window (a Lab): a small window to read it in, not a tab.
     if (shell && prefs.get('labQuickWindow') === true) {
       const space = spaceId || (spaces && spaces.activeId);
-      shell.openQuick(url, tabs.sessionFor ? tabs.sessionFor(space) : tabs.session, space);
+      // Through sessionForNew, as a tab gets one: a container space's session
+      // is set up - permissions asked, the blocker and the warnings on - the
+      // first time it is used, and the quick window could be that first time.
+      shell.openQuick(url, tabs.sessionForNew(null, space), space);
       return true;
     }
     tabs.create({ url, spaceId });
@@ -1110,7 +1113,9 @@ function main() {
 
     // Page images must never outlive the session that took them, and a crash
     // cannot be relied upon to have run the per-tab cleanup.
-    sweepThumbnails();
+    // Not from a private window, which writes none: the folder is the
+    // ordinary browser's, and sweeping it took that browser's pictures.
+    if (!INCOGNITO) sweepThumbnails();
     log('system', JSON.stringify(platform.systemInfo()));
     log('config', `profile=${cfg.profile} budget=${cfg.memoryBudgetMB}MB`);
 
@@ -1158,7 +1163,16 @@ function main() {
         });
       });
     }
-    if (circuits) icons.useSession(circuits.iconSession());
+    if (circuits) {
+      // The host, not the origin: a page upgraded to https still has its icon
+      // guessed at http, and either way it is the same site's circuit.
+      const hostOf = (u) => { try { return new URL(u).hostname; } catch { return null; } };
+      icons.useSession((url) => {
+        const host = hostOf(url);
+        const tab = tabs && tabs.all().find((t) => !t.closed && (t.favicon === url || hostOf(t.url) === host));
+        return tab ? tab.session : null;
+      });
+    }
 
     spaces = new Spaces(INCOGNITO || OFFLINE_MODE ? null : app.getPath('userData'), BROWSING_PARTITION);
     tabs = new TabManager({
@@ -1331,7 +1345,13 @@ function main() {
       tabManager: tabs,
       prefs,
       log,
-      onCommand: (name) => { if (name === 'chrome-ready' || name === 'view-ready') publish(); },
+      // Two notices, and the window's own commands: a mouse's back and
+      // forward buttons, and links opened from Peek or the quick window -
+      // which this used to drop, so all of them did nothing.
+      onCommand: (name, payload = null) => {
+        if (name === 'chrome-ready' || name === 'view-ready') publish();
+        else runCommand(name, payload);
+      },
       // Every view the shell owns answers the same table the tabs do - the
       // chrome included, since its own DOM handler is gone.
       bindShortcuts,
@@ -1602,6 +1622,8 @@ function main() {
       dir: () => downloadDir(prefs),
       // The list survives a restart - but not from a private window, or a test.
       store: INCOGNITO || OFFLINE_MODE ? null : path.join(app.getPath('userData'), 'downloads.json'),
+      // Marked as from the internet either way; where from, not in a private window.
+      recordSource: !INCOGNITO,
       // One connection over Tor: several would share a circuit and gain nothing
       // but load on the exit relay.
       connections: () => (INCOGNITO ? 1 : prefs.get('downloadConnections')),
@@ -1853,7 +1875,7 @@ function main() {
     }
   });
 
-  app.on('second-instance', (_event, secondArgv, _cwd, data) => {
+  app.on('second-instance', (_event, secondArgv, secondCwd, data) => {
     // Uninstalling while the browser is open: the window is shown here, so
     // that confirming closes the browser the ordinary way (uninstall.js) -
     // but only for this copy. Another copy shares the profile, so its request
@@ -1885,7 +1907,7 @@ function main() {
     if (!INCOGNITO && tabs && (secondArgv || []).includes('--new-tab')) runCommand('new-tab');
     // A link opened while Debrowser runs arrives as a second launch.
     let quick = false;
-    if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [])) quick = openExternal(url) || quick;
+    if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [], secondCwd)) quick = openExternal(url) || quick;
     if (shell && !shell.window.isDestroyed() && !quick) {
       if (shell.window.isMinimized()) shell.window.restore();
       shell.window.focus();
@@ -1950,7 +1972,9 @@ function main() {
     if (tor) tor.stop();
     // Synchronous on purpose: quit does not wait for promises, and leaving
     // page screenshots on disk is the one cleanup that must not be best effort.
-    sweepThumbnailsSync();
+    // Not from a private window, which writes none: the folder is the
+    // ordinary browser's, and sweeping it took that browser's pictures.
+    if (!INCOGNITO) sweepThumbnailsSync();
   });
 
   /** Whether closing now needs the user's say-so: several tabs, and the setting on. */
@@ -2939,7 +2963,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const opener = (!payload?.fromBar && context.model?.tabId && tabs.byId(context.model.tabId)) || active;
         // A link the browser's own page offers (release notes, feedback) opens
         // in front: it is what was asked for, not a page to read later.
-        if (openableUrl(url)) openLinkTab(tabs, prefs, opener, url, payload?.foreground === true ? { foreground: true } : {});
+        // The browser's own pages only from one of them, or the bookmarks bar:
+        // as `window.open` already refuses, a website's menu must not open
+        // them with whatever parameters the site put in the link.
+        const ownPage = pages.isInternal(url) && !payload?.fromBar && !(opener && opener.internal);
+        if (openableUrl(url) && !ownPage) openLinkTab(tabs, prefs, opener, url, payload?.foreground === true ? { foreground: true } : {});
         break;
       }
 
@@ -3051,7 +3079,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           let host = 'page';
           try { host = new URL(active.url).hostname.replace(/^www\./, ''); } catch { /* keep "page" */ }
           const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '.');
-          const file = path.join(await downloadDir(prefs), `Screenshot ${host} ${stamp}.png`);
+          // Through the download name rules: an IPv6 host is `[::1]`, and a colon
+          // is not a file name character on Windows.
+          const file = path.join(await downloadDir(prefs), sanitiseName(`Screenshot ${host} ${stamp}.png`));
           await fs.promises.writeFile(file, Buffer.from(shot.data, 'base64'));
           toast('Screenshot saved', 'Show', () => electronShell.showItemInFolder(file));
         })().catch((err) => { log(`screenshot failed: ${err.message}`); toast('That page could not be photographed'); });
@@ -4920,7 +4950,7 @@ function openInOtherBrowser(url, log) {
   if (process.platform === 'win32') {
     electronShell.openExternal(`microsoft-edge:${url}`).catch(fail);
   } else if (process.platform === 'darwin') {
-    const child = require('child_process').spawn('open', ['-a', 'Safari', url], { stdio: 'ignore', detached: true });
+    const child = require('child_process').spawn(require('./system-tools').OPEN, ['-a', 'Safari', url], { stdio: 'ignore', detached: true });
     child.on('error', fail);
     child.unref();
   } else {
@@ -5139,7 +5169,7 @@ function systemAccent() {
   }
 }
 
-function launchUrls(args) {
+function launchUrls(args, cwd = process.cwd()) {
   const out = [];
   for (const arg of args.slice(1)) {
     if (typeof arg !== 'string' || arg.startsWith('-')) continue;
@@ -5149,7 +5179,9 @@ function launchUrls(args) {
     }
     if (/\.(html?|pdf)$/i.test(arg)) {
       try {
-        const full = path.resolve(arg);
+        // Against the folder the file was named from: a second launch hands its
+        // own working folder over, which is not this process's.
+        const full = path.resolve(cwd || process.cwd(), arg);
         if (fs.statSync(full).isFile()) out.push(require('url').pathToFileURL(full).href);
       } catch { /* not a file */ }
     }

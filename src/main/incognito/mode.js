@@ -127,7 +127,7 @@ function windowsFirewall() {
   const script = `$r = (New-Object -ComObject HNetCfg.FwPolicy2).Rules; ` +
     `@(foreach ($n in @('${named}', '${RULE}')) { try { $r.Item($n) } catch { } }) | ` +
     'Select-Object Enabled, Action, Direction, ApplicationName | ConvertTo-Json -Compress';
-  const ask = (timeout) => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+  const ask = (timeout) => spawnSync(require('../system-tools').POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script],
     { encoding: 'utf8', windowsHide: true, timeout });
   // A check that did not finish is not an answer: once more, with longer, and
   // if that cannot finish either, say so - never "missing" for a rule that

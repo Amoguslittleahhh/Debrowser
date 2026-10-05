@@ -19,7 +19,11 @@ const { session } = require('electron');
 const mode = require('./mode');
 const policy = require('./policy');
 
-/** Slot 0 is the fallback for contexts not set up here, slot 1 carries site icons. */
+/**
+ * Slot 0 is the fallback for contexts not set up here. Slot 1 carried site
+ * icons until each icon went over its own tab's circuit (main.js); it is kept
+ * out of the rotation, so anything arriving on it is something gone astray.
+ */
 const FIRST_TAB_SLOT = 2;
 /** Fresh circuits one blocked page gets before the user is told instead. */
 const MAX_ROTATIONS = 3;
@@ -55,11 +59,6 @@ class Circuits {
   /** A fresh partition on a fresh circuit, for a tab nothing opened. */
   newTabSession() {
     return mode.sessionWithSlot(session, `incognito-tab-${++this.count}`, this.nextSlot());
-  }
-
-  /** Where site icons are fetched from: a circuit of their own, shared by no tab. */
-  iconSession() {
-    return mode.sessionWithSlot(session, 'incognito-icons', 1);
   }
 
   /**

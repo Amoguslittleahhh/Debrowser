@@ -63,8 +63,32 @@ const HTTPS_ONLY_FAILURES = new Set([
 const THUMB_WIDTH = 480;
 const THUMB_QUALITY = 55;
 
-/** Under the OS temp directory: see the privacy note on captureThumbnail. */
-const thumbnailDir = () => path.join(app.getPath('temp'), 'debrowser-thumbs');
+/**
+ * Under a temporary directory only this user can enter: see the privacy note
+ * on captureThumbnail. On Linux the OS temp directory is /tmp, shared by every
+ * account, and a folder of page screenshots there was readable by all of them
+ * - or, made first by someone else, theirs. So there, the per-user runtime
+ * directory (in RAM, 0700) where the session has one; elsewhere, and as the
+ * fallback, a folder named for this user that `privateThumbDir` checks before
+ * anything is written to it. Windows' and macOS's temp directories are the
+ * user's own already.
+ */
+const thumbnailDir = () => {
+  const runtime = process.platform === 'linux' ? process.env.XDG_RUNTIME_DIR : null;
+  if (runtime) return path.join(runtime, 'debrowser-thumbs');
+  const uid = typeof process.getuid === 'function' ? `-${process.getuid()}` : '';
+  return path.join(app.getPath('temp'), `debrowser-thumbs${uid}`);
+};
+
+/** The thumbnail folder, made private to this user - or null if it is not ours. */
+async function privateThumbDir() {
+  const dir = thumbnailDir();
+  await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+  if (typeof process.getuid !== 'function') return dir;
+  const st = await fs.promises.lstat(dir);
+  if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== process.getuid() || (st.mode & 0o077)) return null;
+  return dir;
+}
 
 /**
  * Delete every thumbnail left behind by a previous run.
@@ -1005,10 +1029,10 @@ class Tab {
       const buffer = image.resize({ width: THUMB_WIDTH }).toJPEG(THUMB_QUALITY);
       if (!buffer || !buffer.length) return null;
 
-      const dir = thumbnailDir();
-      await fs.promises.mkdir(dir, { recursive: true });
+      const dir = await privateThumbDir();
+      if (!dir) return null;
       const file = path.join(dir, `tab-${this.id}.jpg`);
-      await fs.promises.writeFile(file, buffer);
+      await fs.promises.writeFile(file, buffer, { mode: 0o600 });
       this.thumbPath = file;
 
       // Asked again after the awaits. The tab may have closed meanwhile - its

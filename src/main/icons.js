@@ -47,14 +47,21 @@
 const { net } = require('electron');
 
 /**
- * Where icon fetches go out from. The default session in the normal browser;
- * in incognito, the in-memory browsing partition, so an icon is neither sent
- * outside the private session's routing nor cached on disk by the default
- * session, which is the one Chromium keeps a profile directory for.
+ * Where icon fetches go out from. The default session in the normal browser.
+ *
+ * In a private window, the circuit of the tab showing that site, or nowhere:
+ * one session of its own for every icon put every site the user had open
+ * through one exit, which could then see them side by side - the link Tor's
+ * per-site circuits exist to break. The tab's own circuit has already carried
+ * that site, so its icon tells the exit nothing new. No tab, no fetch: the row
+ * shows the site's letter.
  */
 let fetcher = (url, init) => net.fetch(url, init);
-function useSession(ses) {
-  fetcher = (url, init) => ses.fetch(url, init);
+function useSession(pick) {
+  fetcher = (url, init) => {
+    const ses = pick(url);
+    return ses ? ses.fetch(url, init) : Promise.resolve(new Response(null, { status: 404 }));
+  };
 }
 
 /** Longest an icon fetch may take before the row falls back to its letter. */

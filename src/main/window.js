@@ -237,8 +237,22 @@ const CHROME_PRELOAD = path.join(__dirname, '..', 'preload', 'chrome-preload.js'
  * is a snapshot of something the same view receives on every broadcast anyway,
  * so nothing crosses this boundary that was not already crossing it.
  */
+/**
+ * Only what the first paint needs. A process's command line is readable by
+ * other users and programs (/proc/<pid>/cmdline, `ps`), and the whole set used
+ * to go there - private bridge lines, hidden new-tab sites, the download
+ * folder - in every view. The rest arrives with the first broadcast, over IPC.
+ */
+const FIRST_PAINT_PREFS = ['theme', 'design', 'accent', 'accentFromSystem', 'tabWidth', 'tabBarPosition',
+  'tabBarColor', 'windowOpacity', 'backgroundMaterial', 'reduceMotion', 'showMemoryMeter', 'showTierDots',
+  'tabCloseButton', 'sidebarPinned', 'showBookmarksBar', 'settingsLayout', 'batteryMode'];
+
 function preloadArgs(prefs) {
-  return prefs ? [`--prefs=${JSON.stringify(prefs.all())}`] : [];
+  if (!prefs) return [];
+  const all = prefs.all();
+  const look = {};
+  for (const key of FIRST_PAINT_PREFS) if (key in all) look[key] = all[key];
+  return [`--prefs=${JSON.stringify(look)}`];
 }
 
 function setRadius(view, radius) {
@@ -754,7 +768,12 @@ class BrowserShell {
     // backdrop dismisses the menu, and the right-click that follows - the one
     // that should raise it at the new point - arrived inside the window and was
     // swallowed, so the menu appeared to have stopped working for a moment.
-    if (page !== 'context' && !refresh &&
+    //
+    // Nor for a question (the ask and update prompts), which no button opens:
+    // closing one by clicking away starts the next one queued behind it at
+    // once, and the guard swallowed that one - its promise never settled,
+    // and a "Close window?" lost this way left the window unable to close.
+    if (page !== 'context' && page !== 'ask' && page !== 'update' && !refresh &&
         this.sheetClosedPage === page && Date.now() - this.sheetClosedAt < 250) return;
 
     const x = Number(anchor?.x);

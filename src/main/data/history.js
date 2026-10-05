@@ -299,6 +299,7 @@ class History {
     this.items = this.items.filter((e) => e.id !== id);
     if (this.items.length === before) return false;
     this.queueSave();
+    this.forgetBackups();
     return true;
   }
 
@@ -328,7 +329,10 @@ class History {
       }
     });
     const removed = before - this.items.length;
-    if (removed) this.queueSave();
+    if (removed) {
+      this.queueSave();
+      this.forgetBackups();
+    }
     return removed;
   }
 
@@ -338,7 +342,23 @@ class History {
     this.items = [];
     this.dirty = true;
     this.flush();
+    this.forgetBackups();
     return removed;
+  }
+
+  /**
+   * The copies an update made (store-file.js `backupProfile`) go too. A
+   * rollback copy of history is still history, and clearing it has to mean
+   * it is gone from the disk - not that it moved into `Backups/1.9.0/`. What
+   * is lost is a rollback of history alone; settings and the rest stay.
+   */
+  forgetBackups() {
+    const root = path.join(this.dir, 'Backups');
+    let versions = [];
+    try { versions = fs.readdirSync(root); } catch { return; }
+    for (const v of versions) {
+      try { fs.rmSync(path.join(root, v, FILE), { force: true }); } catch { /* not there */ }
+    }
   }
 
   /* ---------------------------------------------------------------- */

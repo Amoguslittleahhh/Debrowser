@@ -23,7 +23,12 @@
  * handler.
  */
 
+const pages = require('./pages');
+
 const FILTER = { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] };
+// Our own pages' files as well, for one check before any handler: a website
+// asking for them is refused (pages.fromWebPage). Handlers never see them.
+const BEFORE_FILTER = { urls: [...FILTER.urls, `${pages.SCHEME}://*/*`] };
 
 const hubs = new WeakMap();
 
@@ -75,7 +80,11 @@ class WebHooks {
     this.before.push(handler);
     if (this.installed.before) return;
     this.installed.before = true;
-    this.session.webRequest.onBeforeRequest(FILTER, (details, callback) => {
+    this.session.webRequest.onBeforeRequest(BEFORE_FILTER, (details, callback) => {
+      if (pages.isInternal(details.url)) {
+        callback(pages.fromWebPage(details) ? { cancel: true } : {});
+        return;
+      }
       run(this.before, details, (result) => callback(result || {}),
         (r) => Boolean(r && (r.cancel || r.redirectURL)));
     });

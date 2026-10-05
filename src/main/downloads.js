@@ -55,6 +55,41 @@ const PROGRESS_INTERVAL_MS = 250;
 
 let nextId = 0;
 
+/**
+ * Mark a finished file as downloaded from the internet, as Chromium's own
+ * download path does - ours replaced it (main.js `takeDownloads`), and the
+ * mark went with it. Without it an installer opens with no SmartScreen check,
+ * an Office file outside Protected View, and an app past Gatekeeper.
+ *
+ *   Windows: the `Zone.Identifier` stream, zone 3 (internet).
+ *   macOS:   the `com.apple.quarantine` attribute.
+ *
+ * `source` null leaves out where it came from, for a private window - the zone
+ * alone still gets the checks. A volume that cannot hold the mark (FAT, a
+ * network share) keeps the file unmarked, as Chromium leaves it.
+ */
+async function markFromInternet(file, source, log = () => {}) {
+  if (!file) return;
+  try {
+    if (process.platform === 'win32') {
+      const lines = ['[ZoneTransfer]', 'ZoneId=3'];
+      if (source && source.referrer) lines.push(`ReferrerUrl=${source.referrer}`);
+      if (source && source.url) lines.push(`HostUrl=${source.url}`);
+      await fs.promises.writeFile(`${file}:Zone.Identifier`, `${lines.join('\r\n')}\r\n`);
+    } else if (process.platform === 'darwin') {
+      // 0081: downloaded, not yet opened - so Gatekeeper asks on first open.
+      const stamp = Math.floor(Date.now() / 1000).toString(16);
+      await new Promise((resolve, reject) => {
+        require('child_process').execFile('/usr/bin/xattr',
+          ['-w', 'com.apple.quarantine', `0081;${stamp};Debrowser;`, file],
+          (err) => (err ? reject(err) : resolve()));
+      });
+    }
+  } catch (err) {
+    log('downloads', `could not mark ${path.basename(file)} as downloaded: ${err.message}`);
+  }
+}
+
 class Download {
   /**
    * @param {object} opts
@@ -66,7 +101,8 @@ class Download {
    * @param {(defaultPath: string) => any} [opts.saveAs] - see DownloadManager
    */
   constructor({ url, dir, connections, session = null, log = () => {}, onChange = () => {},
-                saveAs = null, ask = false, referrer = null }) {
+                saveAs = null, ask = false, referrer = null, recordSource = true }) {
+    this.recordSource = recordSource;
     this.id = `dl-${Date.now().toString(36)}-${(nextId += 1).toString(36)}`;
     this.url = url;
     this.dir = dir;
@@ -187,6 +223,7 @@ class Download {
           this.error = `could not replace ${this.filename}: ${err.message}`;
         }
       }
+      if (this.state === 'done') await markFromInternet(this.file, this.recordSource ? this : null, this.log);
       // A failed download leaves no file behind either - the same rule as a
       // cancelled one, and here it matters more.
       //
@@ -546,7 +583,9 @@ class DownloadManager {
    * between runs; null (a private window, a test) keeps it for this run only.
    */
   constructor({ dir, connections = () => 4, session = null, log = () => {}, onChange = () => {},
-                saveAs = null, store = null }) {
+                saveAs = null, store = null, recordSource = true }) {
+    /** Whether a finished file is marked with where it came from (not in a private window). */
+    this.recordSource = recordSource;
     this.dir = dir;
     this.saveAs = saveAs;
     this.connections = connections;
@@ -675,6 +714,7 @@ class DownloadManager {
       saveAs: this.saveAs,
       ask,
       referrer: /^https?:\/\//i.test(referrer || '') ? referrer : null,
+      recordSource: this.recordSource,
       log: this.log,
       onChange: (d) => {
         if (d && TERMINAL.has(d.state)) this.persist();
@@ -907,6 +947,7 @@ async function openUnique(dir, name) {
 }
 
 module.exports = {
+  markFromInternet,
   DownloadManager,
   Download,
   sanitiseName,

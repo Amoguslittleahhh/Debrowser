@@ -55,18 +55,38 @@ class Vault {
     this.file = dir ? path.join(dir, FILE) : null;
     this.now = now;
     this.log = log;
-    this.record = this.load();
     this.unlockedUntil = 0;
-    this.failures = 0;
-    this.blockedUntil = 0;
+    this.record = this.load();
+    // Wrong guesses are kept with the hash, so quitting and starting again
+    // does not hand out a fresh set of free tries. A wait further off than the
+    // longest there is means the clock was moved; it is cut to the longest.
+    this.failures = Number.isInteger(this.record?.failures) ? this.record.failures : 0;
+    const blocked = Number(this.record?.blockedUntil) || 0;
+    this.blockedUntil = Math.min(blocked, this.now() + BACKOFF_MS[BACKOFF_MS.length - 1]);
   }
 
+  /**
+   * The stored hash, or null for none.
+   *
+   * A file that is there but could not be read this time - locked by a virus
+   * scanner, a permissions slip - is not "none": that reading made the passwords
+   * page offer a first passcode, and setting one deletes everything saved (the
+   * orphan rule in main.js). So it is `unreadable` instead, and asked again
+   * on the next look. A file that reads but does not parse was set aside by
+   * readJson and really is gone.
+   */
   load() {
+    this.unreadable = false;
     if (!this.file) return null;
     try {
       const raw = readJson(this.file);
       if (raw && typeof raw.salt === 'string' && typeof raw.hash === 'string') return raw;
-    } catch { /* none set, or unreadable: treated as none */ }
+    } catch (err) {
+      if (err.code && err.code !== 'ENOENT') {
+        this.unreadable = true;
+        this.log('vault', `passcode file could not be read: ${err.code}`);
+      }
+    }
     return null;
   }
 
@@ -86,6 +106,7 @@ class Vault {
 
   /** Whether a passcode is set, which is whether the feature is on at all. */
   configured() {
+    if (this.unreadable) this.record = this.load();
     return Boolean(this.record);
   }
 
@@ -152,8 +173,10 @@ class Vault {
     if (wait > 0) return { ok: false, waitMs: wait };
     const ok = await matches(String(passcode ?? ''), this.record);
     if (ok) {
+      const had = this.failures;
       this.failures = 0;
       this.blockedUntil = 0;
+      if (had) this.keepFailures();
       return { ok: true };
     }
     this.failures += 1;
@@ -161,8 +184,21 @@ class Vault {
     if (over > 0) {
       this.blockedUntil = this.now() + BACKOFF_MS[Math.min(over, BACKOFF_MS.length) - 1];
     }
+    this.keepFailures();
     this.log('vault', `wrong passcode (${this.failures})`);
     return { ok: false, waitMs: Math.max(0, this.blockedUntil - this.now()) };
+  }
+
+  /** Write the count of wrong guesses beside the hash. Best effort. */
+  keepFailures() {
+    if (!this.record) return;
+    const { failures: _f, blockedUntil: _b, ...hash } = this.record;
+    const next = this.failures ? { ...hash, failures: this.failures, blockedUntil: this.blockedUntil } : hash;
+    try {
+      this.write(next);
+    } catch (err) {
+      this.log('vault', `could not keep the wrong-guess count: ${err.message}`);
+    }
   }
 
   /**
@@ -172,6 +208,9 @@ class Vault {
   async setPasscode(next, current = null) {
     const reason = weakness(next);
     if (reason) return { ok: false, reason };
+    if (!this.configured() && this.unreadable) {
+      return { ok: false, reason: 'The passcode file could not be read. Try again in a moment.' };
+    }
     if (this.configured()) {
       const check = await this.check(current);
       if (!check.ok) return { ok: false, reason: 'The current passcode is not right.', waitMs: check.waitMs };
