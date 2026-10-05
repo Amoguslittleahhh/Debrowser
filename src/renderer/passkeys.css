@@ -94,3 +94,31 @@ body.calm .card { animation: none; }
 .meta { color: var(--text-dim); font-size: var(--fs-small, 12px); }
 
 .sep { height: 1px; margin: 6px 4px; background: var(--border); }
+
+/* The passcode, where there is no Touch ID: a field and its button. */
+.verify { padding: 0 10px 8px; }
+.verify[hidden], .rows[hidden], .sep[hidden], .row[hidden] { display: none; }
+.verify-row { display: flex; gap: 8px; }
+.verify input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+.verify input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.go {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-fill, var(--accent));
+  color: #fff;
+  font: inherit;
+}
+.error { margin: 6px 0 0; color: var(--crit); font-size: var(--fs-small, 12px); }
+.error:empty { display: none; }

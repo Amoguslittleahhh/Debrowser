@@ -4663,6 +4663,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       sleep(10_000).then(() => { throw new Error(`the page did not answer ${code.slice(0, 40)}`); })]);
     const dbg = page.wc.debugger;
     const savedList = passkeys.list;
+    // Windows' route first: its own list, its own authenticator.
+    const savedStore = passkeys.store;
+    passkeys.store = null;
     try {
       dbg.attach('1.3');
       await dbg.sendCommand('WebAuthn.enable', { enableUI: false });
@@ -4738,9 +4741,74 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       check('the passkey list runs end to end', false, err.message);
     } finally {
       passkeys.list = savedList;
+      passkeys.store = savedStore;
       try { dbg.detach(); } catch { /* not attached */ }
       tabs.close(page.id);
       shell.hidePasskeys();
+    }
+
+    // macOS and Linux: passkeys Debrowser keeps itself (passkey-store.js). A
+    // site makes one, it is saved after the passcode, and signing in with it
+    // works - with nothing left in the tab between requests.
+    {
+      const { PasskeyStore } = require('../passkey-store');
+      const noTouchId = { capability: async () => ({ available: false }), verify: async () => false };
+      const store = new PasskeyStore({ credentials, vault, presence: noTouchId });
+      const kept = { store: passkeys.store, list: passkeys.list, ask: passkeys.ask,
+        key: credentials.key, loaded: credentials.loaded, records: credentials.records, capability: credentials.capability };
+      credentials.key = require('crypto').randomBytes(32);
+      credentials.loaded = true;
+      credentials.unavailable = null;
+      credentials.capability = () => ({ available: true, reason: null });
+      credentials.records = { login: [], payment: [], passkey: [] };
+      await vault.setPasscode('passkey-passcode');
+      passkeys.store = store;
+      passkeys.list = (rpId) => store.list(rpId);
+      passkeys.ask = async () => ({ response: 0 });   // "Save passkey"
+      const site = tabs.create({ url: `http://localhost:${fixtures.port}/passkey.html`, activate: true, realise: true });
+      await waitFor(() => site.isLive && !site.loading, { timeoutMs: 10_000 });
+      await tabs.activate(site.id);
+      const run = (code) => Promise.race([site.wc.executeJavaScript(code, true),
+        sleep(10_000).then(() => { throw new Error(`the page did not answer ${code.slice(0, 40)}`); })]);
+      try {
+        const making = run('reg("carol@example.com", "Carol").catch((e) => e.name)');
+        await waitFor(() => passkeys.shown && passkeys.shown.verifying && shell.passkeyHeight > 0, { timeoutMs: 8000 });
+        const askedPasscode = Boolean(passkeys.shown && passkeys.shown.verifying);
+        runCommand('passkey-passcode', { passcode: 'not-the-passcode' });
+        await sleep(600);
+        const stillAsking = Boolean(passkeys.shown && passkeys.shown.verifying);
+        runCommand('passkey-passcode', { passcode: 'passkey-passcode' });
+        const made = await making;
+        await waitFor(() => credentials.passkeysFor('localhost').length === 1 && !site.passkeyOp, { timeoutMs: 8000 });
+        const record = credentials.passkeysFor('localhost')[0];
+        check('a passkey a site makes is kept in Debrowser\'s own store, after the passcode',
+          askedPasscode && stillAsking && record && record.id === made && record.name === 'carol@example.com' &&
+            Boolean(record.key) && !site.passkeyOp,
+          `asked ${askedPasscode}, wrong one refused ${stillAsking}, made ${made}, kept ${record ? record.name : 'nothing'}`);
+
+        // Signed in with: the passcode was given a moment ago, so only a pick.
+        const signing = run('login().catch((e) => e.name)');
+        await waitFor(() => passkeys.shown && shell.passkeyHeight > 0, { timeoutMs: 8000 });
+        const rows = shell.passkeyView
+          ? await shell.passkeyView.webContents.executeJavaScript('document.querySelectorAll("#rows .row").length').catch(() => -1) : 0;
+        runCommand('passkey-pick', { id: made });
+        const who = await signing;
+        await waitFor(() => !site.passkeyOp, { timeoutMs: 8000 });
+        const after = credentials.passkeysFor('localhost')[0];
+        const released = site.passkeyHeld == null && !site.passkeyOp;
+        check('signing in with a kept passkey works, and the tab holds no key afterwards',
+          rows === 1 && who === made && after && released,
+          `${rows} row(s); signed in as ${who === made ? 'Carol' : who}; counter ${after && after.signCount}; ` +
+          `released ${released}`);
+      } catch (err) {
+        check('the kept passkeys run end to end', false, err.message);
+      } finally {
+        shell.hidePasskeys();
+        tabs.close(site.id);
+        await vault.removePasscode('passkey-passcode');
+        Object.assign(passkeys, { store: kept.store, list: kept.list, ask: kept.ask });
+        Object.assign(credentials, { key: kept.key, loaded: kept.loaded, records: kept.records, capability: kept.capability });
+      }
     }
   }
 

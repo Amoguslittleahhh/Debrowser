@@ -79,10 +79,13 @@ function keystoreCapability() {
   return { available: true, reason: null };
 }
 
-/** The two kinds, and the file each lives in. */
+/** The kinds, and the file each lives in. */
 const KINDS = {
   login: 'logins.dat',
-  payment: 'payments.dat'
+  payment: 'payments.dat',
+  // Passkeys Debrowser keeps itself, where the system has no store it may use
+  // (macOS without Apple's browser entitlement, Linux): see passkey-store.js.
+  passkey: 'passkeys.dat'
 };
 
 const KEY_FILE = 'keyring.dat';
@@ -109,7 +112,27 @@ const SHAPES = {
     number: (v) => typeof v === 'string' && /^[0-9]{12,19}$/.test(v),
     expiry: (v) => typeof v === 'string' && /^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(v),
     holder: (v) => typeof v === 'string' && v.length < 256
+  },
+  // The site, the credential's id (base64url), the account it signs in as,
+  // and the private key (PKCS#8, base64) - which never leaves this process
+  // except into the tab's authenticator for the one sign-in it was picked for.
+  passkey: {
+    rpId: (v) => typeof v === 'string' && /^[a-z0-9.-]{1,253}$/.test(v),
+    id: (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,1400}$/.test(v),
+    userHandle: (v) => typeof v === 'string' && /^[A-Za-z0-9+/=]{0,700}$/.test(v),
+    name: (v) => typeof v === 'string' && v.length < 512,
+    display: (v) => typeof v === 'string' && v.length < 512,
+    key: (v) => typeof v === 'string' && /^[A-Za-z0-9+/=]{16,8192}$/.test(v),
+    signCount: (v) => Number.isInteger(v) && v >= 0,
+    created: (v) => Number.isFinite(v)
   }
+};
+
+/** What identifies a record of each kind, for replacing and removing. */
+const IDENTITY = {
+  login: (r) => `${r.origin}\u0000${r.username}`,
+  payment: (r) => r.label,
+  passkey: (r) => r.id
 };
 
 function validate(kind, record) {
@@ -142,7 +165,7 @@ class Credentials {
     this.key = null;
     this.unavailable = null;   // a named reason, or null when usable
     /** @type {Record<string, object[]>} kind -> records, decrypted, in memory */
-    this.records = { login: [], payment: [] };
+    this.records = { login: [], payment: [], passkey: [] };
     this.loaded = false;
   }
 
@@ -340,10 +363,8 @@ class Credentials {
       return false;
     }
 
-    const list = this.records[kind];
-    const same = kind === 'login'
-      ? (r) => r.origin === record.origin && r.username === record.username
-      : (r) => r.label === record.label;
+    const list = this.records[kind] || (this.records[kind] = []);
+    const same = (r) => IDENTITY[kind](r) === IDENTITY[kind](record);
 
     // Written first, kept second. The list used to be mutated before `save`,
     // and `save` swallows its own errors and returns false - so a disk that
@@ -371,9 +392,7 @@ class Credentials {
     // rejection from a crash.
     if (!Array.isArray(list) || typeof id !== 'string') return false;
     const before = list.length;
-    this.records[kind] = kind === 'login'
-      ? list.filter((r) => `${r.origin}\u0000${r.username}` !== id)
-      : list.filter((r) => r.label !== id);
+    this.records[kind] = list.filter((r) => IDENTITY[kind](r) !== id);
     if (this.records[kind].length === before) return false;
     // As in `put`: a delete the disk refused must not vanish from the list
     // only to come back, and be filled in again, after a restart.
@@ -403,8 +422,16 @@ class Credentials {
         // Last four only. The rest is never sent anywhere it is not needed.
         last4: r.number.slice(-4),
         expiry: r.expiry
-      }))
+      })),
+      // Never the key.
+      passkeys: (this.records.passkey || []).map((r) => ({ id: r.id, rpId: r.rpId, name: r.name, display: r.display }))
     };
+  }
+
+  /** Every passkey kept for exactly this site (a WebAuthn relying party id). */
+  passkeysFor(rpId) {
+    this.load();
+    return (this.records.passkey || []).filter((r) => r.rpId === rpId);
   }
 
   /** Every login stored for exactly this origin. */
@@ -416,13 +443,13 @@ class Credentials {
   }
 
   /**
-   * Forget every saved sign-in and card - what taking the passcode away means.
+   * Forget every saved sign-in, card and passkey - what taking the passcode away means.
    * The files are removed rather than written empty, so nothing is left to
    * decrypt. Returns how many records went.
    */
   clear() {
     this.load();
-    const removed = this.records.login.length + this.records.payment.length;
+    const removed = Object.keys(KINDS).reduce((n, kind) => n + (this.records[kind] || []).length, 0);
     for (const kind of Object.keys(KINDS)) {
       this.records[kind] = [];
       try { fs.unlinkSync(path.join(this.dir, KINDS[kind])); } catch { /* none saved */ }
@@ -433,10 +460,8 @@ class Credentials {
   /** One full record, for a fill or a deliberate reveal. */
   reveal(kind, id) {
     this.load();
-    if (kind === 'login') {
-      return this.records.login.find((r) => `${r.origin}\u0000${r.username}` === id) || null;
-    }
-    return this.records.payment.find((r) => r.label === id) || null;
+    if (!IDENTITY[kind]) return null;
+    return (this.records[kind] || []).find((r) => IDENTITY[kind](r) === id) || null;
   }
 }
 

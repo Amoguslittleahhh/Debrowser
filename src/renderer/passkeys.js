@@ -18,8 +18,42 @@ const el = {
   head: document.getElementById('head'),
   title: document.getElementById('title'),
   rows: document.getElementById('rows'),
-  other: document.getElementById('other')
+  other: document.getElementById('other'),
+  sub: document.getElementById('sub'),
+  sep: document.getElementById('sep'),
+  verify: document.getElementById('verify'),
+  passcode: document.getElementById('passcode'),
+  error: document.getElementById('verify-error')
 };
+
+/** The card's height, for the view to be exactly that tall. */
+function measure() {
+  requestAnimationFrame(() => {
+    // The card and the margin its shadow is drawn in.
+    const box = el.card.getBoundingClientRect();
+    api.send('passkey-size', { height: Math.ceil(box.bottom + 16) });
+  });
+}
+
+/** Asking for the passcode instead of a choice: the list has been made. */
+function askPasscode(model) {
+  el.head.hidden = false;
+  if (model.title) el.title.textContent = model.title;
+  el.sub.textContent = 'Enter your Debrowser passcode to continue';
+  for (const node of [el.rows, el.sep, el.other]) node.hidden = true;
+  el.verify.hidden = false;
+  el.error.textContent = model.error || '';
+  el.passcode.value = '';
+  el.passcode.focus();
+  measure();
+}
+
+el.verify.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!el.passcode.value) return;
+  api.send('passkey-passcode', { passcode: el.passcode.value });
+  el.passcode.value = '';
+});
 
 /** The rows the keyboard moves through, the "different passkey" one last. */
 const items = () => [...el.rows.querySelectorAll('.row'), el.other];
@@ -30,6 +64,9 @@ function render(model) {
   document.body.dataset.mode = chooser ? 'chooser' : 'dropdown';
   el.head.hidden = !chooser;
   el.title.textContent = `Sign in to ${model.site}`;
+  el.sub.textContent = 'Choose a passkey saved on this device';
+  for (const node of [el.rows, el.sep, el.other]) node.hidden = false;
+  el.verify.hidden = true;
   el.rows.textContent = '';
   for (const account of model.accounts || []) {
     const row = document.createElement('button');
@@ -55,17 +92,14 @@ function render(model) {
     row.addEventListener('click', () => api.send('passkey-pick', { id: account.id }));
     el.rows.append(row);
   }
-  requestAnimationFrame(() => {
-    // The card and the margin its shadow is drawn in.
-    const box = el.card.getBoundingClientRect();
-    api.send('passkey-size', { height: Math.ceil(box.bottom + 16) });
-    if (chooser) items()[0].focus();
-  });
+  measure();
+  if (chooser) requestAnimationFrame(() => items()[0].focus());
 }
 
 el.other.addEventListener('click', () => api.send('passkey-other'));
 
 document.addEventListener('keydown', (event) => {
+  if (!el.verify.hidden && event.key !== 'Escape') return;
   const list = items();
   const at = list.indexOf(document.activeElement);
   if (event.key === 'Escape') {
@@ -85,5 +119,6 @@ api.onMessage((message) => {
   if (!message) return;
   if (message.kind === 'passkeys') render(message);
   // Down from the field: the first passkey, as in Chrome's dropdown.
-  if (message.kind === 'passkeys-focus') items()[0].focus();
+  if (message.kind === 'passkeys-focus' && el.verify.hidden) items()[0].focus();
+  if (message.kind === 'passkeys-passcode') askPasscode(message);
 });

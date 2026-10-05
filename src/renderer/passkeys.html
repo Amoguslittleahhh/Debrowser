@@ -16,11 +16,20 @@
       </span>
       <div>
         <strong id="title"></strong>
-        <span class="sub">Choose a passkey saved on this device</span>
+        <span class="sub" id="sub">Choose a passkey saved on this device</span>
       </div>
     </header>
     <div class="rows" id="rows"></div>
-    <div class="sep" role="separator"></div>
+    <!-- It is you: the Debrowser passcode, where there is no Touch ID. -->
+    <form class="verify" id="verify" hidden autocomplete="off">
+      <div class="verify-row">
+        <input id="passcode" type="password" spellcheck="false" autocomplete="off"
+               placeholder="Passcode" aria-label="Debrowser passcode">
+        <button type="submit" class="go">Continue</button>
+      </div>
+      <p class="error" id="verify-error" role="alert"></p>
+    </form>
+    <div class="sep" id="sep" role="separator"></div>
     <button type="button" class="row other" id="other" role="option">
       <span class="avatar quiet" aria-hidden="true">
         <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 17.5h2"/></svg>

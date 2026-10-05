@@ -5,6 +5,7 @@
 ### New
 
 - **Windows: passkeys in Debrowser's own list.** Signing in with a passkey now lists your accounts for the site in Debrowser itself, as Chrome and Edge do: under the address bar, or as a dropdown under the sign-in field on sites that offer one. Pick an account and Windows Hello only confirms it is you. Use a different passkey still opens Windows' own dialog, for a phone or a security key. Needs Windows 11 22H2 or later; on earlier versions Windows' dialog appears as before. The site never sees your account list, only the one you pick.
+- **Passkeys on macOS and Linux, kept by Debrowser.** Sites that offer to make a passkey now can: Debrowser asks whether to save it, and keeps it encrypted with your saved passwords, behind your passcode. Signing in shows it in the same list as on Windows. Touch ID confirms it is you where the Mac has it, otherwise your Debrowser passcode, which is not asked again for five minutes. Passkeys are listed under Passwords, where you can delete them. They stay on this device and are not shared with iCloud Keychain or other browsers.
 
 ### Improved
 
@@ -18,6 +19,10 @@
 - **A downloaded update can be installed after you dismiss its prompt.** Choosing Later left no way back to the restart until Debrowser was opened again. Now the menu shows Restart to update at the top, with a dot on the menu button, and the button under Settings → Updates becomes Restart to update.
 - **Windows: installing an update shows that it is installing.** After Restart to update, a small Debrowser window says it is updating until the new version opens, instead of nothing on screen while the browser was closed.
 - **An update already downloaded is no longer shown downloading again.** Opening Debrowser with an update downloaded but not yet installed showed it downloading from 0%; it now says it is getting the update ready, then offers the restart.
+
+### Known issues
+
+- **macOS: passkeys in iCloud Keychain are not offered.** Apple lets a browser use them only with an entitlement that needs a signed build, which Debrowser does not have yet; until then Debrowser keeps its own passkeys on the Mac.
 
 ## 2.1.0
 

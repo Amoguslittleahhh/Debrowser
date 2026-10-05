@@ -1308,6 +1308,20 @@ class BrowserShell {
     this.placePasskeys();
   }
 
+  /**
+   * The list asks for the Debrowser passcode instead (passkeys.js, confirm):
+   * a Mac without Touch ID, or Linux. It takes the keyboard for it.
+   */
+  passcodePasskeys(model) {
+    const view = this.passkeyView;
+    if (!view) return;
+    this.passkeyReady.then(() => {
+      if (this.passkeyView !== view || view.webContents.isDestroyed()) return;
+      send(view, 'debrowser:ui', { kind: 'passkeys-passcode', ...model });
+      view.webContents.focus();
+    });
+  }
+
   /** Arrow down from the field: the keyboard into the list. */
   focusPasskeys() {
     const view = this.passkeyView;

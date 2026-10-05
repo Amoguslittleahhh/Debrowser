@@ -55,6 +55,7 @@ const COMMANDS = new Set([
   'passkey-other',
   'passkey-close',
   'passkey-size',
+  'passkey-passcode',
   'peek-link',
   'split-new',
   'unsplit',

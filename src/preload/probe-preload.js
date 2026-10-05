@@ -793,6 +793,11 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
  * exactly as the page wrote it. The accounts never pass through here: the page
  * learns only the credential chosen, as it would from the signed answer.
  *
+ * On macOS and Linux the passkeys are Debrowser's own (passkey-store.js), so
+ * a page offering to make one, or naming the one it wants, is asked about here
+ * too; after Chromium has made or used it, the browser is told, and takes the
+ * key back out of the tab.
+ *
  * A field marked for passkeys (`autocomplete="username webauthn"`) says where
  * the dropdown goes, as it does in Chrome; its position is all that is sent.
  *
@@ -803,10 +808,11 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
   const ask = (request) => ipcRenderer.invoke('debrowser:passkey-request', request);
   const canAsk = () => ipcRenderer.invoke('debrowser:passkey-available');
   const gaveUp = () => ipcRenderer.send('debrowser:passkey-abort');
+  const settled = () => ipcRenderer.send('debrowser:passkey-done');
   try {
     contextBridge.executeInMainWorld({
-      func: (ask, canAsk, gaveUp) => {
-        /* global atob, DOMException -- the page's own, in its world */
+      func: (ask, canAsk, gaveUp, settled) => {
+        /* global atob, btoa, DOMException -- the page's own, in its world */
         const proto = window.CredentialsContainer && window.CredentialsContainer.prototype;
         if (!proto || typeof proto.get !== 'function') return;
         const decode = (s) => {
@@ -815,51 +821,96 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
           for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i);
           return out;
         };
+        const encode = (source) => {
+          try {
+            const bytes = source instanceof ArrayBuffer ? new Uint8Array(source)
+              : new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+            let s = '';
+            for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+            return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          } catch { return null; }
+        };
+        const ids = (list) => (Array.isArray(list) ? list.map((c) => c && c.id && encode(c.id)).filter(Boolean) : []);
         // What Chromium says when its own dialog is closed: the page cannot
         // tell a dismissal here from one there.
         const refused = () => new DOMException('The operation either timed out or was not allowed. ' +
           'See: https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.', 'NotAllowedError');
+        const already = () => new DOMException('The user attempted to register an authenticator that contains ' +
+          'one of the credentials already registered with the relying party.', 'InvalidStateError');
+
+        // Ask the browser, then Chromium with what it answered. `then` makes
+        // the call Chromium sees; a passkey kept by the browser is told when
+        // that call has settled, so it can take the key back.
+        const through = (target, self, args, question, then) => {
+          const options = args[0];
+          const signal = options.signal;
+          if (signal && signal.aborted) return Reflect.apply(target, self, args);
+          return new Promise((resolve, reject) => {
+            let done = false;
+            const onAbort = () => {
+              if (done) return;
+              done = true;
+              gaveUp();
+              reject(signal.reason !== undefined ? signal.reason : new DOMException('signal is aborted without reason', 'AbortError'));
+            };
+            if (signal) signal.addEventListener('abort', onAbort, { once: true });
+            const finish = (fn) => {
+              if (done) return;
+              done = true;
+              if (signal) signal.removeEventListener('abort', onAbort);
+              fn();
+            };
+            const asWritten = () => resolve(Reflect.apply(target, self, args));
+            ask(question).then((answer) => finish(() => {
+              if (!answer) { asWritten(); return; }
+              if (answer.cancel) { reject(refused()); return; }
+              if (answer.exists) { reject(already()); return; }
+              const call = Reflect.apply(target, self, [then(answer)]);
+              if (answer.done) call.then(settled, settled);
+              resolve(call);
+            }), () => finish(asWritten));
+          });
+        };
+
         proto.get = new Proxy(proto.get, {
           apply(target, self, args) {
             const options = args[0];
             const pk = options && options.publicKey;
-            // Only "any of mine": a page naming the credentials it wants
-            // already knows who is signing in, and Windows asks only Hello.
-            if (!pk || typeof pk !== 'object' || options.mediation === 'silent' ||
-                (pk.allowCredentials && pk.allowCredentials.length)) return Reflect.apply(target, self, args);
-            const signal = options.signal;
-            if (signal && signal.aborted) return Reflect.apply(target, self, args);
-            const conditional = options.mediation === 'conditional';
-            return new Promise((resolve, reject) => {
-              let done = false;
-              const onAbort = () => {
-                if (done) return;
-                done = true;
-                gaveUp();
-                reject(signal.reason !== undefined ? signal.reason : new DOMException('signal is aborted without reason', 'AbortError'));
-              };
-              if (signal) signal.addEventListener('abort', onAbort, { once: true });
-              const finish = (fn) => {
-                if (done) return;
-                done = true;
-                if (signal) signal.removeEventListener('abort', onAbort);
-                fn();
-              };
-              const asWritten = () => resolve(Reflect.apply(target, self, args));
-              ask({ rpId: typeof pk.rpId === 'string' ? pk.rpId : '', conditional }).then((answer) => finish(() => {
-                if (!answer) { asWritten(); return; }
-                if (answer.cancel) { reject(refused()); return; }
-                // Asked now, not left waiting: the user has just chosen.
-                const now = Object.assign({}, options);
-                delete now.mediation;
-                if (!answer.native) {
-                  now.publicKey = Object.assign({}, pk, { allowCredentials: [{ type: 'public-key', id: decode(answer.id) }] });
-                }
-                resolve(Reflect.apply(target, self, [now]));
-              }), () => finish(asWritten));
+            if (!pk || typeof pk !== 'object' || options.mediation === 'silent') return Reflect.apply(target, self, args);
+            const named = ids(pk.allowCredentials);
+            return through(target, self, args, {
+              rpId: typeof pk.rpId === 'string' ? pk.rpId : '',
+              conditional: options.mediation === 'conditional',
+              allow: named.length ? named : null
+            }, (answer) => {
+              // Asked now, not left waiting: the user has just chosen.
+              const now = Object.assign({}, options);
+              delete now.mediation;
+              if (!answer.native) {
+                now.publicKey = Object.assign({}, pk, { allowCredentials: [{ type: 'public-key', id: decode(answer.id) }] });
+              }
+              return now;
             });
           }
         });
+
+        if (typeof proto.create === 'function') {
+          proto.create = new Proxy(proto.create, {
+            apply(target, self, args) {
+              const options = args[0];
+              const pk = options && options.publicKey;
+              if (!pk || typeof pk !== 'object') return Reflect.apply(target, self, args);
+              return through(target, self, args, {
+                rpId: pk.rp && typeof pk.rp.id === 'string' ? pk.rp.id : '',
+                create: {
+                  name: pk.user && typeof pk.user.name === 'string' ? pk.user.name : '',
+                  exclude: ids(pk.excludeCredentials)
+                }
+              }, () => options);
+            }
+          });
+        }
+
         // The dropdown is the browser's to show, so a page may wait on the
         // field, as it would in Chrome.
         const PKC = window.PublicKeyCredential;
@@ -871,7 +922,7 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
           });
         }
       },
-      args: [ask, canAsk, gaveUp]
+      args: [ask, canAsk, gaveUp, settled]
     });
   } catch { /* an older bridge: Windows' own dialog, as before */ }
 

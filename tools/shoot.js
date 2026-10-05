@@ -298,6 +298,13 @@ const SHOTS = [
   { name: 'passkeys-dropdown', file: 'passkeys.html', w: 440, h: 260,
     message: { kind: 'passkeys', mode: 'dropdown', site: 'github.com', accounts: [
       { id: 'a', name: 'awalker', display: '' }] } },
+  // The passwords page open, with passkeys Debrowser keeps (macOS, Linux).
+  { name: 'passwords-open', file: 'passwords.html', w: 1280, h: 820,
+    replies: { 'vault-status': { available: true, configured: true, unlocked: true },
+      'list-credentials': { available: true, reason: null,
+        logins: [{ id: 'c1', origin: 'https://github.com', username: 'amogus36311@gmail.com' }], payments: [],
+        passkeys: [{ id: 'k1', rpId: 'google.com', name: 'alice.walker@gmail.com', display: 'Alice Walker' },
+          { id: 'k2', rpId: 'github.com', name: 'awalker', display: '' }] } } },
   // The passwords page locked, on a machine with Windows Hello.
   { name: 'passwords-locked', file: 'passwords.html', w: 1280, h: 720,
     replies: { 'vault-status': { available: true, configured: true, unlocked: false },

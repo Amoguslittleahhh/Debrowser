@@ -1192,17 +1192,6 @@ function main() {
     const ipcHub = new IpcHub(() => tabs.all(), log);
     if (widevine) ipcHub.onDrmNeeded = (tab) => widevine.retry(tab);
 
-    // A site's passkeys in the browser's own list rather than Windows' dialog.
-    // Never in a private window, where the page hook is not installed either.
-    if (!INCOGNITO) {
-      const { PasskeyBroker, windowsLister } = require('./passkeys');
-      passkeys = new PasskeyBroker({
-        list: windowsLister((m) => log('passkeys', m)),
-        shellFor: () => shell,
-        log: (m) => log('passkeys', m)
-      });
-      ipcHub.wirePasskeys(passkeys);
-    }
 
     if (!INCOGNITO) {
       // In memory under a test, which must not leave answers behind.
@@ -1311,6 +1300,25 @@ function main() {
 
     // In memory under a test, which must not leave a passcode behind.
     vault = INCOGNITO ? null : new Vault(OFFLINE_MODE ? null : app.getPath('userData'), { log });
+
+    // A site's passkeys in the browser's own list rather than the system's
+    // dialog: Windows' own store where there is one, and on macOS and Linux
+    // the ones Debrowser keeps itself, beside the saved passwords. Never in a
+    // private window, where the page hook is not installed either.
+    if (!INCOGNITO) {
+      const { PasskeyBroker, windowsLister } = require('./passkeys');
+      const passkeyLog = (m) => log('passkeys', m);
+      const store = process.platform === 'win32' ? null
+        : new (require('./passkey-store').PasskeyStore)({ credentials, vault, presence, log: passkeyLog });
+      passkeys = new PasskeyBroker({
+        list: store ? null : windowsLister(passkeyLog),
+        store,
+        shellFor: () => shell,
+        ask: (sh, spec) => ask(sh, spec),
+        log: passkeyLog
+      });
+      ipcHub.wirePasskeys(passkeys);
+    }
 
     // A submitted sign-in becomes a question, never a save. The origin comes
     // from the tab, not from the page that sent the message.
@@ -2185,7 +2193,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   // the pointer moves, and repainting every view in the browser for each one
   // would cost more than the command itself.
   const UNPUBLISHED = new Set(['suggest-hover', 'suggest-select', 'suggest-size', 'prefetch-tab',
-    'passkey-pick', 'passkey-other', 'passkey-close', 'passkey-size']);
+    'passkey-pick', 'passkey-other', 'passkey-close', 'passkey-size', 'passkey-passcode']);
 
   const runCommand = (command, payload, sender = null) => {
     if (INCOGNITO && INCOGNITO_REFUSED.has(command)) return undefined;
@@ -2668,6 +2676,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
       case 'passkey-size':
         shell.sizePasskeys(Number(payload?.height));
+        break;
+      case 'passkey-passcode':
+        if (passkeys && typeof payload?.passcode === 'string') passkeys.passcode(payload.passcode.slice(0, 256));
         break;
 
       // The quick window (a Lab): kept as a tab in the main window, or closed.
@@ -4714,6 +4725,9 @@ function credentialRequest(command, payload, { tabs, credentials, log }) {
       return credentials.remove(payload?.kind, payload?.id);
     // Deliberate, one at a time, and never logged.
     case 'reveal-credential': {
+      // A passkey's key is never shown: it does nothing for anyone who reads
+      // it but sign in as you, and there is nowhere it belongs but this file.
+      if (payload?.kind !== 'login' && payload?.kind !== 'payment') return null;
       const record = credentials.reveal(payload?.kind, payload?.id);
       if (!record) return null;
       return payload?.kind === 'login'

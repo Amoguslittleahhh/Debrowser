@@ -23,6 +23,7 @@ const el = {
   passcode: $('passcode'), unlock: $('unlock'), unlockError: $('unlock-error'),
   open: $('open'), logins: $('logins'), loginsEmpty: $('logins-empty'),
   cards: $('cards'), cardsEmpty: $('cards-empty'),
+  passkeys: $('passkeys'), passkeysSection: $('passkeys-section'),
   cardForm: $('card-form'), cardError: $('card-error'), addCard: $('add-card')
 };
 
@@ -128,12 +129,13 @@ $('setup').addEventListener('click', () => api.send('open-settings', { section: 
 /* The lists                                                           */
 /* ------------------------------------------------------------------ */
 
-let data = { logins: [], payments: [] };
+let data = { logins: [], payments: [], passkeys: [] };
 
 function clearLists() {
-  data = { logins: [], payments: [] };
+  data = { logins: [], payments: [], passkeys: [] };
   el.logins.replaceChildren();
   el.cards.replaceChildren();
+  el.passkeys.replaceChildren();
 }
 
 /** Ask for something that needs the vault open; a locked answer shows the lock. */
@@ -169,7 +171,7 @@ importButton.addEventListener('click', async () => {
 async function load() {
   const res = await ask('list-credentials');
   if (!res) return;
-  data = { logins: res.logins || [], payments: res.payments || [] };
+  data = { logins: res.logins || [], payments: res.payments || [], passkeys: res.passkeys || [] };
   render();
 }
 
@@ -195,6 +197,14 @@ function render() {
     kind: 'payment', id: p.id, title: p.label, detail: `•••• ${p.last4} · ${p.expiry}`
   })));
   el.cardsEmpty.hidden = data.payments.length > 0;
+
+  // Only where Debrowser keeps passkeys itself (macOS, Linux), and has some.
+  const passkeys = data.passkeys.filter((p) => hit(p.rpId, p.name, p.display));
+  el.passkeys.replaceChildren(...passkeys.map((p) => row({
+    kind: 'passkey', id: p.id, title: p.rpId, site: `https://${p.rpId}`,
+    detail: p.name || p.display || 'Passkey'
+  })));
+  el.passkeysSection.hidden = data.passkeys.length === 0;
 }
 
 function host(origin) {
@@ -339,7 +349,9 @@ function row({ kind, id, title, site, detail, flag = null }) {
     });
     controls.append(fill);
   }
-  controls.append(reveal, copy, remove);
+  // A passkey has nothing to show or copy - its key never leaves the browser.
+  if (kind === 'passkey') controls.append(remove);
+  else controls.append(reveal, copy, remove);
 
   const body = document.createElement('div');
   body.className = 'row-body';

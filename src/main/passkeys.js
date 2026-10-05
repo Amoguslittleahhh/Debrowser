@@ -124,6 +124,10 @@ function rpIdFor(pageUrl, asked) {
  *   { id }            the credential the user picked
  *   { native: true }  "Use a different passkey": Windows' own dialog
  *   { cancel: true }  dismissed, replaced, or the page went away
+ * and for a passkey Debrowser keeps itself (passkey-store.js, macOS and Linux):
+ *   { id, done }      as { id }, and the page says when its request settled
+ *   { go, done }      save: the page makes its passkey now
+ *   { exists: true }  save: this site already has that one here
  */
 class PasskeyBroker {
   /**
@@ -132,9 +136,11 @@ class PasskeyBroker {
    * @param {(tab: object) => object|null} deps.shellFor - the window a tab is in
    * @param {(...a) => void} [deps.log]
    */
-  constructor({ list, shellFor, log = () => {} }) {
-    this.list = list;
+  constructor({ list = null, store = null, shellFor, ask = null, log = () => {} }) {
+    this.store = store;
+    this.list = list || (store ? (rpId) => store.list(rpId) : null);
     this.shellFor = shellFor;
+    this.ask = ask;
     this.log = log;
     /** @type {Map<number, object>} tab id -> request */
     this.pending = new Map();
@@ -146,11 +152,16 @@ class PasskeyBroker {
   available() { return typeof this.list === 'function'; }
 
   /** A page asked. Resolves with one of the answers above. */
-  async request(tab, frameUrl, { rpId, conditional }) {
+  async request(tab, frameUrl, { rpId, conditional, allow = null, create = null }) {
     if (!this.available() || !tab || !tab.wc || tab.wc.isDestroyed()) return null;
     const site = rpIdFor(frameUrl, rpId);
     if (!site) return null;
-    const accounts = await this.list(site).catch(() => null);
+    if (create) return this.save(tab, frameUrl, site, create);
+    // A page naming its passkeys is Windows' to answer: it asks only Hello.
+    // Kept here, the named one has to come from here.
+    if (allow && !this.store) return null;
+    let accounts = await this.list(site).catch(() => null);
+    if (accounts && allow) accounts = accounts.filter((a) => allow.includes(a.id));
     if (!accounts || !accounts.length) return null;
     // Still the page that asked: a listing takes a moment, and the tab may
     // have gone somewhere else in it.
@@ -172,6 +183,7 @@ class PasskeyBroker {
     if (!req) return;
     this.pending.delete(tab.id);
     if (this.shown === req) this.hide();
+    if (req.verifying) { req.verifying.resolve(false); req.verifying = null; }
     req.resolve(answer);
   }
 
@@ -236,10 +248,99 @@ class PasskeyBroker {
   }
 
   /** From the list: an account. */
-  pick(id) {
+  async pick(id) {
     const req = this.shown;
-    if (!req || !req.accounts.some((a) => a.id === id)) return;
-    this.answer(req, { id });
+    if (!req || req.verifying || !req.accounts.some((a) => a.id === id)) return;
+    if (!this.store) { this.answer(req, { id }); return; }
+    // Kept here: it is you (Touch ID or the passcode), then the passkey goes
+    // into the tab's authenticator for this one request.
+    if (!(await this.confirm(req, `sign in to ${req.site}`))) {
+      if (this.pending.get(req.tab.id) === req) this.answer(req, { cancel: true });
+      return;
+    }
+    if (this.pending.get(req.tab.id) !== req) return;
+    const ready = await this.store.prepareSignIn(req.tab, id);
+    this.answer(req, ready ? { id, done: true } : { cancel: true });
+  }
+
+  /**
+   * Save a passkey a page offers to make, where Debrowser keeps them. Asked
+   * first, as Chrome asks; then it is you; then the page makes it.
+   */
+  async save(tab, frameUrl, site, { name = '', exclude = [] } = {}) {
+    if (!this.store || !this.store.available() || !this.ask) return null;
+    const shell = this.shellFor(tab);
+    if (!shell) return null;
+    const mine = new Set(((await this.store.list(site)) || []).map((a) => a.id));
+    if (exclude.some((id) => mine.has(id))) return { exists: true };
+    const who = name ? `${name} on ${site}` : site;
+    const { response } = await this.ask(shell, {
+      buttons: ['Save passkey', 'Not now'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Save a passkey?',
+      message: `Save a passkey for ${who}?`,
+      detail: 'You will sign in with it instead of a password. It is encrypted and kept on this device, ' +
+        'with your saved passwords, and is not copied anywhere else.'
+    });
+    if (response !== 0) return { cancel: true };
+    if (tab.wc.isDestroyed() || originOf(tab.wc.getURL()) !== originOf(frameUrl)) return { cancel: true };
+    this.watch(tab);
+    this.settle(tab, { cancel: true });
+    const req = { tab, site, accounts: [], conditional: false, resolve: () => {}, saving: true };
+    this.pending.set(tab.id, req);
+    const ok = await this.confirm(req, `save a passkey for ${site}`);
+    if (this.pending.get(tab.id) !== req) return { cancel: true };
+    this.pending.delete(tab.id);
+    if (this.shown === req) this.hide();
+    if (!ok) return { cancel: true };
+    const ready = await this.store.prepareSave(tab, site);
+    try { tab.wc.focus(); } catch { /* gone */ }
+    return ready ? { go: true, done: true } : { cancel: true };
+  }
+
+  /**
+   * It is you: Touch ID, or the passcode typed into the list - which the list
+   * turns into for it. False on a refusal, a dismissal, or the page leaving.
+   */
+  async confirm(req, reason) {
+    const shell = this.shellFor(req.tab);
+    const verdict = await this.store.verify(reason, shell ? shell.window : null);
+    if (verdict !== 'passcode') return verdict === 'ok';
+    return new Promise((resolve) => {
+      req.verifying = { resolve, reason };
+      if (this.shown !== req) this.show(req, null);
+      if (shell) {
+        shell.passcodePasskeys({ title: req.saving ? `Save a passkey for ${req.site}` : `Sign in to ${req.site}` });
+      }
+    });
+  }
+
+  /** The passcode, from the list. */
+  async passcode(code) {
+    const req = this.shown;
+    if (!req || !req.verifying || !this.store) return;
+    const result = await this.store.unlock(code);
+    if (!req.verifying) return;
+    if (result && result.ok) {
+      const { resolve } = req.verifying;
+      req.verifying = null;
+      resolve(true);
+      return;
+    }
+    const shell = this.shellFor(req.tab);
+    if (shell) {
+      shell.passcodePasskeys({
+        error: result && result.waitMs
+          ? `Too many tries. Wait ${Math.ceil(result.waitMs / 1000)} seconds.`
+          : 'That is not the passcode.'
+      });
+    }
+  }
+
+  /** The page's request settled: the store takes back what the tab held. */
+  async done(tab) {
+    if (this.store && tab.passkeyOp) await this.store.finish(tab);
   }
 
   /** From the list: "Use a different passkey" - Windows' own dialog. */
@@ -256,6 +357,13 @@ class PasskeyBroker {
   dismiss({ escaped = false } = {}) {
     const req = this.shown;
     if (!req) return;
+    if (req.verifying) {
+      const { resolve } = req.verifying;
+      req.verifying = null;
+      this.hide();
+      resolve(false);
+      return;
+    }
     if (req.conditional) { this.hide(); return; }
     // Escape gives the keyboard back to the page, as closing a menu does; a
     // click elsewhere leaves it where the click put it.
@@ -279,7 +387,11 @@ class PasskeyBroker {
     if (this.watched.has(tab.wc)) return;
     this.watched.add(tab.wc);
     const wc = tab.wc;
-    const forget = () => { tab.passkeyField = null; this.settle(tab, { cancel: true }); };
+    const forget = () => {
+      tab.passkeyField = null;
+      this.settle(tab, { cancel: true });
+      if (this.store && tab.passkeyOp) this.store.finish(tab).catch(() => {});
+    };
     wc.on('did-start-navigation', (details) => {
       if (details && details.isMainFrame && !details.isSameDocument) forget();
     });

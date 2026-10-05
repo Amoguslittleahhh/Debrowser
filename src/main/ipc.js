@@ -179,10 +179,26 @@ class IpcHub {
       if (!tab || !payload || typeof payload !== 'object') return null;
       let frameUrl = null;
       try { frameUrl = event.senderFrame.url; } catch { return null; }
+      const ids = (list) => (Array.isArray(list)
+        ? list.filter((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,1400}$/.test(id)).slice(0, 64)
+        : null);
+      const create = payload.create && typeof payload.create === 'object' ? {
+        name: typeof payload.create.name === 'string' ? payload.create.name.slice(0, 200) : '',
+        exclude: ids(payload.create.exclude) || []
+      } : null;
+      const allow = ids(payload.allow);
       return broker.request(tab, frameUrl, {
         rpId: typeof payload.rpId === 'string' ? payload.rpId.slice(0, 253) : '',
-        conditional: payload.conditional === true
+        conditional: payload.conditional === true,
+        allow: allow && allow.length ? allow : null,
+        create
       });
+    });
+    // The page's request to Chromium settled, after a passkey kept here was
+    // put in its tab for it: the store takes it back.
+    ipcMain.on('debrowser:passkey-done', (event) => {
+      const tab = pageTab(event);
+      if (tab) broker.done(tab).catch(() => {});
     });
     ipcMain.on('debrowser:passkey-field', (event, rect) => {
       const tab = pageTab(event);
