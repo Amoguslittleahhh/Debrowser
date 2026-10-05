@@ -117,18 +117,27 @@ function windowsFirewall() {
   // The firewall's own COM interface rather than `netsh`, whose output is
   // translated: on a German Windows "Enabled" is "Aktiviert", and a check that
   // parsed English labels would report every rule missing. Action 0 is block,
-  // direction 2 is outbound.
+  // direction 2 is outbound. The rule is asked for by name: piping every rule
+  // through PowerShell took long enough on a busy machine to time out.
   const { spawnSync } = require('child_process');
-  const script = '(New-Object -ComObject HNetCfg.FwPolicy2).Rules | ' +
-    `Where-Object { $_.Name -eq '${RULE}' } | ` +
+  const script = `(New-Object -ComObject HNetCfg.FwPolicy2).Rules.Item('${RULE}') | ` +
     'Select-Object Enabled, Action, Direction, ApplicationName | ConvertTo-Json -Compress';
-  const out = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
-    { encoding: 'utf8', windowsHide: true, timeout: 8000 });
+  const ask = (timeout) => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf8', windowsHide: true, timeout });
+  // A check that did not finish is not an answer: once more, with longer, and
+  // if that cannot finish either, say so - never "missing" for a rule that
+  // was simply slow to read. (A missing rule makes Item() throw: an answer.)
+  const unfinished = (out) => Boolean(out.error) || out.signal !== null;
+  let out = ask(8000);
+  if (unfinished(out)) out = ask(20000);
+  if (unfinished(out)) {
+    return { available: false, mechanism: null, reason: `the firewall rule could not be checked (${out.error ? out.error.code || out.error.message : out.signal})` };
+  }
   let rules = [];
   try {
     const parsed = JSON.parse(out.stdout || 'null');
     rules = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
-  } catch { /* no rule, or PowerShell unavailable: reported as missing */ }
+  } catch { /* no rule: reported as missing */ }
   const covers = rules.some((r) => r.Enabled === true && r.Action === 0 && r.Direction === 2 &&
     String(r.ApplicationName || '').toLowerCase() === process.execPath.toLowerCase());
   if (covers) return { available: true, mechanism: 'Windows Firewall rule for this executable', reason: null };

@@ -30,6 +30,7 @@ Debrowser 2.1 installs and uninstalls in its own design on Windows, macOS and Li
 - **The new tab page is centred.** The search field and the Continue card sat a little above the middle of the page; they are now centred, with as much space above as below.
 - **Report a problem now opens.** It opened the report in a background tab, so nothing seemed to happen, especially with the tabs tucked away. It now opens in front, as do the release-notes and Labs feedback links in Settings.
 - **No more stray lines in Settings.** In the Paper design, an empty list drew a double line (under "Nothing saved yet" in Bookmarks), and two lists next to each other each drew their own rule (in Passwords and payment).
+- **Windows: the private window's kill switch is no longer reported missing when Windows is slow to answer.** The check that asks Windows Firewall for the rule now reads that one rule instead of every rule on the system, and a check that runs out of time is tried again; if it still cannot finish, the private window says the rule could not be checked rather than that it is missing. The rule itself always applied.
 
 ## 2.0.0
 
