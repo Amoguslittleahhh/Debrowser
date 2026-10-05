@@ -2188,6 +2188,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     runCommand('set-pref', { key: 'design', value: designBefore });
   }
 
+  // History cleared on every close, set once and forgotten, looked like
+  // history being lost: the History page says so, and undoes it in one click.
+  {
+    prefs.set('clearHistoryOnExit', true);
+    const page = tabs.create({ url: pages.HISTORY_URL, activate: true, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    const shownNote = await waitFor(async () => (await page.wc.executeJavaScript(
+      "!document.getElementById('clears').hidden").catch(() => false)), { timeoutMs: 5000 });
+    await page.wc.executeJavaScript("document.getElementById('keep').click()").catch(() => {});
+    const kept = await waitFor(() => prefs.get('clearHistoryOnExit') === false, { timeoutMs: 3000 });
+    const hidden = await page.wc.executeJavaScript("document.getElementById('clears').hidden").catch(() => null);
+    tabs.close(page.id);
+    prefs.set('clearHistoryOnExit', false);
+    check('History says when it is cleared on close, and "Keep it instead" turns that off',
+      Boolean(shownNote && kept && hidden === true), `note=${shownNote} kept=${kept} hidden=${hidden}`);
+  }
+
   const webUrl = pageUrl('idle.html');
   await fresh.wc.loadURL(webUrl).catch(() => {});
   await waitFor(() => !fresh.loading && fresh.url.startsWith('http'), { timeoutMs: 10_000 });

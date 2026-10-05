@@ -4264,7 +4264,10 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         return {
           items: history ? history.search(payload?.query, payload?.limit) : [],
           total: history ? history.count() : 0,
-          recording: prefs.get('saveHistory')
+          recording: prefs.get('saveHistory'),
+          // Said on the page, with the way out: a list that empties itself on
+          // every close, set once and forgotten, read as history being lost.
+          clearsOnExit: prefs.get('clearHistoryOnExit') === true
         };
 
       case 'delete-history':
@@ -4281,8 +4284,8 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
       // changes neither, and it belongs beside the list it governs, which is
       // where someone turning it off is looking.
       case 'set-pref': {
-        if (sender !== 'history' || payload?.key !== 'saveHistory') return null;
-        return { ok: prefs.set('saveHistory', payload?.value) };
+        if (sender !== 'history' || !['saveHistory', 'clearHistoryOnExit'].includes(payload?.key)) return null;
+        return { ok: prefs.set(payload.key, payload.value) };
       }
 
       case 'list-downloads':

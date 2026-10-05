@@ -35,6 +35,17 @@
 
 .count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
+/* Clearing on exit is on: said where the missing pages would be looked for. */
+.clears {
+  max-width: 820px;
+  margin: 8px auto 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius, 8px);
+  background: var(--wash-soft);
+  color: var(--text-dim);
+}
+.clears[hidden] { display: none; }
+
 .list { max-width: 820px; margin: 0 auto 40px; }
 
 #empty { max-width: 820px; margin: 26px auto; }

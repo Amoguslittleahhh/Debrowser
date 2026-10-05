@@ -9,6 +9,7 @@
 
 ### Improved
 
+- **History says when it is cleared on close.** With Clear history when I close the browser turned on, the History page now says so above the list, with Keep it instead to turn it off, so pages missing after a restart are not a mystery.
 - **The new tab page keeps its layout.** "Continue with these tabs" now stays under the search whenever it is on, with a short note when there is nothing to continue, instead of disappearing and leaving the search alone in the middle of the page. It lists your last four pages from history, which is kept when you close Debrowser unless you turn on clearing it on exit, including pages that are open again after a restart: those say Open now and take you to their tab. Settings has the choice of what sits under the search, Recent pages (the default) or Favourites, and the card's menu can switch to favourites too.
 - **The private connection page is dark.** The page a private window opens on is now dark from its first frame, even when your system uses a light theme, so opening a private window in a dark room no longer fills the screen with white. Choosing Light under Settings → Appearance still makes it light.
 - **A clearer lock on saved passwords.** The locked Passwords page is now one card: Unlock with Windows Hello (or Touch ID) first and ready for Enter, with the passcode below it for when that is not available, and a note that it locks again after five minutes without use.

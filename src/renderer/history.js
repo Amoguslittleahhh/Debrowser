@@ -22,7 +22,9 @@ const el = {
   close: document.getElementById('close'),
   empty: document.getElementById('empty'),
   count: document.getElementById('count'),
-  recording: document.getElementById('recording')
+  recording: document.getElementById('recording'),
+  clears: document.getElementById('clears'),
+  keep: document.getElementById('keep')
 };
 
 /**
@@ -178,6 +180,7 @@ async function load() {
   const res = await api.request('list-history', { query: el.query.value, limit: PAGE });
   if (!res || asked !== loads) return;
   el.recording.checked = res.recording !== false;
+  el.clears.hidden = res.clearsOnExit !== true;
   render(res.items || []);
   showCount(res.total, (res.items || []).length);
 }
@@ -232,6 +235,11 @@ el.clear.addEventListener('click', async () => {
 el.clear.addEventListener('blur', disarmClear);
 
 el.close.addEventListener('click', () => api.send('close-tab'));
+
+el.keep.addEventListener('click', async () => {
+  const res = await api.request('set-pref', { key: 'clearHistoryOnExit', value: false });
+  if (res && res.ok) el.clears.hidden = true;
+});
 
 el.recording.addEventListener('change', async () => {
   // The browser decides, and the box follows it. Trusting the click would leave
