@@ -4118,7 +4118,7 @@ const PAGE_POLICY = new Map([
     requests: new Set(['bookmark-profiles', 'import-from-profile', 'import-bookmark-file', 'default-browser-status'])
   }],
   ['newtab', {
-    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'open-history', 'open-receipt']),
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'activate-tab', 'open-history', 'open-receipt']),
     requests: NEWTAB_REQUESTS
   }],
   ['history', {
@@ -4218,18 +4218,21 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
       case 'top-sites':
         return { items: topSites(history, bookmarks, Number(payload?.limit) || 8, prefs.get('hiddenTiles')) };
 
-      // "Continue with these tabs": the last pages visited that are not open
-      // now, newest first. `shown` false when the card is off, or in a
+      // "Continue with these tabs": the last pages visited, newest first. `shown` false when the card is off, or in a
       // private window, which has no history to give; otherwise the card
       // stays, empty or not, so the new tab page keeps one layout.
       case 'recent-pages': {
         if (!history || INCOGNITO || !prefs.get('continueCard')) return { items: [], shown: false };
-        const open = new Set(tabs.all().map((t) => t.url));
+        // Pages open now are listed too, as the tab to switch to: left out,
+        // a restart that reopened your last pages emptied the card, and the
+        // new tab page changed its whole layout to favourites.
+        const open = new Map(tabs.all().map((t) => [t.url, t.id]));
         const limit = Math.min(Math.max(Number(payload?.limit) || 4, 1), 12);
         const items = [];
         for (const e of history.entries()) {
-          if (!/^https?:/i.test(e.url) || open.has(e.url)) continue;
-          items.push({ url: e.url, title: e.title || '', visitedAt: e.visitedAt, icon: e.icon || null });
+          if (!/^https?:/i.test(e.url)) continue;
+          items.push({ url: e.url, title: e.title || '', visitedAt: e.visitedAt, icon: e.icon || null,
+            tabId: open.get(e.url) ?? null });
           if (items.length >= limit) break;
         }
         return { items, shown: true };

@@ -197,10 +197,13 @@ function continueRow(item) {
   // When, on its own at the end of the row, where a list's times line up.
   const when = document.createElement('span');
   when.className = 'continue-when';
-  when.textContent = ago(item.visitedAt);
+  // Already open: says so, and the row goes to that tab rather than opening
+  // the page a second time.
+  when.textContent = item.tabId != null ? 'Open now' : ago(item.visitedAt);
   row.append(siteChip(item.url, { icon: item.icon }), text, when);
   row.addEventListener('click', (event) => {
-    if (event.ctrlKey || event.metaKey) api.send('new-tab', { url: item.url });
+    if (item.tabId != null && !event.ctrlKey && !event.metaKey) api.send('activate-tab', { id: item.tabId });
+    else if (event.ctrlKey || event.metaKey) api.send('new-tab', { url: item.url });
     else api.send('navigate', { url: item.url });
   });
   row.addEventListener('auxclick', (event) => {

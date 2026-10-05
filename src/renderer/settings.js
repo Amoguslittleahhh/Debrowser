@@ -85,9 +85,14 @@ const SECTIONS = {
     },
     {
       key: 'continueCard',
-      label: 'Show recent pages on the new tab page',
-      hint: '"Continue with these tabs", your last few pages under the search. Not in Legacy, and never in private windows.',
-      type: 'checkbox',
+      label: 'Under the search on the new tab page',
+      hint: 'Recent pages is "Continue with these tabs", your last four pages, and the tabs they are open in. Favourites are the sites you use most. Not in Legacy, and never in private windows.',
+      type: 'select',
+      boolean: true,
+      options: [
+        { value: 'true', name: 'Recent pages' },
+        { value: 'false', name: 'Favourites' }
+      ],
       unavailable: (state) => (state.prefs.design === 'legacy' ? 'The legacy design shows your frequent sites instead.' : '')
     },
     {
@@ -886,9 +891,10 @@ function buildControl(spec) {
   switch (spec.type) {
     case 'select': {
       const select = document.createElement('select');
-      // `numeric` for a choice of numbers: an option's value is always a string.
+      // `numeric` for a choice of numbers, `boolean` for a choice between a
+      // setting on and off: an option's value is always a string.
       select.addEventListener('change', () =>
-        save(spec.key, spec.numeric ? Number(select.value) : select.value));
+        save(spec.key, spec.numeric ? Number(select.value) : spec.boolean ? select.value === 'true' : select.value));
       return {
         node: select,
         input: select,
