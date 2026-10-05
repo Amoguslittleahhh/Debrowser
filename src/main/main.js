@@ -5176,7 +5176,14 @@ function menuModel({ tabs, shell }) {
   // what this page can do, what the browser can do - because that ordering is
   // twenty years of muscle memory and there is nothing to gain by being
   // different. What is in each group is ours.
+  // A downloaded update waits at the top until it is installed, as Chrome's
+  // does: dismissing the prompt must not leave the restart nowhere to be found.
+  const update = !INCOGNITO && shell.updater ? shell.updater.snapshot() : null;
+  const ready = update && update.state === 'ready'
+    ? [{ id: 'update-restart', label: `Restart to update to ${update.version}`, icon: 'reload' }, { kind: 'separator' }]
+    : [];
   return [
+    ...ready,
     { id: 'new-tab', label: 'New tab', accel: accel('new-tab'), icon: 'plus' },
     // Not offered from inside incognito: a second one is just another tab there.
     ...(INCOGNITO ? [

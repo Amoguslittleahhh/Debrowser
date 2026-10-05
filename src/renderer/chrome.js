@@ -1906,6 +1906,13 @@ api.onState((state) => {
   }
   renderToolbar(state);
   renderMeter(state);
+  // An update waiting for a restart marks the menu, where Restart to update is.
+  const updateReady = String(state.updates?.state === 'ready');
+  const menuBtn = document.getElementById('menu');
+  if (menuBtn && menuBtn.dataset.update !== updateReady) {
+    menuBtn.dataset.update = updateReady;
+    menuBtn.title = updateReady === 'true' ? 'Customise and control Debrowser – an update is ready' : 'Customise and control Debrowser';
+  }
 
   // The bar is hidden rather than emptied when it is off or when the strip runs
   // down the side: the window has already given its 34px back to the page, and

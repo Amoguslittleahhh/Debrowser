@@ -669,6 +669,19 @@ body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: non
 .omnibox .icon-btn:last-of-type { margin-right: -8px; }
 /* The menu is the last thing in the toolbar, after the meter. */
 .toolbar > #menu { order: 99; flex: none; }
+/* An update downloaded and waiting: a dot on the menu, where Restart to update is. */
+#menu { position: relative; }
+#menu[data-update="true"]::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
 .omnibox:has(#url:focus) {
   border-color: var(--accent);
   background: var(--bg);

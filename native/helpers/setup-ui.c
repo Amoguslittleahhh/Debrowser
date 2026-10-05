@@ -3,6 +3,7 @@
  * own design instead of NSIS's.
  *
  *     setup-ui.exe install <pid>
+ *     setup-ui.exe update <pid>      (an update the user asked to restart into)
  *     setup-ui.exe uninstall <pid>
  *
  * NSIS draws its one-click progress window ("SpiderBanner") with the system's
@@ -92,7 +93,7 @@ static const Palette LIGHT = {
 
 /* ---- State --------------------------------------------------------------- */
 
-typedef enum { MODE_INSTALL, MODE_UNINSTALL } Mode;
+typedef enum { MODE_INSTALL, MODE_UNINSTALL, MODE_UPDATE } Mode;
 
 static struct {
   HWND hwnd;
@@ -239,13 +240,15 @@ static float easeInOut(float t) {
 
 static const wchar_t *titleText(void) {
   if (ui.asking) return L"Debrowser is open";
-  return ui.mode == MODE_INSTALL ? L"Installing Debrowser" : L"Removing Debrowser";
+  return ui.mode == MODE_INSTALL ? L"Installing Debrowser"
+       : ui.mode == MODE_UPDATE ? L"Updating Debrowser" : L"Removing Debrowser";
 }
 
 static const wchar_t *bodyText(void) {
   if (ui.asking) return L"It will close to finish installing, and offer your tabs back when it opens again.";
-  return ui.mode == MODE_INSTALL ? L"This takes a few seconds. Debrowser opens when it is done."
-                                 : L"This takes a few seconds.";
+  if (ui.mode == MODE_INSTALL) return L"This takes a few seconds. Debrowser opens when it is done.";
+  if (ui.mode == MODE_UPDATE) return L"This takes a few seconds. Debrowser opens again when it is done.";
+  return L"This takes a few seconds.";
 }
 
 static const wchar_t *BUTTON_TEXT[2] = { L"Cancel", L"Close and install" };
@@ -510,7 +513,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR line, int show) {
   int argc = 0;
   wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (!argv || argc < 3) return 2;
-  ui.mode = _wcsicmp(argv[1], L"uninstall") == 0 ? MODE_UNINSTALL : MODE_INSTALL;
+  ui.mode = _wcsicmp(argv[1], L"uninstall") == 0 ? MODE_UNINSTALL
+          : _wcsicmp(argv[1], L"update") == 0 ? MODE_UPDATE : MODE_INSTALL;
   DWORD pid = (DWORD)wcstoul(argv[2], NULL, 10);
   LocalFree(argv);
   /* No installer to follow, no window: it would never be told to close. */
@@ -547,7 +551,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR line, int show) {
   mi.cbSize = sizeof mi;
   GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), &mi);
   ui.hwnd = CreateWindowExW(WS_EX_APPWINDOW, SETUP_UI_CLASS,
-                            ui.mode == MODE_INSTALL ? L"Debrowser Setup" : L"Uninstall Debrowser",
+                            ui.mode == MODE_UNINSTALL ? L"Uninstall Debrowser" : L"Debrowser Setup",
                             WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX, mi.rcWork.left, mi.rcWork.top, 1, 1,
                             NULL, NULL, instance, NULL);
   if (!ui.hwnd) return 5;

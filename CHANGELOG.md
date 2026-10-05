@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A downloaded update can be installed after you dismiss its prompt.** Choosing Later left no way back to the restart until Debrowser was opened again. Now the menu shows Restart to update at the top, with a dot on the menu button, and the button under Settings → Updates becomes Restart to update.
+- **Windows: installing an update shows that it is installing.** After Restart to update, a small Debrowser window says it is updating until the new version opens, instead of nothing on screen while the browser was closed.
+- **An update already downloaded is no longer shown downloading again.** Opening Debrowser with an update downloaded but not yet installed showed it downloading from 0%; it now says it is getting the update ready, then offers the restart.
+
 ## 2.1.0
 
 Debrowser 2.1 installs and uninstalls in its own design on Windows, macOS and Linux, lets you choose when tabs go to sleep, and saves more power on battery by putting background tabs in your system's efficiency mode. Settings now shows one section at a time, the task manager's figures match what the system reports, and pages that won't load explain what to try.

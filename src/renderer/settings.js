@@ -1195,7 +1195,10 @@ function renderUpdateState(u) {
     case 'available':   el.textContent = u.manual
       ? `${u.version} is available. Download it and drag it into Applications over this one.`
       : `${u.version} is available. Turn on automatic updates to download it.`; break;
-    case 'downloading': el.textContent = `Downloading ${u.version} – ${u.progress}%.`; break;
+    // A figure only once bytes are arriving: an update already on disk from an
+    // earlier download goes straight to ready without any.
+    case 'downloading': el.textContent = Number.isFinite(u.progress)
+      ? `Downloading ${u.version} – ${u.progress}%.` : `Getting ${u.version} ready…`; break;
     case 'ready':       el.textContent = `${u.version} is downloaded and installs when you restart.`; break;
     case 'error':       el.textContent = `Last check failed: ${u.error}`; break;
     case 'idle':        el.textContent = 'Up to date.'; break;
@@ -1204,16 +1207,23 @@ function renderUpdateState(u) {
 
   if (button) {
     button.hidden = false;
-    // Nothing to ask while an answer is already on its way, or while an update
-    // is sitting downloaded waiting for a restart.
-    button.disabled = u.state === 'checking' || u.state === 'downloading' || u.state === 'ready';
+    // Nothing to ask while an answer is already on its way. A downloaded update
+    // waiting for a restart turns the button into the restart: the prompt that
+    // offered it may have been dismissed, and this is where people look.
+    button.disabled = u.state === 'checking' || u.state === 'downloading';
     // On macOS the update is installed by hand, so the button fetches it.
     button.dataset.download = String(Boolean(u.manual && u.state === 'available'));
-    button.textContent = button.dataset.download === 'true' ? 'Download' : 'Check now';
+    button.dataset.restart = String(u.state === 'ready');
+    button.textContent = button.dataset.download === 'true' ? 'Download'
+      : button.dataset.restart === 'true' ? 'Restart to update' : 'Check now';
   }
 }
 
 document.getElementById('check-updates')?.addEventListener('click', async (event) => {
+  if (event.currentTarget.dataset.restart === 'true') {
+    api.send('update-restart');
+    return;
+  }
   if (event.currentTarget.dataset.download === 'true') {
     api.send('open-link-tab', { url: 'https://github.com/amoguslittleahhh/debrowser/releases/latest', foreground: true });
     return;

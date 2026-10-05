@@ -226,6 +226,11 @@ class Updater {
       }
 
       this.state = 'downloading';
+      // No figure until bytes actually arrive. An update downloaded before -
+      // and not yet installed, because the prompt was dismissed - is found on
+      // disk and never reports progress: it showed "Downloading 0%" for a
+      // download that was not happening, then the restart prompt.
+      this.progress = null;
       // Blockmap differential download happens inside this call: it fetches the
       // new blockmap, diffs it against the installed artifact, and requests only
       // the ranges that differ.

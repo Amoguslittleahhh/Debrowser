@@ -3110,6 +3110,35 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `automatic: ${first}, a second automatic: ${throttled}, after the button: ${manual}`);
   }
 
+  // A downloaded update stays reachable after its prompt is dismissed: the
+  // menu offers the restart and so does Settings' Updates button. And an
+  // update found already on disk is not shown downloading.
+  {
+    const real = shell.updater;
+    let snap = { available: true, manual: false, state: 'ready', version: '9.9.9', progress: 100, error: null };
+    shell.updater = { snapshot: () => snap, install: () => false, dismissPrompt: () => {} };
+    const menuFirst = menuModel({ tabs, shell })[0];
+    const page = tabs.create({ url: pages.SETTINGS_URL, activate: true, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    const read = () => page.wc.executeJavaScript(`({ text: document.getElementById('update-state').textContent,
+      button: document.getElementById('check-updates').textContent,
+      disabled: document.getElementById('check-updates').disabled })`).catch(() => ({}));
+    shell.publish(governor.snapshot());
+    const ready = await waitFor(async () => (await read()).button === 'Restart to update', { timeoutMs: 4000 });
+    const readyView = await read();
+    snap = { ...snap, state: 'downloading', progress: null };
+    shell.publish(governor.snapshot());
+    await waitFor(async () => /ready…$/.test((await read()).text || ''), { timeoutMs: 4000 });
+    const fromDisk = await read();
+    shell.updater = real;
+    shell.publish(governor.snapshot());
+    tabs.close(page.id);
+    check('a downloaded update can be restarted into after its prompt is dismissed, and one already on disk is not shown downloading',
+      menuFirst && menuFirst.id === 'update-restart' && /9\.9\.9/.test(menuFirst.label) &&
+        ready && readyView.disabled === false && fromDisk.text === 'Getting 9.9.9 ready…',
+      `menu ${JSON.stringify(menuFirst && menuFirst.label)}, settings ${JSON.stringify(readyView)}, on disk ${JSON.stringify(fromDisk.text)}`);
+  }
+
   // The side strip: out of the way until the pointer asks for it.
   //
   // Zen's shape, and the two halves that make it work. The strip's *view* is a

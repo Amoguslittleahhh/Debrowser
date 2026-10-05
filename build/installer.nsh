@@ -62,6 +62,13 @@
       ${IfNot} ${Errors}
         SetSilent silent
       ${EndIf}
+    ${ElseIf} ${isUpdated}
+      ; An update the user started (Restart to update): silent, as it must be
+      ; for no wizard to appear - but not invisible. Between the browser
+      ; closing and opening again, our window says what is happening. It goes
+      ; when this installer exits, just after electron-builder starts the new
+      ; version (--force-run).
+      !insertmacro setupUiStart update
     ${EndIf}
   !endif
 !macroend
@@ -209,6 +216,7 @@ Var pid
 
   !ifdef SETUP_UI
     ${If} ${FileExists} "$PLUGINSDIR\setup-ui.exe"
+    ${AndIfNot} ${isUpdated}
       ; Our window made this install silent, and electron-builder starts the
       ; app after a silent install only when told to (--force-run): started
       ; here, as the window fades.
