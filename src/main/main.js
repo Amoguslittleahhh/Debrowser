@@ -1344,7 +1344,15 @@ function main() {
     // The passkey list lost the keyboard: a click elsewhere, which is a dismissal.
     shell.onPasskeysBlur = () => { if (passkeys) passkeys.dismiss(); };
     browserShell = shell;
-    shell.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
+    // A private window's copy goes with it: see incognito/clipboard.js.
+    if (INCOGNITO) {
+      const { ClipboardGuard } = require('./incognito/clipboard');
+      const guard = new ClipboardGuard();
+      guard.watch(shell.window);
+      shell.window.on('close', () => guard.clearIfOurs());
+      app.on('will-quit', () => guard.clearIfOurs());
+    }
+    shell.onSheetClosed =(page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
     shell.siteIsAsking = () => Boolean(permissionAsks && permissionAsks.shown);
     // What the main process paints - an error page, the surface behind a tab -
     // takes the window's palette and accent, as our own pages do.

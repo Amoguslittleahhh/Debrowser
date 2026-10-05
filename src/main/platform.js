@@ -922,6 +922,13 @@ function chromiumSwitches(cfg, incognito = null) {
     const mode = require('./incognito/mode');
     jsFlags.push(...(mode.JS_LEVELS[incognito.jsLevel] || []));
     switches.push(...mode.switches(incognito));
+    // Nothing a private window plays reaches the system's media controls:
+    // Windows' volume flyout and lock screen, macOS's Now Playing, Linux's
+    // MPRIS applets all showed the page's title, site and artwork, and kept
+    // them on screen after the window had gone. Here, with the rest of the
+    // disabled features, because a second --disable-features would replace
+    // this one rather than add to it.
+    disabledFeatures.push('HardwareMediaKeyHandling', 'MediaSessionService');
   } else if (cfg.jsLevel === 'balanced' || cfg.jsLevel === 'maximum') {
     // The ordinary browser, hardened by choice (Settings): the same levels a
     // private window uses - most attacks on the JavaScript engine go through

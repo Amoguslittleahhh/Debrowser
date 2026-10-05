@@ -21,6 +21,12 @@
 - **Windows: installing an update shows that it is installing.** After Restart to update, a small Debrowser window says it is updating until the new version opens, instead of nothing on screen while the browser was closed.
 - **An update already downloaded is no longer shown downloading again.** Opening Debrowser with an update downloaded but not yet installed showed it downloading from 0%; it now says it is getting the update ready, then offers the restart.
 
+### Security
+
+- **Private windows: what you copied is cleared when the window closes.** Text, links or images copied in a private window no longer stay on the clipboard for the next program or person to paste. Something you copied elsewhere afterwards is left alone. Windows' clipboard history (Win+V) keeps its own copy if you have it turned on, which Debrowser cannot reach.
+- **Private windows: nothing playing appears in the system's media controls.** The page's title, site and artwork no longer show on the Windows lock screen and volume flyout, in macOS's Now Playing or in Linux media applets, where they stayed after the window closed.
+- **Private windows: permissions and devices are refused, and say so.** A page asking whether it has any permission is now told no, matching what it gets when it asks for one, instead of a "granted" that was untrue and set this browser apart. USB, HID, serial and Bluetooth devices are refused outright.
+
 ### Known issues
 
 - **macOS: passkeys in iCloud Keychain are not offered.** Apple lets a browser use them only with an entitlement that needs a signed build, which Debrowser does not have yet; until then Debrowser keeps its own passkeys on the Mac.

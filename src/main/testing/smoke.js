@@ -4812,6 +4812,35 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     }
   }
 
+  // A private window's copy is cleared when it closes, and nothing else is
+  // (incognito/clipboard.js). A pretend clipboard and window, so what happens
+  // is exactly what is tested.
+  {
+    const { EventEmitter } = require('events');
+    const { ClipboardGuard } = require('../incognito/clipboard');
+    const run = (steps) => {
+      let board = 'before';
+      let cleared = false;
+      const win = new EventEmitter();
+      const guard = new ClipboardGuard({ read: () => board, clear: () => { cleared = true; board = null; } });
+      guard.watch(win);
+      for (const step of steps) {
+        if (step === 'focus' || step === 'blur') win.emit(step);
+        else board = step;
+      }
+      guard.clearIfOurs();
+      return cleared;
+    };
+    const copiedHere = run(['focus', 'private text']);
+    const copiedThenLeft = run(['focus', 'private text', 'blur']);
+    const replacedElsewhere = run(['focus', 'private text', 'blur', 'other program']);
+    const nothingCopied = run(['focus', 'blur']);
+    check('a private window clears only its own copy from the clipboard when it closes',
+      copiedHere && copiedThenLeft && !replacedElsewhere && !nothingCopied,
+      `copied here ${copiedHere}, copied then left ${copiedThenLeft}, replaced elsewhere ${replacedElsewhere}, ` +
+      `nothing copied ${nothingCopied}`);
+  }
+
   // The presence check exists to stop someone at an unlocked machine pressing
   // Show. Its one load-bearing property is that it fails *closed*: a helper
   // that will not start, a throw, a timeout or an answer nobody recognises must

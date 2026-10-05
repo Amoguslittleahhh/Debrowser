@@ -44,7 +44,8 @@ const SPECULATION_TTL_MS = 10_000;
  * profile, and the leak test found exactly that - a disk cache of every page
  * visited, sitting in the private profile until it was wiped.
  */
-const BROWSING_PARTITION = require('../incognito/mode').INCOGNITO
+const PRIVATE = require('../incognito/mode').INCOGNITO;
+const BROWSING_PARTITION = PRIVATE
   ? 'debrowser-incognito'
   : 'persist:debrowser';
 
@@ -168,10 +169,19 @@ class TabManager {
     // check says no, so this never stops a site from asking. Anything else
     // keeps the default.
     ses.setPermissionCheckHandler((_wc, permission, origin, details) => {
+      // A private window grants nothing beyond the two above, and says so when
+      // asked: answering "granted" to a check for something it then refuses
+      // was both untrue and a trait of this browser a page could read.
+      if (PRIVATE) return permission === 'fullscreen' || permission === 'clipboard-sanitized-write';
       const kinds = kindsFor(permission, details?.mediaType ? { mediaTypes: [details.mediaType] } : {});
       if (!kinds) return true;
       return Boolean(this.permissionGranted && this.permissionGranted(origin, kinds));
     });
+    // USB, HID, serial and Bluetooth devices: never in a private window, which
+    // has no chooser and no business learning what is plugged in.
+    if (PRIVATE && typeof ses.setDevicePermissionHandler === 'function') {
+      ses.setDevicePermissionHandler(() => false);
+    }
   }
 
   /* ---------------------------------------------------------------- */
