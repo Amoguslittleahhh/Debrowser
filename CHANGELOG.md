@@ -26,6 +26,7 @@
 - **Private windows: what you copied is cleared when the window closes.** Text, links or images copied in a private window no longer stay on the clipboard for the next program or person to paste. Something you copied elsewhere afterwards is left alone. Windows' clipboard history (Win+V) keeps its own copy if you have it turned on, which Debrowser cannot reach.
 - **Private windows: nothing playing appears in the system's media controls.** The page's title, site and artwork no longer show on the Windows lock screen and volume flyout, in macOS's Now Playing or in Linux media applets, where they stayed after the window closed.
 - **Private windows: permissions and devices are refused, and say so.** A page asking whether it has any permission is now told no, matching what it gets when it asks for one, instead of a "granted" that was untrue and set this browser apart. USB, HID, serial and Bluetooth devices are refused outright.
+- **Chromium 152.0.7977.130.** Up from 152.0.7977.65, through Electron 44.5.1 with Widevine, bringing a month of Chromium's security fixes. Tor stays on 15.0.24, already the newest.
 
 ### Known issues
 
