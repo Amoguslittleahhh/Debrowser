@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.1.0
+
+Debrowser 2.1 installs and uninstalls in its own design on Windows, macOS and Linux, lets you choose when tabs go to sleep, and saves more power on battery by putting background tabs in your system's efficiency mode. Settings now shows one section at a time, the task manager's figures match what the system reports, and pages that won't load explain what to try.
 
 ### New
 
