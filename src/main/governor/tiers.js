@@ -328,9 +328,12 @@ function refreshPriority(tab, cfg, tier = tab.tier) {
   if (!tab.pid) return;
   if (tab.boosted) return; // the boost controller owns this tab's priority
 
+  // In efficiency mode (battery mode, background) the helper has put it in
+  // Windows' idle class, which is half of what that mode is; the usual
+  // background priority would take it out again on the next pass.
   const priority = tier === Tier.ACTIVE
     ? cfg.boost.niceForeground
-    : cfg.boost.niceBackground;
+    : platform.isWindows && platform.efficiencyOf(tab.pid) ? 19 : cfg.boost.niceBackground;
 
   platform.setProcessPriority(tab.pid, priority);
   tab.priority = priority;

@@ -379,10 +379,14 @@ static void available_bytes(long long *avail, long long *backing_total,
 /*
  * eco <pid> <0|1> - efficiency mode for one process, on battery.
  *
- * Windows: EcoQoS - PROCESS_POWER_THROTTLING_EXECUTION_SPEED, half of what Task
- * Manager's "Efficiency mode" sets (the other half, the low priority class,
- * the governor already gives background tabs). The scheduler then prefers
- * efficient cores and low clock speeds for the process.
+ * Windows: what Task Manager's "Efficiency mode" sets, both halves - EcoQoS
+ * (PROCESS_POWER_THROTTLING_EXECUTION_SPEED: efficient cores, low clocks) and
+ * the idle priority class. EcoQoS alone was set before, with the governor's
+ * below-normal priority, and Windows did not count that as efficiency mode:
+ * no leaf in Task Manager, and the scheduler still treated the process as
+ * ordinary background work. Off, an idle class goes back to below normal - the
+ * governor's background priority - and any other class (a tab just brought to
+ * the front, set to normal) is left as it is.
  *
  * Linux: the nearest things the kernel has, on every thread of the process -
  * a utilisation clamp (uclamp_max, a quarter of full speed: the hint that keeps
@@ -394,7 +398,7 @@ static void available_bytes(long long *avail, long long *backing_total,
  */
 #if defined(_WIN32)
 static long set_eco(unsigned long pid, int on, int *err) {
-    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION, FALSE, (DWORD)pid);
+    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
     if (!h) { *err = (int)GetLastError(); return -1; }
     PROCESS_POWER_THROTTLING_STATE state;
     memset(&state, 0, sizeof(state));
@@ -403,6 +407,11 @@ static long set_eco(unsigned long pid, int on, int *err) {
     state.StateMask = on ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
     BOOL ok = SetProcessInformation(h, ProcessPowerThrottling, &state, sizeof(state));
     if (!ok) *err = (int)GetLastError();
+    if (ok && on) {
+        if (!SetPriorityClass(h, IDLE_PRIORITY_CLASS)) { ok = FALSE; *err = (int)GetLastError(); }
+    } else if (ok && GetPriorityClass(h) == IDLE_PRIORITY_CLASS) {
+        SetPriorityClass(h, BELOW_NORMAL_PRIORITY_CLASS);
+    }
     CloseHandle(h);
     return ok ? 1 : -1;
 }
