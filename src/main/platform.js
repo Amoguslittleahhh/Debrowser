@@ -978,7 +978,7 @@ function chromiumSwitches(cfg, incognito = null) {
 }
 
 module.exports = {
-  measureProcess, measureCapability, measureFailures, stopMeasureHelper, probeBinaryPath,
+  measureProcess, measureCapability, measureFailures, stopMeasureHelper, probeBinaryPath, helperPath,
   PLATFORM,
   isLinux,
   isMac,

@@ -159,6 +159,48 @@ class IpcHub {
     });
   }
 
+  /**
+   * A page's passkey requests (probe-preload.js), answered by the broker
+   * (passkeys.js). The site the passkeys are for is judged against the address
+   * of the frame that asked, as the browser knows it - and only the page's own
+   * top frame asks; the preload is not in its iframes.
+   */
+  wirePasskeys(broker) {
+    const pageTab = (event) => {
+      const tab = this.tabForWebContents(event.sender.id);
+      if (!tab || tab.internal) return null;
+      let top = false;
+      try { top = Boolean(event.senderFrame) && event.senderFrame === event.sender.mainFrame; } catch { /* frame gone */ }
+      return top ? tab : null;
+    };
+    ipcMain.handle('debrowser:passkey-available', (event) => Boolean(pageTab(event)) && broker.available());
+    ipcMain.handle('debrowser:passkey-request', (event, payload) => {
+      const tab = pageTab(event);
+      if (!tab || !payload || typeof payload !== 'object') return null;
+      let frameUrl = null;
+      try { frameUrl = event.senderFrame.url; } catch { return null; }
+      return broker.request(tab, frameUrl, {
+        rpId: typeof payload.rpId === 'string' ? payload.rpId.slice(0, 253) : '',
+        conditional: payload.conditional === true
+      });
+    });
+    ipcMain.on('debrowser:passkey-field', (event, rect) => {
+      const tab = pageTab(event);
+      if (!tab) return;
+      const ok = rect && typeof rect === 'object' &&
+        ['left', 'bottom', 'width'].every((k) => Number.isFinite(rect[k]) && Math.abs(rect[k]) < 1e5);
+      broker.field(tab, ok ? { left: rect.left, bottom: rect.bottom, width: rect.width } : null);
+    });
+    ipcMain.on('debrowser:passkey-abort', (event) => {
+      const tab = pageTab(event);
+      if (tab) broker.abort(tab);
+    });
+    ipcMain.on('debrowser:passkey-key', (event) => {
+      const tab = pageTab(event);
+      if (tab) broker.enterList(tab);
+    });
+  }
+
   tabForWebContents(webContentsId) {
     for (const tab of this.getTabs()) {
       if (tab.wc && !tab.wc.isDestroyed() && tab.wc.id === webContentsId) return tab;

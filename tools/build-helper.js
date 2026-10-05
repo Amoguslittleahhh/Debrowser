@@ -22,7 +22,7 @@ const fs = require('fs');
 const dir = path.join(__dirname, '..', 'native', 'helpers');
 const NAME = process.argv[2];
 if (!NAME || !/^[a-z-]+$/.test(NAME)) {
-  console.error('usage: node tools/build-helper.js <mem-probe|mem-trim|net-watch|setup-ui>');
+  console.error('usage: node tools/build-helper.js <mem-probe|mem-trim|net-watch|setup-ui|passkeys>');
   process.exit(2);
 }
 const src = path.join(dir, `${NAME}.c`);
@@ -48,7 +48,9 @@ if (process.platform === 'win32') {
   // the installer's window, draws with GDI and GDI+.
   const LIBS = {
     'net-watch': ['iphlpapi', 'ws2_32'],
-    'setup-ui': ['user32', 'gdi32', 'gdiplus', 'shell32', 'advapi32']
+    'setup-ui': ['user32', 'gdi32', 'gdiplus', 'shell32', 'advapi32'],
+    // webauthn.dll is loaded at run time, so a Windows without it still runs.
+    passkeys: []
   }[NAME] || ['psapi'];
   // A window, not a console program: no console flashes up behind it.
   const GUI = NAME === 'setup-ui';
@@ -67,6 +69,9 @@ if (process.platform === 'win32') {
   }
 } else if (NAME === 'setup-ui') {
   console.error('build setup-ui: Windows only - it is the Windows installer\'s window.');
+  process.exit(1);
+} else if (NAME === 'passkeys') {
+  console.error('build passkeys: Windows only - it reads the passkeys Windows Hello keeps.');
   process.exit(1);
 } else if (process.platform === 'darwin') {
   // Universal, because one macOS runner builds both the x64 and the arm64

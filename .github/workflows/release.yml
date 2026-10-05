@@ -183,6 +183,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: npm run build:setupui
 
+      # Lists the passkeys Windows Hello keeps for a site, so the browser can
+      # offer them in its own list (native/helpers/passkeys.c).
+      - name: Build the passkey lister
+        if: matrix.os == 'windows-latest'
+        run: npm run build:passkeys
+
       # Incognito's tripwire and reaper, on every platform: the three socket
       # backends differ completely, and this step is the only place the Windows
       # and macOS ones are ever compiled.

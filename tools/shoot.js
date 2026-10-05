@@ -289,6 +289,15 @@ const SHOTS = [
   // draws and has its own set of icons to get wrong.
   { name: 'tab-menu', file: 'context.html', w: 900, h: 560, answers: 'tab-menu-model' },
   { name: 'ask', file: 'ask.html', w: 900, h: 560 },
+  // A site's passkeys in the browser's own list: the chooser under the
+  // address bar, and the dropdown under a sign-in field.
+  { name: 'passkeys-chooser', file: 'passkeys.html', w: 440, h: 330,
+    message: { kind: 'passkeys', mode: 'chooser', site: 'google.com', accounts: [
+      { id: 'a', name: 'alice.walker@gmail.com', display: 'Alice Walker' },
+      { id: 'b', name: 'alice.work@company.com', display: 'Alice (work)' }] } },
+  { name: 'passkeys-dropdown', file: 'passkeys.html', w: 440, h: 260,
+    message: { kind: 'passkeys', mode: 'dropdown', site: 'github.com', accounts: [
+      { id: 'a', name: 'awalker', display: '' }] } },
   // The passwords page locked, on a machine with Windows Hello.
   { name: 'passwords-locked', file: 'passwords.html', w: 1280, h: 720,
     replies: { 'vault-status': { available: true, configured: true, unlocked: false },

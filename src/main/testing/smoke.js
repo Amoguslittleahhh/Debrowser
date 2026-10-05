@@ -82,7 +82,7 @@ async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
                           openInternalPage, senderPage, bookmarks,
                           runCommand = () => {}, history = null, context = { model: null },
-                          credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null }) {
+                          credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null, passkeys = null }) {
   console.log('\n=== Debrowser smoke test ===\n');
   // Every uncaught error in the browser's own pages, for the whole run. A page
   // that throws half-way through drawing looks finished in a screenshot -
@@ -3244,6 +3244,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
           parked.y >= placed.y && parked.y < placed.y + placed.height) {
         shell.window.setPosition(parked.x + 40, placed.y);
       }
+      // And the window's own watch on the real cursor (watchAway) is off: it
+      // would see that parked cursor and close the strip these events opened.
+      shell.watchAwayOff = true;
       const leave = () => inChrome(`document.dispatchEvent(new MouseEvent('mouseleave')); 1`);
       const settle = () => sleep(650);   // past the close delay and the slide
       const reset = async () => {
@@ -3351,6 +3354,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       check('focus moving to the page with the pointer elsewhere puts the strip away',
         !shell.sidebarOpen, `cursor ${cursor.x},${cursor.y}; open: ${shell.sidebarOpen}`);
       await reset();
+      shell.watchAwayOff = false;
     }
 
     // Pinned, it takes its column back and the page gives up the width.
@@ -4630,6 +4634,114 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     bookmarks.remove('https://bar.test/one');
     bookmarks.remove('https://bar.test/two');
+  }
+
+  // Passkeys in the browser's own list (passkeys.js). Chromium's virtual
+  // authenticator stands in for Windows Hello, and the list Windows would give
+  // is read back from it, so the whole path runs for real: the page asks, the
+  // browser lists, a pick is made, and the page signs in with that passkey.
+  if (passkeys) {
+    const { rpIdFor } = require('../passkeys');
+    const judged = [
+      rpIdFor('https://accounts.google.com/signin', 'google.com') === 'google.com',
+      rpIdFor('https://accounts.google.com/signin', '') === 'accounts.google.com',
+      rpIdFor('https://evil.example/', 'google.com') === null,
+      rpIdFor('https://a.example.co.uk/', 'co.uk') === null,
+      rpIdFor('http://example.com/', '') === null,
+      rpIdFor('http://localhost:8080/', 'localhost') === 'localhost'
+    ];
+    check('a page may ask for its own site\'s passkeys and nobody else\'s', judged.every(Boolean),
+      judged.map((ok) => (ok ? 'ok' : 'WRONG')).join(' '));
+
+    const page = tabs.create({ url: `http://localhost:${fixtures.port}/passkey.html`, activate: true, realise: true });
+    await waitFor(() => page.isLive && !page.loading, { timeoutMs: 10_000 });
+    // In front throughout: a page put to sleep behind another answers nothing.
+    await tabs.activate(page.id);
+    // Every question to the page has a deadline, so a page that stops
+    // answering fails its check instead of stopping the suite.
+    const run = (code) => Promise.race([page.wc.executeJavaScript(code, true),
+      sleep(10_000).then(() => { throw new Error(`the page did not answer ${code.slice(0, 40)}`); })]);
+    const dbg = page.wc.debugger;
+    const savedList = passkeys.list;
+    try {
+      dbg.attach('1.3');
+      await dbg.sendCommand('WebAuthn.enable', { enableUI: false });
+      const { authenticatorId } = await dbg.sendCommand('WebAuthn.addVirtualAuthenticator', { options: {
+        protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true,
+        isUserVerified: true, automaticPresenceSimulation: true } });
+      const alice = await run('reg("alice@example.com", "Alice")');
+      const bob = await run('reg("bob@example.com", "Bob")');
+      const { credentials } = await dbg.sendCommand('WebAuthn.getCredentials', { authenticatorId });
+      const b64url = (s) => s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      // What the helper would say on Windows, for this authenticator.
+      passkeys.list = async (rpId) => (rpId === 'localhost'
+        ? credentials.map((c) => ({ id: b64url(c.credentialId), name: c.userName || '', display: '' })) : []);
+      const rowsShown = () => shell.passkeyView
+        ? shell.passkeyView.webContents.executeJavaScript('document.querySelectorAll("#rows .row").length').catch(() => -1)
+        : Promise.resolve(0);
+
+      // Asked there and then: the chooser under the address bar.
+      const signedIn = run('login().catch((e) => e.name)');
+      await waitFor(() => passkeys.shown && shell.passkeyHeight > 0, { timeoutMs: 8000 });
+      const rows = await rowsShown();
+      const mode = passkeys.shown && !passkeys.shown.conditional ? 'chooser' : 'none';
+      runCommand('passkey-pick', { id: bob });
+      const who = await signedIn;
+      check('a passkey sign-in lists the site\'s passkeys in the browser, and signs in with the one picked',
+        rows === 2 && mode === 'chooser' && who === bob && !shell.passkeyView,
+        `${rows} rows in the ${mode}; signed in as ${who === bob ? 'Bob, as picked' : who === alice ? 'Alice' : who}`);
+
+      const refused = run('login().catch((e) => e.name)');
+      await waitFor(() => passkeys.shown, { timeoutMs: 8000 });
+      runCommand('passkey-close');
+      const outcome = await refused;
+      check('closing the list refuses the sign-in, as closing Windows\' own dialog does',
+        outcome === 'NotAllowedError' && !shell.passkeyView, `the page got ${outcome}`);
+
+      // Left waiting on the field: nothing until the field has the keyboard,
+      // then the dropdown under it.
+      const conditional = await run('PublicKeyCredential.isConditionalMediationAvailable()');
+      await run('waitOnField()');
+      await sleep(600);
+      const before = Boolean(shell.passkeyView);
+      page.wc.focus();
+      await run('document.getElementById("user").focus()');
+      await waitFor(() => passkeys.shown && shell.passkeyHeight > 0, { timeoutMs: 8000 });
+      const field = await run('document.getElementById("user").getBoundingClientRect().bottom');
+      const box = shell.passkeyView ? shell.passkeyView.getBounds() : null;
+      const under = box && Math.abs(box.y + 16 - 4 - (page.view.getBounds().y + field)) <= 2;
+      runCommand('passkey-pick', { id: alice });
+      const fromField = await run('window.waiting');
+      check('a page waiting on its sign-in field gets the passkey dropdown under that field',
+        conditional === true && !before && under && fromField === alice,
+        `available ${conditional}, shown before focus ${before}, under the field ${Boolean(under)}, ` +
+        `signed in as ${fromField === alice ? 'Alice, as picked' : fromField}`);
+
+      // The page gives up waiting: the list goes, and nothing is left behind.
+      await run('window.ac = new AbortController(); waitOnField(window.ac.signal)');
+      await run('document.getElementById("user").blur(); document.getElementById("user").focus()');
+      await waitFor(() => passkeys.shown, { timeoutMs: 8000 });
+      await run('window.ac.abort()');
+      const aborted = await run('window.waiting');
+      await sleep(200);
+      check('a sign-in the page abandons takes its dropdown with it',
+        aborted === 'AbortError' && !passkeys.pending.has(page.id) && !shell.passkeyView,
+        `the page got ${aborted}; pending ${passkeys.pending.has(page.id)}, list ${Boolean(shell.passkeyView)}`);
+
+      // A page naming its credential is Chromium's as before: no list.
+      const named = run(`loginAs(${JSON.stringify(alice)}).catch((e) => e.name)`);
+      await sleep(400);
+      const listed = Boolean(passkeys.shown);
+      check('a sign-in that names its passkey goes to Windows untouched', (await named) === alice && !listed,
+        `listed ${listed}`);
+    } catch (err) {
+      check('the passkey list runs end to end', false, err.message);
+    } finally {
+      passkeys.list = savedList;
+      try { dbg.detach(); } catch { /* not attached */ }
+      tabs.close(page.id);
+      shell.hidePasskeys();
+    }
   }
 
   // The presence check exists to stop someone at an unlocked machine pressing

@@ -23,8 +23,9 @@ small window for links from other apps**.
 
 - **Tab groups and the quick window out of Labs,** once they have been used
   for a release and what people report has been dealt with.
-- **Passkeys confirmed** on Windows Hello and Touch ID, with a test that proves
-  it on each, before the release notes say they work.
+- **Passkeys confirmed on Touch ID,** with a test that proves it, before the
+  release notes say they work on macOS. Windows Hello is confirmed, and its
+  passkeys are listed in the browser's own chooser.
 - **Signed installers** for Windows and macOS, so the first run does not stop at
   a warning.
 - **winget, Homebrew and Flathub** packages built by the release workflow.

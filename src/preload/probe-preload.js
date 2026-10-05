@@ -781,3 +781,125 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
     });
   } catch { /* an older bridge: no notice, and nothing else changes */ }
 }
+
+/*
+ * Passkeys, in the browser's own list (src/main/passkeys.js).
+ *
+ * A request for "any passkey of mine for this site" is asked of the browser
+ * first: it lists the site's passkeys in its own view, under the address bar
+ * or under the sign-in field, and hands back only the one picked - which is
+ * then requested from Windows by name, so Windows Hello asks whether it is you
+ * and nothing more. Anything the browser does not take (null) goes to Chromium
+ * exactly as the page wrote it. The accounts never pass through here: the page
+ * learns only the credential chosen, as it would from the signed answer.
+ *
+ * A field marked for passkeys (`autocomplete="username webauthn"`) says where
+ * the dropdown goes, as it does in Chrome; its position is all that is sent.
+ *
+ * Not in private windows, which keep nothing and ask Windows for nothing new.
+ */
+if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol)) {
+  const { contextBridge } = require('electron');
+  const ask = (request) => ipcRenderer.invoke('debrowser:passkey-request', request);
+  const canAsk = () => ipcRenderer.invoke('debrowser:passkey-available');
+  const gaveUp = () => ipcRenderer.send('debrowser:passkey-abort');
+  try {
+    contextBridge.executeInMainWorld({
+      func: (ask, canAsk, gaveUp) => {
+        /* global atob, DOMException -- the page's own, in its world */
+        const proto = window.CredentialsContainer && window.CredentialsContainer.prototype;
+        if (!proto || typeof proto.get !== 'function') return;
+        const decode = (s) => {
+          const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
+          const out = new Uint8Array(b.length);
+          for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i);
+          return out;
+        };
+        // What Chromium says when its own dialog is closed: the page cannot
+        // tell a dismissal here from one there.
+        const refused = () => new DOMException('The operation either timed out or was not allowed. ' +
+          'See: https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.', 'NotAllowedError');
+        proto.get = new Proxy(proto.get, {
+          apply(target, self, args) {
+            const options = args[0];
+            const pk = options && options.publicKey;
+            // Only "any of mine": a page naming the credentials it wants
+            // already knows who is signing in, and Windows asks only Hello.
+            if (!pk || typeof pk !== 'object' || options.mediation === 'silent' ||
+                (pk.allowCredentials && pk.allowCredentials.length)) return Reflect.apply(target, self, args);
+            const signal = options.signal;
+            if (signal && signal.aborted) return Reflect.apply(target, self, args);
+            const conditional = options.mediation === 'conditional';
+            return new Promise((resolve, reject) => {
+              let done = false;
+              const onAbort = () => {
+                if (done) return;
+                done = true;
+                gaveUp();
+                reject(signal.reason !== undefined ? signal.reason : new DOMException('signal is aborted without reason', 'AbortError'));
+              };
+              if (signal) signal.addEventListener('abort', onAbort, { once: true });
+              const finish = (fn) => {
+                if (done) return;
+                done = true;
+                if (signal) signal.removeEventListener('abort', onAbort);
+                fn();
+              };
+              const asWritten = () => resolve(Reflect.apply(target, self, args));
+              ask({ rpId: typeof pk.rpId === 'string' ? pk.rpId : '', conditional }).then((answer) => finish(() => {
+                if (!answer) { asWritten(); return; }
+                if (answer.cancel) { reject(refused()); return; }
+                // Asked now, not left waiting: the user has just chosen.
+                const now = Object.assign({}, options);
+                delete now.mediation;
+                if (!answer.native) {
+                  now.publicKey = Object.assign({}, pk, { allowCredentials: [{ type: 'public-key', id: decode(answer.id) }] });
+                }
+                resolve(Reflect.apply(target, self, [now]));
+              }), () => finish(asWritten));
+            });
+          }
+        });
+        // The dropdown is the browser's to show, so a page may wait on the
+        // field, as it would in Chrome.
+        const PKC = window.PublicKeyCredential;
+        if (PKC && typeof PKC.isConditionalMediationAvailable === 'function') {
+          PKC.isConditionalMediationAvailable = new Proxy(PKC.isConditionalMediationAvailable, {
+            apply(target, self, args) {
+              return canAsk().then((yes) => yes || Reflect.apply(target, self, args), () => Reflect.apply(target, self, args));
+            }
+          });
+        }
+      },
+      args: [ask, canAsk, gaveUp]
+    });
+  } catch { /* an older bridge: Windows' own dialog, as before */ }
+
+  // Where the field for passkeys is, while it has the keyboard.
+  const isPasskeyField = (el) => el instanceof HTMLInputElement && /\bwebauthn\b/i.test(el.getAttribute('autocomplete') || '');
+  let passkeyField = null;
+  let frame = 0;
+  const reportField = () => {
+    frame = 0;
+    if (!passkeyField) return;
+    const r = passkeyField.getBoundingClientRect();
+    ipcRenderer.send('debrowser:passkey-field', { left: r.left, bottom: r.bottom, width: r.width });
+  };
+  const follow = () => { if (passkeyField && !frame) frame = requestAnimationFrame(reportField); };
+  document.addEventListener('focusin', (e) => {
+    if (!isPasskeyField(e.target)) return;
+    passkeyField = e.target;
+    reportField();
+  }, true);
+  document.addEventListener('focusout', (e) => {
+    if (e.target !== passkeyField) return;
+    passkeyField = null;
+    ipcRenderer.send('debrowser:passkey-field', null);
+  }, true);
+  window.addEventListener('scroll', follow, { passive: true, capture: true });
+  window.addEventListener('resize', follow, { passive: true });
+  // Down from the field moves into the list, as in Chrome's.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' && e.target === passkeyField && !e.altKey) ipcRenderer.send('debrowser:passkey-key');
+  }, true);
+}

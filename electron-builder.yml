@@ -148,6 +148,9 @@ win:
         # Linux half, which needs a `setcap`.
         - mem-trim.exe
         - mem-trim.c
+        # The passkeys Windows Hello keeps for a site (passkeys.js).
+        - passkeys.exe
+        - passkeys.c
         # Incognito's egress tripwire and the reaper that deletes its profile
         # after exit. Every platform ships it: on macOS it is the only runtime
         # check that nothing went around the proxy.

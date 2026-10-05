@@ -543,6 +543,8 @@ function main() {
   let siteStyles = null;
   let archive = null;
   let permissionAsks = null;
+  /** Passkeys in the browser's own list, where Windows can list them (passkeys.js). */
+  let passkeys = null;
   /** Incognito only: the check, from outside Chromium, that nothing went around the proxy. */
   let tripwire = null;
   /** Incognito only: which Tor circuit each tab uses. */
@@ -1190,6 +1192,18 @@ function main() {
     const ipcHub = new IpcHub(() => tabs.all(), log);
     if (widevine) ipcHub.onDrmNeeded = (tab) => widevine.retry(tab);
 
+    // A site's passkeys in the browser's own list rather than Windows' dialog.
+    // Never in a private window, where the page hook is not installed either.
+    if (!INCOGNITO) {
+      const { PasskeyBroker, windowsLister } = require('./passkeys');
+      passkeys = new PasskeyBroker({
+        list: windowsLister((m) => log('passkeys', m)),
+        shellFor: () => shell,
+        log: (m) => log('passkeys', m)
+      });
+      ipcHub.wirePasskeys(passkeys);
+    }
+
     if (!INCOGNITO) {
       // In memory under a test, which must not leave answers behind.
       sitePermissions = new SitePermissions(log, OFFLINE_MODE ? null : app.getPath('userData'));
@@ -1319,6 +1333,8 @@ function main() {
         : null,
       held: WARM
     });
+    // The passkey list lost the keyboard: a click elsewhere, which is a dismissal.
+    shell.onPasskeysBlur = () => { if (passkeys) passkeys.dismiss(); };
     browserShell = shell;
     shell.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
     shell.siteIsAsking = () => Boolean(permissionAsks && permissionAsks.shown);
@@ -1540,6 +1556,7 @@ function main() {
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, previousSession, context, find, quitState, siteZoom, circuits, slowJs,
       sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
+      passkeys,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
     });
@@ -1767,7 +1784,7 @@ function main() {
       });
     } else if (SMOKE_TEST) {
       runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
-        blocker, sitePrefs, spaces });
+        blocker, sitePrefs, spaces, passkeys });
     } else if (SPEED_TEST) {
       // Startup, from this process starting to the first tab drawn.
       const startedAt = Date.now() - process.uptime() * 1000;
@@ -2035,7 +2052,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], previousSession = { tabs: [] }, context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null }) {
+                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null,
+                       passkeys = null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
     for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
@@ -2166,7 +2184,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   // Commands that change nothing the state broadcast carries. Each is sent as
   // the pointer moves, and repainting every view in the browser for each one
   // would cost more than the command itself.
-  const UNPUBLISHED = new Set(['suggest-hover', 'suggest-select', 'suggest-size', 'prefetch-tab']);
+  const UNPUBLISHED = new Set(['suggest-hover', 'suggest-select', 'suggest-size', 'prefetch-tab',
+    'passkey-pick', 'passkey-other', 'passkey-close', 'passkey-size']);
 
   const runCommand = (command, payload, sender = null) => {
     if (INCOGNITO && INCOGNITO_REFUSED.has(command)) return undefined;
@@ -2634,6 +2653,21 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
       case 'peek-close':
         shell.closePeek();
+        break;
+
+      // The passkey list (passkeys.html): an account, Windows' own dialog,
+      // dismissed, or how tall it drew.
+      case 'passkey-pick':
+        if (passkeys && typeof payload?.id === 'string') passkeys.pick(payload.id);
+        break;
+      case 'passkey-other':
+        if (passkeys) passkeys.other();
+        break;
+      case 'passkey-close':
+        if (passkeys) passkeys.dismiss({ escaped: true });
+        break;
+      case 'passkey-size':
+        shell.sizePasskeys(Number(payload?.height));
         break;
 
       // The quick window (a Lab): kept as a tab in the main window, or closed.
@@ -5486,7 +5520,7 @@ function applySecureDns(prefs, log) {
 /* ------------------------------------------------------------------ */
 
 function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
-                       blocker, sitePrefs, spaces }) {
+                       blocker, sitePrefs, spaces, passkeys }) {
   const { runSmoke } = require('./testing/smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
@@ -5494,7 +5528,7 @@ function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, his
             // the context menu the way a keystroke does rather than by calling
             // into their parts.
             runCommand: (command, payload, sender = null) => runCommand(command, payload, sender),
-            history, context, credentials, vault, blocker, sitePrefs, spaces }).then((code) => {
+            history, context, credentials, vault, blocker, sitePrefs, spaces, passkeys }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Passkeys</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="passkeys.css">
+</head>
+<body>
+  <div class="card" id="card" role="listbox" tabindex="-1" aria-label="Passkeys">
+    <header class="head" id="head">
+      <span class="key" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21M17.5 12v3M20.5 12v2.5"/></svg>
+      </span>
+      <div>
+        <strong id="title"></strong>
+        <span class="sub">Choose a passkey saved on this device</span>
+      </div>
+    </header>
+    <div class="rows" id="rows"></div>
+    <div class="sep" role="separator"></div>
+    <button type="button" class="row other" id="other" role="option">
+      <span class="avatar quiet" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 17.5h2"/></svg>
+      </span>
+      <span class="text"><span class="name">Use a different passkey</span><span class="meta">A phone, tablet or security key</span></span>
+    </button>
+  </div>
+
+  <script src="theme.js"></script>
+  <script src="passkeys.js"></script>
+</body>
+</html>

@@ -15,6 +15,8 @@ native/helpers/net-watch
 native/helpers/net-watch.exe
 native/helpers/mem-trim.exe
 native/helpers/setup-ui.exe
+native/helpers/passkeys.exe
+native/helpers/passkeys
 native/helpers/netns-launch
 
 # Tor, fetched and verified by tools/fetch-tor.js - never committed.

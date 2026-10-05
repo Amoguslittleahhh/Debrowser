@@ -26,6 +26,7 @@
     "build:memprobe": "node tools/build-helper.js mem-probe",
     "build:netwatch": "node tools/build-helper.js net-watch",
     "build:setupui": "node tools/build-helper.js setup-ui",
+    "build:passkeys": "node tools/build-helper.js passkeys",
     "build:netns": "node tools/build-helper.js netns-launch",
     "build:streamview": "node tools/build-streamview.js",
     "test:incognito": "node test/incognito-leak.js",

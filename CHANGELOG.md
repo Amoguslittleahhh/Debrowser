@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### New
+
+- **Windows: passkeys in Debrowser's own list.** Signing in with a passkey now lists your accounts for the site in Debrowser itself, as Chrome and Edge do: under the address bar, or as a dropdown under the sign-in field on sites that offer one. Pick an account and Windows Hello only confirms it is you. Use a different passkey still opens Windows' own dialog, for a phone or a security key. Needs Windows 11 22H2 or later; on earlier versions Windows' dialog appears as before. The site never sees your account list, only the one you pick.
+
 ### Improved
 
 - **The private connection page is dark.** The page a private window opens on is now dark from its first frame, even when your system uses a light theme, so opening a private window in a dark room no longer fills the screen with white. Choosing Light under Settings → Appearance still makes it light.

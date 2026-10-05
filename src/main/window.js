@@ -1226,6 +1226,114 @@ class BrowserShell {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Passkeys                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * The site's passkeys, in the browser's own list (passkeys.js).
+   *
+   * A view of its own sized to the card, like the address bar's suggestions,
+   * not the window-sized sheet: as a dropdown under a sign-in field it must
+   * leave the keyboard in that field and every click outside it to the page.
+   * As a chooser under the address bar it takes the keyboard, so Escape and
+   * the arrows work, and losing it is a dismissal. Gone when hidden: it is up
+   * for seconds, a few times a day.
+   *
+   * @param {{mode: 'dropdown'|'chooser', site: string, accounts: object[],
+   *   anchor: {x: number, y: number, width: number}}} model - the anchor in
+   *   window coordinates: the field's bottom-left and width, or the middle of
+   *   the top of the page
+   */
+  showPasskeys(model) {
+    if (this.window.isDestroyed()) return;
+    if (!this.passkeyView) {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          backgroundThrottling: false,
+          additionalArguments: preloadArgs(this.prefs),
+          transparent: true
+        }
+      });
+      try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+      // Clicked away from, or Escape: the broker decides what that means.
+      view.webContents.on('blur', () => {
+        if (this.passkeyView === view && this.onPasskeysBlur) setImmediate(() => this.onPasskeysBlur());
+      });
+      this.passkeyView = view;
+      this.passkeyHeight = 0;
+      this.passkeyReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
+      view.webContents.loadFile(path.join(RENDERER_DIR, 'passkeys.html')).catch(() => {});
+      view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
+      this.window.contentView.addChildView(view);   // topmost
+    }
+    const view = this.passkeyView;
+    const EDGE = 16;   // passkeys.css's margin round the card, for its shadow
+    const { width: winW, height: winH } = this.window.getContentBounds();
+    const dropdown = model.mode === 'dropdown';
+    const cardW = dropdown ? Math.min(Math.max(Math.round(model.anchor.width), 300), 420) : 380;
+    const width = Math.min(cardW + EDGE * 2, winW);
+    const left = dropdown ? model.anchor.x - EDGE : model.anchor.x - width / 2;
+    this.passkeyBox = {
+      x: Math.round(Math.max(0, Math.min(left, winW - width))),
+      // The card's top 4px under the field, or 8px into the page.
+      y: Math.round(Math.min(model.anchor.y + (dropdown ? 4 : 8) - EDGE, winH - 40)),
+      width
+    };
+    this.placePasskeys();
+    const chooser = !dropdown;
+    this.passkeyReady.then(() => {
+      if (this.passkeyView !== view || view.webContents.isDestroyed()) return;
+      send(view, 'debrowser:ui', { kind: 'passkeys', ...model, prefs: this.prefs ? this.prefs.all() : null });
+      if (chooser) view.webContents.focus();
+    });
+  }
+
+  placePasskeys() {
+    if (!this.passkeyView || !this.passkeyBox) return;
+    const { x, y, width } = this.passkeyBox;
+    // One pixel tall until the card has measured itself, so nothing
+    // half-drawn shows.
+    const height = Math.max(1, this.passkeyHeight || 1);
+    this.passkeyView.setBounds({ x, y, width, height });
+  }
+
+  /** The card measured itself: the view is exactly that tall. */
+  sizePasskeys(height) {
+    if (!Number.isFinite(height) || height <= 0) return;
+    this.passkeyHeight = Math.min(Math.round(height), 640);
+    this.placePasskeys();
+  }
+
+  /** Arrow down from the field: the keyboard into the list. */
+  focusPasskeys() {
+    const view = this.passkeyView;
+    if (view && !view.webContents.isDestroyed()) {
+      view.webContents.focus();
+      send(view, 'debrowser:ui', { kind: 'passkeys-focus' });
+    }
+  }
+
+  passkeysFocused() {
+    const view = this.passkeyView;
+    return Boolean(view && !view.webContents.isDestroyed() && view.webContents.isFocused());
+  }
+
+  hidePasskeys() {
+    const view = this.passkeyView;
+    if (!view) return;
+    this.passkeyView = null;
+    this.passkeyBox = null;
+    try {
+      this.window.contentView.removeChildView(view);
+      view.webContents.close();
+    } catch { /* already gone */ }
+  }
+
+  /* ---------------------------------------------------------------- */
   /* Split view                                                        */
   /* ---------------------------------------------------------------- */
 
@@ -2448,6 +2556,9 @@ class BrowserShell {
     const tick = () => {
       this.awayTimer = null;
       if (this.window.isDestroyed() || !this.sidebarOpen || this.sidebarPinned() || !this.detached()) return;
+      // Off for a test driving the strip with events of its own, where the
+      // real cursor is parked outside the window on purpose.
+      if (this.watchAwayOff) return;
       const at = screen.getCursorScreenPoint();
       const b = this.window.getContentBounds();
       const width = this.band() ? STRIP_VIEW_WIDTH : this.chromeView.getBounds().width;
@@ -2829,7 +2940,7 @@ class BrowserShell {
   isChromeSender(sender) {
     if (!sender) return false;
     for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
-      this.toastView, this.dividerView, this.devToolsDivider, this.peek && this.peek.backdrop, this.quick && this.quick.bar]) {
+      this.toastView, this.dividerView, this.devToolsDivider, this.passkeyView, this.peek && this.peek.backdrop, this.quick && this.quick.bar]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }

@@ -1,0 +1,96 @@
+/*
+ * The site's passkeys: one card, in a view sized to it (window.js,
+ * showPasskeys). The 16px round it is the room its shadow is drawn in.
+ */
+
+html, body { margin: 0; background: transparent; overflow: hidden; }
+body { padding: 16px; font: var(--fs-body, 13px) / 1.35 var(--font-ui, system-ui), sans-serif; }
+
+.card {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-menu);
+  outline: none;
+  animation: card-in 160ms var(--ease-out);
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+body.calm .card { animation: none; }
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 12px;
+}
+.head[hidden] { display: none; }
+.head strong { display: block; font-size: 14px; font-weight: 600; }
+.head .sub { display: block; margin-top: 2px; color: var(--text-dim); font-size: var(--fs-small, 12px); }
+
+.key {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-text);
+}
+.key svg, .avatar svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  outline: none;
+  transition: background-color var(--fast) var(--ease);
+}
+.row:hover, .row:focus-visible, .row:focus {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-fill, var(--accent));
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+}
+.avatar.quiet { background: var(--wash-soft); color: var(--text-dim); }
+
+.text { display: flex; flex-direction: column; min-width: 0; }
+.name, .meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name { font-weight: 500; }
+.meta { color: var(--text-dim); font-size: var(--fs-small, 12px); }
+
+.sep { height: 1px; margin: 6px 4px; background: var(--border); }
