@@ -4,7 +4,7 @@
 /**
  * Stands in for the Tor binary under the Linux kill-switch test.
  *
- * tools/netns-launch starts "Tor" as `<tor> -f <torrc>` in the original
+ * native/helpers/netns-launch starts "Tor" as `<tor> -f <torrc>` in the original
  * network namespace, exactly as it starts the real one. This reads the same
  * torrc, listens where it says - SOCKS on a Unix socket - with the SOCKS
  * stand-in behind it, writes the control cookie, and prints the bootstrap

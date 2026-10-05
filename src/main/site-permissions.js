@@ -21,10 +21,10 @@
  */
 
 const fs = require('fs');
-const { readJson } = require('./store-file');
+const { readJson } = require('./data/store-file');
 const { setAside } = require('./set-aside');
 const path = require('path');
-const { originOf } = require('./credentials');
+const { originOf } = require('./data/credentials');
 
 const FILE = 'site-permissions.json';
 

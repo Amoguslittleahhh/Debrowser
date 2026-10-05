@@ -446,7 +446,7 @@ memory — so there the tier says so by name rather than pretending.
 
 ```bash
 npm run build:memtrim
-sudo setcap cap_sys_nice+ep tools/mem-trim   # process_madvise on another process
+sudo setcap cap_sys_nice+ep native/helpers/mem-trim   # process_madvise on another process
 sudo swapon /dev/zram0                       # somewhere to compress into
 ```
 
@@ -628,7 +628,7 @@ Tested per-tab, in PSS, and rejected:
 
 ### Page merging across the renderer pool (opt-in)
 
-`tools/ksm-launch.c` marks the browser's process tree eligible for **kernel
+`native/helpers/ksm-launch.c` marks the browser's process tree eligible for **kernel
 same-page merging**, so identical anonymous pages across renderers collapse onto
 one physical copy.
 

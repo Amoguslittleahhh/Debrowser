@@ -15,8 +15,8 @@
 const fixtureServer = require('./fixture-server');
 const fs = require('fs');
 const { footprintMB, accountingMode, unreportedProcessesMB,
-        compressionStatus } = require('./memory');
-const { MB } = require('./config');
+        compressionStatus } = require('../memory');
+const { MB } = require('../config');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

@@ -24,8 +24,8 @@
  * Private windows have their own, stricter rule (incognito/policy.js).
  */
 
-const { isLocalHost } = require('./incognito/policy');
-const { WebHooks } = require('./web-hooks');
+const { isLocalHost } = require('../incognito/policy');
+const { WebHooks } = require('../web-hooks');
 
 /** Names reserved for testing, examples and private networks (RFC 2606, 6761, 8375). */
 const RESERVED = ['.test', '.example', '.invalid', '.localhost', '.local', '.lan', '.home.arpa', '.internal', '.corp'];

@@ -11,7 +11,7 @@ profile "${executable}" "/opt/${sanitizedProductName}/${executable}" flags=(unco
   include if exists <local/${executable}>
 }
 
-# The private-window launcher (tools/netns-launch.c). It puts the private
+# The private-window launcher (native/helpers/netns-launch.c). It puts the private
 # browser in a network namespace with nowhere to go - incognito's kill switch -
 # and needs the same one permission to do it. Without this entry the launcher
 # is refused, and the private window runs with the tripwire alone and says so.

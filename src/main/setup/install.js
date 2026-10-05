@@ -2,7 +2,7 @@
 
 /**
  * Installing, where the system has no installer for us to draw: macOS and
- * Linux. Windows has its own (packaging/installer.nsh, tools/setup-ui.c).
+ * Linux. Windows has its own (build/installer.nsh, native/helpers/setup-ui.c).
  *
  *   macOS   A downloaded app runs from wherever it was opened - the disk image,
  *           or Downloads - and from a disk image it cannot update itself and

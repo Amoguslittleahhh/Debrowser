@@ -5,7 +5,7 @@
  *
  * Everything here is asked of the browser one request at a time, and the
  * browser answers `{ locked: true }` to any of them once the vault has locked
- * itself (five minutes without use; see src/main/vault.js). So the page never
+ * itself (five minutes without use; see src/main/data/vault.js). So the page never
  * decides it is unlocked on its own: it asks, and a locked answer anywhere
  * sends it back to the lock screen.
  *

@@ -101,7 +101,7 @@ publish:
 ## Web links, so Debrowser can be the default browser. On macOS this becomes
 ## the app's URL types in Info.plist, which is what lets it be chosen; on Linux
 ## the desktop entry's handlers, alongside `mimeTypes` below. Windows is
-## registered by the installer instead (packaging/installer.nsh).
+## registered by the installer instead (build/installer.nsh).
 protocols:
   - name: Web page
     schemes: [http, https]
@@ -136,7 +136,7 @@ win:
   ## process. Shipping a second path to the same number would be one more thing
   ## to keep honest.
   extraResources:
-    - from: tools
+    - from: native/helpers
       to: tools
       filter:
         - mem-probe.exe
@@ -199,9 +199,9 @@ win:
 ## on its own welcome tour. What it gives up is choosing the folder; it is the
 ## per-user Programs folder, as every per-user browser's is.
 ##
-## Even that progress window is ours (tools/setup-ui.c, in the browser's own
-## palette), and uninstalling asks in a browser window (src/main/uninstall.js)
-## instead of a message box. packaging/installer.nsh wires both in.
+## Even that progress window is ours (native/helpers/setup-ui.c, in the browser's own
+## palette), and uninstalling asks in a browser window (src/main/setup/uninstall.js)
+## instead of a message box. build/installer.nsh wires both in.
 nsis:
   oneClick: true
   perMachine: false           # install per-user, so no UAC prompt
@@ -210,8 +210,8 @@ nsis:
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false   # keep the user's session and settings
   # Incognito's kill switch: a hard link the firewall rule can name, and the
-  # rule. See packaging/installer.nsh.
-  include: packaging/installer.nsh
+  # rule. See build/installer.nsh.
+  include: build/installer.nsh
 
 portable:
   artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
@@ -253,7 +253,7 @@ mac:
   ## Same helper, macOS build. `proc_pid_rusage` needs no task port and no
   ## debugger entitlement, so the hardened runtime above does not block it.
   extraResources:
-    - from: tools
+    - from: native/helpers
       to: tools
       filter:
         - mem-probe
@@ -311,7 +311,7 @@ linux:
   ## that platform.js will never look for on a platform where trimming is not
   ## implemented.
   extraResources:
-    - from: tools
+    - from: native/helpers
       to: tools
       filter:
         - mem-trim
@@ -324,7 +324,7 @@ linux:
     - from: vendor/tor/${platform}-${arch}
       to: tor
     # The icon for the apps-menu entry Debrowser writes for an AppImage or an
-    # unpacked folder (src/main/install.js); the .deb installs its own.
+    # unpacked folder (src/main/setup/install.js); the .deb installs its own.
     - from: build/icon.png
       to: icon.png
   target:
@@ -358,8 +358,8 @@ linux:
 
 deb:
   # The default profile plus one entry for the private-window launcher, which
-  # needs to make a network namespace. See packaging/apparmor-profile.tpl.
-  appArmorProfile: packaging/apparmor-profile.tpl
+  # needs to make a network namespace. See build/apparmor-profile.tpl.
+  appArmorProfile: build/apparmor-profile.tpl
   depends:
     - libgtk-3-0
     - libnotify4

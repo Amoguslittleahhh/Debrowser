@@ -58,7 +58,7 @@ class NetWatchHelper extends HelperProcess {
       replyId,
       missingHint: (binary) => (binary.includes('resources')
         ? `helper missing from this build: ${binary}`
-        : 'tools/net-watch not built (npm run build:netwatch)'),
+        : 'native/helpers/net-watch not built (npm run build:netwatch)'),
       log
     });
   }

@@ -62,7 +62,7 @@
  * needs ptrace-read access (same uid suffices) AND CAP_SYS_NICE. A desktop
  * launch has the first and not the second, so this needs a one-time
  *
- *     sudo setcap cap_sys_nice+ep tools/mem-trim
+ *     sudo setcap cap_sys_nice+ep native/helpers/mem-trim
  *
  * exactly as page merging needs a one-time root action. Without it every trim
  * returns EPERM, which the caller reports as "unavailable" rather than failing.
@@ -70,7 +70,7 @@
  * anonymous pages, so the call succeeds and reclaims nothing - which is why
  * compressionStatus() in src/main/memory.js reports the two conditions apart.
  *
- * Build:  cc -O2 -Wall -o tools/mem-trim tools/mem-trim.c   (npm run build:memtrim)
+ * Build:  cc -O2 -Wall -o native/helpers/mem-trim native/helpers/mem-trim.c   (npm run build:memtrim)
  * Use:    a line protocol on stdin, one long-lived process owned by platform.js.
  *           trim <pid>   ->  ok <pid> <bytes-advised>
  *                        ->  err <pid> <errno>
@@ -474,7 +474,7 @@ int main(void) {
      * _IONBF ignores the size argument and is valid everywhere. For a protocol
      * that writes one short line and waits, unbuffered is what we want. The
      * explicit flushes below cost nothing then and keep the replies arriving
-     * if anyone ever reintroduces a buffer. `tools/mem-probe.c` carries the
+     * if anyone ever reintroduces a buffer. `native/helpers/mem-probe.c` carries the
      * same note for the same reason.
      */
     setvbuf(stdout, NULL, _IONBF, 0);

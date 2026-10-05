@@ -242,7 +242,7 @@ for distributing to anyone else.
 
 ## Hibernation in a packaged build
 
-The `HIBERNATED` tier needs `tools/mem-trim`, and two things about it change
+The `HIBERNATED` tier needs `native/helpers/mem-trim`, and two things about it change
 once the app is packaged.
 
 **It cannot live inside `app.asar`.** An asar archive is a single file the

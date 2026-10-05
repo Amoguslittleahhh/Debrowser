@@ -30,7 +30,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ipcMain, net } = require('electron');
-const { WebHooks } = require('./web-hooks');
+const { WebHooks } = require('../web-hooks');
 
 const MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 const FILE = 'engine.bin';

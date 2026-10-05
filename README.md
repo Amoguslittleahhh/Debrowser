@@ -66,7 +66,7 @@ Needs Node 18 or later, on Windows, macOS or Linux.
 - **[The full guide](docs/GUIDE.md):** using it, keyboard shortcuts, private
   windows, profiles, how it keeps tabs cheap, measurements, and limits worth knowing.
 - [What's new](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md) ·
-  [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+  [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) · [Roadmap](docs/ROADMAP.md)
 - Open source under the [MIT licence](LICENSE). Bundled components (Chromium,
   Electron, Tor, Readability, the Ghostery engine and the filter lists) keep
   their own licences.

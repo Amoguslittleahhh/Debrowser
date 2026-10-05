@@ -37,7 +37,7 @@
  */
 
 const fs = require('fs');
-const { readJson } = require('./store-file');
+const { readJson } = require('./data/store-file');
 const path = require('path');
 const { net } = require('electron');
 

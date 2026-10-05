@@ -19,7 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { setAside } = require('./set-aside');
+const { setAside } = require('../set-aside');
 
 const KEEP_BACKUPS = 2;
 

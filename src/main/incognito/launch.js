@@ -10,7 +10,7 @@
  *
  * It is started through the operating system's kill switch where there is one:
  *
- *   Linux    tools/netns-launch, which starts Tor outside and the browser
+ *   Linux    native/helpers/netns-launch, which starts Tor outside and the browser
  *            inside a network namespace with nowhere to go. If the kernel
  *            refuses the namespace, the launcher says so and the browser runs
  *            behind its own settings and the tripwire.

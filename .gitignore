@@ -2,20 +2,20 @@ node_modules/
 dist/
 *.log
 .DS_Store
-tools/ksm-launch
-tools/mem-trim
+native/helpers/ksm-launch
+native/helpers/mem-trim
 
 # Packaging output
 dist/
 
-# Compiled helpers - build output, not source. tools/*.c is the source.
-tools/mem-probe
-tools/mem-probe.exe
-tools/net-watch
-tools/net-watch.exe
-tools/mem-trim.exe
-tools/setup-ui.exe
-tools/netns-launch
+# Compiled helpers - build output, not source. native/helpers/*.c is the source.
+native/helpers/mem-probe
+native/helpers/mem-probe.exe
+native/helpers/net-watch
+native/helpers/net-watch.exe
+native/helpers/mem-trim.exe
+native/helpers/setup-ui.exe
+native/helpers/netns-launch
 
 # Tor, fetched and verified by tools/fetch-tor.js - never committed.
 vendor/

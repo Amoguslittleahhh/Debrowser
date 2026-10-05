@@ -41,7 +41,7 @@
  */
 
 const fs = require('fs');
-const { setAside } = require('./set-aside');
+const { setAside } = require('../set-aside');
 const path = require('path');
 const crypto = require('crypto');
 const { app, safeStorage } = require('electron');

@@ -15,7 +15,7 @@
  * Never in a private window, which keeps nothing about the sites it visits.
  */
 
-const { SitePrefs } = require('./site-prefs');
+const { SitePrefs } = require('./data/site-prefs');
 
 const WORLD = 1003;
 

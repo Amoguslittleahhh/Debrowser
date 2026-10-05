@@ -174,9 +174,9 @@ jobs:
         if: matrix.os != 'ubuntu-latest'
         run: npm run build:memprobe
 
-      # The installer's and uninstaller's own window (tools/setup-ui.c),
+      # The installer's and uninstaller's own window (native/helpers/setup-ui.c),
       # drawn in the browser's design instead of NSIS's progress box.
-      # packaging/installer.nsh embeds it when the file exists, so it must be
+      # build/installer.nsh embeds it when the file exists, so it must be
       # built before packaging - and a compile error here fails the release
       # rather than shipping the stock window unnoticed.
       - name: Build the installer window
@@ -260,7 +260,7 @@ jobs:
         run: npm run test:incognito
 
       # The kill switch, where the operating system has one. Linux: the private
-      # browser started through tools/netns-launch, in a namespace with no
+      # browser started through native/helpers/netns-launch, in a namespace with no
       # route, and a direct connection has to fail at the kernel. Windows: the
       # private browser run as a hard link that a firewall rule blocks, and a
       # real connection to 1.1.1.1 - which an ordinary process on the same

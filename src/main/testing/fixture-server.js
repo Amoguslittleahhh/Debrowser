@@ -21,7 +21,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PAGES = path.join(__dirname, '..', '..', 'test', 'pages');
+const PAGES = path.join(__dirname, '..', '..', '..', 'test', 'pages');
 
 /** The Chromium switch that makes `*.test` hostnames resolve locally. */
 const HOST_RESOLVER_RULES = 'MAP *.test 127.0.0.1';

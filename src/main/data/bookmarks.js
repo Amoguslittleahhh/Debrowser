@@ -36,7 +36,7 @@
  */
 
 const fs = require('fs');
-const { setAside } = require('./set-aside');
+const { setAside } = require('../set-aside');
 const path = require('path');
 const os = require('os');
 const { app } = require('electron');

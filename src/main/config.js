@@ -286,7 +286,7 @@ const BASE = {
    * about 2:1, so a per-process reading alone overstates this by roughly double.
    *
    * On by default, and inert unless the platform can actually do it - which
-   * today means Linux, with `tools/mem-trim` built, CAP_SYS_NICE granted, and
+   * today means Linux, with `native/helpers/mem-trim` built, CAP_SYS_NICE granted, and
    * swap or zram configured. `trimCapability()` reports which of those is
    * missing rather than leaving a silent zero. Unlike page merging, this is not
    * gated behind a warning: KSM shares identical pages *between* processes and

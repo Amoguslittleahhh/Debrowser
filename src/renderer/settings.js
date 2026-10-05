@@ -735,7 +735,7 @@ function safetyRow() {
 
 /**
  * Installing and uninstalling, last in Advanced. Each opens its own window
- * (src/main/setup-window.js); the rows appear only when there is something to
+ * (src/main/setup/setup-window.js); the rows appear only when there is something to
  * do - nothing to install on Windows or from the .deb, nothing to remove from
  * a copy that was never installed. Asked again whenever Settings comes back
  * into view, since an install done meanwhile leaves nothing to install.
@@ -1263,7 +1263,7 @@ document.getElementById('labs-feedback')?.addEventListener('click', () => {
  * The passcode, and a way to the passwords page.
  *
  * The saved records themselves are not here: they live on
- * debrowser://passwords, behind the lock (src/main/vault.js), and this page
+ * debrowser://passwords, behind the lock (src/main/data/vault.js), and this page
  * cannot ask for them. What it can do is set the passcode that turns the
  * feature on, change it, or take it away - which turns the feature off and
  * deletes what was saved.

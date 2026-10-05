@@ -264,7 +264,7 @@ async function main() {
   console.log(`\nIncognito leak test${inNamespace ? ' (inside a network namespace: loopback only)' : ''}` +
     `${killSwitch ? ', started through the kill switch' : ''}\n`);
 
-  const fixtures = await require('../src/main/fixture-server').start();
+  const fixtures = await require('../src/main/testing/fixture-server').start();
   // An HTTPS site with a certificate nobody vouches for - what an exit relay
   // intercepting the connection would present. Its page must never show.
   const tls = await selfSignedServer();
@@ -345,7 +345,7 @@ async function main() {
   if (typeof process.getuid === 'function' && process.getuid() === 0) browserArgs.push('--no-sandbox');
 
   // Under the kill switch the browser is started the way the product starts
-  // it: through tools/netns-launch, with "Tor" - a stand-in on a Unix socket -
+  // it: through native/helpers/netns-launch, with "Tor" - a stand-in on a Unix socket -
   // outside and the browser in a namespace of its own. No proxy port is
   // given: the browser relays to Tor's socket itself.
   let launch = [electron, browserArgs];
@@ -380,7 +380,7 @@ async function main() {
   }
   const namesFile = path.join(scratch, 'names.txt');
   if (killSwitch) {
-    const helper = path.join(ROOT, 'tools', 'netns-launch');
+    const helper = path.join(ROOT, 'native', 'helpers', 'netns-launch');
     if (!fs.existsSync(helper)) {
       check('the kill-switch launcher is built', false, 'npm run build:netns');
       process.exit(1);

@@ -18,7 +18,8 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const dir = __dirname;
+// The helpers' sources, and where each is built to: native/helpers.
+const dir = path.join(__dirname, '..', 'native', 'helpers');
 const NAME = process.argv[2];
 if (!NAME || !/^[a-z-]+$/.test(NAME)) {
   console.error('usage: node tools/build-helper.js <mem-probe|mem-trim|net-watch|setup-ui>');

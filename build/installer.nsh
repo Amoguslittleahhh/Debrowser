@@ -1,5 +1,5 @@
 ; The installer's and uninstaller's own window, in the browser's design
-; (tools/setup-ui.c), instead of NSIS's: its one-click progress box is drawn
+; (native/helpers/setup-ui.c), instead of NSIS's: its one-click progress box is drawn
 ; with the system's dialog controls, which nothing restyles, and its uninstall
 ; question is a system message box.
 ;
@@ -10,14 +10,14 @@
 ; silent install (/S, and every update) stays as it was: no window at all.
 ;
 ; Uninstall: Windows' Apps list runs `UninstallString`, which customInstall
-; points at the browser itself (`--uninstall`, src/main/uninstall.js) - the
+; points at the browser itself (`--uninstall`, src/main/setup/uninstall.js) - the
 ; question in the browser's own window. That starts this uninstaller with /S
 ; and --wait-pid, and the window here shows the progress.
 ;
 ; Embedded only when built (npm run build:setupui; the release workflow does);
 ; a local package without it gets the stock windows and the stock uninstaller.
-!if /FileExists "${PROJECT_DIR}\tools\setup-ui.exe"
-  !define SETUP_UI "${PROJECT_DIR}\tools\setup-ui.exe"
+!if /FileExists "${PROJECT_DIR}\native\helpers\setup-ui.exe"
+  !define SETUP_UI "${PROJECT_DIR}\native\helpers\setup-ui.exe"
 !endif
 !define SETUP_UI_CLASS "DebrowserSetup"
 !define SETUP_UI_ASK 0x8001    ; WM_APP + 1: "Debrowser is open" - answers 1 to go on
@@ -203,7 +203,7 @@ Var pid
   ${EndIf}
 
   ; Uninstalling from Windows' Apps list opens the browser's own window
-  ; (src/main/uninstall.js) rather than the uninstaller's message box. The
+  ; (src/main/setup/uninstall.js) rather than the uninstaller's message box. The
   ; quiet string, which management tools use, still runs it with /S.
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" UninstallString '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --uninstall'
 

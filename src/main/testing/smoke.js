@@ -13,12 +13,12 @@
 
 const fs = require('fs');
 const { app, session } = require('electron');
-const { Tier, tierRank, isStopped } = require('./config');
-const { applyPrefs } = require('./prefs');
-const platform = require('./platform');
+const { Tier, tierRank, isStopped } = require('../config');
+const { applyPrefs } = require('../prefs');
+const platform = require('../platform');
 const fixtureServer = require('./fixture-server');
-const pages = require('./pages');
-const contextMenu = require('./context-menu');
+const pages = require('../pages');
+const contextMenu = require('../context-menu');
 
 /** The process a tab's page is in, asked of the renderer rather than the tab. */
 const safePidOf = (tab) => {
@@ -29,7 +29,7 @@ const safePidOf = (tab) => {
   }
 };
 const path = require('path');
-const { BROWSING_PARTITION } = require('./tabs/tab-manager');
+const { BROWSING_PARTITION } = require('../tabs/tab-manager');
 
 /**
  * Fixtures are served on distinct sites (t1.test, t2.test, …) rather than as
@@ -223,7 +223,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // counts the Chromium binary once per renderer and overstated this project's
   // figures by roughly 3x; the fix is easy to undo by accident, and the symptom
   // is merely "the numbers look big" rather than anything that breaks.
-  const { accountingMode } = require('./memory');
+  const { accountingMode } = require('../memory');
   const mode = accountingMode();
   const naiveRssMB = Math.round(
     require('electron').app.getAppMetrics()
@@ -589,7 +589,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // whether the syscall is permitted reports a working feature on a machine
   // where it does nothing - which is exactly what shipped, and what this asserts
   // against.
-  const compression = require('./memory').compressionStatus();
+  const compression = require('../memory').compressionStatus();
   const cap = await platform.trimCapability();
   // Both halves, against an *independent* reading of the compressor, and a
   // named reason whenever either is missing. Asserting on `cap.compression`
@@ -669,7 +669,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // "0MB out". The before figure came from the governor and the after figure
     // from somewhere that does not exist on that platform, which is not a
     // comparison at all.
-    const afterDetail = require('./memory').readProcessMemory(big.pid);
+    const afterDetail = require('../memory').readProcessMemory(big.pid);
     let afterMB = afterDetail ? afterDetail.privateMB : null;
     if (afterMB == null) {
       const probed = await platform.measureProcess(big.pid).catch(() => null);
@@ -852,9 +852,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const fs2 = require('fs');
     const marked = ['history.html', 'downloads.html', 'newtab.html'].every((page) =>
       /id="q"[^>]*data-transient/.test(
-        fs2.readFileSync(path.join(__dirname, '..', 'renderer', page), 'utf8')));
+        fs2.readFileSync(path.join(__dirname, '..', '..', 'renderer', page), 'utf8')));
     const watched = ['history.js', 'downloads.js', 'newtab.js'].every((page) =>
-      fs2.readFileSync(path.join(__dirname, '..', 'renderer', page), 'utf8')
+      fs2.readFileSync(path.join(__dirname, '..', '..', 'renderer', page), 'utf8')
         .includes('watchTransientInput(api)'));
     check('a page that can hold typed text marks it and watches for it',
       marked && watched, `marked=${marked}, watched=${watched}`);
@@ -1012,7 +1012,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // Tab search: "@tabs" lists only open tabs, every one when nothing follows,
   // matched on words when something does, and never offers a search.
   {
-    const { suggest: rank } = require('./suggest');
+    const { suggest: rank } = require('../suggest');
     const open = [
       { id: 1, title: 'Pull requests · Debrowser', url: 'https://github.com/pulls', note: 'Asleep' },
       { id: 2, title: 'Inbox', url: 'https://mail.example.com/', note: '210 MB' },
@@ -1030,7 +1030,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // The downloads list survives a restart: a finished file whose file is gone
   // says so, and one cut off by closing comes back as failed, ready to retry.
   {
-    const { DownloadManager: Manager } = require('./downloads');
+    const { DownloadManager: Manager } = require('../downloads');
     const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'debrowser-dl-'));
     const store = path.join(dir, 'downloads.json');
     fs.writeFileSync(store, JSON.stringify([
@@ -1063,7 +1063,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // Importing: a password export in any exporter's column names, and another
   // browser's history database, read from a copy.
   {
-    const { parseLoginCsv, readHistory, readFirefoxBookmarks } = require('./importer');
+    const { parseLoginCsv, readHistory, readFirefoxBookmarks } = require('../data/importer');
     const chrome = parseLoginCsv('name,url,username,password,note\r\n' +
       'GitHub,https://github.com/login,octo,"p,a""ss",\r\nApp,android://x,,y,\r\n');
     const bitwarden = parseLoginCsv('folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password\n' +
@@ -1098,7 +1098,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // are not, a failed upgrade hands back the plain address, and a site that
   // bounces https back to http is stopped instead of looping.
   {
-    const { HttpsFirst } = require('./https-first');
+    const { HttpsFirst } = require('../protection/https-first');
     let mode = 'upgrade';
     const hf = new HttpsFirst(() => mode);
     const nav = (url) => hf.judge({ url, resourceType: 'mainFrame' });
@@ -1124,7 +1124,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // them, one to the page's own site (subdomains included) keeps them, and a
   // site the user let them in on keeps them too.
   {
-    const { ThirdPartyCookies, isThirdParty } = require('./third-party');
+    const { ThirdPartyCookies, isThirdParty } = require('../protection/third-party');
     let allowed = false;
     const tpc = new ThirdPartyCookies(() => true, () => allowed);
     const req = (url, top, resourceType = 'script') => ({ url, resourceType, frame: { top: { url: top } } });
@@ -1143,7 +1143,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   // Links: tracking parameters out, redirect hops skipped, the rest untouched.
   {
-    const { clean } = require('./link-cleaner');
+    const { clean } = require('../protection/link-cleaner');
     const pairs = [
       ['https://example.com/a?utm_source=x&id=5&fbclid=abc#top', 'https://example.com/a?id=5#top'],
       ['https://l.facebook.com/l.php?u=https%3A%2F%2Fnews.site%2Fstory%3Futm_campaign%3Dz%26p%3D2&h=AT0', 'https://news.site/story?p=2'],
@@ -1166,7 +1166,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // warning page in the tab, "open anyway" lets it load; a site one letter
   // from one the user uses often is caught too, and a familiar one is not.
   {
-    const { Threats, domainsIn, distance } = require('./threats');
+    const { Threats, domainsIn, distance } = require('../protection/threats');
     const parsed = domainsIn('# comment\n127.0.0.1\tbad.example\nphish.example.net\n0.0.0.0 localhost\n');
     const fake = new Threats({ dir: null, enabled: () => true, domains: ['evil.example'],
       history: () => [{ url: 'https://github.com/x', visits: 30 }, { url: 'https://paypal.com/', visits: 9 }] });
@@ -1190,7 +1190,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // The password check-up: only a five-character hash prefix is asked about,
   // a breached password is matched here, and reuse and weakness are found.
   {
-    const { checkPasswords, sha1 } = require('./password-check');
+    const { checkPasswords, sha1 } = require('../protection/password-check');
     const asked = [];
     const breachedHash = sha1('password');
     const fake = async (url) => {
@@ -1214,7 +1214,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // Permissions a site has not used in three months go by themselves; a
   // refusal stays. And the safety check draws every protection.
   {
-    const { SitePermissions } = require('./site-permissions');
+    const { SitePermissions } = require('../site-permissions');
     const store = new SitePermissions(() => {}, null);
     store.set('https://old.example', 'camera', 'allow');
     store.set('https://old.example', 'notifications', 'block');
@@ -1238,10 +1238,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const info = String(await require('electron').clipboard.readText());
     // Review fixes that need no network: each is the failure the review found.
     {
-      const { siteOf } = require('./third-party');
-      const { clean } = require('./link-cleaner');
-      const { HttpsFirst } = require('./https-first');
-      const { Prefs } = require('./prefs');
+      const { siteOf } = require('../protection/third-party');
+      const { clean } = require('../protection/link-cleaner');
+      const { HttpsFirst } = require('../protection/https-first');
+      const { Prefs } = require('../prefs');
       // Private suffixes are separate sites.
       const privateSites = siteOf('https://alice.github.io/') !== siteOf('https://bob.github.io/');
       // A malformed escape in a redirect link does not throw.
@@ -1283,7 +1283,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const profile = (() => {
         const fs = require('fs');
         const p = require('path');
-        const { readJson, backupProfile } = require('./store-file');
+        const { readJson, backupProfile } = require('../data/store-file');
         const d = fs.mkdtempSync(p.join(require('os').tmpdir(), 'profile-'));
         fs.writeFileSync(p.join(d, 'spaces.json'), '{"spaces": [');
         fs.writeFileSync(p.join(d, 'preferences.json'), '{"theme":"dark"}');
@@ -1293,7 +1293,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         const backedUp = backupProfile(d, '1.9.3') && fs.existsSync(p.join(d, 'Backups', '1.9.3', 'preferences.json'));
         const once = backupProfile(d, '1.9.3') === false;
         // Two failed starts of a new version offer the way back, and the restore puts the old files back.
-        const { StartupGuard } = require('./startup-guard');
+        const { StartupGuard } = require('../startup-guard');
         const guard = new StartupGuard(d, '2.0.0');
         guard.begin(); guard.begin();
         const troubled = guard.troubled(guard.begin());
@@ -1302,7 +1302,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         const restored = JSON.parse(fs.readFileSync(p.join(d, 'preferences.json'), 'utf8')).theme === 'dark' &&
           fs.existsSync(p.join(d, 'Backups', '2.0.0-before-restore', 'preferences.json'));
         // A crash is kept for one report, with addresses and the home folder taken out.
-        const CrashReport = require('./crash-report');
+        const CrashReport = require('../crash-report');
         const err = new Error('boom at https://secret.example/path');
         err.stack = `Error: boom\n    at ${require('os').homedir()}/x.js visiting https://secret.example/a`;
         CrashReport.record(d, err, '2.0.0');
@@ -1324,7 +1324,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const notesPage = await waitFor(() => tabs.activeTab() && pages.pageName(tabs.activeTab().url) === 'whats-new', { timeoutMs: 5000 });
     const items = notesPage && await waitFor(async () => (await tabs.activeTab().wc.executeJavaScript(
       'document.querySelectorAll("#notes li").length').catch(() => 0)) || 0, { timeoutMs: 5000 });
-    const parsed = require('./whats-new').notesFor('## 2.0.0\n\n### New\n\n- **A thing.** It `works`.\n  still\n\n## 1.0.0\n\n- Old.\n', '2.0.0');
+    const parsed = require('../whats-new').notesFor('## 2.0.0\n\n### New\n\n- **A thing.** It `works`.\n  still\n\n## 1.0.0\n\n- Old.\n', '2.0.0');
     check('What’s new shows this version’s notes, sorted by section',
       items > 0 && parsed.sections[0].title === 'New' && parsed.sections[0].items[0].head === 'A thing.' &&
       parsed.sections[0].items[0].text === 'It `works`. still', `items ${items}, ${JSON.stringify(parsed)}`);
@@ -1484,7 +1484,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // Receipts: what changed since the last look is added to today, a counter
   // that restarts is not taken as negative, and the week has seven days.
   {
-    const { Receipts } = require('./receipts');
+    const { Receipts } = require('../data/receipts');
     let totals = { freedMB: 100, slept: 2, blocked: 10, cleaned: 1, stopped: 0 };
     const r = new Receipts(null, () => totals);
     r.tick();
@@ -1501,8 +1501,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // The command bar: ">" lists the browser's commands, words narrow them, and
   // picking one runs it.
   {
-    const { suggest: rank } = require('./suggest');
-    const { commandList } = require('./commands');
+    const { suggest: rank } = require('../suggest');
+    const { commandList } = require('../commands');
     const list = commandList({ incognito: false, hasTab: true });
     const all = rank({ text: '> ', commands: list }).items;
     const dark = rank({ text: '> dark', commands: list }).items;
@@ -1623,7 +1623,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(300);
     const labels = await shell.chromeView.webContents.executeJavaScript(
       '[...document.querySelectorAll(".tab-group:not([hidden])")].map((n) => n.textContent)').catch(() => null);
-    const saved = require('./session').Session.prototype.snapshot.call({}, tabs.all(), tabs.activeId);
+    const saved = require('../data/session').Session.prototype.snapshot.call({}, tabs.all(), tabs.activeId);
     const kept = saved.groups.some((g) => g.id === groupId) && saved.tabs.filter((t) => t.groupId === groupId).length === 2;
     runCommand('toggle-group', { groupId });
     await sleep(300);
@@ -1631,7 +1631,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `document.querySelector('.tab[data-id="${c.id}"]')?.classList.contains('group-folded')`).catch(() => null);
     const slept = await waitFor(() => !c.isLive, { timeoutMs: 8000 });
     runCommand('ungroup-all', { groupId });
-    const forgotten = !a.groupId && !c.groupId && !require('./tab-groups').TabGroups.current.get(groupId);
+    const forgotten = !a.groupId && !c.groupId && !require('../tab-groups').TabGroups.current.get(groupId);
     check('tab groups: joined beside, one label, folded away and asleep, saved, and forgotten when ungrouped',
       beside && labels?.length === 1 && kept && folded === true && slept && forgotten,
       JSON.stringify({ beside, labels, kept, folded, slept, forgotten }));
@@ -1757,8 +1757,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // The archive: only tabs unopened for the chosen days, never pinned or in
   // front; tab search finds them by name, and picking one opens it again.
   {
-    const { Archive } = require('./archive');
-    const { suggest: rank } = require('./suggest');
+    const { Archive } = require('../data/archive');
+    const { suggest: rank } = require('../suggest');
     const day = 86_400_000;
     const now = Date.now();
     const fake = [
@@ -1779,7 +1779,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   // A run that never quit is noticed at the next start, and a clean quit is not.
   {
-    const { Session } = require('./session');
+    const { Session } = require('../data/session');
     const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'debrowser-run-'));
     const one = new Session(() => {}, dir);
     const first = one.claimRun();
@@ -2277,7 +2277,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // allowlist cannot live in a module both sides share - and a second copy of
   // it here to compare against would be the drift this check is looking for.
   const preloadSource = fs.readFileSync(
-    path.join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
+    path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js'), 'utf8');
   const unknown = ids.filter((id) => !preloadSource.includes(`'${id}'`));
   check('every item in the menu names a command the bridge allows',
     unknown.length === 0,
@@ -2345,7 +2345,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // The store keeps an address only when it could not be worked out, which is
     // what keeps a ten-thousand-entry history from carrying ten thousand copies
     // of a string the page can derive.
-    const { customIcon } = require('./history');
+    const { customIcon } = require('../data/history');
     check('history stores a custom icon address and derives the default one',
       customIcon('https://a.test/page', 'https://a.test/logo.png') === 'https://a.test/logo.png' &&
       customIcon('https://a.test/page', 'https://a.test/favicon.ico') === null,
@@ -2415,7 +2415,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // blocking. Only two things are fetchable: the well-known default path, and
   // an address Chromium reported for a page that was actually loaded.
   {
-    const icons = require('./icons');
+    const icons = require('../icons');
     const arbitrary = 'https://internal.test/secret.png';
     const before = icons.allowed(arbitrary);
     icons.remember(arbitrary);
@@ -2439,7 +2439,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // a history full of "New tab" is the failure mode, and it would be invisible
   // until someone opened the page.
   {
-    const { History } = require('./history');
+    const { History } = require('../data/history');
     const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-hist-'));
     let recording = true;
     const hist = new History(() => {}, { dir, enabled: () => recording });
@@ -2493,7 +2493,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // threshold is read from the profile rather than from `cfg`, which this
   // suite compresses.
   {
-    const shipped = require('./config').loadConfig('balanced').coldAfterMs;
+    const shipped = require('../config').loadConfig('balanced').coldAfterMs;
 
     const keep = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
     await waitFor(() => keep.isLive && !keep.loading, { timeoutMs: 10_000 });
@@ -2825,7 +2825,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       Object.entries(counts).map(([name, n]) => `${name}=${n}`).join(' '));
 
     // And the table itself agrees with what the menu advertises.
-    const table = require('./shortcuts');
+    const table = require('../shortcuts');
     // Built with this platform's modifier, because the table uses Cmd on macOS
     // and Ctrl elsewhere - and this suite runs on all three.
     const press = (key, extra = {}) => ({
@@ -2860,7 +2860,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // Read from a file of its own rather than from the user's, which this suite
   // runs against.
   {
-    const { Prefs } = require('./prefs');
+    const { Prefs } = require('../prefs');
     const os = require('os');
     const fs = require('fs');
     const file = path.join(os.tmpdir(), `debrowser-prefs-${process.pid}.json`);
@@ -3000,7 +3000,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // find bar opened from the keyboard was laid out off the side of the
     // window - visible to nobody and typeable into by nobody.
     {
-      const { SIDEBAR_WIDTH } = require('./window');
+      const { SIDEBAR_WIDTH } = require('../window');
       const was = prefs.get('tabBarPosition');
       const wasPinned = prefs.get('sidebarPinned');
       prefs.set('sidebarPinned', false);
@@ -3035,7 +3035,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // of them failed: Electron cancels a manual redirect unless it is followed
   // inside its own event, and the manager only looked for a 3xx response.
   {
-    const { DownloadManager } = require('./downloads');
+    const { DownloadManager } = require('../downloads');
     const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-dl-'));
     const manager = new DownloadManager({ dir, session: session.fromPartition(BROWSING_PARTITION) });
     const target = new URL(pageUrl('idle.html'));
@@ -3090,7 +3090,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // requests; the button must not be subject to it, because pressing Check now
   // means check now. Both halves are here because they are one decision.
   {
-    const { Updater } = require('./updater');
+    const { Updater } = require('../updater');
     let calls = 0;
     const sched = new Updater({ log: () => {}, enabled: () => true });
     // Stubbed rather than packaged: `capability()` is false from source, so the
@@ -3119,7 +3119,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // reflowed every time the pointer brushed the window edge would be the most
   // distracting thing in the browser.
   {
-    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP, STRIP_VIEW_WIDTH } = require('./window');
+    const { SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP, STRIP_VIEW_WIDTH } = require('../window');
     const chromeWidth = () => shell.chromeView.getBounds().width;
 
     prefs.set('tabBarPosition', 'left');
@@ -3437,7 +3437,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // once and not twice; and it is never built when memory is tight or an
   // animation is running.
   {
-    const { Prewarm } = require('./prewarm');
+    const { Prewarm } = require('../prewarm');
     let busy = false;
     const warmer = new Prewarm({
       session: () => session.fromPartition(BROWSING_PARTITION),
@@ -3528,7 +3528,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // snapshot still never reads one. These checks cover the opposite path - the
   // explicit one - and the one thing that would make it worthless, which is
   // writing a secret to disk that anything can read.
-  const { Credentials } = require('./credentials');
+  const { Credentials } = require('../data/credentials');
   const creds = new Credentials(() => {});
   const credCap = creds.capability();
 
@@ -3628,7 +3628,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // page's origin. Importing someone else's bookmarks must not be importing
   // their code.
   {
-    const bm = require('./bookmarks');
+    const bm = require('../data/bookmarks');
     const tmpDir = require('fs').mkdtempSync(
       require('path').join(require('os').tmpdir(), 'debrowser-bm-'));
     const store = new bm.Bookmarks(() => {}, tmpDir);
@@ -4063,7 +4063,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     for (const extra of tabs.all().slice(before)) tabs.close(extra.id);
     tabs.close(site.id);
 
-    const { isLocalHost } = require('./incognito/policy');
+    const { isLocalHost } = require('../incognito/policy');
     check('private windows treat IPv4-mapped IPv6 as the local network in every spelling',
       isLocalHost('[::ffff:7f00:1]') && isLocalHost('::ffff:c0a8:101') && !isLocalHost('::ffff:808:808'));
   }
@@ -4072,8 +4072,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // their own. Private windows sent it as it was; its GPS block and XMP are
   // now blanked in place, and nothing else in the file moves.
   {
-    const { stripImage } = require('./incognito/sanitise');
-    const photo = fs.readFileSync(path.join(__dirname, '..', '..', 'test', 'pages', 'gps.heic'));
+    const { stripImage } = require('../incognito/sanitise');
+    const photo = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'test', 'pages', 'gps.heic'));
     const clean = stripImage(photo);
     const text = clean ? clean.data.toString('latin1') : '';
     check('a HEIC photo loses its location and owner and keeps its image data',
@@ -4086,7 +4086,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // in it may reach PowerShell as code: no $(...), no backtick, no quote of
   // either kind that could close the string.
   {
-    const { windowsPromptScript } = require('./presence');
+    const { windowsPromptScript } = require('../presence');
     const script = windowsPromptScript(1234, 'Unlock $(Start-Process calc) `whoami` "x" \u201csmart\u201d \u2019');
     const line = script.split('\n').find((l) => l.includes('[DebrowserHello]::Verify')) || '';
     check('the Windows Hello prompt text cannot run as PowerShell',
@@ -4095,7 +4095,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   // From the hands-on audit: the fixes most likely to regress.
   {
-    const { normaliseUrl } = require('./main');
+    const { normaliseUrl } = require('../main');
     const local = ['127.0.0.1:8080/x', '192.168.1.1', 'router:8080', 'nas.local', '[::1]:3000']
       .map((t) => normaliseUrl(t, 'https://s/?q=%s'));
     check('a typed address on this network is reached over http, not guessed as https',
@@ -4104,8 +4104,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
     // From the code review: the address bar's list and the permission queue.
     {
-      const { suggest } = require('./suggest');
-      const { classifyAddress } = require('./address');
+      const { suggest } = require('../suggest');
+      const { classifyAddress } = require('../address');
       const history = Array.from({ length: 9 }, (_, i) =>
         ({ title: `GitHub ${i}`, url: `https://github.com/p${i}`, visits: 9 - i, visitedAt: Date.now() }));
       const address = suggest({ text: 'github.com', history });
@@ -4132,7 +4132,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       check('the list and Enter agree about local addresses',
         classifyAddress('router:8080') === 'local' && port.items[0].kind === 'go', port.items[0].kind);
 
-      const { PermissionAsks } = require('./site-permissions');
+      const { PermissionAsks } = require('../site-permissions');
       const stored = [];
       const store = { decide: () => 'ask', set: (o, k, v) => stored.push(`${o} ${k} ${v}`) };
       const fakeTab = { id: 999, url: 'https://a.test/' };
@@ -4151,7 +4151,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         `answered=${unshown} stored=${stored.length} answers=${answers.join()} shows=${shows}`);
       asks.forget(fakeTab);
 
-      const saveKey = require('./shortcuts').match({ type: 'keyDown', key: 's', control: process.platform !== 'darwin',
+      const saveKey = require('../shortcuts').match({ type: 'keyDown', key: 's', control: process.platform !== 'darwin',
         meta: process.platform === 'darwin' });
       check('Ctrl+S goes to a website first', Boolean(saveKey && saveKey.pageFirst), JSON.stringify(saveKey));
     }
@@ -4309,7 +4309,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       drawn && heading === '127.0.0.1 refused to connect' && tab.url === failing,
       `heading "${heading}", tab url ${tab.url}`);
     {
-      const words = require('./error-page').explain;
+      const words = require('../error-page').explain;
       const lost = words(-105, 'ERR_NAME_NOT_RESOLVED', 'https://www.exmaple.com/');
       const forged = words(-202, 'ERR_CERT_AUTHORITY_INVALID', 'https://bank.example/');
       check('a failed load says what to try, offers a search for a name it cannot find, and does not urge a forged site',
@@ -4367,7 +4367,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // `load()` - four lines - and the round trip below is the part with the rules
   // in it.
   {
-    const { Session } = require('./session');
+    const { Session } = require('../data/session');
     const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-session-'));
     const store = new Session(() => {}, dir);
 
@@ -4434,7 +4434,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     shell.applyWindowPrefs();
     const withBar = shell.contentBounds();
 
-    const { BOOKMARKS_BAR_HEIGHT } = require('./window');
+    const { BOOKMARKS_BAR_HEIGHT } = require('../window');
     check('the bookmarks bar takes its room from the page, not from the chrome',
       withBar.y - withoutBar.y === BOOKMARKS_BAR_HEIGHT &&
       withoutBar.height - withBar.height === BOOKMARKS_BAR_HEIGHT,
@@ -4556,7 +4556,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       shell.publish(governor.snapshot());
       const filled = shell.contentBounds();
 
-      const { BOOKMARKS_BAR_HEIGHT } = require('./window');
+      const { BOOKMARKS_BAR_HEIGHT } = require('../window');
       check('an empty bookmarks bar takes no room, and the first bookmark brings it back',
         emptyVisible === false && shell.bookmarksBarVisible() === true &&
         empty.height - filled.height === BOOKMARKS_BAR_HEIGHT,
@@ -4606,7 +4606,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // failure mode is that the protection silently stops existing while Settings
   // still advertises it.
   {
-    const presence = require('./presence');
+    const presence = require('../presence');
     const cap = await presence.capability();
     check('the presence check reports what this machine can do, and why not when it cannot',
       typeof cap.available === 'boolean' &&
@@ -4653,7 +4653,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // would not notice.
   {
     const http = require('http');
-    const dl = require('./downloads');
+    const dl = require('../downloads');
     const crypto = require('crypto');
     const osmod = require('os');
     const pathmod = require('path');
@@ -4802,7 +4802,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     fs.rmSync(outDir, { recursive: true, force: true });
   }
 
-  const { Updater } = require('./updater');
+  const { Updater } = require('../updater');
   const updateCap = new Updater({ log: () => {} }).capability();
   // Only asked of a build run from source: the suite also ships in packaged
   // builds (electron-builder.yml), where updates are exactly what should work.
@@ -5200,7 +5200,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // checkout was never installed, so confirming says so and quits nothing.
   {
     const { BrowserWindow: BW } = require('electron');
-    const uninstall = require('./uninstall');
+    const uninstall = require('../setup/uninstall');
     let quit = false;
     const win = uninstall.show({ prefs: prefs.all(), browserOpen: true, onConfirmed: () => { quit = true; } });
     const shown = await waitFor(() => win.isVisible(), { timeoutMs: 5000 });
@@ -5234,7 +5234,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       'vault-set', 'vault-remove', 'reveal-credential', 'site-clear-data', 'forget-site', 'delete-space',
       'screenshot-page', 'hide-element', 'inspect', 'view-source', 'report-problem', 'install-browser',
       'uninstall-browser']);
-    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'preload', 'chrome-preload.js'), 'utf8');
     const list = src.slice(src.indexOf('const COMMANDS = new Set(['), src.indexOf(']);', src.indexOf('const COMMANDS = new Set([')));
     const commands = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).filter((c) => !skip.has(c));
     const junk = [undefined, null, {}, 'x', 42, [],
@@ -5275,7 +5275,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       'make-default', 'forget-site', 'site-clear-data', 'safety-revoke', 'check-passwords', 'update-restart',
       'save-payment', 'fill-payment', 'remove-bookmark', 'forget-bookmark', 'toggle-bookmark', 'delete-space',
       'site-style-set', 'hide-element', 'show-hidden', 'screenshot-page', 'report-problem']);
-    const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'preload', 'chrome-preload.js'), 'utf8');
+    const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'preload', 'chrome-preload.js'), 'utf8');
     const list = src.slice(src.indexOf('const COMMANDS = new Set(['), src.indexOf(']);', src.indexOf('const COMMANDS = new Set([')));
     const names = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).filter((c) => !skipRequests.has(c));
     const page = tabs.create({ url: pages.SETTINGS_URL, activate: false, realise: true });

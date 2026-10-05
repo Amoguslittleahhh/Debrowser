@@ -35,7 +35,7 @@ function load() {
   if (process.platform !== 'win32' && process.platform !== 'darwin') return native;
   const candidates = [
     process.resourcesPath && path.join(process.resourcesPath, 'streamview', 'streamview.node'),
-    path.join(__dirname, '..', '..', 'vendor', 'streamview', `${process.platform}-${process.arch}`, 'streamview.node')
+    path.join(__dirname, '..', '..', '..', 'vendor', 'streamview', `${process.platform}-${process.arch}`, 'streamview.node')
   ].filter(Boolean);
   for (const file of candidates) {
     if (!fs.existsSync(file)) continue;

@@ -20,7 +20,7 @@ const { session: electronSession } = require('electron');
 const { Tab } = require('./tab');
 const pages = require('../pages');
 const { Tier, isStopped } = require('../config');
-const { LatencyTracker } = require('../latency');
+const { LatencyTracker } = require('../testing/latency');
 const { kindsFor } = require('../site-permissions');
 
 /**

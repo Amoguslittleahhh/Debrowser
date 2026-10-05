@@ -1,5 +1,5 @@
 /*
- * Installing and uninstalling (src/main/setup-window.js): a window of its
+ * Installing and uninstalling (src/main/setup/setup-window.js): a window of its
  * own, so the page is the card. The whole window drags, as a dialog with no title bar should;
  * the controls opt out.
  */

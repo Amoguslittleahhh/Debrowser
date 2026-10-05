@@ -28,7 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const { safeStorage } = require('electron');
-const { keystoreCapability } = require('../credentials');
+const { keystoreCapability } = require('../data/credentials');
 
 const FILE = 'incognito-tor.sealed';
 const MAGIC = Buffer.from('DBT1');

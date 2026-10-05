@@ -21,7 +21,7 @@
 const fs = require('fs');
 const { readJson } = require('./store-file');
 const path = require('path');
-const { setAside } = require('./set-aside');
+const { setAside } = require('../set-aside');
 
 const FILE = 'site-prefs.json';
 const MAX_SITES = 5000;

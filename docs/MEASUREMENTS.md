@@ -844,7 +844,7 @@ caught Chromium's own network-service socket for the first one.
 
 ## Incognito, M3 — the kill switch, and the tripwire's real cost
 
-**Linux: the wall holds.** Started through `tools/netns-launch`, the private
+**Linux: the wall holds.** Started through `native/helpers/netns-launch`, the private
 browser runs in a network namespace containing only loopback, and Tor runs
 outside on Unix sockets. Under the leak test: every page, favicon and download
 arrived at the stand-in for Tor through the relay; a direct socket to the

@@ -21,8 +21,8 @@
 const { BrowserWindow, ipcMain, nativeTheme } = require('electron');
 const path = require('path');
 
-const PAGE = path.join(__dirname, '..', 'renderer', 'setup.html');
-const PRELOAD = path.join(__dirname, 'setup-preload.js');
+const PAGE = path.join(__dirname, '..', '..', 'renderer', 'setup.html');
+const PRELOAD = path.join(__dirname, '..', '..', 'preload', 'setup-preload.js');
 const WIDTH = 440;
 
 /** The window up now: { win, spec, prefs, onConfirm, working }. */

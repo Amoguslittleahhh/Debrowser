@@ -47,7 +47,7 @@
  * for unprivileged users - Tor is stopped and the browser is exec'd with
  * DEBROWSER_KILL_SWITCH=unavailable:<reason>. It then runs Tor itself and says,
  * in its panel, that only the tripwire stands behind its proxy settings. The
- * .deb installs an AppArmor profile that allows this (packaging/apparmor).
+ * .deb installs an AppArmor profile that allows this (build/apparmor-profile.tpl).
  */
 
 #define _GNU_SOURCE

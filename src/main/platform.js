@@ -131,7 +131,7 @@ function helperPath(name) {
   if (process.resourcesPath && __dirname.includes(`app.asar${path.sep}`)) {
     return path.join(process.resourcesPath, 'tools', name);
   }
-  return path.join(__dirname, '..', '..', 'tools', name);
+  return path.join(__dirname, '..', '..', 'native', 'helpers', name);
 }
 
 const TRIM_BINARY = helperPath(process.platform === 'win32' ? 'mem-trim.exe' : 'mem-trim');
@@ -239,7 +239,7 @@ class TrimHelper extends HelperProcess {
       // binary that was merely not executable.
       missingHint: (binary) => (binary.includes('resources')
         ? `helper missing from this build: ${binary}`
-        : 'tools/mem-trim not built (npm run build:memtrim)'),
+        : 'native/helpers/mem-trim not built (npm run build:memtrim)'),
       log
     });
 
@@ -413,7 +413,7 @@ class TrimHelper extends HelperProcess {
       // The helper ran and answered "no". On a desktop that is overwhelmingly
       // the missing capability, and it is the one with a fix.
       this.reason = m
-        ? 'needs CAP_SYS_NICE: sudo setcap cap_sys_nice+ep tools/mem-trim'
+        ? 'needs CAP_SYS_NICE: sudo setcap cap_sys_nice+ep native/helpers/mem-trim'
         : `helper gave an unreadable answer: "${line}"`;
     }
     return this.canTrim;
@@ -481,7 +481,7 @@ class MeasureHelper extends HelperProcess {
         : null),
       missingHint: (binary) => (binary.includes('resources')
         ? `helper missing from this build: ${binary}`
-        : 'tools/mem-probe not built (npm run build:memprobe)'),
+        : 'native/helpers/mem-probe not built (npm run build:memprobe)'),
       log
     });
     /** null until the helper has been asked; then true/false. */

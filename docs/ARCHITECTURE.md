@@ -154,7 +154,7 @@ Restore is lazy: a discarded tab costs nothing until it is clicked.
 
 ## Page merging, and why it is not a default
 
-`tools/ksm-launch.c` calls `prctl(PR_SET_MEMORY_MERGE)` and execs the browser.
+`native/helpers/ksm-launch.c` calls `prctl(PR_SET_MEMORY_MERGE)` and execs the browser.
 The flag is inherited across fork and exec, so the whole renderer pool enters the
 kernel's same-page-merging scope without patching Chromium — which matters,
 because KSM is otherwise opted into per-region with `madvise(MADV_MERGEABLE)`,
@@ -283,7 +283,7 @@ they say.
 ## Memory compression as a side channel
 
 The `HIBERNATED` tier hands a renderer's cold pages to the kernel's compressor.
-That is a weaker exposure than the page merging in `tools/ksm-launch.c`, and the
+That is a weaker exposure than the page merging in `native/helpers/ksm-launch.c`, and the
 difference is worth stating because the two are easy to lump together.
 
 KSM finds byte-identical pages **across** processes and collapses them onto one
@@ -359,11 +359,11 @@ kinds of window then share no memory. `src/main/incognito/` holds it:
 - `mode.js` - the private profile, the switches, and the per-session proxy.
 - `tor.js`, `bridges.js`, `torstate.js` - running Tor, reaching it through
   bridges, and keeping its guard sealed between sessions.
-- `relay.js`, `tools/netns-launch.c` - the Linux kill switch: the browser in a
+- `relay.js`, `native/helpers/netns-launch.c` - the Linux kill switch: the browser in a
   network namespace with nothing but loopback, Tor outside it, and a relay
   from a loopback port to Tor's Unix socket. On Windows the installer adds a
   firewall rule for a hard-linked copy of the executable instead.
-- `tripwire.js`, `tools/net-watch.c` - every socket every private process
+- `tripwire.js`, `native/helpers/net-watch.c` - every socket every private process
   holds, checked four times a second against the proxy ports; one that goes
   anywhere else closes the window. The only runtime protection on macOS.
 - `policy.js` - no loopback or LAN destinations, HTTPS or an explanation,

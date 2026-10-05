@@ -74,7 +74,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   // asks before falling back, so the test says yes for these hosts the same
   // way the user does - through the policy's own switch, not a test backdoor.
   // `up.test` is left out on purpose: it is the one that must be upgraded.
-  const policy = require('./incognito/policy');
+  const policy = require('../incognito/policy');
   for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'fp2', 'fpx', 'up2', 'ref', 'img.ref', 'other', 'cam1', 'cam2', 'cam3', 'decoy']) policy.allowHttp(url(host, ''));
   const loaded = [];
   const byHost = {};
@@ -172,7 +172,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   // shared worker, and from the request headers - against what every private
   // window should say; the page's size against the letterbox steps; and the
   // startup self-check's own answer.
-  const fp = require('./incognito/fingerprint');
+  const fp = require('../incognito/fingerprint');
   const fpTab = tabs.create({ url: url('fp', 'idle.html') });
   await waitFor(() => fpTab.isLive && !fpTab.loading && /idle/.test(fpTab.url), 15_000);
   const READ = `(async () => {
@@ -269,7 +269,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   // Uploads. A photo carrying GPS coordinates, picked for a file input: the
   // page must receive it without them, and with exactly the same pixels.
   const { nativeImage } = require('electron');
-  const sanitise = require('./incognito/sanitise');
+  const sanitise = require('../incognito/sanitise');
   const px = Buffer.alloc(64 * 48 * 4);
   for (let i = 0; i < px.length; i += 4) { px[i] = i & 255; px[i + 1] = (i >> 8) & 255; px[i + 2] = 128; px[i + 3] = 255; }
   const jpeg = nativeImage.createFromBitmap(px, { width: 64, height: 48 }).toJPEG(90);
@@ -309,7 +309,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   const pdfItem = [...downloads.items.values()].pop();
   let safeCopy = { error: 'not downloaded' };
   if (pdfItem && pdfItem.state === 'done') {
-    const sanitiser = require('./incognito/sanitise');
+    const sanitiser = require('../incognito/sanitise');
     const out = sanitiser.safeCopyName(pdfItem.file);
     const started = Date.now();
     try {

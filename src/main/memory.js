@@ -119,7 +119,7 @@ function footprintMB(pid, rssFallbackMB) {
  * matters because the failure modes look identical from the outside:
  *
  *   processMergeable  this process opted in, via prctl(PR_SET_MEMORY_MERGE)
- *                     before exec - see tools/ksm-launch.c. Detected by looking
+ *                     before exec - see native/helpers/ksm-launch.c. Detected by looking
  *                     for the `mg` VmFlag, since prctl cannot be called from
  *                     Node and the flag is what KSM actually keys on.
  *   ksmRunning        the kernel's scanner is enabled system-wide, which needs

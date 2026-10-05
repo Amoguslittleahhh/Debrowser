@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The setup window (src/main/setup-window.js): installing or uninstalling,
+ * The setup window (src/main/setup/setup-window.js): installing or uninstalling,
  * one question at a time. What it says comes from the browser as a spec;
  * this draws it, measures it and sends the answer back. Cancel has the
  * focus - the other answer moves or removes a program - and Escape cancels

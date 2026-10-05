@@ -6,7 +6,7 @@
  *     setup-ui.exe uninstall <pid>
  *
  * NSIS draws its one-click progress window ("SpiderBanner") with the system's
- * dialog controls, which nothing can restyle. packaging/installer.nsh starts
+ * dialog controls, which nothing can restyle. build/installer.nsh starts
  * this instead, from .onInit, and only then makes the installer silent - so if
  * this cannot start (no file, or the system refuses an unsigned program), the
  * installer keeps its own window and nothing is lost.

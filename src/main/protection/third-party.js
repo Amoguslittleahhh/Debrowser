@@ -20,7 +20,7 @@
  */
 
 const { getDomain } = require('tldts-experimental');
-const { WebHooks } = require('./web-hooks');
+const { WebHooks } = require('../web-hooks');
 
 function siteOf(url) {
   try {

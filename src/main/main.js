@@ -21,32 +21,32 @@ const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB, SCHEMA } = require('./prefs');
 const { Updater } = require('./updater');
 const { SiteZoom } = require('./zoom');
-const { SitePrefs } = require('./site-prefs');
-const { ContentBlocker } = require('./blocker');
-const { HttpsFirst } = require('./https-first');
-const { ThirdPartyCookies } = require('./third-party');
-const { LinkCleaner } = require('./link-cleaner');
-const { Threats } = require('./threats');
-const { Receipts } = require('./receipts');
+const { SitePrefs } = require('./data/site-prefs');
+const { ContentBlocker } = require('./protection/blocker');
+const { HttpsFirst } = require('./protection/https-first');
+const { ThirdPartyCookies } = require('./protection/third-party');
+const { LinkCleaner } = require('./protection/link-cleaner');
+const { Threats } = require('./protection/threats');
+const { Receipts } = require('./data/receipts');
 const WhatsNew = require('./whats-new');
-const { backupProfile } = require('./store-file');
+const { backupProfile } = require('./data/store-file');
 const { StartupGuard } = require('./startup-guard');
 const CrashReport = require('./crash-report');
 const { TabGroups } = require('./tab-groups');
 const { commandList } = require('./commands');
 const { Spaces, COLOURS } = require('./spaces');
 const { SiteStyles } = require('./site-styles');
-const { Archive } = require('./archive');
+const { Archive } = require('./data/archive');
 
 const reader = require('./reader');
 const readerStore = new reader.ReaderStore();
-const { Credentials, originOf } = require('./credentials');
-const { Bookmarks, findProfiles, readProfile, parseExport } = require('./bookmarks');
-const { Session, loadWindowState, saveWindowState } = require('./session');
-const { History } = require('./history');
+const { Credentials, originOf } = require('./data/credentials');
+const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bookmarks');
+const { Session, loadWindowState, saveWindowState } = require('./data/session');
+const { History } = require('./data/history');
 const icons = require('./icons');
 const presence = require('./presence');
-const { Vault } = require('./vault');
+const { Vault } = require('./data/vault');
 const { Speculation } = require('./speculation');
 const { DownloadManager } = require('./downloads');
 const { Governor } = require('./governor');
@@ -73,8 +73,8 @@ const { Camouflage } = require('./incognito/camouflage');
 const { suggest, TAB_SCOPE } = require('./suggest');
 const { classifyAddress } = require('./address');
 const palette = require('./palette');
-const uninstall = require('./uninstall');
-const installer = require('./install');
+const uninstall = require('./setup/uninstall');
+const installer = require('./setup/install');
 const { SitePermissions, PermissionAsks } = require('./site-permissions');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
@@ -284,7 +284,7 @@ function log(...args) {
 // Not in incognito, whose resolver refuses every name: its tests reach the
 // fixtures through a stand-in for Tor, the same way a real page would.
 if (!INCOGNITO && (SMOKE_TEST || SPEED_TEST || (argv.includes('--bench-test') && argv.includes('--distinct-origins')))) {
-  const { HOST_RESOLVER_RULES } = require('./fixture-server');
+  const { HOST_RESOLVER_RULES } = require('./testing/fixture-server');
   app.commandLine.appendSwitch('host-resolver-rules', HOST_RESOLVER_RULES);
 }
 
@@ -342,7 +342,7 @@ pages.registerScheme();
 // The streaming-view test and probe (streamview-probe.js) open a window of
 // their own and never start the browser, so they run beside a browser that is
 // already open instead of handing it their arguments.
-const STREAMVIEW_TEST = !INCOGNITO && require('./streamview-probe').run();
+const STREAMVIEW_TEST = !INCOGNITO && require('./streamview/streamview-probe').run();
 
 // One instance owns the profile directory; a second launch focuses the first.
 // Incognito has a profile directory of its own, so it has a lock of its own,
@@ -802,8 +802,8 @@ function main() {
   const forgetIfLast = (tab) => {
     const host = SitePrefs.hostOf(tab.url);
     if (!host || sitePrefs.get(host, 'forget') !== true) return;
-    const site = require('./third-party').siteOf(tab.url);
-    if (tabs.all().some((t) => t !== tab && require('./third-party').siteOf(t.url) === site)) return;
+    const site = require('./protection/third-party').siteOf(tab.url);
+    if (tabs.all().some((t) => t !== tab && require('./protection/third-party').siteOf(t.url) === site)) return;
     forgetSite(tab.session || session.fromPartition(BROWSING_PARTITION), host, site)
       .then(() => log('site', `forgot ${site}`))
       .catch((err) => log(`forgetting ${site} failed: ${err.message}`));
@@ -1718,7 +1718,7 @@ function main() {
     // budget measures.
     if (OFFLINE_MODE && blocker && prefs.get('blockAds') !== false) {
       const first = tabs.activeTab();
-      const painted = first && first.wc ? require('./speed').paintedAt(first.wc, 15_000).catch(() => null) : Promise.resolve();
+      const painted = first && first.wc ? require('./testing/speed').paintedAt(first.wc, 15_000).catch(() => null) : Promise.resolve();
       painted.then(() => blocker.load());
     }
 
@@ -1758,7 +1758,7 @@ function main() {
     }
 
     if (SMOKE_TEST && INCOGNITO) {
-      require('./smoke-incognito').run({
+      require('./testing/smoke-incognito').run({
         app, tabs, shell, downloads, tripwire, circuits, camouflage, runCommand, ctx: incognitoCtx, log,
         setTripHook: (fn) => { onTripForTest = fn; }
       }).then((code) => app.exit(code), (err) => {
@@ -1772,7 +1772,7 @@ function main() {
       // Startup, from this process starting to the first tab drawn.
       const startedAt = Date.now() - process.uptime() * 1000;
       const first = tabs.activeTab();
-      const speed = require('./speed');
+      const speed = require('./testing/speed');
       (async () => {
         let startup = null;
         if (first && first.wc) {
@@ -1800,7 +1800,7 @@ function main() {
         app.exit(0);
       })().catch((err) => { console.error('[speed] failed:', err.stack || err.message); app.exit(1); });
     } else if (argv.includes('--bench-test')) {
-      const { runBench } = require('./bench');
+      const { runBench } = require('./testing/bench');
       const tabCount = Number(argValue('tabs')) || 8;
       const settleMs = Number(argValue('settle')) || 8000;
       const coldMs = Number(argValue('cold')) || undefined;
@@ -4517,7 +4517,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         // knows their sites from the first day. Not where history is off.
         let pages = 0;
         if (payload?.withHistory === true && history && !INCOGNITO && prefs.get('saveHistory') !== false) {
-          const past = require('./importer').readHistory(profile);
+          const past = require('./data/importer').readHistory(profile);
           if (past.ok) pages = history.merge(past.entries).added;
           log('history', past.ok ? `imported ${pages} page(s) from ${profile.browser}` : past.reason);
         }
@@ -4630,7 +4630,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         } catch (err) {
           return { ok: false, reason: `could not read that file: ${err.message}` };
         }
-        const parsed = require('./importer').parseLoginCsv(text);
+        const parsed = require('./data/importer').parseLoginCsv(text);
         if (!parsed.ok) return parsed;
         let added = 0;
         for (const login of parsed.logins) if (credentials.put('login', login)) added += 1;
@@ -4646,7 +4646,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         const logins = credentials.list().logins.map((l) => ({
           id: l.id, password: credentials.reveal('login', l.id)?.password || ''
         })).filter((l) => l.password);
-        const { checkPasswords } = require('./password-check');
+        const { checkPasswords } = require('./protection/password-check');
         return checkPasswords(logins, (url, init) => electronNet.fetch(url, init));
       }
 
@@ -5477,7 +5477,7 @@ function applySecureDns(prefs, log) {
 
 function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
                        blocker, sitePrefs, spaces }) {
-  const { runSmoke } = require('./smoke');
+  const { runSmoke } = require('./testing/smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
             // The command dispatcher itself, so the suite exercises find and

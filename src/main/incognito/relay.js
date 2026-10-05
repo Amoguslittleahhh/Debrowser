@@ -4,7 +4,7 @@
  * The one door out of the private namespace.
  *
  * On Linux the private browser runs in a network namespace with nothing in it
- * but loopback (tools/netns-launch.c), and Tor runs outside, listening on a
+ * but loopback (native/helpers/netns-launch.c), and Tor runs outside, listening on a
  * Unix socket. Chromium can only speak SOCKS over TCP, so this listens on the
  * namespace's loopback and hands every connection to Tor's socket, byte for
  * byte. It does not read or change what passes through: SOCKS is between

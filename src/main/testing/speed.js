@@ -19,7 +19,7 @@
  */
 
 const fixtureServer = require('./fixture-server');
-const pages = require('./pages');
+const pages = require('../pages');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -257,7 +257,7 @@ async function discardForBench(tab) {
   tab.setVisible(false);
   tab.captureNavigation();
   tab.teardownView();
-  tab.tier = require('./config').Tier.DISCARDED;
+  tab.tier = require('../config').Tier.DISCARDED;
   return !tab.isLive;
 }
 

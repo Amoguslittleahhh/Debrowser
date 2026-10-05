@@ -9,7 +9,7 @@
  */
 
 const { ipcMain } = require('electron');
-const { originOf } = require('./credentials');
+const { originOf } = require('./data/credentials');
 
 const VALID_DEMANDS = new Set(['idle', 'light', 'heavy']);
 

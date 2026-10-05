@@ -276,7 +276,7 @@ async function verify(reason, window = null) {
     // and a helper process asking on its behalf was refused the foreground -
     // "did not confirm" with no prompt ever shown. The helper stays as the
     // fallback for a build without the native module.
-    const code = await require('./streamview').verifyPresence(window, reason);
+    const code = await require('./streamview/streamview').verifyPresence(window, reason);
     if (code !== null) return code === 0;
 
     let hwnd = 0;

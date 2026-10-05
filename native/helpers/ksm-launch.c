@@ -26,8 +26,8 @@
  * Electron, puts the browser process and every renderer it spawns in scope
  * without patching Chromium at all.
  *
- * Build:  cc -O2 -o tools/ksm-launch tools/ksm-launch.c
- * Use:    tools/ksm-launch npx electron .
+ * Build:  cc -O2 -o native/helpers/ksm-launch native/helpers/ksm-launch.c
+ * Use:    native/helpers/ksm-launch npx electron .
  *
  * Requires KSM to be running system-wide (root: echo 1 > /sys/kernel/mm/ksm/run).
  * See the security note in docs/ARCHITECTURE.md before enabling it: page

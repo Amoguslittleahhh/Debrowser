@@ -7,11 +7,11 @@
  * then each system's own way of removing a program, done for the user:
  *
  *   Windows  Windows' Apps list runs `UninstallString`, which the installer
- *            (packaging/installer.nsh) points here, `Debrowser.exe --uninstall`,
+ *            (build/installer.nsh) points here, `Debrowser.exe --uninstall`,
  *            instead of at NSIS's uninstaller and its system message box.
  *            Confirming starts that uninstaller silently, told to wait for this
  *            process to be gone (`--wait-pid`), and quits; it draws its own
- *            progress (tools/setup-ui.c). `QuietUninstallString` still names it
+ *            progress (native/helpers/setup-ui.c). `QuietUninstallString` still names it
  *            with /S, so management tools never see a window.
  *   macOS    The app goes to the Trash, as dragging it there would do.
  *   Linux    The .deb is removed by dpkg, behind the system's own password
@@ -151,7 +151,7 @@ async function processesOfThisCopy() {
  * Each is a process of its own (`--incognito`, incognito/launch.js) with its
  * own single-instance lock, so quitting this browser does not end it - and it
  * would go on running from the files about to be removed. Windows has the
- * uninstaller do the same for Debrowser-Incognito.exe (packaging/installer.nsh),
+ * uninstaller do the same for Debrowser-Incognito.exe (build/installer.nsh),
  * a name of its own this search would not find.
  */
 async function closePrivateWindows() {

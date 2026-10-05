@@ -12,7 +12,7 @@
  * already covers it there.
  *
  * Output: vendor/streamview/<platform>-<arch>/streamview.node, which
- * electron-builder ships as `resources/streamview` and src/main/streamview.js
+ * electron-builder ships as `resources/streamview` and src/main/streamview/streamview.js
  * loads. Compiled against the Electron in node_modules - castLabs' build, whose
  * ABI is upstream Electron's of the same version.
  *

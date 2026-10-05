@@ -29,7 +29,7 @@ const fs = require('fs');
 const path = require('path');
 const { net } = require('electron');
 const { getDomain } = require('tldts-experimental');
-const { WebHooks } = require('./web-hooks');
+const { WebHooks } = require('../web-hooks');
 
 const LISTS = [
   { url: 'https://urlhaus.abuse.ch/downloads/hostfile/', kind: 'malware' },

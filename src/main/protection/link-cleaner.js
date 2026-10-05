@@ -20,7 +20,7 @@
  * (`si` on YouTube and Spotify) are removed only there.
  */
 
-const { WebHooks } = require('./web-hooks');
+const { WebHooks } = require('../web-hooks');
 
 /** Removed wherever they appear. */
 const EVERYWHERE = new Set([

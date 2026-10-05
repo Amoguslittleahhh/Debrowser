@@ -39,8 +39,8 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
-const { TabGroups, GROUP_ID } = require('./tab-groups');
-const { setAside } = require('./set-aside');
+const { TabGroups, GROUP_ID } = require('../tab-groups');
+const { setAside } = require('../set-aside');
 
 const FILE = 'session.json';
 
