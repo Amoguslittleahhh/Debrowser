@@ -170,6 +170,16 @@ function pointerWantsStrip(event) {
   return event.clientX < 10;
 }
 
+// The slide away has finished: the browser hides the view now, rather than on
+// a timer that could cut the last frames off. Whichever element moves - the
+// panel in the strip's own view, the body when detached - reports its
+// transform's end.
+document.addEventListener('transitionend', (event) => {
+  if (event.propertyName !== 'transform' || !document.body.classList.contains('sliding-out')) return;
+  if (event.target !== document.body && !event.target.classList?.contains('tabstrip')) return;
+  api.send('sidebar-slid');
+});
+
 document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event)));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside
@@ -209,6 +219,27 @@ el.pin.addEventListener('click', () => api.send('toggle-sidebar-pin'));
  * is a property of the *window*, since what slides is the view's width. The
  * strip only draws itself to match.
  */
+// Whether this view has painted a frame yet; see the strip's open state below.
+let painted = false;
+let sidebarWanted = false;
+let paintWaiters = null;
+function whenPainted(fn) {
+  if (paintWaiters) { paintWaiters.push(fn); return; }
+  paintWaiters = [fn];
+  // The first frame is drawn after the first callback, so the second one
+  // runs once there is a painted "before" to transition from.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    painted = true;
+    for (const waiter of paintWaiters.splice(0)) waiter();
+  }));
+}
+
+function applySidebarOpen(open) {
+  if (document.body.dataset.sidebarOpen === String(open)) return;
+  document.body.dataset.sidebarOpen = String(open);
+  document.body.classList.remove('sliding-out');
+}
+
 function renderSidebar(sidebar) {
   const side = Boolean(sidebar);
   if (document.body.dataset.sidebar !== String(side)) {
@@ -237,10 +268,15 @@ function renderSidebar(sidebar) {
   // and rebuilding them on every slide would be work for something the pointer
   // opens and closes by accident all day.
   const open = sidebar.open === true;
-  if (document.body.dataset.sidebarOpen !== String(open)) {
-    document.body.dataset.sidebarOpen = String(open);
-    document.body.classList.remove('sliding-out');
+  if (open && !painted) {
+    // Chromium starts no transition in a view that has not painted a frame,
+    // so the first slide out of a strip view shown for the first time just
+    // appeared. It waits for one frame drawn closed, then slides.
+    whenPainted(() => applySidebarOpen(sidebarWanted));
+  } else {
+    applySidebarOpen(open);
   }
+  sidebarWanted = open;
 
   // Full screen: the strip is a panel drawn over the page rather than a column
   // beside it, so it stops filling its view and reports what it comes to
@@ -599,6 +635,7 @@ function renderTabs(tabs, groups = null) {
   // A cursor walks the strip, stepping over tabs still collapsing on their
   // way out: they hold their place until they are gone.
   let cursor = el.tabs.firstElementChild;
+  const fresh = [];
   const skipClosing = () => {
     while (cursor && cursor.classList.contains('closing')) cursor = cursor.nextElementSibling;
   };
@@ -608,6 +645,7 @@ function renderTabs(tabs, groups = null) {
     if (!node) {
       node = createTabElement(tab.id);
       tabEls.set(tab.id, node);
+      fresh.push(node.root);
     }
 
     skipClosing();
@@ -621,8 +659,12 @@ function renderTabs(tabs, groups = null) {
     const group = groups && tab.groupId ? groups[tab.groupId] : null;
     updateGroup(node, tab, group, Boolean(group) && tabs[i - 1]?.groupId !== tab.groupId);
   });
+  // The first render, or a window's worth restored at once, just appears.
+  if (tabsRendered && fresh.length <= 3) fresh.forEach(openTabElement);
+  tabsRendered = true;
   updateStripFades();
 }
+let tabsRendered = false;
 
 /**
  * The strip fades out at an edge with more tabs beyond it. It used to stop
@@ -650,19 +692,41 @@ window.addEventListener('resize', updateStripFades);
 function closeTabElement(root) {
   if (root.classList.contains('closing')) return;
   root.classList.add('closing');
-  const still = document.body.classList.contains('calm') ||
+  if (stillTabs() || !root.isConnected) { root.remove(); return; }
+  const [full, none] = tabFold(root);
+  // Eased at both ends: a front-loaded curve took a third of the width in
+  // its first frame, and the tabs beside it lurched rather than slid.
+  const fold = root.animate([full, none], { duration: 180, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+  fold.onfinish = () => root.remove();
+  fold.oncancel = () => root.remove();
+}
+
+/**
+ * The same fold the other way: a new tab grows out of nothing, so the tabs
+ * beside it - and the + after them - make room over a few frames instead of
+ * jumping to their new places in one.
+ */
+function openTabElement(root) {
+  if (stillTabs() || !root.isConnected) return;
+  const [full, none] = tabFold(root);
+  delete none.opacity; // the entrance (tab-in) fades it
+  root.animate([none, full], { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' });
+}
+
+function stillTabs() {
+  return document.body.classList.contains('calm') ||
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (still || !root.isConnected) { root.remove(); return; }
+}
+
+/** A tab at its size now, and folded flat: the two ends of opening and closing. */
+function tabFold(root) {
   const vertical = document.body.dataset.layout === 'left';
   const size = vertical ? root.offsetHeight : root.offsetWidth;
-  const frames = vertical
+  return vertical
     ? [{ height: `${size}px`, minHeight: `${size}px`, opacity: 1 },
        { height: '0px', minHeight: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 }]
     : [{ flexBasis: `${size}px`, minWidth: `${size}px`, maxWidth: `${size}px`, opacity: 1 },
        { flexBasis: '0px', minWidth: '0px', maxWidth: '0px', paddingLeft: '0px', paddingRight: '0px', opacity: 0 }];
-  const fold = root.animate(frames, { duration: 150, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
-  fold.onfinish = () => root.remove();
-  fold.oncancel = () => root.remove();
 }
 
 /*

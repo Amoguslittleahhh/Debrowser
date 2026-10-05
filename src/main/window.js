@@ -104,8 +104,15 @@ const CONTENT_RADIUS = 10;
 const SIDEBAR_CLOSE_MS = 150;
 const SIDEBAR_OPEN_MS = 60;    // enough to tell a brush past the edge from a visit, short enough not to feel
 
-/** How long a detached strip takes to slide back out; see setSidebarOpen. */
-const DETACH_SLIDE_MS = 120;   // chrome.css, .sliding-out
+/**
+ * How long a detached strip takes to slide back out; see setSidebarOpen.
+ * The strip says when it has finished (`sidebar-slid`), and that is when its
+ * view goes: a timer alone started before the slide did - the message has to
+ * reach the strip and be styled first - and hid the view a frame or two short
+ * of the end. This is the fallback, with room for that message.
+ */
+const DETACH_SLIDE_MS = 150;   // chrome.css, .sliding-out and the band's slide out
+const DETACH_SLIDE_GRACE_MS = 100;
 
 /**
  * How much of the content area a docked inspector takes, and the least it may
@@ -2425,6 +2432,43 @@ class BrowserShell {
     this.edgeTimer.unref?.();
   }
 
+  /**
+   * Opened by the pointer, the strip closes when the pointer leaves it - which
+   * the strip learns from its own `mouseleave`. A pointer that reached the
+   * edge and went straight off again (a flick, or leaving while the strip was
+   * still sliding out) never entered the view the strip grew into, so nothing
+   * left, and the strip stayed out until the pointer came back. Watched from here until the pointer is
+   * clearly elsewhere or the strip has closed; never while it is tucked away.
+   */
+  watchAway() {
+    clearTimeout(this.awayTimer);
+    const tick = () => {
+      this.awayTimer = null;
+      if (this.window.isDestroyed() || !this.sidebarOpen || this.sidebarPinned() || !this.detached()) return;
+      const at = screen.getCursorScreenPoint();
+      const b = this.window.getContentBounds();
+      const width = this.band() ? STRIP_VIEW_WIDTH : this.chromeView.getBounds().width;
+      const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
+      const over = at.y >= top && at.y < b.y + b.height && at.x >= b.x - 8 && at.x < b.x + width + 8;
+      if (!over) {
+        this.edgeHeld = false;
+        this.setSidebarOpen(false);
+        return;
+      }
+      this.awayTimer = setTimeout(tick, this.saver ? 100 : 50);
+      this.awayTimer.unref?.();
+    };
+    this.awayTimer = setTimeout(tick, 50);
+    this.awayTimer.unref?.();
+  }
+
+  /** The strip has finished sliding away (chrome.js): its view can go now. */
+  sidebarSlid() {
+    if (!this.sidebarSliding || !this.sidebarShut) return;
+    clearTimeout(this.sidebarSliding);
+    this.sidebarShut();
+  }
+
   /** How much width the chrome occupies in sidebar mode, right now. */
   sidebarWidth() {
     if (!this.vertical()) return 0;
@@ -2469,6 +2513,7 @@ class BrowserShell {
       this.sidebarOpen = true;
       this.layout();
       this.publishSidebar();
+      this.watchAway();
       return;
     }
     // Something the strip started is still going on: text half typed into its
@@ -2491,7 +2536,8 @@ class BrowserShell {
       // edge - unless motion is reduced, where it simply goes.
       if (!this.reducedMotion()) {
         this.toChrome('sidebar-slide', { out: true });
-        this.sidebarSliding = setTimeout(shut, DETACH_SLIDE_MS);
+        this.sidebarShut = shut;
+        this.sidebarSliding = setTimeout(shut, DETACH_SLIDE_MS + DETACH_SLIDE_GRACE_MS);
       } else {
         shut();
       }

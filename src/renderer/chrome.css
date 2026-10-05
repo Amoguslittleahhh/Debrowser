@@ -1710,6 +1710,21 @@ body[data-detached="true"][data-floating="false"] { background: transparent; }
 body[data-detached="true"][data-floating="false"] .tabstrip { -webkit-app-region: no-drag; }
 body[data-detached="true"][data-floating="false"][data-sidebar-open="false"] > * { visibility: hidden; }
 
+/*
+ * The strip's slide, one motion for every way it comes out. Measured frame by
+ * frame: the old 140ms curve covered half the distance in its first frame and
+ * settled in four more, which reads as a jump, not a slide. easeOutCubic over
+ * 200ms moves each frame a little less than the one before (55, 50, 40, 30px
+ * … at 60Hz) across twelve. Away is quicker and accelerates, as things leaving
+ * do; the browser hides the view only when it has finished (sidebar-slid).
+ */
+:root {
+  --strip-in: 200ms;
+  --strip-in-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --strip-out: 150ms;
+  --strip-out-ease: cubic-bezier(0.4, 0, 1, 1);
+}
+
 /* Detached and out: a rounded panel over the page, the height of the window
    less its margins - the window clips the view to the same corners. It
    slides in from the edge and back out to it; with reduced motion it is
@@ -1717,8 +1732,9 @@ body[data-detached="true"][data-floating="false"][data-sidebar-open="false"] > *
 body[data-detached="true"][data-floating="true"] {
   box-shadow: none;
   border-radius: 14px;
-  /* A longer, softer arrival than a snap: out fast, settling gently. */
-  animation: detached-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* Out decelerating evenly: each frame a little shorter a step than the
+     last (easeOutCubic), so the first frame is not already half the way. */
+  animation: detached-in var(--strip-in) var(--strip-in-ease);
   /* The panel's surface is a layer inside the body rather than the body's own
      background: a body's background is painted across the whole view whatever
      transform the body has, so sliding it left a dark block where the panel
@@ -1745,7 +1761,7 @@ body[data-detached="true"][data-floating="true"] .tabstrip { flex: 1 1 auto; }
 body[data-detached="true"]:not([data-band="true"]).sliding-out {
   transform: translateX(calc(-100% - 12px));
   opacity: 0.4;
-  transition: transform 120ms cubic-bezier(0.5, 0, 0.75, 0), opacity 120ms ease-in;
+  transition: transform var(--strip-out) var(--strip-out-ease), opacity var(--strip-out) ease-in;
 }
 @keyframes detached-in {
   from { transform: translateX(calc(-100% - 12px)); opacity: 0.4; }
@@ -2134,8 +2150,8 @@ body[data-band="true"][data-layout="left"]::before {
   opacity: 0;
   visibility: hidden;
   will-change: transform;
-  transition: transform 120ms cubic-bezier(0.4, 0, 1, 1), opacity 120ms ease-in,
-              visibility 0s linear 120ms;
+  transition: transform var(--strip-out) var(--strip-out-ease), opacity var(--strip-out) ease-in,
+              visibility 0s linear var(--strip-out);
 }
 /* Out: in place, decelerating in - quick to arrive, gentle to settle. */
 body[data-band="true"][data-layout="left"][data-sidebar-open="true"]:not(.sliding-out) :is(.tabstrip, .findbar),
@@ -2143,7 +2159,7 @@ body[data-band="true"][data-layout="left"][data-sidebar-open="true"]:not(.slidin
   transform: none;
   opacity: 1;
   visibility: visible;
-  transition: transform 140ms cubic-bezier(0.2, 0.9, 0.25, 1), opacity 90ms ease-out,
+  transition: transform var(--strip-in) var(--strip-in-ease), opacity 120ms ease-out,
               visibility 0s;
 }
 body.calm[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
