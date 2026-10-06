@@ -1,5 +1,12 @@
 'use strict';
 
+// Milliseconds since this process started, at each step of starting up. The
+// smoke test reports them beside its cold-start budget, so a slow start on a
+// release runner says which step it was spent in.
+const boot = { main: Math.round(process.uptime() * 1000) };
+global.debrowserBoot = boot;
+const bootMark = (name) => { if (!(name in boot)) boot[name] = Math.round(process.uptime() * 1000); };
+
 /**
  * Debrowser entry point.
  *
@@ -1087,6 +1094,7 @@ function main() {
   }
 
   app.whenReady().then(() => {
+    bootMark('ready');
     // This version has failed to start twice running: the way back, before
     // anything else can fail the same way (startup-guard.js).
     if (startupGuard && startupGuard.troubled(failedStarts)) offerWayBack();
@@ -1353,6 +1361,7 @@ function main() {
         (err) => log(`credential offer failed: ${err.message}`));
     });
 
+    bootMark('window');
     shell = new BrowserShell({
       tabManager: tabs,
       prefs,
@@ -1715,6 +1724,7 @@ function main() {
     } else {
       tabs.create({ url: newTabUrl(prefs) });
     }
+    bootMark('firstTab');
     // Links the system handed over at launch - Debrowser as the default
     // browser, a link clicked in another app - open after that, in front.
     if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) openExternal(url);
@@ -4930,6 +4940,7 @@ function startWidevine(log) {
     .then(() => components.whenReady())
     .then(() => {
       ready = true;
+      bootMark('widevine');
       log(`widevine: ${JSON.stringify(components.status())}`);
     }, (err) => {
       failed = true;

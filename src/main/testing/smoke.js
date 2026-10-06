@@ -5475,7 +5475,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('performance budgets: cold start, new tab, command bar, tab switching, idle chrome',
       Number.isFinite(coldStartMs) && coldStartMs < 600 * SLACK && newTabMs < 100 * SLACK && barMs < 100 * SLACK && longest < 50 * SLACK && Number.isFinite(idleCpu) && idleCpu < 1 * SLACK,
       `cold start ${coldStartMs} ms (budget ${600 * SLACK}), new tab ${Math.round(newTabMs)} ms (budget ${100 * SLACK}), command bar ${Math.round(barMs)} ms (${100 * SLACK}), ` +
-      `longest chrome task switching tabs ${Math.round(longest)} ms (${50 * SLACK}), idle chrome CPU ${idleCpu?.toFixed(2)}% (${SLACK})`);
+      `longest chrome task switching tabs ${Math.round(longest)} ms (${50 * SLACK}), idle chrome CPU ${idleCpu?.toFixed(2)}% (${SLACK}); ` +
+      `start-up steps (ms since the process started): ${JSON.stringify(global.debrowserBoot || {})}`);
   }
 
   // The uninstall window (uninstall.js), as an open browser shows it: drawn in
