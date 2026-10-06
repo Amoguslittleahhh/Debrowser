@@ -1244,4 +1244,4 @@ function safePid(wc) {
 }
 
 module.exports = {
-  createTabView, Tab, sweepThumbnails, sweepThumbnailsSync };
+  createTabView, Tab, sweepThumbnails, sweepThumbnailsSync, thumbnailDir };

@@ -514,9 +514,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     hasThumb && thumbKB > 0 && thumbKB < 250,
     hasThumb ? `${thumbKB}KB on disk` : 'no thumbnail written');
 
+  // In the thumbnail folder (tab.js): the user's runtime folder on Linux,
+  // which the system empties at logout, or the temp folder elsewhere.
+  const thumbs = require('../tabs/tab').thumbnailDir();
   check('the thumbnail lives outside userData, so a crash leaves nothing behind',
-    hasThumb && shot.thumbPath.startsWith(app.getPath('temp')),
-    hasThumb ? shot.thumbPath.replace(app.getPath('temp'), '<temp>') : 'n/a');
+    hasThumb && shot.thumbPath.startsWith(thumbs + path.sep) && !shot.thumbPath.startsWith(app.getPath('userData')),
+    hasThumb ? shot.thumbPath : 'n/a');
 
   // The privacy rule. A screenshot of a logged-in page on disk would defeat the
   // existing refusal to read credential fields into the session store at all.
