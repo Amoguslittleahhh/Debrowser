@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="passkeys.css">
 </head>
 <body>
-  <div class="card" id="card" role="listbox" tabindex="-1" aria-label="Passkeys">
+  <div class="card" id="card" role="dialog" tabindex="-1" aria-label="Passkeys">
     <header class="head" id="head">
       <span class="key" aria-hidden="true">
         <svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H21M17.5 12v3M20.5 12v2.5"/></svg>
@@ -19,7 +19,9 @@
         <span class="sub" id="sub">Choose a passkey saved on this device</span>
       </div>
     </header>
-    <div class="rows" id="rows"></div>
+    <!-- The list is the accounts alone: a listbox may hold only options, and
+         the heading, the passcode form and the divider beside them are not. -->
+    <div class="rows" id="rows" role="listbox" aria-label="Passkeys for this site"></div>
     <!-- It is you: the Debrowser passcode, where there is no Touch ID. -->
     <form class="verify" id="verify" hidden autocomplete="off">
       <div class="verify-row">
@@ -30,7 +32,7 @@
       <p class="error" id="verify-error" role="alert"></p>
     </form>
     <div class="sep" id="sep" role="separator"></div>
-    <button type="button" class="row other" id="other" role="option">
+    <button type="button" class="row other" id="other">
       <span class="avatar quiet" aria-hidden="true">
         <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 17.5h2"/></svg>
       </span>
