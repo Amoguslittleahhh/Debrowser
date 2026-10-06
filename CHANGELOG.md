@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.2.0
+
+Debrowser 2.2 brings passkeys into the browser itself: on Windows your accounts are listed right in Debrowser, and on macOS and Linux Debrowser keeps passkeys for you. Private windows get their own icon and more protection, Chromium moves to 152.0.7977.130, and a full audit closed a set of security and privacy gaps, among them downloads now carrying the system's downloaded-from-the-internet mark again.
 
 ### New
 
