@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Improved
+
+- **Settings shows an update's progress.** Updates in Settings now has a bar under its line: a sweep while it checks, one that fills as an update downloads - with how many megabytes of how many - a full one when it is ready, saying it installs when you restart Debrowser, and Installing once you choose to restart, until Debrowser closes for the installer. After the restart it says which version you updated from.
+
 ## 2.2.1
 
 Debrowser 2.2.1 lets Windows installs of 2.1.0 update again, which every one of them failed to do, and makes the updating window move smoothly.

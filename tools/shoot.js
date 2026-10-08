@@ -82,6 +82,8 @@ const STATE = {
     rememberWindowBounds: true, downloadDir: '', askWhereToSave: false
   }
 };
+/** The update state every shot gets unless it asks for another. */
+const BASE_UPDATES = STATE.updates;
 
 const ANSWERS = {
   'list-bookmarks': { items: [
@@ -268,6 +270,15 @@ const SHOTS = [
   { name: 'quick', file: 'quick.html', w: 900, h: 44,
     message: { kind: 'quick', url: 'https://www.bbc.co.uk/news/articles/x', title: 'The story behind the headline', loading: false } },
   { name: 'settings-labs', file: 'settings.html', w: 1280, h: 860, hash: 'labs' },
+  // The update's progress, in each state the bar has: no figure yet, bytes
+  // arriving, and downloaded (the fixture's own state, under 'settings-updates').
+  { name: 'settings-updates', file: 'settings.html', w: 1280, h: 860, hash: 'updates' },
+  { name: 'settings-updates-checking', file: 'settings.html', w: 1280, h: 860, hash: 'updates',
+    updates: { available: true, reason: null, state: 'checking', version: null, progress: null, error: null } },
+  { name: 'settings-updates-installing', file: 'settings.html', w: 1280, h: 860, hash: 'updates',
+    updates: { available: true, reason: null, state: 'installing', version: '1.5.0', progress: 100, error: null } },
+  { name: 'settings-updates-downloading', file: 'settings.html', w: 1280, h: 860, hash: 'updates',
+    updates: { available: true, reason: null, state: 'downloading', version: '1.5.0', progress: 40, bytes: { done: 12.4e6, total: 31e6 }, error: null } },
   // The page a tab shows when a load fails (src/main/error-page.js), drawn
   // into a blank page the way the browser draws it into Chromium's error entry.
   { name: 'error-offline', file: 'blank.html', w: 1100, h: 720,
@@ -375,6 +386,9 @@ app.whenReady().then(async () => {
 
     STATE.incognito = shot.incognito || null;
     STATE.saver = shot.saver === true;
+    STATE.updates = shot.updates || BASE_UPDATES;
+    // Looking at the section asks for a check: answered with the same state.
+    ANSWERS['check-for-updates'] = STATE.updates;
     STATE.spaces = shot.spaces ? { activeId: 'home', list: [
       { id: 'home', name: 'Home', color: '#2f857b', container: false },
       { id: 'swork', name: 'Work', color: '#7b6a9c', container: true },

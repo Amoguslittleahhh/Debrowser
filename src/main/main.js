@@ -1803,9 +1803,11 @@ function main() {
     // Once after an update, a quiet word and the way to the notes - never a
     // tab opened by itself. A new install has nothing to compare, so it only
     // records the version.
+    let updatedFrom = null;
     if (!INCOGNITO && !OFFLINE_MODE) {
       const seen = prefs.get('seenVersion');
       if (seen !== app.getVersion()) {
+        if (seen) updatedFrom = seen;
         if (seen) runCommand.toast(`Updated to ${app.getVersion()}`, 'What’s new', () => runCommand('open-whats-new'), 12_000);
         prefs.set('seenVersion', app.getVersion());
       }
@@ -1824,7 +1826,10 @@ function main() {
         // The browser draws its own prompt rather than asking the system for
         // one: a Win32 message box in the middle of a window that draws
         // everything else itself is the thing this browser keeps replacing.
-        onReady: () => { if (shell) shell.openSheet('update'); }
+        onReady: () => { if (shell) shell.openSheet('update'); },
+        onChange: () => publish(),
+        // Settings says so for this run: "Updated to 2.2.2 from 2.2.1".
+        updatedFrom
       });
       updater.start();
       shell.updater = updater;
@@ -3258,7 +3263,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (prewarm) prewarm.drop();
         // An install that did not start leaves the browser running, and the
         // close-tabs question has to be there again for it.
-        if (!(shell.updater && shell.updater.install()) && quitState) quitState.confirmed = false;
+        const undo = () => { if (quitState) quitState.confirmed = false; };
+        if (!(shell.updater && shell.updater.install(undo))) undo();
         break;
 
       case 'open-settings':

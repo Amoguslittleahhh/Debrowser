@@ -70,8 +70,13 @@ class Updater {
    *   light-themed on a dark window, in a different typeface, with the system's
    *   own buttons.
    */
-  constructor({ enabled = () => true, channel = () => 'stable', log = () => {}, onReady = () => {} }) {
+  constructor({ enabled = () => true, channel = () => 'stable', log = () => {}, onReady = () => {},
+                onChange = () => {}, updatedFrom = null }) {
     this.enabled = enabled;
+    /** Tells the pages a state changed now, rather than at the next broadcast. */
+    this.onChange = onChange;
+    /** This run is the first of a new version: the one it replaced, for Settings to say so. */
+    this.updatedFrom = updatedFrom;
     /** 'stable', or 'beta' for releases published as prereleases. Read live. */
     this.channel = channel;
     this.log = log;
@@ -82,7 +87,7 @@ class Updater {
     this.timer = null;
 
     /**
-     * unchecked | idle | checking | available | downloading | ready | error
+     * unchecked | idle | checking | available | downloading | ready | installing | error
      *
      * `unchecked` and `idle` are deliberately different states. Both mean "no
      * update is in flight", but the first means we have never asked and the
@@ -231,6 +236,7 @@ class Updater {
       // disk and never reports progress: it showed "Downloading 0%" for a
       // download that was not happening, then the restart prompt.
       this.progress = null;
+      this.bytes = null;
       // Blockmap differential download happens inside this call: it fetches the
       // new blockmap, diffs it against the installed artifact, and requests only
       // the ranges that differ.
@@ -246,6 +252,11 @@ class Updater {
 
     u.on('download-progress', (p) => {
       this.progress = Math.round(p.percent || 0);
+      // How much of how much, for the bar in Settings: a percentage alone
+      // does not say whether that is two megabytes or two hundred.
+      if (Number.isFinite(p.transferred) && Number.isFinite(p.total) && p.total > 0) {
+        this.bytes = { done: p.transferred, total: p.total };
+      }
     });
 
     u.on('update-downloaded', (info) => {
@@ -357,15 +368,26 @@ class Updater {
    * means restart rather than quit. A first install from a downloaded .exe is
    * unaffected: that one is the wizard, and it is meant to be.
    */
-  install() {
+  install(onFailed = () => {}) {
     if (!this.impl || this.state !== 'ready') return false;
-    try {
-      this.impl.quitAndInstall(true, true);
-      return true;
-    } catch (err) {
-      this.log('updates', `could not install: ${err.message}`);
-      return false;
-    }
+    // Said first, then done: Settings shows "Installing" for the moment
+    // between the button and the browser closing, which was otherwise a
+    // pause in which nothing seemed to happen. The install itself runs with
+    // the browser closed, in the installer's own window ("Updating
+    // Debrowser"), and the new version opens by itself.
+    this.state = 'installing';
+    this.onChange();
+    setTimeout(() => {
+      try {
+        this.impl.quitAndInstall(true, true);
+      } catch (err) {
+        this.log('updates', `could not install: ${err.message}`);
+        this.state = 'ready';
+        this.onChange();
+        onFailed();
+      }
+    }, 400);
+    return true;
   }
 
   /** The prompt was dismissed. It comes back on the next launch. */
@@ -394,6 +416,8 @@ class Updater {
       state: this.state,
       version: this.info?.version || null,
       progress: this.progress,
+      updatedFrom: this.updatedFrom,
+      bytes: this.state === 'downloading' ? this.bytes || null : null,
       error: this.error
     };
   }

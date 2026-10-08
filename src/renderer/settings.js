@@ -1184,6 +1184,18 @@ function renderUpdateState(u) {
   const button = document.getElementById('check-updates');
   if (!el) return;
 
+  const bar = document.getElementById('update-bar');
+  // The bar under the line: hidden, a sweep while there is no figure yet, a
+  // fill while bytes arrive, and full once the update is waiting to install.
+  const showBar = (mode, percent = 0) => {
+    if (!bar) return;
+    bar.hidden = !mode;
+    if (!mode) return;
+    bar.dataset.mode = mode;
+    bar.firstElementChild.style.width = mode === 'fill' ? `${Math.max(2, Math.min(100, percent))}%` : '';
+  };
+  showBar(null);
+
   if (!u) {
     el.textContent = '';
     if (button) button.hidden = true;
@@ -1196,19 +1208,38 @@ function renderUpdateState(u) {
     return;
   }
 
+  const mb = (n) => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
   switch (u.state) {
-    case 'checking':    el.textContent = 'Checking for a new version…'; break;
+    case 'checking':    el.textContent = 'Checking for a new version…'; showBar('sweep'); break;
     case 'available':   el.textContent = u.manual
       ? `${u.version} is available. Download it and drag it into Applications over this one.`
       : `${u.version} is available. Turn on automatic updates to download it.`; break;
     // A figure only once bytes are arriving: an update already on disk from an
     // earlier download goes straight to ready without any.
-    case 'downloading': el.textContent = Number.isFinite(u.progress)
-      ? `Downloading ${u.version} – ${u.progress}%.` : `Getting ${u.version} ready…`; break;
-    case 'ready':       el.textContent = `${u.version} is downloaded and installs when you restart.`; break;
+    case 'downloading':
+      if (Number.isFinite(u.progress)) {
+        el.textContent = u.bytes
+          ? `Downloading ${u.version} – ${mb(u.bytes.done)} of ${mb(u.bytes.total)} MB (${u.progress}%)`
+          : `Downloading ${u.version} – ${u.progress}%`;
+        showBar('fill', u.progress);
+      } else {
+        el.textContent = `Getting ${u.version} ready…`;
+        showBar('sweep');
+      }
+      break;
+    case 'ready':
+      el.textContent = `${u.version} is ready. It installs when you restart Debrowser, which takes a few seconds.`;
+      showBar('done');
+      break;
     case 'error':       el.textContent = `Last check failed: ${u.error}`; break;
-    case 'idle':        el.textContent = 'Up to date.'; break;
-    default:            el.textContent = 'Not checked yet.';
+    case 'installing':
+      el.textContent = `Installing ${u.version}. Debrowser closes now and opens again by itself in a few seconds.`;
+      showBar('sweep');
+      break;
+    case 'idle':        el.textContent = u.updatedFrom
+      ? `Up to date. Updated to this version from ${u.updatedFrom}.` : 'Up to date.'; break;
+    default:            el.textContent = u.updatedFrom
+      ? `Updated to this version from ${u.updatedFrom}.` : 'Not checked yet.';
   }
 
   if (button) {
@@ -1216,12 +1247,13 @@ function renderUpdateState(u) {
     // Nothing to ask while an answer is already on its way. A downloaded update
     // waiting for a restart turns the button into the restart: the prompt that
     // offered it may have been dismissed, and this is where people look.
-    button.disabled = u.state === 'checking' || u.state === 'downloading';
+    button.disabled = u.state === 'checking' || u.state === 'downloading' || u.state === 'installing';
     // On macOS the update is installed by hand, so the button fetches it.
     button.dataset.download = String(Boolean(u.manual && u.state === 'available'));
     button.dataset.restart = String(u.state === 'ready');
     button.textContent = button.dataset.download === 'true' ? 'Download'
-      : button.dataset.restart === 'true' ? 'Restart to update' : 'Check now';
+      : button.dataset.restart === 'true' ? 'Restart to update'
+      : u.state === 'installing' ? 'Installing…' : 'Check now';
   }
 }
 

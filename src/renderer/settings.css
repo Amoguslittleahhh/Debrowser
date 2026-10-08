@@ -441,7 +441,35 @@ h2 + .note { margin: 0 2px var(--s4); }
      the text's baseline, the taller button rose into the card's edge. */
   margin-top: var(--s3);
 }
-.update-foot .note { flex: 1; margin-top: 0; }
+.update-status { flex: 1; min-width: 0; }
+.update-foot .note { margin-top: 0; }
+
+/* The update's progress, under its line. Thin, in the accent, on the same
+   track colour as the rest of the page's rules. */
+.update-bar {
+  position: relative;
+  height: 4px;
+  margin-top: var(--s2);
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border-soft);
+}
+.update-bar[hidden] { display: none; }
+.update-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--slow) var(--ease-out);
+}
+.update-bar[data-mode="done"] > span { width: 100%; }
+/* No figure yet: a segment crossing, as the installer's own window does. */
+.update-bar[data-mode="sweep"] > span { width: 32%; animation: update-sweep 1.4s var(--ease) infinite; }
+@keyframes update-sweep { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+@media (prefers-reduced-motion: reduce) {
+  .update-bar[data-mode="sweep"] > span { animation: none; width: 100%; opacity: .45; }
+}
+body.calm .update-bar[data-mode="sweep"] > span { animation: none; width: 100%; opacity: .45; }
 .update-foot .ghost-btn { flex: none; }
 
 /*
