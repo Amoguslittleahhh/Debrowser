@@ -43,7 +43,6 @@
 #define SETUP_UI_CLASS L"DebrowserSetup"
 #define SETUP_UI_ASK (WM_APP + 1)
 #define SETUP_UI_DONE (WM_APP + 2)
-#define TIMER_FRAME 1
 
 /* ---- GDI+ flat API, the few calls used ---------------------------------- */
 
@@ -356,7 +355,6 @@ static int buttonAt(int x, int y) {
 
 static void fadeOutAndQuit(void) {
   if (!IsWindowVisible(ui.hwnd)) { PostQuitMessage(0); return; }
-  KillTimer(ui.hwnd, TIMER_FRAME);
   AnimateWindow(ui.hwnd, ui.motion ? 160 : 1, AW_BLEND | AW_HIDE);
   DestroyWindow(ui.hwnd);
 }
@@ -368,7 +366,6 @@ static LRESULT ask(void) {
   ui.answer = -1;
   ui.focus = 1;
   ui.hover = ui.pressed = -1;
-  KillTimer(ui.hwnd, TIMER_FRAME);
   InvalidateRect(ui.hwnd, NULL, FALSE);
   SetForegroundWindow(ui.hwnd);
   FlashWindow(ui.hwnd, TRUE);
@@ -380,10 +377,7 @@ static LRESULT ask(void) {
   int answer = ui.answer > 0;
   ui.asking = FALSE;
   ui.start = GetTickCount64();
-  if (answer) {
-    if (ui.motion) SetTimer(ui.hwnd, TIMER_FRAME, 16, NULL);
-    InvalidateRect(ui.hwnd, NULL, FALSE);
-  }
+  if (answer) InvalidateRect(ui.hwnd, NULL, FALSE);
   /* Cancelled: the installer quits, and this window with it - see the parent wait in main. */
   return answer;
 }
@@ -402,9 +396,6 @@ static LRESULT CALLBACK proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
   case WM_ERASEBKGND:
     return 1;
-  case WM_TIMER:
-    InvalidateRect(hwnd, NULL, FALSE);
-    return 0;
   case WM_NCHITTEST: {
     /* Dragged anywhere but a button, like any window with no title bar. */
     POINT p = { (short)LOWORD(lp), (short)HIWORD(lp) };
@@ -508,6 +499,45 @@ static void removeSelfLater(void) {
   }
 }
 
+/* ---- Frames --------------------------------------------------------------
+ *
+ * The bar used to move on a 16 ms WM_TIMER, and looked like a slideshow:
+ * measured from a recording, it jumped up to 88 px between frames and held
+ * others, about 15 frames a second. A timer message is the lowest priority
+ * Windows has, is merged with others, and is stretched further for a process
+ * Windows thinks is in the background - which this window, behind a browser
+ * closing or an installer working, usually is. So each frame is drawn
+ * straight to the window and then waits for the screen's next refresh
+ * (DwmFlush): one frame per refresh, whatever the timers are doing.
+ */
+typedef HRESULT (WINAPI *DwmFlushFn)(void);
+static DwmFlushFn dwmFlush;
+
+static void loadFrameClock(void) {
+  HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+  dwmFlush = dwm ? (DwmFlushFn)(void *)GetProcAddress(dwm, "DwmFlush") : NULL;
+}
+
+static void drawFrame(void) {
+  HDC dc = GetDC(ui.hwnd);
+  if (!dc) return;
+  paint(dc);
+  ReleaseDC(ui.hwnd, dc);
+  if (!dwmFlush || FAILED(dwmFlush())) Sleep(16);
+}
+
+/* And not slowed as a background process: Windows 11 runs one at low clock
+   speed and coarse timer resolution ("power throttling") unless told not to. */
+static void noThrottling(void) {
+  typedef struct { ULONG Version, ControlMask, StateMask; } Throttling;
+  typedef BOOL (WINAPI *SetInfo)(HANDLE, int, LPVOID, DWORD);
+  HMODULE k = GetModuleHandleW(L"kernel32.dll");
+  SetInfo set = k ? (SetInfo)(void *)GetProcAddress(k, "SetProcessInformation") : NULL;
+  /* ProcessPowerThrottling is 4; EXECUTION_SPEED 0x1, IGNORE_TIMER_RESOLUTION 0x4. */
+  Throttling t = { 1, 0x1 | 0x4, 0 };
+  if (set) set(GetCurrentProcess(), 4, &t, sizeof t);
+}
+
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR line, int show) {
   (void)prev; (void)line; (void)show;
   int argc = 0;
@@ -522,6 +552,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR line, int show) {
   if (!parent) return 3;
 
   becomeDpiAware();
+  noThrottling();
+  loadFrameClock();
   ULONG_PTR gdiplus = 0;
   GdiplusStartupInput gin = { 1, NULL, FALSE, FALSE };
   if (GdiplusStartup(&gdiplus, &gin, NULL) != 0) return 4;
@@ -566,12 +598,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR line, int show) {
 
   AnimateWindow(ui.hwnd, ui.motion ? 180 : 1, AW_BLEND | AW_ACTIVATE);
   SetForegroundWindow(ui.hwnd);
-  if (ui.motion) SetTimer(ui.hwnd, TIMER_FRAME, 16, NULL);
 
-  /* Until the installer is gone or says it is done. */
+  /* Until the installer is gone or says it is done. While the bar moves, the
+     wait does not block: the frame below paces the loop instead. */
   MSG msg;
   for (;;) {
-    DWORD woke = MsgWaitForMultipleObjects(1, &parent, FALSE, INFINITE, QS_ALLINPUT);
+    BOOL moving = ui.motion && !ui.asking && IsWindow(ui.hwnd) && IsWindowVisible(ui.hwnd);
+    DWORD woke = MsgWaitForMultipleObjects(1, &parent, FALSE, moving ? 0 : INFINITE, QS_ALLINPUT);
     if (woke == WAIT_OBJECT_0) {
       if (IsWindow(ui.hwnd)) fadeOutAndQuit();
       break;
@@ -583,6 +616,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR line, int show) {
       DispatchMessageW(&msg);
     }
     if (quit) break;
+    if (moving && IsWindow(ui.hwnd) && IsWindowVisible(ui.hwnd)) drawFrame();
   }
   CloseHandle(parent);
   GdiplusShutdown(gdiplus);

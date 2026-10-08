@@ -78,6 +78,37 @@
 ; (allowOnlyOneInstallerInstance.nsh), so it is brought in here.
 !include "getProcessInfo.nsh"
 Var pid
+;
+; Windows' Apps list entry points at the browser (`Debrowser.exe --uninstall`,
+; see customInstall), and electron-builder reads the same UninstallString to
+; find the old version's uninstaller before an update. Since 2.1.0 it found
+; Debrowser.exe, copied it out of its folder and ran it as an uninstaller -
+; where Electron stops at once (exit 0x80000003, shown as -2147483645) - and
+; every update from 2.1.0 ended in "Failed to uninstall old application files".
+; So, before that step, an entry naming the browser is pointed back at the
+; real uninstaller. The Apps list gets the browser's own window again when
+; customInstall writes the entry afresh, a moment later.
+!ifndef BUILD_UNINSTALLER
+  !macro repairUninstallString ROOT MODE
+    Push $R6
+    Push $R7
+    Push $R8
+    ReadRegStr $R6 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" UninstallString
+    ${If} $R6 != ""
+      !insertmacro GetInQuotes $R7 "$R6"
+      ${GetFileName} "$R7" $R8
+      ${If} $R8 == "${APP_EXECUTABLE_FILENAME}"
+        ${GetParent} "$R7" $R8
+        ${If} ${FileExists} "$R8\${UNINSTALL_FILENAME}"
+          WriteRegStr ${ROOT} "${UNINSTALL_REGISTRY_KEY}" UninstallString '"$R8\${UNINSTALL_FILENAME}" ${MODE}'
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+    Pop $R8
+    Pop $R7
+    Pop $R6
+  !macroend
+!endif
 !macro customCheckAppRunning
   !insertmacro IS_POWERSHELL_AVAILABLE
   !ifdef BUILD_UNINSTALLER
@@ -130,6 +161,11 @@ Var pid
     Pop $R0
   ${EndIf}
   !insertmacro _CHECK_APP_RUNNING
+  ; Next comes the old version's uninstaller: see repairUninstallString.
+  !ifndef BUILD_UNINSTALLER
+    !insertmacro repairUninstallString HKCU "/currentuser"
+    !insertmacro repairUninstallString HKLM "/allusers"
+  !endif
 !macroend
 
 ; Incognito's kill switch on Windows.

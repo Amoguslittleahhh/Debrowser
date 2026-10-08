@@ -1965,6 +1965,7 @@ function main() {
       askToClose(() => app.quit());
       return;
     }
+    if (startupGuard) startupGuard.clear();
     if (updater) updater.stop();
     if (prewarm) prewarm.drop();
     if (governor) governor.stop();

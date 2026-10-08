@@ -1300,6 +1300,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         const guard = new StartupGuard(d, '2.0.0');
         guard.begin(); guard.begin();
         const troubled = guard.troubled(guard.begin());
+        // A clean quit counts as a start that got going, however quick: the
+        // next start is not troubled.
+        guard.clear();
+        const cleared = !guard.troubled(guard.begin());
         fs.writeFileSync(p.join(d, 'preferences.json'), '{"theme":"light"}');
         guard.restore(guard.backup());
         const restored = JSON.parse(fs.readFileSync(p.join(d, 'preferences.json'), 'utf8')).theme === 'dark' &&
@@ -1313,7 +1317,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         const url = CrashReport.issueUrl(['Debrowser 2.0.0'], crash);
         const reported = crash && !/secret\.example/.test(url) && !url.includes(encodeURIComponent(require('os').homedir())) &&
           url.startsWith('https://github.com/') && CrashReport.take(d) === null;
-        return threw && kept && backedUp && once && troubled && restored && reported;
+        return threw && kept && backedUp && once && troubled && cleared && restored && reported;
       })();
       check('review fixes: private suffixes, malformed links, HTTPS-first re-upgrade, inherited pref keys, idle time, restore origin, profile safety',
         privateSites && decoded && upgradedTwice && prefsLoad && idleFromLeaving && restoreGuard && profile,

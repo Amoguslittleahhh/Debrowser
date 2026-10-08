@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Improved
+
+- **Windows: the updating window moves smoothly.** The progress bar in the window shown while Debrowser installs or updates moved at about 15 frames a second, in jumps; it now draws a frame for every refresh of the screen, and Windows no longer slows it as a background program.
+
+### Fixed
+
+- **Windows: updating from 2.1.0 works.** Every update from Debrowser 2.1.0 stopped with "Failed to uninstall old application files" (-2147483645), because the installer, looking for the old version's uninstaller, found and ran the browser instead. The installer now puts the right uninstaller back in place first, so 2.1.0 updates as normal.
+- **No "has not started properly" warning after updates.** A start of Debrowser that ended within its first half minute counted as one that failed, even when you closed it yourself, so two quick restarts to update - or two updates that did not install - offered to undo an update. A clean close now always counts as a good start.
+
 ## 2.2.0
 
 Debrowser 2.2 brings passkeys into the browser itself: on Windows your accounts are listed right in Debrowser, and on macOS and Linux Debrowser keeps passkeys for you. Private windows get their own icon and more protection, Chromium moves to 152.0.7977.130, and a full audit closed a set of security and privacy gaps, among them downloads now carrying the system's downloaded-from-the-internet mark again.

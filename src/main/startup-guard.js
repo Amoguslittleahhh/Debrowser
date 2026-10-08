@@ -48,7 +48,17 @@ class StartupGuard {
 
   /** Cleared once this run has lasted long enough to call it a start. */
   settle() {
-    setTimeout(() => this.write({ version: this.version, attempts: 0 }), STARTED_MS).unref?.();
+    setTimeout(() => this.clear(), STARTED_MS).unref?.();
+  }
+
+  /**
+   * Cleared now: a run that reached a clean quit got going, however short.
+   * Counting it was what turned two quick "Restart to update"s - an update
+   * that then failed to install - into "has not started properly the last 2
+   * times", offering to undo an update that had never happened.
+   */
+  clear() {
+    this.write({ version: this.version, attempts: 0 });
   }
 
   /** The newest backup from another version, if there is one to go back to. */
