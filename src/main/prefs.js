@@ -431,10 +431,18 @@ class Prefs {
    * @param {string} [options.file]      - another profile's file, for incognito
    * @param {boolean} [options.readOnly] - changes last for this process only
    */
-  constructor(log = () => {}, { file = null, readOnly = false } = {}) {
+  constructor(log = () => {}, { file = null, readOnly = false, darkUnlessLight = false } = {}) {
     this.log = log;
     this.file = file || path.join(app.getPath('userData'), 'preferences.json');
     this.readOnly = readOnly;
+    /**
+     * A private window's: the theme reads as dark unless Light was chosen
+     * outright. Following a light system theme filled a window opened for
+     * privacy - often at night - with white, and made it look like any
+     * other window. Websites are not told: a private page always reports
+     * light (incognito/scrub.js), so the page's own colours do not change.
+     */
+    this.darkUnlessLight = darkUnlessLight;
     this.values = this.load();
   }
 
@@ -499,8 +507,15 @@ class Prefs {
     return values;
   }
 
-  get(key) { return this.values[key]; }
-  all() { return { ...this.values }; }
+  get(key) {
+    if (key === 'theme' && this.darkUnlessLight && this.values.theme === 'system') return 'dark';
+    return this.values[key];
+  }
+  all() {
+    const all = { ...this.values };
+    if (this.darkUnlessLight && all.theme === 'system') all.theme = 'dark';
+    return all;
+  }
 
   /**
    * Set one preference. Returns whether it was accepted, so the UI can tell

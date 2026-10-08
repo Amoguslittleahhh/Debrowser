@@ -4,6 +4,7 @@
 
 ### Improved
 
+- **Private windows are dark.** The whole private window - tab bar, new tab page and Debrowser's own pages - is now dark unless you have chosen Light under Settings → Appearance, instead of following a light system theme. Websites see no difference: a private window always tells them light, so it does not stand out.
 - **Your most-used sites are back on the new tab page.** With "Continue with these tabs" on, the new tab page hid your favourites to make room for it. They now sit in one row under the search, above your recent pages, so the sites you open every day are one click from every new tab.
 - **No empty card on a fresh new tab page.** With nothing to continue yet, the new tab page is the plain one again, rather than an empty "Continue with these tabs" card saying pages will appear there.
 - **The tucked-away tab bar is easier to reach and quicker to come out.** With the tabs down the left and tucked away, the pointer now brings them out from anywhere within 22 pixels of the window's left edge instead of the first 10, without taking any clicks from the page there, and they open sooner and slide in faster: about a quarter quicker from reaching the edge to the tabs being there.

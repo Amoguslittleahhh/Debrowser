@@ -315,7 +315,7 @@ if (!INCOGNITO && (SMOKE_TEST || SPEED_TEST || (argv.includes('--bench-test') &&
 // security level - and never writes them: a setting changed in incognito lasts
 // until the window closes. Its own profile directory is empty by design.
 const earlyPrefs = INCOGNITO
-  ? new Prefs(log, { file: path.join(incognitoCtx.normalUserData, 'preferences.json'), readOnly: true })
+  ? new Prefs(log, { file: path.join(incognitoCtx.normalUserData, 'preferences.json'), readOnly: true, darkUnlessLight: true })
   : new Prefs(log);
 // `--uninstall`: the uninstall window and nothing else (uninstall.js). It
 // reads the preferences for the design and writes nothing in the profile - no
