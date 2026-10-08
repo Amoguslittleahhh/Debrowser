@@ -255,6 +255,7 @@ function renderSidebar(sidebar) {
   }
 
   const pinned = sidebar.pinned === true;
+  const wasPinned = document.body.dataset.pinned === 'true';
   if (document.body.dataset.pinned !== String(pinned)) document.body.dataset.pinned = String(pinned);
   if (el.pin.getAttribute('aria-pressed') !== String(pinned)) {
     el.pin.setAttribute('aria-pressed', String(pinned));
@@ -288,6 +289,10 @@ function renderSidebar(sidebar) {
 
   const floating = sidebar.floating === true;
   if (document.body.dataset.floating !== String(floating)) {
+    // Unpinned with the pointer on the button: the strip is already out, so
+    // it becomes the panel where it stands. Playing the slide in from the
+    // edge made it vanish and come back under the pointer that unpinned it.
+    document.body.classList.toggle('stays', floating && wasPinned);
     document.body.dataset.floating = String(floating);
     document.body.classList.remove('sliding-out');
     reportChromeHeight();

@@ -2096,11 +2096,12 @@ class BrowserShell {
     // behind the chrome and the strip just tints towards it.
     let material = this.prefs.get('backgroundMaterial');
     const translucent = this.translucentNow();
-    if (material === 'none' && translucent) material = 'acrylic';
-    // Only 'none' when translucency is off here rather than in the settings:
-    // a strip that slides over the page cannot show the desktop, so a window
-    // of glass round an opaque strip is all that setting could give there.
-    if (!translucent && this.prefs.get('windowOpacity') < 1) material = 'none';
+    // Chosen from the settings, not from the layout. Where the layout is
+    // opaque - the tabs tucked away - the window's opaque background below
+    // covers the glass, so it can stay. Dropping it to 'none' there and back
+    // made every pin and unpin swap the window's backdrop, which Windows
+    // repaints white for a frame: a white flash on every unpin.
+    if (material === 'none' && this.prefs.get('windowOpacity') < 1) material = 'acrylic';
     this.material = material;
 
     // A translucent strip shows whatever is behind it, and behind it is the
@@ -2136,7 +2137,10 @@ class BrowserShell {
     } catch (err) {
       this.log(`transparent chrome unavailable: ${err.message}`);
     }
-    if (typeof this.window.setBackgroundMaterial === 'function') {
+    // Only on a change: this runs on every preference write, and setting even
+    // the same material again repaints the backdrop.
+    if (typeof this.window.setBackgroundMaterial === 'function' && material !== this.appliedMaterial) {
+      this.appliedMaterial = material;
       try {
         this.window.setBackgroundMaterial(material);
       } catch (err) {
@@ -2174,8 +2178,11 @@ class BrowserShell {
       // leaves the window and comes back. Writing the flag unconditionally is
       // the other way to be wrong: it would hold the strip out on every change
       // that reaches here, including simply switching into this layout.
-      if (wasPinned === true && this.laidOutPinned === false) this.sidebarOpen = true;
+      const unpinned = wasPinned === true && this.laidOutPinned === false;
+      if (unpinned) this.sidebarOpen = true;
       this.layout();
+      // Then it goes the way a panel the pointer opened goes.
+      if (unpinned && this.detached()) this.watchAway();
     }
 
     // Keep the system's window buttons legible against whatever the strip is.

@@ -1767,6 +1767,7 @@ body[data-detached="true"]:not([data-band="true"]).sliding-out {
   from { transform: translateX(calc(-100% - 12px)); opacity: 0.4; }
   to   { transform: none; opacity: 1; }
 }
+body.stays[data-detached="true"][data-floating="true"],
 body.calm[data-detached="true"][data-floating="true"],
 body.calm[data-detached="true"].sliding-out { animation: none; transition: none; }
 @media (prefers-reduced-motion: reduce) {

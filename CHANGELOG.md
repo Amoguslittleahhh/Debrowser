@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- **Unpinning the tab bar no longer flickers.** Pressing the button to tuck the tabs away made them vanish for a moment and slide back in from the edge under the pointer; they now stay where they are as the panel and go when the pointer leaves.
+- **Windows: no white flash when you pin or unpin the tab bar.** With a see-through window, pinning and unpinning the tabs switched the window's glass off and on again, and Windows painted the window white for a moment each time; the glass now stays, covered where the layout is solid.
 - **Windows: the private window's taskbar icon shows its ring.** At taskbar sizes the ring on the private window's icon was drawn under 5 pixels across and blurred into a squashed "o"; at small sizes it is now larger and bolder, and reads as a ring.
 
 ## 2.2.1
