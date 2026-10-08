@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.2.1
+
+Debrowser 2.2.1 lets Windows installs of 2.1.0 update again, which every one of them failed to do, and makes the updating window move smoothly.
 
 ### Improved
 
