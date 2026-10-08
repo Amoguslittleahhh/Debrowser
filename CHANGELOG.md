@@ -5,6 +5,7 @@
 ### Improved
 
 - **Your most-used sites are back on the new tab page.** With "Continue with these tabs" on, the new tab page hid your favourites to make room for it. They now sit in one row under the search, above your recent pages, so the sites you open every day are one click from every new tab.
+- **No empty card on a fresh new tab page.** With nothing to continue yet, the new tab page is the plain one again, rather than an empty "Continue with these tabs" card saying pages will appear there.
 - **The tucked-away tab bar is easier to reach and quicker to come out.** With the tabs down the left and tucked away, the pointer now brings them out from anywhere within 22 pixels of the window's left edge instead of the first 10, without taking any clicks from the page there, and they open sooner and slide in faster: about a quarter quicker from reaching the edge to the tabs being there.
 - **Settings shows an update's progress.** Updates in Settings now has a bar under its line: a sweep while it checks, one that fills as an update downloads - with how many megabytes of how many - a full one when it is ready, saying it installs when you restart Debrowser, and Installing once you choose to restart, until Debrowser closes for the installer. After the restart it says which version you updated from.
 

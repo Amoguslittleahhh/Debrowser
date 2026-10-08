@@ -383,7 +383,6 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .co
    most often opened to reach - off the page. Legacy keeps its own list. */
 .continue-title { font-size: var(--fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .continue-meta { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.continue-empty { margin: 0; padding: 14px 12px 6px; font-size: var(--fs-body); color: var(--text-dim); }
 .continue-all {
   margin: 6px 12px 0; padding: 4px 0; border: 0; background: transparent;
   /* The accent, drawn toward the text colour: on the card's lifted surface the
