@@ -73,6 +73,15 @@ const SIDEBAR_WIDTH = 240;
  */
 const SIDEBAR_EDGE = 10;
 
+/**
+ * How far from the left edge the pointer opens the tucked-away strip, read
+ * from the cursor (watchEdge) rather than from the view. Wider than the view,
+ * because a view that wide would push every page right by as much and take
+ * the clicks in it; a reading of where the cursor is takes nothing. 10px was
+ * a target that had to be aimed at.
+ */
+const SIDEBAR_SENSE = 22;
+
 /** How close to the left edge the pointer must be for it to be watched closely. */
 const EDGE_NEAR = 160;
 
@@ -102,7 +111,7 @@ const CONTENT_RADIUS = 10;
  * pointer rather than lagging behind it.
  */
 const SIDEBAR_CLOSE_MS = 150;
-const SIDEBAR_OPEN_MS = 60;    // enough to tell a brush past the edge from a visit, short enough not to feel
+const SIDEBAR_OPEN_MS = 40;    // enough to tell a brush past the edge from a visit, short enough not to feel
 
 /**
  * How long a detached strip takes to slide back out; see setSidebarOpen.
@@ -2543,7 +2552,7 @@ class BrowserShell {
       return;
     }
     if (this.edgeTimer) return;
-    // Paced by how far the pointer is from the edge: every 25ms - two frames,
+    // Paced by how far the pointer is from the edge: every 16ms - a frame,
     // as quick as the pointer's own hover would be - once it is within
     // EDGE_NEAR of it, and every 150ms otherwise. A window left focused all
     // day with the tabs tucked away read the cursor forty times a second for
@@ -2557,7 +2566,7 @@ class BrowserShell {
         const b = this.window.getContentBounds();
         const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
         const rows = at.y >= top && at.y < b.y + b.height;
-        const inside = rows && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_EDGE;
+        const inside = rows && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_SENSE;
         near = rows && at.x >= b.x - 8 && at.x < b.x + EDGE_NEAR;
         if (inside && !this.edgeHeld) {
           this.edgeHeld = true;
@@ -2573,11 +2582,11 @@ class BrowserShell {
       }
       if (this.window.isDestroyed() || this.sidebarOpen || this.edgeTimer) return;
       // Battery mode reads it less often far from the edge (400ms): the
-      // pointer still has the 25ms pace once it is near.
-      this.edgeTimer = setTimeout(tick, near || this.edgeHeld ? 25 : this.saver ? 400 : 150);
+      // pointer still has the 16ms pace once it is near.
+      this.edgeTimer = setTimeout(tick, near || this.edgeHeld ? 16 : this.saver ? 400 : 150);
       this.edgeTimer.unref?.();
     };
-    this.edgeTimer = setTimeout(tick, 25);
+    this.edgeTimer = setTimeout(tick, 16);
     this.edgeTimer.unref?.();
   }
 
@@ -3074,5 +3083,5 @@ function send(view, channel, payload) {
 
 module.exports = {
   BrowserShell, CHROME_HEIGHT, BOOKMARKS_BAR_HEIGHT, PANEL_WIDTH,
-  SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_TOP_BAND, CONTENT_GAP, STRIP_VIEW_WIDTH
+  SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_SENSE, SIDEBAR_TOP_BAND, CONTENT_GAP, STRIP_VIEW_WIDTH
 };

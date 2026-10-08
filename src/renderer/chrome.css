@@ -1719,7 +1719,7 @@ body[data-detached="true"][data-floating="false"][data-sidebar-open="false"] > *
  * do; the browser hides the view only when it has finished (sidebar-slid).
  */
 :root {
-  --strip-in: 200ms;
+  --strip-in: 160ms;
   --strip-in-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --strip-out: 150ms;
   --strip-out-ease: cubic-bezier(0.4, 0, 1, 1);
