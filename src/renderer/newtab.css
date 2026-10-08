@@ -377,9 +377,10 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .co
   font-variant-numeric: tabular-nums;
 }
 /* With the card showing, the favourites give it the room (newtab.js). */
-/* Not in Legacy, which hides the card and keeps its tiles - even when the
-   design changes under a page that had the card. */
-body.with-continue:not([data-design="legacy"]) .tiles { display: none !important; }
+/* Beside the card, the favourites become one quiet row under the field:
+   smaller marks, one-line names, no heading. They used to give way to the
+   card entirely, which took the most-used sites - the thing a new tab is
+   most often opened to reach - off the page. Legacy keeps its own list. */
 .continue-title { font-size: var(--fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .continue-meta { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .continue-empty { margin: 0; padding: 14px 12px 6px; font-size: var(--fs-body); color: var(--text-dim); }
@@ -515,3 +516,31 @@ body[data-design="paper"] .tile-label { font-family: var(--font-display); font-s
 body[data-design="grid"] .tiles::before { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
 body[data-design="grid"] .tile-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-forget { top: 0; right: 8px; }
+
+/* The row beside the card (see above). After the design rules, so it wins. */
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles:not([hidden]) {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+  margin: 20px 0 0;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles::before { display: none; }
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open {
+  gap: 6px;
+  padding: 6px 2px 4px;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .chip {
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .site-icon {
+  inset: 12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-label {
+  -webkit-line-clamp: 1;
+  min-height: 0;
+  font-size: 12px;
+}

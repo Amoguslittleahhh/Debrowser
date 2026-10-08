@@ -2108,8 +2108,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const accentBefore = prefs.get('accent');
     const designBefore = prefs.get('design');
     runCommand('set-pref', { key: 'accent', value: '#b0306a' });
-    // Nothing to continue: the card stays, saying so, and the favourites stay
-    // aside - one layout for the page, whatever history holds.
+    // Nothing to continue: the card stays, saying so - one layout for the
+    // page, whatever history holds.
     const keptHistory = history.items;
     history.items = [];
     runCommand('set-pref', { key: 'design', value: 'ledger' });
@@ -2125,7 +2125,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const empty = await readEmpty();
       tabs.close(page.id);
       check('"Continue with these tabs" stays on the new tab page with no history to show',
-        Boolean(empty && empty.card && empty.empty && !empty.tiles), JSON.stringify(empty));
+        Boolean(empty && empty.card && empty.empty), JSON.stringify(empty));
     }
     history.items = keptHistory;
 
@@ -2165,9 +2165,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // Favourites in the new designs, named for the site ("continue", not
     // "continue.test"); Legacy keeps its own list of hostnames.
     // With "Continue with these tabs" showing (history was planted above), the
-    // favourites stand aside for it - but are built, by name, underneath.
-    check('the new designs show the mark in the chosen accent, and favourites by name give way to Continue; Legacy keeps its list',
-      fresh.every((d) => seen[d].brand && !seen[d].tiles && seen[d].card && seen[d].dot === 'rgb(176, 48, 106)' &&
+    // favourites stay, as one row under the field, named for the site.
+    check('the new designs show the mark in the chosen accent, and favourites by name above Continue; Legacy keeps its list',
+      fresh.every((d) => seen[d].brand && seen[d].tiles && seen[d].card && seen[d].dot === 'rgb(176, 48, 106)' &&
         seen[d].label.split(',').includes('continue')) &&
       !seen.legacy.brand && seen.legacy.label.split(',').includes('continue.test'),
       fresh.map((d) => `${d}: mark=${seen[d].brand} dot=${seen[d].dot} favourites=${seen[d].label}`).join(', ') +

@@ -382,7 +382,9 @@ app.whenReady().then(async () => {
     Object.assign(ANSWERS, shot.replies);
     // Recent pages only for the shot that wants the Continue card, so the plain
     // new tab keeps photographing the favourites.
-    ANSWERS['recent-pages'] = shot.recent ? RECENT : { items: [] };
+    // `shown` as the browser answers it: the card is on, or (the plain new
+    // tab shot) switched to favourites.
+    ANSWERS['recent-pages'] = shot.recent ? { ...RECENT, shown: true } : { items: [], shown: false };
 
     STATE.incognito = shot.incognito || null;
     STATE.saver = shot.saver === true;
