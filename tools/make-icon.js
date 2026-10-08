@@ -36,8 +36,15 @@ function svg(size, windows = false, look = NORMAL) {
   const stroke = small ? 8 : 5;
   const dot = small ? 8.5 : 6.5;
   // A ring keeps the dot's outer size; its stroke is what stays legible at 16 px.
+  // A ring keeps the dot's place. At taskbar sizes (48px and under) it is
+  // drawn bigger and bolder than the dot it stands for: kept to the dot's
+  // size, it came out under 5px across with a 1.4px line at 24px, which the
+  // antialiasing smeared into a squashed "o". Moved in a little so the larger
+  // ring still clears the heavier frame.
   const mark = look.ring
-    ? `<circle cx="26" cy="26" r="${dot - (small ? 2.4 : 1.7)}" fill="none" stroke="${look.dot}" stroke-width="${small ? 4.8 : 3.4}"/>`
+    ? (small
+      ? `<circle cx="29" cy="29" r="9" fill="none" stroke="${look.dot}" stroke-width="6"/>`
+      : `<circle cx="26" cy="26" r="${dot - 1.7}" fill="none" stroke="${look.dot}" stroke-width="3.4"/>`)
     : `<circle cx="26" cy="26" r="${dot}" fill="${look.dot}"/>`;
   const scale = (tile * (small ? 0.82 : windows ? 0.76 : 0.66)) / 64;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
