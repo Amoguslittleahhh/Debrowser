@@ -2205,7 +2205,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       "!document.getElementById('clears').hidden").catch(() => false)), { timeoutMs: 5000 });
     await page.wc.executeJavaScript("document.getElementById('keep').click()").catch(() => {});
     const kept = await waitFor(() => prefs.get('clearHistoryOnExit') === false, { timeoutMs: 3000 });
-    const hidden = await page.wc.executeJavaScript("document.getElementById('clears').hidden").catch(() => null);
+    // The page hides the note when the answer reaches it, which can be after
+    // the preference has changed here: waited for, not read once.
+    const hidden = await waitFor(async () => (await page.wc.executeJavaScript(
+      "document.getElementById('clears').hidden").catch(() => false)) === true, { timeoutMs: 3000 });
     tabs.close(page.id);
     prefs.set('clearHistoryOnExit', false);
     check('History says when it is cleared on close, and "Keep it instead" turns that off',
