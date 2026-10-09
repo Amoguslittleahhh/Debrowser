@@ -25,6 +25,7 @@ const COMMANDS = [
   { title: 'Close split view', command: 'unsplit', keywords: 'side by side single' },
   { title: 'Swap the two sides', command: 'split-swap', keywords: 'split side' },
   { title: 'Put other tabs to sleep', command: 'sleep-other-tabs', keywords: 'discard memory free' },
+  { title: 'Close duplicate tabs', command: 'close-duplicate-tabs', keywords: 'same twice clean tidy' },
   { title: 'Close other tabs', command: 'close-other-tabs', keywords: '', needsTab: true },
   { title: 'Put this tab in a new group', command: 'group-tab', keywords: 'tab group collect', needsTab: true, lab: 'labTabGroups' },
   { title: 'Fold or unfold this tab’s group', command: 'toggle-group', keywords: 'tab group collapse expand', needsTab: true, lab: 'labTabGroups' },

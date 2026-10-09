@@ -174,6 +174,21 @@ const SCHEMA = {
   restoreTabs: { def: false, ok: (v) => typeof v === 'boolean' },
 
   /**
+   * Sites opened at every start, one address per line - the day's usual
+   * places, there before you reach for them. They open asleep (startup.js),
+   * so ten of them cost about what one new tab does until one is clicked.
+   * Not with restoreTabs on, where last time's tabs are the start.
+   */
+  startupSites: { def: '', ok: (v) => typeof v === 'string' && v.length <= 20_000 },
+
+  /**
+   * Which way Ctrl+Tab goes: to the tab used last, as Alt+Tab does between
+   * windows, or to the next one along the strip. Ctrl+PageDown always goes
+   * along the strip.
+   */
+  tabCycleOrder: { def: 'recent', ok: (v) => v === 'recent' || v === 'strip' },
+
+  /**
    * Whether the welcome tour has been through, or skipped. A new profile
    * starts on it; a profile from before it existed counts as done (see load),
    * since someone who has used the browser for months does not need greeting.

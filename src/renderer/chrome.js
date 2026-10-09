@@ -1278,7 +1278,9 @@ function tierLabel(tab) {
     case 'cold': return `Quiet · ${mb}. It sleeps if memory runs short`;
     case 'frozen': return `Asleep · paused, using no processor`;
     case 'hibernated': return 'Asleep · memory squeezed down, wakes instantly';
-    case 'discarded': return 'Asleep · memory given back, reloads when you open it';
+    case 'discarded': return tab.gaveBackMB > 0
+      ? `Asleep · gave back ${tab.gaveBackMB} MB, reloads when you open it`
+      : 'Asleep · memory given back, reloads when you open it';
     default: return tab.tier;
   }
 }

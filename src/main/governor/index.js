@@ -726,7 +726,7 @@ class Governor {
     return chosen != null ? Math.min(this.cfg.minLifetimeMs, chosen) : this.cfg.minLifetimeMs;
   }
 
-  clampToProtections(tab, requested, { discardAllowed = true, ignoreGrace = false } = {}) {
+  clampToProtections(tab, requested, { discardAllowed = true, ignoreGrace = false, explicit = false } = {}) {
     let floor = requested;
 
     const cap = (tier) => {
@@ -786,12 +786,14 @@ class Governor {
       cap(Tier.HIBERNATED);
     }
 
-    if (tab.pinned) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.COLD);
+    // Asked for by name ("Put to sleep"), a pin or a keep-awake rule gives way:
+    // they are about what the browser does by itself, not about what you ask.
+    if (tab.pinned && !explicit) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.COLD);
 
     // A site the user keeps awake - a chat, a music player, a dashboard. Warm,
     // like a tab playing sound, until memory is critical: then it may be
     // hibernated, which loses nothing, but never discarded.
-    if (this.sitePolicy(tab) === 'never') cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.WARM);
+    if (this.sitePolicy(tab) === 'never' && !explicit) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.WARM);
 
     // A tab with developer tools open is a tab being worked on.
     //
@@ -963,6 +965,26 @@ class Governor {
     const reached = await applyTier(tab, target, this.ctx());
     if (reached === Tier.DISCARDED) this.stats.discards += 1;
     return reached !== null;
+  }
+
+  /**
+   * "Put to sleep", from the tab's menu or the command bar: now, rather than
+   * when the ladder would get to it. Sound, a call, unsent text and open
+   * developer tools still hold it awake - losing any of those is worse than
+   * the memory - and the answer says how far it went.
+   *
+   * @returns {Promise<string|null>} the tier it is in afterwards
+   */
+  async sleepNow(tab) {
+    if (!tab || tab.visible || !tab.isLive) return tab ? tab.tier : null;
+    const target = this.clampToProtections(tab, Tier.DISCARDED, { ignoreGrace: true, explicit: true });
+    const before = tab.rssMB;
+    const reached = await applyTier(tab, target, this.ctx());
+    if (reached === Tier.DISCARDED) {
+      this.stats.discards += 1;
+      this.stats.reclaimedMB += before;
+    }
+    return tab.tier;
   }
 
   /** Called by the tab manager the moment the user switches tabs. */

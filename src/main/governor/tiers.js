@@ -72,6 +72,10 @@ async function applyTier(tab, target, ctx) {
   // -> ACTIVE, where `promote` is a no-op that reaches the tier it started at
   // and is discarded as unmoved.
   const goingUp = tierRank(target) <= tierRank(current);
+  // What it held before going down, for "gave back 240 MB" on the sleeping
+  // tab (the strip's tooltip): read now, since a discarded tab has no
+  // renderer left to measure.
+  const heldMB = goingUp ? 0 : Math.round(tab.memNowMB ?? tab.rssMB ?? 0);
   const reached = goingUp
     ? await promote(tab, target, ctx)
     : await demote(tab, target, ctx).finally(() => { tab.freezing = false; });
@@ -80,6 +84,8 @@ async function applyTier(tab, target, ctx) {
 
   tab.tier = reached;
   tab.tierChangedAt = Date.now();
+  if (reached === Tier.DISCARDED && heldMB > 0) tab.gaveBackMB = heldMB;
+  else if (tierRank(reached) < tierRank(Tier.FROZEN)) tab.gaveBackMB = 0;
   log(`tab ${tab.id}: ${current} -> ${reached}`);
   tab.emit('updated');
   return reached;

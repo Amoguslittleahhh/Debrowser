@@ -133,6 +133,8 @@ const COMMANDS = new Set([
   'pin-tab',
   'mute-tab',
   'duplicate-tab',
+  'close-duplicate-tabs',
+  'sleep-tab',
   'close-other-tabs',
   'close-tabs-right',
   'tab-menu',

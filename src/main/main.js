@@ -50,6 +50,17 @@ const readerStore = new reader.ReaderStore();
 const { Credentials, originOf } = require('./data/credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
+const { startupTabs, placeKey } = require('./startup');
+const { duplicateTabs } = require('./tabs/duplicates');
+
+// A Ctrl+Tab run in progress: the recent-use order it started with and where
+// in it the keyboard is (`cycle-tab`). Ended by letting go of Ctrl.
+let tabCycle = null;
+let tabCycleTimer = null;
+function endTabCycle() {
+  clearTimeout(tabCycleTimer);
+  tabCycle = null;
+}
 const { History } = require('./data/history');
 const icons = require('./icons');
 const presence = require('./presence');
@@ -690,6 +701,8 @@ function main() {
   const bindShortcuts = (wc, tab = null, { only = null } = {}) => {
     if (!wc || wc.isDestroyed()) return;
     wc.on('before-input-event', (event, input) => {
+      // Letting go of Ctrl (Cmd on a Mac) ends a Ctrl+Tab run through recent tabs.
+      if (input.type === 'keyUp' && (input.key === 'Control' || input.key === 'Meta')) endTabCycle();
       // Esc stops a page that is still loading, as in every browser - and
       // still reaches the page, which uses it to close its own dialogs.
       if (tab && input.type === 'keyDown' && input.key === 'Escape' && !input.control && !input.alt &&
@@ -1694,7 +1707,17 @@ function main() {
       : { tabs: [], activeIndex: 0 };
     // Restore is off, but Debrowser crashed or the computer lost power: the
     // tabs are offered back once, rather than lost with the crash.
-    const lost = unclean && !saved.tabs.length ? sessionStore.load().tabs : [];
+    // Pinned tabs and the startup sites, asleep, behind the tab in front
+    // (startup.js). Not on the welcome tour's first start, and never in a
+    // private window, which has no session to read.
+    const opening = sessionStore && prefs.get('welcomeDone')
+      ? startupTabs({ restoring: saved.tabs.length > 0, lastSession: sessionStore.load().tabs,
+        sitesText: prefs.get('startupSites') })
+      : [];
+    const openingKeys = new Set(opening.map((entry) => placeKey(entry.url)));
+    const lost = unclean && !saved.tabs.length
+      ? sessionStore.load().tabs.filter((entry) => !openingKeys.has(placeKey(entry.url)))
+      : [];
     // Not for someone who has history cleared on exit: last time's pages are
     // exactly what they asked not to be shown again.
     if (sessionStore && !unclean && !saved.tabs.length && !prefs.get('clearHistoryOnExit')) {
@@ -1722,6 +1745,12 @@ function main() {
       // A new profile starts on the welcome tour.
       tabs.create({ url: pages.WELCOME_URL });
     } else {
+      for (const entry of opening) {
+        const tab = tabs.create({ url: entry.url, activate: false, realise: false });
+        if (entry.title) tab.title = entry.title;
+        if (entry.pinned) tabs.setPinned(tab.id, true);
+      }
+      if (opening.length) log('session', `opened ${opening.length} startup tab(s) asleep`);
       tabs.create({ url: newTabUrl(prefs) });
     }
     bootMark('firstTab');
@@ -2830,6 +2859,33 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       // Put every tab but the one in front to sleep, from the command bar.
+      // "Put to sleep", from a tab's menu: now, not when the ladder gets there.
+      case 'sleep-tab': {
+        const tab = tabs.byId(payload?.id);
+        if (!governor || !tab) break;
+        governor.sleepNow(tab).then((tier) => {
+          publish();
+          if (tier !== 'discarded') {
+            const why = tab.audible ? 'it is playing sound' : tab.capturing ? 'it is using the camera or microphone'
+              : tab.hasDirtyInput ? 'it has text you haven’t sent' : 'it is busy';
+            runCommand.toast(`That tab stays awake: ${why}`);
+          }
+        }).catch((e) => log(`sleep failed: ${e.message}`));
+        break;
+      }
+
+      // The same page open twice or more in this space: one of each stays.
+      case 'close-duplicate-tabs': {
+        const here = tabs.activeTab();
+        const list = tabs.all().filter((t) => !here || t.spaceId === here.spaceId);
+        const doomed = duplicateTabs(list, tabs.activeId);
+        if (!doomed.length) { runCommand.toast('No tab here is open twice'); break; }
+        const before = closedTabs.remembered || 0;
+        for (const other of doomed.reverse()) tabs.close(other.id);
+        offerUndoClose((closedTabs.remembered || 0) - before);
+        break;
+      }
+
       case 'sleep-other-tabs':
         if (!governor) break;
         for (const tab of tabs.all()) {
@@ -2890,6 +2946,25 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'cycle-tab': {
         const list = spaceTabs();
         if (list.length < 2) break;
+        // Ctrl+Tab by when tabs were used, as Alt+Tab goes between windows:
+        // one press back to the tab you were just on, two to the one before.
+        // The order is fixed at the first press and held until Ctrl is let go
+        // (`endTabCycle`), or each press would only swap the last two.
+        if (payload?.recent && prefs.get('tabCycleOrder') !== 'strip') {
+          if (!tabCycle) {
+            const order = [...list].sort((a, b) => (b.id === tabs.activeId) - (a.id === tabs.activeId) ||
+              (b.lastActiveAt || 0) - (a.lastActiveAt || 0));
+            tabCycle = { order: order.map((t) => t.id), at: 0 };
+          }
+          clearTimeout(tabCycleTimer);
+          // In case the release is never seen - focus moved to another app.
+          tabCycleTimer = setTimeout(endTabCycle, 1500);
+          const n = tabCycle.order.length;
+          tabCycle.at = ((tabCycle.at + (Number(payload.delta) || 1)) % n + n) % n;
+          const next = tabs.byId(tabCycle.order[tabCycle.at]);
+          if (next) goTo(next.id);
+          break;
+        }
         const at = list.findIndex((tab) => tab.id === tabs.activeId);
         const delta = Number(payload?.delta) || 1;
         const next = list[(((at === -1 ? 0 : at) + delta) % list.length + list.length) % list.length];
@@ -3524,6 +3599,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const at = all.indexOf(tab);
         const others = all.filter((t) => t !== tab && !t.pinned).length;
         const right = all.slice(at + 1).filter((t) => !t.pinned).length;
+        const dupes = duplicateTabs(all, tabs.activeId).length;
         const id = tab.id;
 
         context.model = {
@@ -3545,6 +3621,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               icon: 'mute',
               payload: { id }
             },
+            // Asleep now, for a tab that is awake and not the one in front.
+            ...(tab.isLive && !tab.visible && governor
+              ? [{ id: 'sleep-tab', label: 'Put to sleep', icon: 'moon', payload: { id } }] : []),
             // Beside the tab in front, or back to one at a time.
             ...(shell.inSplit(tab) ? [{ id: 'unsplit', label: 'Close split view', icon: 'close', payload: {} }]
               : tabs.activeTab() && tab !== tabs.activeTab() && tab.spaceId === tabs.activeTab().spaceId
@@ -3570,6 +3649,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               payload: { id },
               enabled: others > 0
             },
+            ...(dupes > 0 ? [{ id: 'close-duplicate-tabs', label: `Close duplicate tabs (${dupes})`, icon: 'close', payload: {} }] : []),
             {
               id: 'close-tabs-right',
               label: 'Close tabs to the right',

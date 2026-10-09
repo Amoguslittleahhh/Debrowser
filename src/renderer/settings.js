@@ -191,6 +191,14 @@ const SECTIONS = {
       hint: 'Off starts with a fresh tab each time. Reopened tabs load when you visit them.',
       type: 'checkbox'
     },
+    {
+      key: 'startupSites',
+      label: 'Open these sites when you start',
+      hint: 'One address per line. They wait asleep until you click one, so they cost almost nothing. Pinned tabs always come back.',
+      type: 'textarea',
+      placeholder: 'mail.google.com\ngithub.com',
+      startupFill: true
+    },
     { key: 'searchEngine', label: 'Search engine', type: 'select', options: 'engines' },
     {
       key: 'inlineAutocomplete',
@@ -301,6 +309,16 @@ const SECTIONS = {
       key: 'linkTabsInBackground',
       label: 'Open links in the background',
       type: 'checkbox'
+    },
+    {
+      key: 'tabCycleOrder',
+      label: 'Ctrl+Tab goes to',
+      hint: 'Ctrl+Page Down always goes to the next tab along.',
+      type: 'select',
+      options: [
+        { value: 'recent', name: 'The tab you used last' },
+        { value: 'strip', name: 'The next tab along' }
+      ]
     },
     {
       key: 'lastTabCloses',
@@ -867,6 +885,21 @@ function buildRow(spec) {
   if (control.input) {
     control.input.id = `pref-${spec.key}`;
     label.htmlFor = control.input.id;
+  }
+
+  // The startup list can be filled from the sites you go to most, which is
+  // what most people would type into it anyway.
+  if (spec.startupFill) {
+    const fill = smallButton('Use my most-used sites');
+    fill.addEventListener('click', async () => {
+      const res = await api.request('top-sites', { limit: 6 });
+      const urls = ((res && res.items) || []).map((item) => item.url).filter(Boolean);
+      if (!urls.length) { if (hint) hint.textContent = 'Nothing yet: visit a few sites first.'; return; }
+      control.input.value = urls.join('\n');
+      save(spec.key, control.input.value);
+    });
+    holder.classList.add('row-control-stack');
+    holder.append(fill);
   }
 
   row.append(text, holder);

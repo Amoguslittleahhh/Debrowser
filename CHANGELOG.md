@@ -2,7 +2,17 @@
 
 ## Unreleased
 
+### New
+
+- **Open your usual sites when Debrowser starts.** Settings → Search and startup → "Open these sites when you start" takes one address per line, and "Use my most-used sites" fills it for you. They open asleep behind a new tab, so ten of them cost about what one tab does until you click one.
+- **Pinned tabs come back every time.** Even with "Reopen your tabs when you start" off, the tabs you pinned are there at the next start, asleep until you click them.
+- **Ctrl+Tab goes to the tab you used last.** Press it once to go back to the tab you were just on, keep holding Ctrl and press again to go further back, as Alt+Tab does between windows. Ctrl+Page Down still goes along the strip, and Settings → Tabs and windows can switch Ctrl+Tab back to that.
+- **Put a tab to sleep now.** Right-click a tab and choose "Put to sleep" to free its memory straight away, pinned or not. A tab playing sound, on a call or holding text you haven't sent stays awake, and says why.
+- **Close duplicate tabs.** When the same page is open more than once, the tab menu offers "Close duplicate tabs", which keeps one of each; it is also in the command bar (Ctrl+K), and Undo brings them back.
+
 ### Improved
+
+- **A sleeping tab says how much memory it gave back.** Hovering a tab Debrowser has put to sleep now reads, for example, "Asleep · gave back 240 MB, reloads when you open it".
 
 - **Private windows are dark.** The whole private window - tab bar, new tab page and Debrowser's own pages - is now dark unless you have chosen Light under Settings → Appearance, instead of following a light system theme. Websites see no difference: a private window always tells them light, so it does not stand out.
 - **Your most-used sites are back on the new tab page.** With "Continue with these tabs" on, the new tab page hid your favourites to make room for it. They now sit in one row under the search, above your recent pages, so the sites you open every day are one click from every new tab.

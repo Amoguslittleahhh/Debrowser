@@ -73,10 +73,22 @@ async function settledSample(governor, samples = 6, gapMs = 180) {
 async function waitFor(predicate, { timeoutMs = 10_000, pollMs = 200 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await predicate()) return true;
+    // Raced against the deadline: a predicate that never settles - script run
+    // in a page that never finished loading - hung the whole run here, past
+    // its own timeout, with no check failing to say where.
+    if (await inTime(predicate(), deadline - Date.now(), false)) return true;
     await sleep(pollMs);
   }
   return false;
+}
+
+/** A promise's answer, or `fallback` once `ms` have gone by without one. */
+function inTime(promise, ms, fallback = null) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), Math.max(0, ms)); })
+  ]).finally(() => clearTimeout(timer));
 }
 
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
@@ -5412,6 +5424,86 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     for (const [key, value] of saved) prefs.set(key, value);
   }
 
+  // A start: pinned tabs from last time, then the startup sites that are not
+  // already one of them, cleaned of anything that is not a web address.
+  {
+    const { startupTabs, parseSites } = require('../startup');
+    const plan = startupTabs({
+      restoring: false,
+      lastSession: [{ url: 'https://mail.google.com/mail/u/0/', title: 'Inbox', pinned: true },
+        { url: 'https://example.com/old', pinned: false }],
+      sitesText: 'github.com\nhttps://www.mail.google.com/mail/u/0\njavascript:alert(1)\nfile:///etc/passwd\n\nnews.ycombinator.com\ngithub.com'
+    });
+    const restoring = startupTabs({ restoring: true, lastSession: [{ url: 'https://a.example/', pinned: true }], sitesText: 'b.example' });
+    check('a start opens pinned tabs and the startup sites, once each, and nothing but web pages',
+      plan.map((e) => `${e.pinned ? 'pin:' : ''}${e.url}`).join(' ') ===
+        'pin:https://mail.google.com/mail/u/0/ https://github.com/ https://news.ycombinator.com/' &&
+        restoring.length === 0 && parseSites('localhost:3000').length === 1,
+      JSON.stringify(plan.map((e) => e.url)));
+  }
+
+  // The same page open twice: one of each stays - the one in front, or a
+  // pinned one, or the one used last - and nothing pinned is closed.
+  {
+    const { duplicateTabs } = require('../tabs/duplicates');
+    const list = [
+      { id: 1, url: 'https://a.example/x', lastActiveAt: 1 },
+      { id: 2, url: 'https://a.example/x#top', lastActiveAt: 5 },
+      { id: 3, url: 'https://b.example/', pinned: true, lastActiveAt: 1 },
+      { id: 4, url: 'https://b.example/', lastActiveAt: 9 },
+      { id: 5, url: 'https://c.example/', lastActiveAt: 2 },
+      { id: 6, url: 'https://c.example/', lastActiveAt: 3 }
+    ];
+    const doomed = duplicateTabs(list, 5).map((t) => t.id).join(',');
+    check('closing duplicate tabs keeps the one in front, a pinned one, or the one used last',
+      doomed === '1,4,6', `closes ${doomed}`);
+  }
+
+  // Ctrl+Tab by recent use: one press back to the tab just left, two to the
+  // one before - the order held while the key is down - and letting go ends it.
+  {
+    const wasOrder = prefs.get('tabCycleOrder');
+    prefs.set('tabCycleOrder', 'recent');
+    const made = [0, 1, 2].map(() => tabs.create({ url: pageUrl('idle.html'), activate: false }));
+    // Used in the order 0, 2, 1: so from 1, recent order is 1, 2, 0.
+    for (const t of [made[0], made[2], made[1]]) {
+      await tabs.activate(t.id);
+      await sleep(30);
+    }
+    runCommand('cycle-tab', { delta: 1, recent: true });
+    const first = tabs.activeId;
+    runCommand('cycle-tab', { delta: 1, recent: true });
+    const second = tabs.activeId;
+    await sleep(1700);   // the run ends by itself when no release is seen
+    runCommand('cycle-tab', { delta: 1, recent: true });
+    const afterEnd = tabs.activeId;
+    prefs.set('tabCycleOrder', 'strip');
+    const stripFrom = tabs.activeId;
+    runCommand('cycle-tab', { delta: 1, recent: true });
+    const strip = tabs.activeId;
+    const list = tabs.all().filter((t) => t.spaceId === tabs.byId(stripFrom).spaceId);
+    const stripNext = list[(list.findIndex((t) => t.id === stripFrom) + 1) % list.length].id;
+    check('Ctrl+Tab goes to the tab used last, then the one before, or along the strip if set',
+      first === made[2].id && second === made[0].id && afterEnd === made[2].id && strip === stripNext,
+      `first ${first} (want ${made[2].id}), second ${second} (want ${made[0].id}), ` +
+      `after the run ${afterEnd} (want ${made[2].id}), strip ${strip} (want ${stripNext})`);
+    prefs.set('tabCycleOrder', wasOrder);
+
+    // "Put to sleep" on a tab in the background: asleep at once, saying how
+    // much it gave back - and a pinned one too, since it was asked for by name.
+    const bg = made[0].visible ? made[1] : made[0];
+    await waitFor(() => bg.isLive && !bg.loading, { timeoutMs: 10_000 });
+    // Measured at least once, so there is a figure to give back.
+    await waitFor(() => (bg.memNowMB ?? bg.rssMB ?? 0) > 0, { timeoutMs: 10_000 });
+    tabs.setPinned(bg.id, true);
+    runCommand('sleep-tab', { id: bg.id });
+    const slept = await waitFor(() => bg.tier === 'discarded', { timeoutMs: 5000 });
+    const gave = bg.toJSON().gaveBackMB;
+    check('"Put to sleep" puts a background tab to sleep now, pinned or not, and says what it gave back',
+      slept && gave > 0, `tier ${bg.tier}, gave back ${gave} MB`);
+    for (const t of made) tabs.close(t.id);
+  }
+
   // The performance budgets (the premium bar): a new tab drawn, the command bar
   // open, no long task in the chrome while switching tabs, and a chrome that
   // costs nothing when nothing is happening. Measured on a virtual display
@@ -5495,15 +5587,18 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     let quit = false;
     const win = uninstall.show({ prefs: prefs.all(), browserOpen: true, onConfirmed: () => { quit = true; } });
     const shown = await waitFor(() => win.isVisible(), { timeoutMs: 5000 });
-    const page = await win.webContents.executeJavaScript(`({
+    // Loaded before it is asked anything: script sent to a page still loading
+    // waits for the load, and a load that never came hung the run here.
+    await waitFor(() => !win.webContents.isLoading(), { timeoutMs: 5000 });
+    const page = await inTime(win.webContents.executeJavaScript(`({
       design: document.body.dataset.design, lead: document.getElementById('lead').textContent,
-      height: document.getElementById('card').getBoundingClientRect().height })`).catch(() => ({}));
+      height: document.getElementById('card').getBoundingClientRect().height })`), 5000, {}) || {};
     const [, contentHeight] = win.getContentSize();
-    await win.webContents.executeJavaScript("document.getElementById('confirm').click()");
+    await inTime(win.webContents.executeJavaScript("document.getElementById('confirm').click()"), 5000);
     const refused = await waitFor(() => win.webContents.executeJavaScript(
       "!document.getElementById('error').hidden && !document.body.classList.contains('working')"), { timeoutMs: 3000 });
     const again = uninstall.show({ prefs: prefs.all(), browserOpen: true, onConfirmed: () => { quit = true; } });
-    await win.webContents.executeJavaScript("document.getElementById('cancel').click()");
+    await inTime(win.webContents.executeJavaScript("document.getElementById('cancel').click()"), 5000);
     const closed = await waitFor(() => win.isDestroyed(), { timeoutMs: 3000 });
     check('the uninstall window draws in the browser\'s design, and confirming on a copy never installed quits nothing',
       shown && page.design === prefs.get('design') && /not installed/.test(page.lead || '') &&

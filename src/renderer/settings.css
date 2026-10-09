@@ -280,6 +280,10 @@ h2 {
   min-width: 172px;
 }
 
+/* A list with a button that fills it: the button under the field, at its
+   right edge, rather than squeezed beside it. */
+.row-control-stack { flex-direction: column; align-items: flex-end; }
+
 /* Bridge lines: long, several of them, and pasted rather than typed. */
 textarea {
   width: 320px;

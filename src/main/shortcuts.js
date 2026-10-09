@@ -60,8 +60,9 @@ const TABLE = [
   // Windows' and Linux's other close-a-tab key, which every browser there takes.
   ...(IS_MAC ? [] : [{ command: 'close-tab', mod: true, key: 'f4' }]),
   { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
-  { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'tab' },
-  { command: 'cycle-tab', payload: { delta: -1 }, mod: true, shift: true, key: 'tab' },
+  // Ctrl+Tab may go by when tabs were used (Settings); `recent` asks for that.
+  { command: 'cycle-tab', payload: { delta: 1, recent: true }, mod: true, key: 'tab' },
+  { command: 'cycle-tab', payload: { delta: -1, recent: true }, mod: true, shift: true, key: 'tab' },
   { command: 'cycle-tab', payload: { delta: 1 }, mod: true, key: 'pagedown' },
   { command: 'cycle-tab', payload: { delta: -1 }, mod: true, key: 'pageup' },
   // A Mac's tab keys, Safari's and Chrome's there: Cmd+Shift+] and Cmd+Shift+[.
@@ -261,6 +262,8 @@ function sheet({ incognito = false } = {}) {
       row('Next space', 'cycle-space', { delta: 1 }),
       row('Previous space', 'cycle-space', { delta: -1 }),
       row('Reader view', 'reader-view'),
+      row('Tab used last (or next, as set in Settings)', 'cycle-tab', { delta: 1, recent: true }),
+      row('Back the other way', 'cycle-tab', { delta: -1, recent: true }),
       row('Next tab', 'cycle-tab', { delta: 1 }),
       row('Previous tab', 'cycle-tab', { delta: -1 }),
       { label: 'Go to tab 1 to 8', keys: `${accelFor('select-tab', { index: 0 }).slice(0, -1)}1–8` },

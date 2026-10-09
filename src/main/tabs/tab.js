@@ -1208,6 +1208,8 @@ class Tab {
       boosted: this.boosted,
       demand: this.demand,
       rssMB: Math.round(this.rssMB),
+      // What it held when it was put to sleep (tiers.js), 0 once awake.
+      gaveBackMB: this.gaveBackMB || 0,
       cpu: Math.round((this.cpu || 0) * 10) / 10,
       // As measured this tick, for the task manager: memory, and CPU as a
       // share of the whole machine, as the system's own task manager shows it.
