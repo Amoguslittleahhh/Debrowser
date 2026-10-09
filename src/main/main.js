@@ -911,8 +911,24 @@ function main() {
         // the renderer may send back, and the page's own coordinates are not
         // something it should be able to restate.
         params: { x: Math.round(params.x || 0), y: Math.round(params.y || 0) },
-        tabId: tab.id
+        tabId: tab.id,
+        // What an extension's menu item is told was clicked - kept here too,
+        // so the item's payload names only which item.
+        extParams: { pageUrl: tab.url, frameUrl: params.frameURL || tab.url, linkUrl: params.linkURL || undefined,
+          srcUrl: params.srcURL || undefined, selectionText: params.selectionText || undefined,
+          mediaType: params.mediaType && params.mediaType !== 'none' ? params.mediaType : undefined,
+          editable: Boolean(params.isEditable) }
       };
+      // Extensions' own items (a Lab), after the browser's.
+      if (extensions && !INCOGNITO && !tab.internal && prefs.get('labExtensions') === true) {
+        const extra = extensions.menuItemsFor(params, tab.url);
+        if (extra.length) {
+          context.model.items.push({ kind: 'separator' }, ...extra.map((m) => ({
+            id: 'extension-menu-click', label: m.label, icon: 'puzzle', enabled: m.enabled,
+            payload: { ext: m.extId, menu: m.menuId }
+          })));
+        }
+      }
 
       // The hit test is in page coordinates and the sheet is window-sized, so
       // the menu is placed where the content area starts. `right` is the same
@@ -1368,7 +1384,29 @@ function main() {
     if (!INCOGNITO) {
       extensions = new Extensions(OFFLINE_MODE && !process.env.DEBROWSER_EXT_DIR
         ? path.join(app.getPath('temp'), `debrowser-ext-${process.pid}`)
-        : process.env.DEBROWSER_EXT_DIR || path.join(app.getPath('userData'), 'extensions'), log);
+        : process.env.DEBROWSER_EXT_DIR || path.join(app.getPath('userData'), 'extensions'), log, {
+        // What an extension may ask of the browser through the bridge.
+        openTab: (url, active) => {
+          if (!/^(https?|chrome-extension):/i.test(url)) throw new Error('only web pages and the extension’s own');
+          const tab = tabs.create({ url, activate: active, realise: true });
+          publish();
+          return { id: tab.wc && !tab.wc.isDestroyed() ? tab.wc.id : -1, url, active };
+        },
+        closeTabs: (ids) => {
+          for (const t of tabs.all()) if (t.wc && !t.wc.isDestroyed() && ids.includes(t.wc.id)) tabs.close(t.id);
+          publish();
+        },
+        notify: ({ title, message, iconPath }, onClick) => {
+          const { Notification } = require('electron');
+          if (!Notification.isSupported()) return;
+          const n = new Notification({ title: String(title).slice(0, 200), body: String(message).slice(0, 500),
+            ...(iconPath && fs.existsSync(iconPath) ? { icon: iconPath } : {}) });
+          n.on('click', onClick);
+          n.show();
+        }
+      });
+      pages.setBridge((token, op, args) => (prefs.get('labExtensions') === true
+        ? extensions.bridge(token, op, args) : Promise.reject(new Error('extensions are off'))));
       browsingSetup.push((ses) => {
         extensions.sessions.add(ses);
         if (prefs.get('labExtensions') === true) extensions.attach(ses).catch((e) => log(`extensions: ${e.message}`));
@@ -2961,6 +2999,19 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // A click anywhere else closes it, as a popup does.
         popup.on('blur', () => { if (!popup.isDestroyed() && !ext.keepPopupOpen) popup.destroy(); });
         popup.loadURL(`chrome-extension://${loaded}/${entry.popup}`).catch((e) => log(`extension popup: ${e.message}`));
+        break;
+      }
+
+      // An extension's own right-click item: the extension hears about it as
+      // chrome.contextMenus.onClicked, with what was under the pointer.
+      case 'extension-menu-click': {
+        const ext = getExtensions();
+        const here = tabs.activeTab();
+        if (!ext || !payload?.ext || payload.menu === undefined) break;
+        const info = { menuItemId: payload.menu, ...(context.model?.extParams || {}) };
+        const tabInfo = here && here.wc && !here.wc.isDestroyed()
+          ? { id: here.wc.id, url: here.url, title: here.title, active: true, windowId: 1, index: tabs.all().indexOf(here) } : undefined;
+        ext.dispatch(String(payload.ext), 'contextMenus.onClicked', [info, tabInfo]);
         break;
       }
 

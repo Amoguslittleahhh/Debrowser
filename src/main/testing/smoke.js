@@ -5466,7 +5466,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const installed = [];
     let installError = '';
     try {
-      for (const source of [path.join(fixtures, 'chrome-hello'), xpi, path.join(fixtures, 'firefox-mv3')]) {
+      for (const source of [path.join(fixtures, 'chrome-hello'), xpi, path.join(fixtures, 'firefox-mv3'),
+        path.join(fixtures, 'chrome-tools')]) {
         const added = ext.install(source);
         installed.push(added);
         const [r] = await ext.loadEverywhere(added.id);
@@ -5494,6 +5495,29 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     try { popupInfo = JSON.parse(popupSaid.replace(/^popup:/, '')); } catch { /* an error title */ }
     if (ext.popupWindow && !ext.popupWindow.isDestroyed()) ext.popupWindow.destroy();
     ext.keepPopupOpen = false;
+
+    // Through the bridge, from a background service worker: request rules
+    // (static, and one added while running) block; an alarm fires; a
+    // right-click item shows in Debrowser's menu and its click reaches the
+    // extension, which opens a tab.
+    const tools = installed.find((e) => e.name === 'Debrowser test: Chrome tools');
+    const fetched = (name) => page.wc.executeJavaScript(
+      `fetch('/${name}').then((r) => r.status, () => 'blocked')`).catch(() => 'error');
+    await waitFor(async () => (await fetched('debrowser-dnr-dynamic.txt')) === 'blocked', { timeoutMs: 8000 });
+    const blocked = { stat: await fetched('debrowser-dnr-static.txt'), dyn: await fetched('debrowser-dnr-dynamic.txt'),
+      fine: await fetched('idle.html') };
+    const tabWith = (frag) => tabs.all().find((t) => String(t.url || '').includes(frag));
+    const alarmed = await waitFor(() => Boolean(tabWith('#alarm-soon')), { timeoutMs: 10_000 });
+    await waitFor(() => ext.menuItemsFor({ selectionText: 'hi' }, page.url).length > 0, { timeoutMs: 5000 });
+    const menu = ext.menuItemsFor({ selectionText: 'hi' }, page.url);
+    context.model = { items: [], params: {}, extParams: { pageUrl: page.url, selectionText: 'hi' } };
+    if (tools && menu[0]) runCommand('extension-menu-click', { ext: tools.id, menu: menu[0].menuId });
+    const clicked = await waitFor(() => Boolean(tabWith('#clicked-hi')), { timeoutMs: 10_000 });
+    for (const t of [tabWith('#alarm-soon'), tabWith('#clicked-hi')]) if (t) tabs.close(t.id);
+    check('Labs: an extension’s request rules block, its alarm fires, and its right-click item shows and answers',
+      blocked.stat === 'blocked' && blocked.dyn === 'blocked' && blocked.fine === 200 && alarmed &&
+        menu.length === 1 && menu[0].label === 'Say “hi”' && clicked,
+      `requests ${JSON.stringify(blocked)}; alarm ${alarmed}; menu ${JSON.stringify(menu.map((m) => m.label))}; click ${clicked}`);
 
     for (const e of installed) ext.remove(e.id);
     page.wc.reload();

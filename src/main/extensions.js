@@ -18,9 +18,13 @@
  *    it runs. Firefox's MV3 background scripts, which Chrome has no place
  *    for, run as a service worker that loads them.
  *
- * What is still missing is said in Settings: an extension's context-menu
- * items are accepted but not shown, and a background service worker cannot
- * open a tab by itself.
+ *  - A bridge back to the browser (`bridge`, `dispatch`): right-click items
+ *    shown in Debrowser's menu, request rules run by extension-dnr.js,
+ *    notifications, and tabs opened and closed from anywhere, the background
+ *    included; events come back through a relay page of the extension's own.
+ *
+ * What is still missing is said in the changelog: an extension that watches
+ * requests in its own code (webRequest blocking) has nothing to watch.
  *
  * Installed copies live unpacked under `<userData>/extensions/<id>/`, and are
  * loaded into every ordinary browsing session at start (and when one is
@@ -35,6 +39,7 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
+const { DeclarativeNetRequest } = require('./extension-dnr');
 
 /**
  * The compatibility layer (extension-compat.js), put in front of the
@@ -48,7 +53,15 @@ const CONTEXT_FILE = 'debrowser-context.js';
 const WORKER_FILE = 'debrowser-worker.js';
 const BACKGROUND_FILE = 'debrowser-background.html';
 const COMPAT_SOURCE = () => fs.readFileSync(path.join(__dirname, 'extension-compat.js'), 'utf8');
-const contextSource = (tabId) => `globalThis.__debrowserActiveTab = ${Number.isInteger(tabId) ? tabId : 'null'};\n`;
+const RELAY_FILE = 'debrowser-relay.html';
+/**
+ * What the extension's own code is told: which tab is in front (for a popup)
+ * and the token its calls to Debrowser carry (extension-compat.js, the
+ * bridge). Only the extension's pages and worker load it; content scripts,
+ * which run beside web pages, never see the token.
+ */
+const contextSource = (tabId, token) => `globalThis.__debrowserActiveTab = ${Number.isInteger(tabId) ? tabId : 'null'};\n` +
+  `globalThis.__debrowserExt = ${JSON.stringify({ token: token || null })};\n`;
 /** Recorded beside each copy: where it came from, so the list can say so. */
 const META_FILE = 'debrowser-meta.json';
 
@@ -156,8 +169,8 @@ function adaptManifest(manifest) {
   if (bg && bg.service_worker) {
     // A module worker cannot importScripts; it imports instead, the layer first.
     worker = bg.type === 'module'
-      ? `import ${quote(COMPAT_FILE)};\nimport ${quote(bg.service_worker)};\n`
-      : `importScripts(${[COMPAT_FILE, bg.service_worker].map(quote).join(', ')});\n`;
+      ? `import ${quote(CONTEXT_FILE)};\nimport ${quote(COMPAT_FILE)};\nimport ${quote(bg.service_worker)};\n`
+      : `importScripts(${[CONTEXT_FILE, COMPAT_FILE, bg.service_worker].map(quote).join(', ')});\n`;
     out.background = { ...bg, service_worker: WORKER_FILE };
   } else if (bg && bg.page) {
     background = String(bg.page).replace(/^\/+/, '');
@@ -274,10 +287,163 @@ class Extensions {
    * @param {string} root - `<userData>/extensions`
    * @param {(msg: string) => void} [log]
    */
-  constructor(root, log = () => {}) {
+  /**
+   * @param {string} root - `<userData>/extensions`
+   * @param {(msg: string) => void} [log]
+   * @param {object} [hooks] - what the bridge asks of the browser:
+   *   openTab(url, active) -> {id, url}, closeTabs(ids), notify({title, message, iconPath}, onClick),
+   *   menusChanged()
+   */
+  constructor(root, log = () => {}, hooks = {}) {
     this.root = root;
     this.log = log;
+    this.hooks = hooks;
     this.sessions = new Set();
+    // Each extension's right-click menu items, as it declared them.
+    this.menus = new Map();
+    this.dnr = new DeclarativeNetRequest({ log });
+  }
+
+  /* -- The bridge: calls from an extension's own code (extension-compat.js). -- */
+
+  /**
+   * One call, from an extension known by its token. The answer is what the
+   * extension's promise resolves to.
+   */
+  async bridge(token, op, args) {
+    const ext = token && this.list().find((e) => e.token === token);
+    if (!ext) throw new Error('unknown extension');
+    const a = args || {};
+    const menus = () => {
+      if (!this.menus.has(ext.id)) this.menus.set(ext.id, new Map());
+      return this.menus.get(ext.id);
+    };
+    const changed = () => { if (this.hooks.menusChanged) this.hooks.menusChanged(); };
+    const rules = () => this.dnr.forExtension(ext);
+    switch (op) {
+      case 'menus.create': {
+        const id = String(a.id ?? `${ext.id}-${menus().size + 1}`);
+        menus().set(id, { ...a, id });
+        changed();
+        return id;
+      }
+      case 'menus.update': {
+        const had = menus().get(String(a.id));
+        if (had) menus().set(String(a.id), { ...had, ...(a.props || {}) });
+        changed();
+        return undefined;
+      }
+      case 'menus.remove': menus().delete(String(a.id)); changed(); return undefined;
+      case 'menus.removeAll': menus().clear(); changed(); return undefined;
+      case 'tabs.create': {
+        if (!this.hooks.openTab) throw new Error('tabs can’t be opened from here');
+        return this.hooks.openTab(String(a.url || 'about:blank'), a.active !== false);
+      }
+      case 'tabs.remove': {
+        if (this.hooks.closeTabs) this.hooks.closeTabs([].concat(a.ids || []));
+        return undefined;
+      }
+      case 'notifications.create': {
+        const id = String(a.id || `${ext.id}-n${Date.now()}`);
+        if (this.hooks.notify) {
+          const icon = a.options && a.options.iconUrl && !/^[a-z]+:/i.test(a.options.iconUrl)
+            ? path.join(ext.dir, String(a.options.iconUrl).replace(/^\/+/, '')) : null;
+          this.hooks.notify({ title: a.options?.title || ext.name, message: a.options?.message || '', iconPath: icon },
+            () => this.dispatch(ext.id, 'notifications.onClicked', [id]));
+        }
+        return id;
+      }
+      case 'dnr.updateDynamicRules': rules().updateDynamicRules(a); return undefined;
+      case 'dnr.getDynamicRules': return rules().getRules(rules().dynamic, a);
+      case 'dnr.updateSessionRules': rules().updateSessionRules(a); return undefined;
+      case 'dnr.getSessionRules': return rules().getRules(rules().session, a);
+      case 'dnr.updateEnabledRulesets': rules().updateEnabledRulesets(a); return undefined;
+      case 'dnr.getEnabledRulesets': return [...rules().enabled];
+      case 'dnr.updateStaticRules': rules().updateStaticRules(a); return undefined;
+      case 'dnr.getDisabledRuleIds': return rules().getDisabledRuleIds(a);
+      case 'dnr.getAvailableStaticRuleCount': return Math.max(0, 330000 - rules().size);
+      default: throw new Error(`${op} isn’t available in Debrowser yet`);
+    }
+  }
+
+  /**
+   * An event for an extension - a menu item clicked, a notification clicked -
+   * delivered to its background and pages as a runtime message from a small
+   * off-screen page of its own (`debrowser-relay.html`), which the layer turns
+   * back into the event. The relay goes after a minute of nothing to say.
+   */
+  dispatch(extId, eventName, args) {
+    const ext = this.list().find((e) => e.id === extId);
+    if (!ext) return;
+    for (const ses of this.sessions) {
+      const loaded = this.loadedId(ses, extId);
+      if (!loaded) continue;
+      const relay = this.ensureRelay(ses, ext, loaded);
+      const message = JSON.stringify({ __debrowserEvent: eventName, args: args || [] });
+      relay.ready.then(() => {
+        if (relay.view.webContents.isDestroyed()) return;
+        relay.view.webContents.executeJavaScript(
+          `chrome.runtime.sendMessage(${message}).catch(() => {}); globalThis.__debrowserFire && globalThis.__debrowserFire(${message});`)
+          .catch(() => {});
+      });
+    }
+  }
+
+  /**
+   * The relay page for an extension in a session. Kept while the extension
+   * has a service worker - it carries the worker's calls to the browser -
+   * and otherwise closed after a minute with nothing to say.
+   */
+  ensureRelay(ses, ext, loaded) {
+    const relays = (ses.__debrowserRelay ||= new Map());
+    let relay = relays.get(ext.id);
+    if (!relay || relay.view.webContents.isDestroyed()) {
+      const { WebContentsView } = require('electron');
+      const view = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true } });
+      relay = { view, ready: view.webContents.loadURL(`chrome-extension://${loaded}/${RELAY_FILE}`).catch(() => {}) };
+      relays.set(ext.id, relay);
+    }
+    clearTimeout(relay.timer);
+    if (!ext.worker) {
+      relay.timer = setTimeout(() => {
+        try { relay.view.webContents.close(); } catch { /* gone */ }
+        relays.delete(ext.id);
+      }, 60_000);
+      relay.timer.unref?.();
+    }
+    return relay;
+  }
+
+  /**
+   * The menu items to show for a right-click: each extension's whose contexts
+   * fit what was clicked, with the selection put in where the title asks.
+   *
+   * @param {{selectionText?: string, linkURL?: string, srcURL?: string, mediaType?: string, isEditable?: boolean}} params
+   */
+  menuItemsFor(params, pageUrl) {
+    const kinds = new Set(['all']);
+    if (params.selectionText) kinds.add('selection');
+    if (params.linkURL) kinds.add('link');
+    if (params.isEditable) kinds.add('editable');
+    if (params.srcURL && params.mediaType === 'image') kinds.add('image');
+    if (params.srcURL && params.mediaType === 'video') kinds.add('video');
+    if (params.srcURL && params.mediaType === 'audio') kinds.add('audio');
+    // "page" only when nothing more particular is under the pointer, as in Chrome.
+    if (kinds.size === 1) kinds.add('page');
+    const out = [];
+    const pattern = (p) => new RegExp(`^${String(p).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+    for (const ext of this.list()) {
+      for (const item of (this.menus.get(ext.id) || new Map()).values()) {
+        if (item.visible === false || item.type === 'separator' || item.parentId !== undefined) continue;
+        const contexts = item.contexts || ['page'];
+        if (!contexts.some((c) => kinds.has(c))) continue;
+        if (Array.isArray(item.documentUrlPatterns) && !item.documentUrlPatterns.some((p) => pattern(p).test(pageUrl))) continue;
+        const sel = String(params.selectionText || '').slice(0, 40);
+        out.push({ extId: ext.id, menuId: item.id, enabled: item.enabled !== false,
+          label: String(item.title || ext.name).replace(/%s/g, sel) });
+      }
+    }
+    return out;
   }
 
   /** The installed copies, newest first, as Settings lists them. Read once, until one changes. */
@@ -295,7 +461,9 @@ class Extensions {
         out.push({
           id, dir, name: displayName(dir, manifest), version: String(manifest.version || ''),
           from: meta.from || 'chrome', addedAt: meta.addedAt || 0, manifestVersion: manifest.manifest_version || 2,
-          popup: popupOf(manifest), background: meta.background || null
+          popup: popupOf(manifest), background: meta.background || null, token: meta.token || null,
+          rules: Boolean(manifest.declarative_net_request),
+          worker: Boolean(manifest.background && manifest.background.service_worker)
         });
       } catch { /* a half-written folder: not listed, not loaded */ }
     }
@@ -346,12 +514,17 @@ class Extensions {
         : /\.html?$/i.test(f.name) ? adaptPage(f.data.toString('utf8')) : f.data);
     }
     fs.writeFileSync(path.join(temp, COMPAT_FILE), COMPAT_SOURCE());
-    fs.writeFileSync(path.join(temp, CONTEXT_FILE), contextSource(null));
+    // Kept across reinstalls, so a page open on the old copy keeps working.
+    let token = null;
+    try { token = JSON.parse(fs.readFileSync(path.join(dir, META_FILE), 'utf8')).token; } catch { /* new */ }
+    token = token || crypto.randomBytes(24).toString('hex');
+    fs.writeFileSync(path.join(temp, CONTEXT_FILE), contextSource(null, token));
+    fs.writeFileSync(path.join(temp, RELAY_FILE), adaptPage('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>\n'));
     if (adapted.worker) fs.writeFileSync(path.join(temp, WORKER_FILE), adapted.worker);
     // Through adaptPage, so the layer and the context load first, as on every page.
     if (adapted.backgroundHtml) fs.writeFileSync(path.join(temp, BACKGROUND_FILE), adaptPage(adapted.backgroundHtml));
     fs.writeFileSync(path.join(temp, META_FILE), JSON.stringify({ from, addedAt: Date.now(), source: path.basename(source),
-      background: adapted.background }));
+      background: adapted.background, token }));
     this.unloadEverywhere(id);
     fs.rmSync(dir, { recursive: true, force: true });
     fs.renameSync(temp, dir);
@@ -363,7 +536,7 @@ class Extensions {
   /** Tell an extension's pages which tab a popup is being opened over. */
   setActiveTab(id, tabId) {
     const ext = this.list().find((e) => e.id === id);
-    if (ext) fs.writeFileSync(path.join(ext.dir, CONTEXT_FILE), contextSource(tabId));
+    if (ext) fs.writeFileSync(path.join(ext.dir, CONTEXT_FILE), contextSource(tabId, ext.token));
   }
 
   /** The id Chromium gave an installed copy in a session, for chrome-extension:// addresses. */
@@ -401,6 +574,13 @@ class Extensions {
       const loaded = await api.loadExtension(ext.dir, { allowFileAccess: false });
       (ses.__debrowserExt ||= new Map()).set(ext.id, loaded.id);
       if (ext.background) this.hostBackground(ses, ext, loaded.id);
+      if (ext.worker) this.ensureRelay(ses, ext, loaded.id);
+      // Its request rules, run by Debrowser (extension-dnr.js).
+      if (ext.rules) {
+        this.dnr.forExtension(ext);
+        this.dnr.setOrigin(ext.id, `chrome-extension://${loaded.id}`);
+      }
+      this.dnr.attach(require('./web-hooks').WebHooks.for(ses));
       return { id: ext.id, ok: true };
     } catch (err) {
       this.log(`extensions: ${ext.name} did not load: ${err.message}`);
@@ -448,7 +628,15 @@ class Extensions {
   }
 
   unloadEverywhere(id) {
+    this.dnr.drop(id);
+    if (this.menus.delete(id) && this.hooks.menusChanged) this.hooks.menusChanged();
     for (const ses of this.sessions) {
+      const relay = ses.__debrowserRelay?.get(id);
+      if (relay) {
+        clearTimeout(relay.timer);
+        try { relay.view.webContents.close(); } catch { /* gone */ }
+        ses.__debrowserRelay.delete(id);
+      }
       const host = ses.__debrowserBg?.get(id);
       if (host) {
         try { host.webContents.close(); } catch { /* already gone */ }

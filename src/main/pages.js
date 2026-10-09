@@ -183,6 +183,9 @@ function serve(log = () => {}, partitions = []) {
     // told about. See icons.js - including the measurement showing that a
     // website can reach this handler, which is why there is an allowlist.
     if (url.hostname === 'icon') return icons.serve(request, log);
+    // Extensions' calls to the browser (extensions.js `bridge`), each carrying
+    // its extension's token: nothing is answered without a known one.
+    if (url.hostname === 'ext-bridge') return answerBridge(url);
     // The host names the page; the path names a file belonging to it, so
     // `debrowser://settings/settings.css` works without a second registration.
     // `hasOwn`, because a bare index reaches the prototype chain:
@@ -212,6 +215,23 @@ function serve(log = () => {}, partitions = []) {
       // Already registered on this session is harmless; anything else is not.
       log('pages', `could not register ${SCHEME}: ${err.message}`);
     }
+  }
+}
+
+/** The extensions store's bridge, set once extensions exist (main.js). */
+let bridge = null;
+function setBridge(fn) { bridge = fn; }
+
+async function answerBridge(url) {
+  const headers = { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
+  if (!bridge) return new Response(JSON.stringify({ error: 'extensions are off' }), { status: 503, headers });
+  let args = null;
+  try { args = JSON.parse(url.searchParams.get('a') || 'null'); } catch { /* none */ }
+  try {
+    const value = await bridge(url.searchParams.get('t'), String(url.searchParams.get('op') || ''), args);
+    return new Response(JSON.stringify({ value: value === undefined ? null : value }), { headers });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: String(err && err.message || err) }), { status: 400, headers });
   }
 }
 
@@ -253,6 +273,8 @@ function fromWebPage(details) {
   } catch {
     from = '';
   }
+  // An extension's own pages may reach the bridge, and nothing else of ours.
+  if (/^chrome-extension:/.test(from) && pageName(details.url) === 'ext-bridge') return false;
   return Boolean(from) && !/^(debrowser|file|devtools):/.test(from);
 }
 
@@ -294,5 +316,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
-  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor, fromWebPage
+  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor, fromWebPage, setBridge
 };

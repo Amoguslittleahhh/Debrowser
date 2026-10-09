@@ -591,7 +591,7 @@ const SECTIONS = {
     {
       key: 'labExtensions',
       label: 'Chrome and Firefox extensions',
-      hint: 'Add from the Chrome Web Store, Edge or Firefox Add-ons, or from a file; popups open from the puzzle button. Ad blockers load but can’t block here, so keep Debrowser’s own. Never in private windows.',
+      hint: 'Add from the Chrome Web Store, Edge or Firefox Add-ons, or from a file; popups open from the puzzle button. Never in private windows.',
       type: 'checkbox'
     }
   ],

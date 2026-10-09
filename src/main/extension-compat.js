@@ -32,15 +32,27 @@
 
   const extPage = typeof document !== 'undefined' && typeof location !== 'undefined' &&
     location.protocol === 'chrome-extension:';
-  const event = () => {
+  // Events this layer fires itself, by name ("contextMenus.onClicked"), from
+  // the browser (through the relay page, extensions.js `dispatch`) or from
+  // its own timers.
+  const named = new Map();
+  const event = (name) => {
     const ls = new Set();
-    return {
+    const ev = {
       addListener: (f) => { ls.add(f); },
       removeListener: (f) => { ls.delete(f); },
       hasListener: (f) => ls.has(f),
-      hasListeners: () => ls.size > 0
+      hasListeners: () => ls.size > 0,
+      fire: (...args) => { for (const f of [...ls]) { try { f(...args); } catch (e) { console.error(e); } } }
     };
+    if (name) named.set(name, ev);
+    return ev;
   };
+  const fire = (msg) => {
+    const ev = msg && named.get(msg.__debrowserEvent);
+    if (ev) ev.fire(...(msg.args || []));
+  };
+  g.__debrowserFire = fire;
   // Answer as a promise, or through the callback if one was given.
   const answer = (promise, cb) => {
     if (typeof cb === 'function') { promise.then(cb, () => cb()); return undefined; }
@@ -49,14 +61,86 @@
   // What could not be added in place - in a service worker the API objects
   // can refuse new keys - is served through a wrapper instead (below).
   const extra = new Map();
-  const define = (obj, key, value) => {
-    if (!obj || obj[key] !== undefined) return;
+  // `replace` for the few Electron has but does not run (alarms that never
+  // go off, request rules nobody enforces): ours, whatever is there.
+  const define = (obj, key, value, replace = false) => {
+    if (!obj || (obj[key] !== undefined && !replace)) return;
+    if (replace && obj[key] !== undefined) {
+      try { Object.defineProperty(obj, key, { value, configurable: true, writable: true }); } catch { /* below */ }
+      if (obj[key] === value) return;
+    }
     try { obj[key] = value; } catch { /* refused: wrapped below */ }
-    if (obj[key] === undefined) {
+    if (obj[key] !== value) {
       if (!extra.has(obj)) extra.set(obj, {});
       extra.get(obj)[key] = value;
     }
   };
+
+  /*
+   * The bridge to the browser: a call to debrowser://ext-bridge carrying this
+   * extension's token, which only its own pages and worker are given. Where
+   * there is no token - a content script - the calls that need it say so.
+   */
+  const token = g.__debrowserExt && g.__debrowserExt.token;
+  const fetchBridge = (op, args) => {
+    if (!token) return Promise.reject(new Error(`${op} isn’t available from here in Debrowser`));
+    const url = `debrowser://ext-bridge/?t=${encodeURIComponent(token)}&op=${encodeURIComponent(op)}` +
+      `&a=${encodeURIComponent(JSON.stringify(args === undefined ? null : args))}`;
+    return fetch(url).then((r) => r.json()).then((r) => {
+      if (r && r.error) throw new Error(r.error);
+      return r ? r.value : undefined;
+    });
+  };
+  // A service worker's requests never reach the browser's own scheme, so it
+  // asks the extension's relay page (debrowser-relay.html), which makes the
+  // call for it - retrying while the relay is still loading.
+  const isWorker = typeof document === 'undefined' && typeof importScripts === 'function';
+  const viaRelay = (op, args) => new Promise((resolve, reject) => {
+    let tries = 0;
+    const attempt = () => {
+      try {
+        c.runtime.sendMessage({ __debrowserCall: op, args }, (res) => {
+          const err = c.runtime.lastError;
+          if (err || res === undefined) {
+            if (++tries < 30) { setTimeout(attempt, 200); return; }
+            reject(new Error(err ? err.message : `${op} got no answer`));
+            return;
+          }
+          if (res && res.error) reject(new Error(res.error));
+          else resolve(res ? res.value : undefined);
+        });
+      } catch (e) { reject(e); }
+    };
+    attempt();
+  });
+  const call = isWorker ? viaRelay : fetchBridge;
+  const isRelay = typeof location !== 'undefined' && location.pathname === '/debrowser-relay.html';
+  // The browser's events arrive as runtime messages; the extension's own
+  // onMessage listeners never see them.
+  if (c.runtime && c.runtime.onMessage) {
+    const om = c.runtime.onMessage;
+    const addListener = om.addListener.bind(om);
+    const removeListener = om.removeListener.bind(om);
+    const inner = new WeakMap();
+    try {
+      om.addListener = (fn) => {
+        const f = (msg, ...rest) => (msg && (msg.__debrowserEvent || msg.__debrowserCall) ? undefined : fn(msg, ...rest));
+        inner.set(fn, f);
+        addListener(f);
+      };
+      om.removeListener = (fn) => removeListener(inner.get(fn) || fn);
+    } catch { /* read-only: the extension sees the event messages too */ }
+    addListener((msg, _sender, sendResponse) => {
+      if (msg && msg.__debrowserEvent) fire(msg);
+      // The relay page answers the worker's calls.
+      if (isRelay && msg && msg.__debrowserCall) {
+        fetchBridge(msg.__debrowserCall, msg.args)
+          .then((value) => sendResponse({ value }), (e) => sendResponse({ error: String(e && e.message || e) }));
+        return true;
+      }
+      return undefined;
+    });
+  }
 
   if (c.extension && c.runtime && c.runtime.getURL) define(c.extension, 'getURL', (p) => c.runtime.getURL(p));
 
@@ -79,19 +163,125 @@
     onCreated: event(), onRemoved: event(), onFocusChanged: event(), onBoundsChanged: event()
   });
 
-  let menuId = 0;
+  // Right-click menu items: shown in Debrowser's own menu, after its items.
+  let menuCount = 0;
+  const onclicks = new Map();
+  const menusClicked = event('contextMenus.onClicked');
+  menusClicked.addListener((info, tab) => {
+    const f = onclicks.get(String(info && info.menuItemId));
+    if (f) f(info, tab);
+  });
+  const plain = (props) => {
+    const out = {};
+    for (const [k, v] of Object.entries(props || {})) if (typeof v !== 'function') out[k] = v;
+    return out;
+  };
   define(c, 'contextMenus', {
     create: (props, cb) => {
-      if (typeof cb === 'function') setTimeout(cb, 0);
-      return (props && props.id) || ++menuId;
+      const id = props && props.id !== undefined ? props.id : `m${++menuCount}`;
+      if (props && typeof props.onclick === 'function') onclicks.set(String(id), props.onclick);
+      call('menus.create', { ...plain(props), id }).then(() => cb && cb(), () => cb && cb());
+      return id;
     },
-    update: (_id, _p, cb) => answer(Promise.resolve(), cb),
-    remove: (_id, cb) => answer(Promise.resolve(), cb),
-    removeAll: (cb) => answer(Promise.resolve(), cb),
-    onClicked: event(),
-    ContextType: {},
-    ItemType: {}
+    update: (id, props, cb) => {
+      if (props && typeof props.onclick === 'function') onclicks.set(String(id), props.onclick);
+      return answer(call('menus.update', { id, props: plain(props) }), cb);
+    },
+    remove: (id, cb) => { onclicks.delete(String(id)); return answer(call('menus.remove', { id }), cb); },
+    removeAll: (cb) => { onclicks.clear(); return answer(call('menus.removeAll', {}), cb); },
+    onClicked: menusClicked,
+    ContextType: {}, ItemType: {}
   });
+
+  // Alarms, on this page's own timers - for a service worker, while it runs.
+  const alarms = new Map();
+  const onAlarm = event('alarms.onAlarm');
+  define(c, 'alarms', {
+    create: (name, info, cb) => {
+      if (typeof name === 'object') { cb = info; info = name; name = ''; }
+      name = String(name || '');
+      info = info || {};
+      const had = alarms.get(name);
+      if (had) { clearTimeout(had.timer); clearInterval(had.repeat); }
+      const delay = info.when ? Math.max(0, info.when - Date.now())
+        : Math.max(0, (info.delayInMinutes ?? info.periodInMinutes ?? 0) * 60000);
+      const alarm = { name, scheduledTime: Date.now() + delay, periodInMinutes: info.periodInMinutes };
+      alarm.timer = setTimeout(() => {
+        onAlarm.fire({ name, scheduledTime: alarm.scheduledTime, periodInMinutes: alarm.periodInMinutes });
+        if (alarm.periodInMinutes) {
+          alarm.repeat = setInterval(() => {
+            alarm.scheduledTime = Date.now();
+            onAlarm.fire({ name, scheduledTime: alarm.scheduledTime, periodInMinutes: alarm.periodInMinutes });
+          }, alarm.periodInMinutes * 60000);
+        } else {
+          alarms.delete(name);
+        }
+      }, delay);
+      alarms.set(name, alarm);
+      return answer(Promise.resolve(), cb);
+    },
+    get: (name, cb) => {
+      if (typeof name === 'function') { cb = name; name = ''; }
+      const a = alarms.get(String(name || ''));
+      return answer(Promise.resolve(a ? { name: a.name, scheduledTime: a.scheduledTime, periodInMinutes: a.periodInMinutes } : undefined), cb);
+    },
+    getAll: (cb) => answer(Promise.resolve([...alarms.values()].map((a) =>
+      ({ name: a.name, scheduledTime: a.scheduledTime, periodInMinutes: a.periodInMinutes }))), cb),
+    clear: (name, cb) => {
+      if (typeof name === 'function') { cb = name; name = ''; }
+      const a = alarms.get(String(name || ''));
+      if (a) { clearTimeout(a.timer); clearInterval(a.repeat); alarms.delete(a.name); }
+      return answer(Promise.resolve(Boolean(a)), cb);
+    },
+    clearAll: (cb) => {
+      for (const a of alarms.values()) { clearTimeout(a.timer); clearInterval(a.repeat); }
+      alarms.clear();
+      return answer(Promise.resolve(true), cb);
+    },
+    onAlarm
+  }, true);
+
+  // Notifications: the system's own, shown by the browser.
+  define(c, 'notifications', {
+    create: (id, options, cb) => {
+      if (typeof id === 'object') { cb = options; options = id; id = undefined; }
+      return answer(call('notifications.create', { id, options }), cb);
+    },
+    clear: (_id, cb) => answer(Promise.resolve(true), cb),
+    update: (_id, _o, cb) => answer(Promise.resolve(false), cb),
+    getAll: (cb) => answer(Promise.resolve({}), cb),
+    getPermissionLevel: (cb) => answer(Promise.resolve('granted'), cb),
+    onClicked: event('notifications.onClicked'), onClosed: event('notifications.onClosed'),
+    onButtonClicked: event('notifications.onButtonClicked'), TemplateType: { BASIC: 'basic', IMAGE: 'image', LIST: 'list', PROGRESS: 'progress' }
+  });
+
+  // Request rules: run by Debrowser (extension-dnr.js).
+  const dnr = (op) => (arg, cb) => answer(call(`dnr.${op}`, typeof arg === 'function' ? {} : (arg || {})),
+    typeof arg === 'function' ? arg : cb);
+  define(c, 'declarativeNetRequest', {
+    updateDynamicRules: dnr('updateDynamicRules'), getDynamicRules: dnr('getDynamicRules'),
+    updateSessionRules: dnr('updateSessionRules'), getSessionRules: dnr('getSessionRules'),
+    updateEnabledRulesets: dnr('updateEnabledRulesets'), getEnabledRulesets: dnr('getEnabledRulesets'),
+    updateStaticRules: dnr('updateStaticRules'), getDisabledRuleIds: dnr('getDisabledRuleIds'),
+    getAvailableStaticRuleCount: dnr('getAvailableStaticRuleCount'),
+    isRegexSupported: (o, cb) => {
+      let ok = true;
+      try { new RegExp(o && o.regex); } catch { ok = false; }
+      return answer(Promise.resolve(ok ? { isSupported: true } : { isSupported: false, reason: 'syntaxError' }), cb);
+    },
+    getMatchedRules: (_f, cb) => answer(Promise.resolve({ rulesMatchedInfo: [] }), typeof _f === 'function' ? _f : cb),
+    testMatchOutcome: (_r, cb) => answer(Promise.resolve({ matchedRules: [] }), cb),
+    setExtensionActionOptions: (_o, cb) => answer(Promise.resolve(), cb),
+    onRuleMatchedDebug: event(),
+    MAX_NUMBER_OF_REGEX_RULES: 1000, MAX_NUMBER_OF_DYNAMIC_RULES: 30000, MAX_NUMBER_OF_SESSION_RULES: 5000,
+    MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES: 5000, MAX_NUMBER_OF_UNSAFE_SESSION_RULES: 5000,
+    MAX_NUMBER_OF_ENABLED_STATIC_RULESETS: 50, MAX_NUMBER_OF_STATIC_RULESETS: 100,
+    GUARANTEED_MINIMUM_STATIC_RULES: 30000, DYNAMIC_RULESET_ID: '_dynamic', SESSION_RULESET_ID: '_session',
+    RuleActionType: { BLOCK: 'block', REDIRECT: 'redirect', ALLOW: 'allow', UPGRADE_SCHEME: 'upgradeScheme',
+      MODIFY_HEADERS: 'modifyHeaders', ALLOW_ALL_REQUESTS: 'allowAllRequests' },
+    ResourceType: {}, RequestMethod: {}, DomainType: { FIRST_PARTY: 'firstParty', THIRD_PARTY: 'thirdParty' },
+    HeaderOperation: { APPEND: 'append', SET: 'set', REMOVE: 'remove' }
+  }, true);
 
   // Permissions: everything the manifest asked for is granted at install, as
   // Chrome does for an extension from its store; optional ones are granted on
@@ -112,23 +302,20 @@
   if (c.browserAction && !c.action) define(c, 'action', c.browserAction);
 
   if (c.tabs) {
+    // Opened and closed by the browser, from anywhere the extension runs -
+    // its background included, which has no window.open.
     define(c.tabs, 'create', (props, cb) => {
       const base = typeof location !== 'undefined' ? location.href : undefined;
       const url = props && props.url ? new URL(props.url, base).href : 'about:blank';
-      let p;
-      if (typeof g.open === 'function') {
-        g.open(url, '_blank');
-        p = Promise.resolve({ id: -1, url, active: !(props && props.active === false), windowId: 1 });
-      } else if (g.clients && g.clients.openWindow) {
-        p = g.clients.openWindow(url).then(() => ({ id: -1, url, windowId: 1 }));
-      } else {
-        p = Promise.reject(new Error('tabs.create isn’t available here in Debrowser yet'));
-      }
+      const viaBridge = call('tabs.create', { url, active: !(props && props.active === false) })
+        .then((t) => ({ ...t, windowId: 1, index: 0, pinned: false, highlighted: Boolean(t && t.active), incognito: false }));
+      const p = token ? viaBridge : typeof g.open === 'function'
+        ? Promise.resolve(g.open(url, '_blank')).then(() => ({ id: -1, url, windowId: 1 }))
+        : viaBridge;
       return answer(p, cb);
     });
     define(c.tabs, 'getCurrent', (cb) => answer(Promise.resolve(undefined), cb));
-    define(c.tabs, 'remove', (_ids, cb) =>
-      answer(Promise.reject(new Error('tabs.remove isn’t available in Debrowser yet')), cb));
+    define(c.tabs, 'remove', (ids, cb) => answer(call('tabs.remove', { ids: [].concat(ids) }), cb));
 
     // From the extension's own pages - its popup, and the background page
     // Debrowser hosts - "the active tab" is the page in front, which Debrowser
@@ -161,9 +348,8 @@
    * stopping at the first missing name. Only these names, so a check for
    * something that is not an extension API at all still finds nothing.
    */
-  const NAMESPACES = ['alarms', 'bookmarks', 'browsingData', 'commands', 'contentSettings', 'cookies',
-    'declarativeContent', 'declarativeNetRequest', 'downloads', 'fontSettings', 'history', 'identity', 'idle',
-    'notifications', 'offscreen', 'omnibox', 'pageCapture', 'power', 'privacy', 'proxy', 'search', 'sessions',
+  const NAMESPACES = ['bookmarks', 'browsingData', 'commands', 'contentSettings', 'cookies',
+    'declarativeContent', 'downloads', 'fontSettings', 'history', 'identity', 'idle', 'offscreen', 'omnibox', 'pageCapture', 'power', 'privacy', 'proxy', 'search', 'sessions',
     'sidePanel', 'tabGroups', 'topSites', 'tts', 'userScripts', 'webNavigation', 'webRequest'];
   const standIns = new Map();
   const standIn = (name) => {
@@ -173,7 +359,7 @@
         get(_t, key) {
           if (typeof key !== 'string' || key === 'then') return undefined;
           if (!members.has(key)) {
-            members.set(key, /^on[A-Z]/.test(key) ? event()
+            members.set(key, /^on[A-Z]/.test(key) ? event(`${name}.${key}`)
               : /^[A-Z_]+$/.test(key) ? {}
                 : (...args) => answer(Promise.resolve(undefined), args.find((a) => typeof a === 'function')));
           }
@@ -191,9 +377,9 @@
   {
     const cover = (obj, top) => new Proxy(obj, {
       get: (t, p) => {
+        if (extra.has(t) && p in extra.get(t)) return extra.get(t)[p];
         const v = t[p];
         if (v !== undefined) return v && typeof v === 'object' && extra.has(v) ? cover(v, false) : v;
-        if (extra.has(t) && p in extra.get(t)) return extra.get(t)[p];
         if (top && NAMESPACES.includes(p)) return standIn(p);
         return undefined;
       },
