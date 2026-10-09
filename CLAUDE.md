@@ -23,6 +23,21 @@ and are worth knowing rather than rediscovering:
   after the one that introduced it. If "Keep my email addresses private" is ever
   switched on for this account, pushes carrying it are rejected with `GH007`.
 
+## The new tab page layout is frozen
+
+The owner has said the new tab page must never change: the mark and
+"debrowser" wordmark above the search field, the field with its "Enter ↵"
+hint, the most-used sites row when there are any, and the "Continue with these
+tabs" card - kept even when empty, saying "The pages you visit will be here to
+come back to." with See more under it.
+
+Do not edit `src/renderer/newtab.html`, `newtab.css` or `newtab.js` - not for a
+redesign, a wording pass, a greeting, or a cleanup - unless the owner asks for
+that specific change to the new tab page in so many words. A broader request
+("make it feel human", "improve the design") does not cover it. Shared files
+the page loads (`theme.css`, `theme.js`) may change only in ways that leave
+this page looking the same.
+
 ## Releases
 
 Release only when the owner says to. Fixes, however urgent, go under

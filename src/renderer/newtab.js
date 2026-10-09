@@ -45,52 +45,24 @@ window.addEventListener('DOMContentLoaded', () => {
 const tiles = document.getElementById('tiles');
 
 /**
- * Hello, by the time of day, and today's date under it. Refreshed when the
- * page comes back into view, so a tab left open overnight does not say good
- * evening at breakfast.
- */
-function greet() {
-  const now = new Date();
-  const h = now.getHours();
-  document.getElementById('greeting').textContent =
-    h < 5 ? 'Still up?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-  document.getElementById('today').textContent =
-    now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-}
-greet();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) greet(); });
-
-/**
  * What a favourite is called under its mark: the site, not its address.
  *
- * "github" rather than "github.com", and "ycombinator" rather than
- * "news.ycombinator", which wrapped onto two lines at the dot. The part in
- * front stays where the whole name fits on one line ("mail.google"), or
- * where two favourites would otherwise share a name, because two tiles
- * reading the same word are worse than one long one. Legacy keeps its hostnames: its tiles are a
- * list, with the room for them.
+ * "github" rather than "github.com", "mail.google" rather than a truncated
+ * "mail.google.…" - the ending is the same on nearly every tile and says
+ * nothing. A break is allowed after each dot, so a long name wraps onto its
+ * second line at a sensible place instead of being cut. Legacy keeps its
+ * hostnames: its tiles are a list, with the room for them.
  */
-function favouriteParts(host) {
-  if (document.body.dataset.design === 'legacy' || !/\./.test(host) || /^[\d.]+$/.test(host)) return [host];
+function favouriteName(host) {
+  if (document.body.dataset.design === 'legacy' || !/\./.test(host) || /^[\d.]+$/.test(host)) return host;
   const parts = host.split('.');
   parts.pop();
   // A second-level ending - .co.uk, .com.au - goes too.
   if (parts.length > 1 && /^(co|com|org|net|ac|gov|edu)$/.test(parts[parts.length - 1])) parts.pop();
-  return parts;
+  return parts.join('.\u200b');
 }
 
-function favouriteName(host, clashes) {
-  const parts = favouriteParts(host);
-  const short = parts[parts.length - 1];
-  const whole = parts.join('.');
-  // "mail.google" fits on one line and says which Google; "en.wikipedia"
-  // only says which language, and "news.ycombinator" wraps.
-  const plain = parts.length === 1 || /^[a-z]{2}$/.test(parts[0]) ? short
-    : whole.length <= 12 ? whole : short;
-  return clashes.has(plain) && plain !== whole ? parts.join('.\u200b') : plain;
-}
-
-function tile(item, clashes) {
+function tile(item) {
   const host = siteOf(item.url);
 
   const root = document.createElement('div');
@@ -110,7 +82,7 @@ function tile(item, clashes) {
   // four tiles all reading "127.0.0.1" said otherwise.
   let port = '';
   try { port = new URL(item.url).port; } catch { /* no URL, no port */ }
-  label.textContent = port ? `${host}:${port}` : favouriteName(host, clashes);
+  label.textContent = port ? `${host}:${port}` : favouriteName(host);
 
   open.append(chip, label);
   open.addEventListener('click', (event) => {
@@ -154,14 +126,7 @@ async function loadTiles() {
   tiles.hidden = items.length === 0;
   if (!items.length) return;
   const frag = document.createDocumentFragment();
-  // Short names that more than one favourite would be called.
-  const count = new Map();
-  for (const item of items) {
-    const name = favouriteName(siteOf(item.url), new Set());
-    count.set(name, (count.get(name) || 0) + 1);
-  }
-  const clashes = new Set([...count].filter(([, n]) => n > 1).map(([name]) => name));
-  for (const item of items) frag.append(tile(item, clashes));
+  for (const item of items) frag.append(tile(item));
   tiles.replaceChildren(frag);
 }
 
@@ -250,14 +215,21 @@ function continueRow(item) {
 async function loadContinue() {
   const res = await api.request('recent-pages', { limit: 4 });
   const items = (res && res.items) || [];
-  // On, and with something to continue: with nothing, the page is the plain
-  // one - an empty card with a note in it was a box for its own sake.
-  card.hidden = !(res && res.shown) || items.length === 0;
+  // Shown whenever it is on, empty or not, so the page has one layout whether
+  // or not there is anything to continue (main.js `recent-pages`).
+  card.hidden = !(res && res.shown);
   // The card is the page's second half when it has something to show; the
   // favourites stand aside for it rather than stacking a third block between
   // the field and the pages you were reading.
   document.body.classList.toggle('with-continue', !card.hidden);
-  cardList.replaceChildren(...items.map(continueRow));
+  if (items.length) {
+    cardList.replaceChildren(...items.map(continueRow));
+  } else {
+    const empty = document.createElement('p');
+    empty.className = 'continue-empty';
+    empty.textContent = 'The pages you visit will be here to come back to.';
+    cardList.replaceChildren(empty);
+  }
   fitCard();
 }
 
@@ -319,14 +291,22 @@ api.onState((state) => {
     : open === 1 ? `${size(state.totalMB)} in 1 tab`
     : `${size(state.totalMB)} in ${open} tabs, about ${size(state.totalMB / open)} each`;
 
-  // Today's receipt, once there is something on it: one plain sentence about
-  // memory, which is what this browser is for. A run of figures in bold with
-  // the tracker count tacked on read as a dashboard widget.
+  // Today's receipt, once there is something on it.
   const r = state.receipt;
-  const line = r && r.freedMB >= 1 ? `Sleeping tabs gave back ${size(r.freedMB)} today`
-    : r && r.slept ? `${r.slept.toLocaleString()} ${r.slept === 1 ? 'tab' : 'tabs'} slept today`
-    : '';
-  receipt.hidden = !line;
-  receipt.textContent = line;
+  const parts = [];
+  if (r && r.freedMB >= 1) parts.push([size(r.freedMB), 'freed']);
+  if (r && r.slept) parts.push([r.slept.toLocaleString(), r.slept === 1 ? 'tab slept' : 'tabs slept']);
+  if (r && r.blocked) parts.push([r.blocked.toLocaleString(), r.blocked === 1 ? 'tracker blocked' : 'trackers blocked']);
+  receipt.hidden = !parts.length;
+  if (parts.length) {
+    const nodes = ['Today: '];
+    parts.forEach(([n, what], i) => {
+      if (i) nodes.push(' · ');
+      const b = document.createElement('b');
+      b.textContent = n;
+      nodes.push(b, ` ${what}`);
+    });
+    receipt.replaceChildren(...nodes);
+  }
 });
 
