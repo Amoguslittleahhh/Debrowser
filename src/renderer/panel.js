@@ -75,10 +75,10 @@ function coverageNote(state) {
 }
 
 const PRESSURE_TEXT = {
-  none: 'Under budget. Tabs you are not using are put to sleep as they go quiet.',
-  moderate: 'Approaching budget. Idle tabs are being trimmed sooner.',
-  high: 'Over budget. Idle tabs are being frozen and may be discarded.',
-  critical: 'Well over budget. Reclaiming aggressively from the least-used tabs.'
+  none: 'Under budget.',
+  moderate: 'Near the budget. Quiet tabs sleep sooner.',
+  high: 'Over budget. Quiet tabs are frozen, and may be closed to free memory.',
+  critical: 'Well over budget. Freeing memory from the tabs used least.'
 };
 
 function render(state) {

@@ -46,29 +46,31 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 .ghost:active { transform: var(--press); }
 .ghost .x-icon { width: 14px; height: 14px; }
 
+/*
+ * Three figures in a row, set as type: the total large, the other two at body
+ * size, each with its word under it, divided by hairlines. They were three
+ * bordered cards of equal weight - the stat-tile grid every generated
+ * dashboard opens with - which gave "Live tabs: 6" the same billing as the
+ * memory the panel exists to show.
+ */
 .summary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 0 14px 10px;
+  display: flex;
+  align-items: flex-end;
+  padding: 2px 14px 12px;
 }
 
 .stat {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  /* `min-width: 0` so a long label can be clipped rather than forcing its
-     track wider. The tiles are already equal thirds - `.summary` is a grid -
-     and what made the first one look wrong was its label wrapping to two lines
-     and standing the tile taller than the two beside it. */
   min-width: 0;
-  padding: 8px 10px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 0 14px;
+  border-left: 1px solid var(--border-soft);
 }
+.stat:first-child { padding-left: 0; border-left: 0; flex: 1; }
 
-.stat-value { font-size: var(--fs-lead); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+.stat-value { font-size: var(--fs-body); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.stat:first-child .stat-value { font-size: 26px; font-weight: var(--fw-bold); letter-spacing: -0.01em; line-height: 1.1; }
 .stat-label {
   font-size: var(--fs-small);
   color: var(--text-dim);
@@ -95,17 +97,15 @@ h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-s
 }
 .budget-row output { font-variant-numeric: tabular-nums; min-width: 54px; text-align: right; }
 
+/* A sentence, not a callout box: it is usually "under budget", which needs no
+   frame round it. It takes a colour only when there is something to say. */
 .pressure {
   margin: 0 14px 10px;
-  padding: 6px 9px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
   color: var(--text-dim);
   font-size: var(--fs-small);
 }
-.pressure[data-pressure="high"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
-.pressure[data-pressure="critical"] { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--border)); }
+.pressure[data-pressure="high"] { color: var(--warn); }
+.pressure[data-pressure="critical"] { color: var(--crit); }
 
 .tabs {
   flex: 1;

@@ -176,9 +176,9 @@
    * theme swaps the numbers, and the six near-identical blocks that used to
    * exist in four stylesheets are gone.
    */
-  --chip-fg-s: 34%;
+  --chip-fg-s: 12%;
   --chip-fg-l: 70%;
-  --chip-bg-s: 22%;
+  --chip-bg-s: 7%;
   --chip-bg-l: 24%;
 
   /* Tighter than they were. A 13px radius on a 34px control is most of the way
@@ -248,9 +248,9 @@
     --border-soft: #e9e5db;
     --text: #201f1c;
     --text-dim: #6b6559;
-    --chip-fg-s: 34%;
+    --chip-fg-s: 12%;
     --chip-fg-l: 32%;
-    --chip-bg-s: 30%;
+    --chip-bg-s: 9%;
     --chip-bg-l: 90%;
   }
 }
@@ -268,9 +268,9 @@ body[data-theme="light"] {
   --border-soft: #e9e5db;
   --text: #201f1c;
   --text-dim: #6b6559;
-  --chip-fg-s: 34%;
+  --chip-fg-s: 12%;
   --chip-fg-l: 32%;
-  --chip-bg-s: 30%;
+  --chip-bg-s: 9%;
   --chip-bg-l: 90%;
 }
 
@@ -283,9 +283,9 @@ body[data-theme="dark"] {
   --border-soft: #24241f;
   --text: #eae7e0;
   --text-dim: #9b978e;
-  --chip-fg-s: 34%;
+  --chip-fg-s: 12%;
   --chip-fg-l: 70%;
-  --chip-bg-s: 22%;
+  --chip-bg-s: 7%;
   --chip-bg-l: 24%;
 }
 

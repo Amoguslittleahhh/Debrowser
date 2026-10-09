@@ -447,20 +447,27 @@ body:not([data-layout="left"]) .tab.pinned .tier,
  * tabs between resource states, so it says so rather than doing it invisibly:
  * the user can always see which tabs are asleep and why one took a moment to
  * come back.
+ *
+ * Only asleep is marked. A dot in a different colour on every tab - green,
+ * paler green, grey - put a status light in front of each title for states
+ * that change nothing you see, and read as a debug view rather than a tab
+ * strip. Awake, the dot's place stays (so nothing moves when a tab falls
+ * asleep) and is empty; asleep, it is the accent, and the title quietens.
  */
 .tier {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--ok);
+  background: transparent;
 }
 
-.tier[data-tier="warm"]      { background: var(--ok); opacity: 0.7; }
-.tier[data-tier="cold"]      { background: var(--text-dim); opacity: 0.6; }
 .tier[data-tier="frozen"]    { background: var(--accent); }
 .tier[data-tier="hibernated"] { background: var(--accent); opacity: 0.55; }
-.tier[data-tier="discarded"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-dim); opacity: 0.6; }
+.tier[data-tier="discarded"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-dim); opacity: 0.7; }
+.tab:has(.tier:is([data-tier="frozen"], [data-tier="hibernated"], [data-tier="discarded"])):not(.active) .tab-title {
+  color: var(--text-dim);
+}
 
 /*
  * A tab going to sleep, seen happening.
@@ -468,8 +475,8 @@ body:not([data-layout="left"]) .tab.pinned .tier,
  * The browser's whole claim is that it gives memory back, and the moment it
  * does was a dot changing colour between two frames - easy to miss, so the
  * claim was easy to doubt. Now the dot breathes out: a small swell and a ring
- * that spreads and fades, as the tab lets go. Waking is quicker and plainer -
- * a tab coming back should feel immediate, not ceremonial.
+ * that spreads and fades, as the tab lets go. Waking has no ceremony: the dot
+ * simply goes.
  *
  * Only once the strip has settled (chrome.js): on launch every restored tab
  * arrives asleep, and a row of dots all exhaling at once is noise.
@@ -480,17 +487,10 @@ body:not([data-layout="left"]) .tab.pinned .tier,
 body.settled .tier:is([data-tier="frozen"], [data-tier="hibernated"], [data-tier="discarded"]) {
   animation: tier-exhale 1100ms var(--ease-out);
 }
-body.settled .tier:is([data-tier="active"], [data-tier="warm"]) {
-  animation: tier-wake 260ms var(--ease-out);
-}
 @keyframes tier-exhale {
   0%   { transform: scale(1);    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
   30%  { transform: scale(1.35); }
   100% { transform: scale(1);    box-shadow: 0 0 0 7px transparent; }
-}
-@keyframes tier-wake {
-  from { transform: scale(0.6); }
-  to   { transform: scale(1); }
 }
 
 .tab.boosted .tier {

@@ -64,7 +64,7 @@ const SECTIONS = {
     {
       key: 'design',
       label: 'Design',
-      hint: 'Shapes and type. Your accent, tab bar colour and theme apply to every one. Legacy design is the look Debrowser had up to 1.7.',
+      hint: 'Shapes and type. Legacy is the look from before 1.8.',
       type: 'select',
       options: [
         { value: 'ledger', name: 'Ledger' },
@@ -76,7 +76,6 @@ const SECTIONS = {
     {
       key: 'settingsLayout',
       label: 'Settings layout',
-      hint: 'One section at a time, picked from the list, or every section on one long page.',
       type: 'select',
       options: [
         { value: 'pages', name: 'One section at a time' },
@@ -86,7 +85,6 @@ const SECTIONS = {
     {
       key: 'continueCard',
       label: 'Under the search on the new tab page',
-      hint: 'Recent pages is "Continue with these tabs", your last four pages, and the tabs they are open in. Favourites are the sites you use most. Not in Legacy, and never in private windows.',
       type: 'select',
       boolean: true,
       options: [
@@ -98,7 +96,6 @@ const SECTIONS = {
     {
       key: 'theme',
       label: 'Theme',
-      hint: 'System follows the machine.',
       type: 'select',
       options: [
         { value: 'system', name: 'System' },
@@ -110,7 +107,7 @@ const SECTIONS = {
     {
       key: 'showBookmarksBar',
       label: 'Show the bookmarks bar',
-      hint: 'A row of saved sites under the toolbar. Ctrl+Shift+B toggles it.',
+      hint: 'Ctrl+Shift+B',
       type: 'checkbox',
       unavailable: (state) => (state.prefs.tabBarPosition === 'left'
         ? 'Shown with tabs across the top. Down the side, bookmarks are under Ctrl+Shift+O.' : '')
@@ -118,7 +115,7 @@ const SECTIONS = {
     {
       key: 'tabBarPosition',
       label: 'Tab bar position',
-      hint: 'Across the top, as in most browsers; down the side, titles stay readable however many tabs are open.',
+      hint: 'Down the side keeps titles readable with many tabs open.',
       type: 'select',
       options: [
         { value: 'top', name: 'Across the top' },
@@ -128,7 +125,6 @@ const SECTIONS = {
     {
       key: 'tabWidth',
       label: 'Tab width',
-      hint: 'Compact fits more tabs before they start shrinking.',
       type: 'select',
       options: [
         { value: 'roomy', name: 'Roomy' },
@@ -138,13 +134,12 @@ const SECTIONS = {
     {
       key: 'tabBarColor',
       label: 'Tab strip colour',
-      hint: 'Its own colour, or the second swatch to match your accent.',
       type: 'stripColor'
     },
     {
       key: 'windowOpacity',
       label: 'Tab bar translucency',
-      hint: 'The strip alone, never pages. Needs a window material behind it.',
+      hint: 'Needs a window material behind it.',
       unavailable: () => (api.platform === 'linux' ? 'Needs Windows or macOS: Linux has no window material to show through.' : ''),
       type: 'range',
       // Shown as translucency, which is what the row is called, not as the
@@ -160,7 +155,6 @@ const SECTIONS = {
     {
       key: 'backgroundMaterial',
       label: 'Window material',
-      hint: 'What shows through a translucent tab bar.',
       unavailable: () => (api.platform !== 'win32' ? 'Windows 11 only.' : ''),
       type: 'select',
       options: [
@@ -173,19 +167,17 @@ const SECTIONS = {
     {
       key: 'reduceMotion',
       label: 'Reduce motion',
-      hint: 'Your system setting is honoured either way.',
       type: 'checkbox'
     },
     {
       key: 'showMemoryMeter',
       label: 'Show the memory meter',
-      hint: 'The bar in the toolbar. Hiding it does not stop the governor.',
+      hint: 'Hiding it doesn’t stop tabs sleeping.',
       type: 'checkbox'
     },
     {
       key: 'showTierDots',
-      label: 'Show resource dots on tabs',
-      hint: 'Whether a tab is active, idle, frozen or discarded.',
+      label: 'Mark sleeping tabs',
       type: 'checkbox'
     }
   ],
@@ -203,13 +195,13 @@ const SECTIONS = {
     {
       key: 'inlineAutocomplete',
       label: 'Complete addresses as I type',
-      hint: 'Fills in the rest of a site you have visited. Keep typing to replace it.',
+      hint: 'Fills in the rest of a site you’ve visited.',
       type: 'checkbox'
     },
     {
       key: 'bookmarkOpensIn',
       label: 'Clicking a bookmark',
-      hint: 'Ctrl-click and the middle button always open a new tab.',
+      hint: 'Ctrl-click always opens a new tab.',
       type: 'select',
       options: [
         { value: 'new-tab', name: 'Opens a new tab' },
@@ -226,7 +218,7 @@ const SECTIONS = {
     {
       key: 'defaultZoom',
       label: 'Page zoom',
-      hint: 'For every site you haven’t zoomed yourself. Resetting a site’s zoom brings it back to this.',
+      hint: 'For sites you haven’t zoomed yourself.',
       type: 'select',
       numeric: true,
       options: [0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
@@ -235,19 +227,19 @@ const SECTIONS = {
     {
       key: 'clearHistoryOnExit',
       label: 'Clear history when I close the browser',
-      hint: 'The list is emptied as the browser closes. Bookmarks and passwords stay.',
+      hint: 'Bookmarks and passwords stay.',
       type: 'checkbox'
     },
     {
       key: 'warnDangerousSites',
       label: 'Warn before dangerous sites',
-      hint: 'Before a site known for phishing or malware (lists from Phishing Army and URLhaus, updated daily and checked on this computer), and before a site you have never visited whose name is one letter from one you use often.',
+      hint: 'Before known phishing or malware sites, and lookalike names of sites you use. Checked on this computer.',
       type: 'checkbox'
     },
     {
       key: 'httpsMode',
       label: 'Secure connections',
-      hint: 'Every site is tried over HTTPS first, which the network between you and it cannot read. Private windows always ask before plain HTTP.',
+      hint: 'Tries HTTPS first and asks before loading an insecure page.',
       type: 'select',
       options: [
         { value: 'upgrade', name: 'Use HTTPS where a site has it' },
@@ -258,7 +250,7 @@ const SECTIONS = {
     {
       key: 'secureDns',
       label: 'Secure DNS',
-      hint: 'Looks up site addresses over HTTPS, so the network cannot see or change which sites you visit. Automatic uses your own provider’s secure service where it has one. Private windows look up through Tor.',
+      hint: 'Looks up sites over HTTPS so your network can’t see or change them.',
       type: 'select',
       options: [
         { value: 'automatic', name: 'Automatic' },
@@ -272,25 +264,25 @@ const SECTIONS = {
     {
       key: 'blockThirdPartyCookies',
       label: 'Block other sites’ cookies',
-      hint: 'Stops ad networks following you from site to site through the pages that carry them. If a sign-in or an embedded comment box stops working, allow them for that site from the padlock.',
+      hint: 'Stops ad networks following you between sites. Allow them for one site from the padlock.',
       type: 'checkbox'
     },
     {
       key: 'cleanLinks',
       label: 'Take tracking out of links',
-      hint: 'Removes the parts of an address that only say where you came from – utm_source, fbclid and the like – and skips the click-tracking stop some sites send links through. Copied links are cleaned too.',
+      hint: 'Strips tracking bits like utm_source and fbclid from links you open and copy.',
       type: 'checkbox'
     },
     {
       key: 'blockAds',
       label: 'Block ads and trackers',
-      hint: 'Uses the lists uBlock Origin uses, updated weekly. Turn it off for one site from the padlock. Not in private windows, where every copy of the browser must look alike.',
+      hint: 'Uses uBlock Origin’s lists, updated weekly. Turn it off for one site from the padlock.',
       type: 'checkbox'
     },
     {
       key: 'hideCookieBanners',
       label: 'Hide cookie notices',
-      hint: 'Hides “we use cookies” banners without answering them, so nothing is accepted for you.',
+      hint: 'Hides cookie banners without accepting anything.',
       type: 'checkbox'
     }
   ],
@@ -299,7 +291,6 @@ const SECTIONS = {
     {
       key: 'newTabPosition',
       label: 'Tabs opened from links',
-      hint: 'Beside the page they came from keeps related tabs together.',
       type: 'select',
       options: [
         { value: 'end', name: 'Go at the end' },
@@ -309,7 +300,6 @@ const SECTIONS = {
     {
       key: 'linkTabsInBackground',
       label: 'Open links in the background',
-      hint: 'Off switches to a tab as soon as a link opens it.',
       type: 'checkbox'
     },
     {
@@ -324,7 +314,7 @@ const SECTIONS = {
     {
       key: 'closedTabToast',
       label: 'Offer Undo when a tab closes',
-      hint: 'A note at the foot of the window for a few seconds. Ctrl+Shift+T reopens a closed tab either way.',
+      hint: 'Ctrl+Shift+T reopens a closed tab either way.',
       type: 'checkbox'
     },
     {
@@ -335,7 +325,7 @@ const SECTIONS = {
     {
       key: 'autoArchiveDays',
       label: 'Put away tabs I have not opened',
-      hint: 'They leave the tab strip for an archive, and tab search (Ctrl+Shift+A) finds them again. Never pinned tabs, or tabs playing sound.',
+      hint: 'Old tabs move to an archive. Find them again with Ctrl+Shift+A.',
       type: 'select',
       numeric: true,
       options: [
@@ -357,19 +347,19 @@ const SECTIONS = {
     {
       key: 'preloadPages',
       label: 'Preload pages you point at',
-      hint: 'Fetches a link’s page while the pointer rests on it, and connects to a site you have visited while you type its address, so both open sooner. Never in private windows.',
+      hint: 'Starts loading a link while you hover over it, so pages open sooner.',
       type: 'checkbox'
     },
     {
       key: 'hoverPrefetch',
       label: 'Preload tabs when I hover them',
-      hint: 'A head start on switching. Off saves the memory a hovered tab would wake.',
+      hint: 'Hovering a sleeping tab starts waking it.',
       type: 'checkbox'
     },
     {
       key: 'rememberWindowBounds',
       label: 'Remember the window size and position',
-      hint: 'Takes effect the next time the browser starts.',
+      hint: 'Applies after a restart.',
       type: 'checkbox'
     }
   ],
@@ -378,7 +368,7 @@ const SECTIONS = {
     {
       key: 'tabSleep',
       label: 'Put tabs to sleep',
-      hint: 'A sleeping tab gives back its memory and reloads when you return. Automatically is after about 15 minutes, sooner when memory is short. Tabs playing sound, on a call, pinned, holding unsent text or kept awake for their site stay awake.',
+      hint: 'A sleeping tab frees its memory and reloads when you come back. Tabs playing sound or on a call stay awake.',
       type: 'select',
       options: [
         { value: 'auto', name: 'Automatically' },
@@ -395,7 +385,7 @@ const SECTIONS = {
     {
       key: 'batteryMode',
       label: 'Battery mode',
-      hint: 'Tabs you are not using go to sleep about three times sooner when sleeping is automatic, background tabs run in your system’s efficiency mode, a background tab still using the processor is paused, the text cursor stops blinking and the browser checks on its tabs less often, so a laptop lasts longer. A leaf in the memory meter shows it is on.',
+      hint: 'Tabs sleep sooner, background tabs use less power, and a leaf shows in the memory meter.',
       type: 'select',
       options: [
         { value: 'auto', name: 'On battery' },
@@ -406,7 +396,7 @@ const SECTIONS = {
     {
       key: 'memoryBudgetMB',
       label: 'Memory budget',
-      hint: 'What the browser may hold before it reclaims. Empty sizes it to this machine.',
+      hint: 'Empty sizes it to this computer.',
       type: 'number',
       placeholder: 'Automatic',
       min: 256,
@@ -416,7 +406,7 @@ const SECTIONS = {
     {
       key: 'maxLiveTabs',
       label: 'Tabs holding a renderer',
-      hint: 'Tabs past this stay open but give their renderer back. 0 removes the limit.',
+      hint: 'Tabs past this stay listed but free their memory. 0 removes the limit.',
       type: 'number',
       placeholder: 'Automatic',
       min: 0,
@@ -428,7 +418,7 @@ const SECTIONS = {
     {
       key: 'downloadConnections',
       label: 'Connections per download',
-      hint: 'Byte ranges fetched at once. Servers that refuse them are downloaded whole.',
+      hint: 'Parts downloaded at once.',
       type: 'number',
       min: 1,
       max: 16
@@ -441,7 +431,7 @@ const SECTIONS = {
     {
       key: 'downloadDir',
       label: 'Save files to',
-      hint: 'A full folder path. Empty, or a folder that is missing, uses your Downloads folder.',
+      hint: 'Empty uses your Downloads folder.',
       type: 'text',
       placeholder: 'Your Downloads folder'
     }
@@ -451,14 +441,14 @@ const SECTIONS = {
     {
       key: 'incognitoSearchEngine',
       label: 'Search engine',
-      hint: 'Private windows search with this one. Google answers most Tor connections with a captcha.',
+      hint: 'Google answers most Tor connections with a captcha.',
       type: 'select',
       options: 'engines'
     },
     {
       key: 'incognitoBridges',
       label: 'Connect to Tor',
-      hint: 'Bridges hide from your ISP that you use Tor. A bridge of your own also hides it from lists of known bridges.',
+      hint: 'Hides from your network that you use Tor.',
       type: 'select',
       options: [
         { value: 'auto', name: 'Through Snowflake (built in)' },
@@ -470,7 +460,7 @@ const SECTIONS = {
     {
       key: 'incognitoBridgeLines',
       label: 'My bridges',
-      hint: 'One per line, as your bridge gives them (obfs4, webtunnel or snowflake). The bridge kit that comes with Debrowser can set one up for you.',
+      hint: 'One per line, as your bridge provider gives them.',
       type: 'textarea',
       placeholder: 'obfs4 203.0.113.5:443 FINGERPRINT cert=… iat-mode=0'
     },
@@ -480,7 +470,7 @@ const SECTIONS = {
       // The costs are measured, by bench/js-levels: everyday page work (DOM,
       // JSON) runs the same at every level; heavy number-crunching and
       // WebAssembly are where the optimising compilers earn their keep.
-      hint: 'Balanced turns off the optimising compilers, where most attacks on the engine land: everyday pages run as fast, heavy computation about half as fast. Maximum runs the interpreter alone, with no WebAssembly: text search about four times slower. Applies to new private windows.',
+      hint: 'Balanced keeps everyday pages fast and heavy apps about half speed. Maximum is safest and slowest.',
       type: 'select',
       options: [
         { value: 'balanced', name: 'Balanced' },
@@ -491,7 +481,7 @@ const SECTIONS = {
     {
       key: 'incognitoKeepTorState',
       label: 'Remember Tor between sessions',
-      hint: 'Keeps the same entry guard, as Tor is designed to, and connects in seconds – sealed with your system keystore. Off leaves no trace of Tor here, but picks a new guard every time.',
+      hint: 'Connects in seconds by keeping the same entry guard. Off leaves no trace of Tor here.',
       type: 'checkbox'
     },
     {
@@ -502,19 +492,19 @@ const SECTIONS = {
     {
       key: 'incognitoCamouflage',
       label: 'Traffic camouflage',
-      hint: 'Loads a decoy page from a built-in list of popular sites beside each real one, on another circuit, so timing and size tell an observer less. About twice the data; the decoy sites see visits you did not make. Applies to new private windows.',
+      hint: 'Loads a decoy site beside each real one, so your traffic is harder to read. Uses about twice the data.',
       type: 'checkbox'
     },
     {
       key: 'incognitoKeepWarm',
       label: 'Keep a private window ready',
-      hint: 'Connects to Tor in the background when Debrowser starts, so Ctrl+Shift+N opens at once. Costs about 300 MB of memory while it waits, and your network sees a Tor connection whenever Debrowser is open.',
+      hint: 'Private windows open instantly. Uses about 300 MB while Debrowser is open.',
       type: 'checkbox'
     },
     {
       key: 'incognitoIdleWipeMinutes',
       label: 'Close private windows when idle',
-      hint: 'Minutes with no input anywhere on this computer. Then everything in them is erased at once, as Ctrl+Shift+Delete does. 0 never closes them.',
+      hint: 'Erases everything after this many idle minutes. 0 never closes them.',
       type: 'number',
       min: 0,
       max: 240,
@@ -536,7 +526,7 @@ const SECTIONS = {
     {
       key: 'hardenJavaScript',
       label: 'JavaScript security',
-      hint: 'The private window’s protection, for every window: Balanced turns off the optimising compilers, where most attacks on the engine land – everyday pages run as fast, heavy computation such as games and editors about half as fast. Maximum runs the interpreter alone, with no WebAssembly. Applies when Debrowser next starts.',
+      hint: 'The private window’s protection, in every window. Balanced suits most pages; Maximum is slower. Applies after a restart.',
       type: 'select',
       options: [
         { value: 'full', name: 'Full speed' },
@@ -547,19 +537,17 @@ const SECTIONS = {
     {
       key: 'showMemoryDetail',
       label: 'Explain the memory figures',
-      hint: 'Adds notes to the task manager about what each number counts.',
       type: 'checkbox'
     },
     {
       key: 'hardwareAcceleration',
       label: 'Use hardware acceleration',
-      hint: 'Try this if pages flicker or the browser will not start. Needs a restart.',
+      hint: 'Try this if pages flicker. Needs a restart.',
       type: 'checkbox'
     },
     {
       key: 'devToolsDock',
       label: 'Developer tools open',
-      hint: 'Beside the page, under it, or in a window of their own.',
       type: 'select',
       options: [
         { value: 'right', name: 'Beside the page' },
@@ -573,13 +561,13 @@ const SECTIONS = {
     {
       key: 'labTabGroups',
       label: 'Tab groups',
-      hint: 'Right-click a tab to start a group: a name and a colour for tabs that belong together, which fold away into one label, and go to sleep while folded.',
+      hint: 'Right-click a tab to start a group. Folded groups go to sleep.',
       type: 'checkbox'
     },
     {
       key: 'labQuickWindow',
       label: 'A small window for links from other apps',
-      hint: 'A link from your mail or chat opens in a small window of its own, to read and close – or “Open in Debrowser” to keep it as a tab.',
+      hint: 'Links from other apps open in a small window. Keep one as a tab with Open in Debrowser.',
       type: 'checkbox'
     }
   ],
@@ -588,7 +576,7 @@ const SECTIONS = {
     {
       key: 'autoUpdate',
       label: 'Install updates automatically',
-      hint: 'Checks on launch and when you open this section. Downloads only what changed.',
+      hint: 'Downloads only what changed.',
       unavailable: (state) => (state.updates && state.updates.available === false
         ? sentence(state.updates.reason || 'Updates are not available for this copy.') : ''),
       type: 'checkbox'
@@ -596,7 +584,7 @@ const SECTIONS = {
     {
       key: 'updateChannel',
       label: 'Update channel',
-      hint: 'Beta gets each release a few weeks before everyone else, so you can try what is new – and tell us when something is not right.',
+      hint: 'Beta gets new releases a few weeks early.',
       type: 'select',
       options: [
         { value: 'stable', name: 'Stable' },
