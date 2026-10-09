@@ -5617,7 +5617,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const first = tabs.activeId;
     runCommand('cycle-tab', { delta: 1, recent: true });
     const second = tabs.activeId;
-    await sleep(1700);   // the run ends by itself when no release is seen
+    // Let go of Ctrl, as a hand does: the run ends, and the order is set once
+    // the last switch has finished.
+    tabs.byId(second)?.wc?.sendInputEvent({ type: 'keyUp', keyCode: 'Control' });
+    await sleep(400);
     // As Alt+Tab: one press now goes back to where the run began (1), not
     // to the tab it only passed through (2).
     runCommand('cycle-tab', { delta: 1, recent: true });
