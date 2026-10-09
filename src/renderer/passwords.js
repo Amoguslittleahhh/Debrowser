@@ -104,7 +104,7 @@ el.locked.addEventListener('submit', async (event) => {
   el.passcode.value = '';
   if (res && res.ok) { el.unlockError.textContent = ''; refresh(); return; }
   if (res && res.waitMs) { waitNote(res.waitMs); return; }
-  el.unlockError.textContent = 'That is not the passcode.';
+  el.unlockError.textContent = 'That isn’t the passcode.';
   el.passcode.focus();
 });
 
@@ -113,7 +113,7 @@ el.presence.addEventListener('click', async () => {
   const res = await api.request('vault-unlock', { method: 'presence' });
   el.presence.disabled = false;
   if (res && res.ok) { el.unlockError.textContent = ''; refresh(); return; }
-  el.unlockError.textContent = `${presence.mechanism} did not confirm it was you. Use the passcode instead.`;
+  el.unlockError.textContent = `${presence.mechanism} didn’t confirm it was you. Use the passcode instead.`;
 });
 
 el.lock.addEventListener('click', async () => {
@@ -163,7 +163,7 @@ importButton.addEventListener('click', async () => {
     importNote.classList.add('ok');
     await load();
   } else {
-    importNote.textContent = `Could not import: ${res.reason || 'that file did not work'}.`;
+    importNote.textContent = `Couldn’t import: ${res.reason || 'that file didn’t work'}.`;
     importNote.classList.remove('ok');
   }
 });
@@ -255,7 +255,7 @@ checkButton.addEventListener('click', async () => {
   if (reused) parts.push(`${reused} used on more than one site`);
   if (weak) parts.push(`${weak} weak`);
   checkNote.textContent = (parts.length ? `${parts.join(', ')}.` : 'No problems found.') +
-    (res.checked ? '' : ' Breaches could not be checked: no connection.');
+    (res.checked ? '' : ' Breaches couldn’t be checked: no connection.');
   checkNote.classList.toggle('ok', !parts.length && res.checked);
   checkNote.hidden = false;
   render();
@@ -314,7 +314,7 @@ function row({ kind, id, title, site, detail, flag = null }) {
       copy.textContent = 'Copied';
       setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
     } catch {
-      copy.textContent = 'Could not copy';
+      copy.textContent = 'Couldn’t copy';
     }
   });
 
@@ -384,7 +384,7 @@ el.cardForm.addEventListener('submit', async (event) => {
   if (!/^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(card.expiry)) { el.cardError.textContent = 'The expiry is MM/YY.'; return; }
   const saved = await ask('save-payment', card);
   if (saved === null) return;
-  if (!saved) { el.cardError.textContent = 'Could not save that card.'; return; }
+  if (!saved) { el.cardError.textContent = 'Couldn’t save that card.'; return; }
   el.cardError.textContent = '';
   el.cardForm.reset();
   el.addCard.open = false;

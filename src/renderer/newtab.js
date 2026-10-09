@@ -45,6 +45,22 @@ window.addEventListener('DOMContentLoaded', () => {
 const tiles = document.getElementById('tiles');
 
 /**
+ * Hello, by the time of day, and today's date under it. Refreshed when the
+ * page comes back into view, so a tab left open overnight does not say good
+ * evening at breakfast.
+ */
+function greet() {
+  const now = new Date();
+  const h = now.getHours();
+  document.getElementById('greeting').textContent =
+    h < 5 ? 'Still up?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  document.getElementById('today').textContent =
+    now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+greet();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) greet(); });
+
+/**
  * What a favourite is called under its mark: the site, not its address.
  *
  * "github" rather than "github.com", and "ycombinator" rather than

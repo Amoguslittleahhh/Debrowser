@@ -19,10 +19,10 @@ $('host').textContent = host;
 
 const TEXT = {
   phishing: ['This site may try to steal your information',
-    'It is on a list of sites that pretend to be banks, shops, email and other services to get passwords, card numbers and codes.',
+    'It’s on a list of sites that pretend to be banks, shops, email and other services to get passwords, card numbers and codes.',
     'Listed by Phishing Army (phishing.army), which collects reports from several phishing feeds. Lists are sometimes wrong; if you are sure this site is safe, you can open it.'],
   malware: ['This site may harm your computer',
-    'It is on a list of sites currently spreading malware – programs that steal from or damage the computers that run them.',
+    'It’s on a list of sites currently spreading malware – programs that steal from or damage the computers that run them.',
     'Listed by URLhaus (urlhaus.abuse.ch), a project of abuse.ch that tracks malware distribution. Lists are sometimes wrong; if you are sure this site is safe, you can open it.'],
   lookalike: ['Did you mean ' + like + '?',
     `You have never been to ${host}, but its name is one letter from ${like}, which you use often. Sites like this are often set up to catch a mistyped address or a misleading link.`,

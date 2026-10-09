@@ -118,7 +118,7 @@ function render(checks) {
   const bad = checks.filter((c) => !c.ok);
   document.getElementById('status').dataset.state = bad.length ? 'failed' : 'ready';
   document.getElementById('headline').textContent = bad.length
-    ? `${bad.length} of ${checks.length} checks show something they should not`
+    ? `${bad.length} of ${checks.length} checks show something they shouldn’t`
     : `All ${checks.length} checks agree`;
   const table = document.getElementById('results');
   table.textContent = '';

@@ -171,7 +171,7 @@ async function findProfiles() {
       } else {
         b.disabled = false;
         hint.textContent = 'Import';
-        note((r && r.reason) ? `Could not import: ${r.reason}.` : 'That import did not work.', 'bad');
+        note((r && r.reason) ? `Couldn’t import: ${r.reason}.` : 'That import didn’t work.', 'bad');
       }
     });
     return b;
@@ -182,7 +182,7 @@ $('import-file').addEventListener('click', async () => {
   const r = await api.request('import-bookmark-file');
   if (!r || r.cancelled) return;
   if (r.ok) note(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'} from ${r.browser}.`, 'ok');
-  else note(`Could not import: ${r.reason}.`, 'bad');
+  else note(`Couldn’t import: ${r.reason}.`, 'bad');
 });
 
 function note(text, kind) {

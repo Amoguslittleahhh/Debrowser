@@ -324,7 +324,7 @@ const SECTIONS = {
     },
     {
       key: 'autoArchiveDays',
-      label: 'Put away tabs I have not opened',
+      label: 'Put away tabs I haven’t opened',
       hint: 'Old tabs move to an archive. Find them again with Ctrl+Shift+A.',
       type: 'select',
       numeric: true,
@@ -578,7 +578,7 @@ const SECTIONS = {
       label: 'Install updates automatically',
       hint: 'Downloads only what changed.',
       unavailable: (state) => (state.updates && state.updates.available === false
-        ? sentence(state.updates.reason || 'Updates are not available for this copy.') : ''),
+        ? sentence(state.updates.reason || 'Updates aren’t available for this copy.') : ''),
       type: 'checkbox'
     },
     {
@@ -662,7 +662,7 @@ function renderSpaces(spaces, prefs = {}) {
     const { row, control } = simpleRow('', sp.id === 'home'
       ? 'Where Debrowser starts. Spaces without cookies of their own share Home’s.'
       : sp.container
-        ? 'Its own cookies and sign-ins: sites here do not see those in your other spaces.'
+        ? 'Its own cookies and sign-ins: sites here don’t see those in your other spaces.'
         : 'Shares cookies and sign-ins with Home.');
     const name = document.createElement('input');
     name.type = 'text';
@@ -739,7 +739,7 @@ async function setupRows(host) {
   if (!status) return;
   if (status.install) {
     const { row, control } = simpleRow('Install Debrowser',
-      api.platform === 'darwin' ? 'Running from outside Applications, it cannot keep itself up to date.'
+      api.platform === 'darwin' ? 'Running from outside Applications, it can’t keep itself up to date.'
         : 'Add it to your apps menu, so it starts like any other app.');
     const go = smallButton(status.install);
     go.addEventListener('click', () => api.send('install-browser'));
@@ -1312,7 +1312,7 @@ async function renderPasscode() {
   if (!status) return;
 
   if (!status.available) {
-    credentialsUnavailable = 'Saving is not available on this computer.';
+    credentialsUnavailable = 'Saving isn’t available on this computer.';
     state.textContent = `Saving is unavailable: ${status.reason}. Nothing is written to disk ` +
                         'unless it can be encrypted by the operating system.';
     host.replaceChildren();
@@ -1377,7 +1377,7 @@ function openRow() {
  */
 function passcodeRow(status) {
   const { row, note, control } = simpleRow('Passcode',
-    status.configured ? 'Unlocks saved passwords when Windows Hello or Touch ID cannot.'
+    status.configured ? 'Unlocks saved passwords when Windows Hello or Touch ID can’t.'
       : `Turns saved passwords on. At least ${status.minLength} characters.`);
 
   const form = document.createElement('form');
@@ -1418,14 +1418,14 @@ function passcodeRow(status) {
     }
     form.onsubmit = async (event) => {
       event.preventDefault();
-      if (next && next.value !== again.value) { error.textContent = 'The two passcodes are not the same.'; return; }
+      if (next && next.value !== again.value) { error.textContent = 'The two passcodes aren’t the same.'; return; }
       const res = mode === 'remove'
         ? await api.request('vault-remove', { current: current.value })
         : await api.request('vault-set', { passcode: next.value, current: current ? current.value : null });
       if (res && res.ok) { renderPasscode(); return; }
       error.textContent = res && res.waitMs
         ? `Too many tries. Wait ${Math.ceil(res.waitMs / 1000)} seconds.`
-        : (res && res.reason) || 'That did not work.';
+        : (res && res.reason) || 'That didn’t work.';
     };
     form.hidden = false;
     requestAnimationFrame(() => form.querySelector('input')?.focus());
@@ -1903,7 +1903,7 @@ async function renderBookmarks() {
         if (!res || res.cancelled) return;
         state.textContent = res.ok
           ? `Imported ${res.added} from ${res.browser}${res.skipped ? `, skipped ${res.skipped} already saved or unsupported` : ''}.`
-          : `Could not import: ${res.reason}`;
+          : `Couldn’t import: ${res.reason}`;
         renderBookmarks();
       })
   );
@@ -1977,7 +1977,7 @@ function renderProfiles(profiles, state, host) {
           `${res.skipped ? `, skipped ${res.skipped} already saved or unsupported` : ''}.`;
         renderBookmarks();
       } else {
-        state.textContent = (res && res.reason) || 'That import did not work.';
+        state.textContent = (res && res.reason) || 'That import didn’t work.';
       }
     }));
   host.replaceChildren(...rows);
@@ -2085,7 +2085,7 @@ function bookmarkForm(item = null) {
     });
     save.disabled = false;
     if (!res || !res.ok) {
-      problem.textContent = (res && res.reason) || 'That could not be saved.';
+      problem.textContent = (res && res.reason) || 'That couldn’t be saved.';
       return;
     }
     // Adding leaves the form up with empty fields; editing closes it, because

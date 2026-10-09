@@ -127,7 +127,7 @@ async function refreshStar(url) {
 function setStar(on) {
   // A private window cannot save bookmarks - see renderPrivate.
   if (document.body.classList.contains('incognito')) {
-    el.star.title = 'Bookmarks cannot be saved from a private window';
+    el.star.title = 'Bookmarks can’t be saved from a private window';
     return;
   }
   if (on === starred) return;
@@ -1168,7 +1168,10 @@ function updateTabElement(node, tab) {
     prev.title = tab.title;
   }
   // Its own check: the address changes on navigations that keep the title.
-  const tip = `${tab.title || ''}\n${tab.url || ''}`;
+  // A sleeping tab says so, and what that means, under its address: the
+  // dot alone left you to guess why it took a moment to come back.
+  const asleep = tab.tier === 'frozen' || tab.tier === 'hibernated' || tab.tier === 'discarded';
+  const tip = `${tab.title || ''}\n${tab.url || ''}${asleep ? `\n${tierLabel(tab)}` : ''}`;
   if (prev.tip !== tip) {
     node.root.title = tip;
     prev.tip = tip;
@@ -1268,13 +1271,14 @@ function updateTabElement(node, tab) {
 }
 
 function tierLabel(tab) {
+  const mb = `${tab.memNowMB ?? tab.rssMB} MB`;
   switch (tab.tier) {
-    case 'active': return tab.boosted ? 'Active – boosted for animation' : 'Active';
-    case 'warm': return `Background – ${tab.memNowMB ?? tab.rssMB}MB`;
-    case 'cold': return `Idle, may be discarded to save memory – ${tab.memNowMB ?? tab.rssMB}MB`;
-    case 'frozen': return `Frozen – no CPU, ${tab.memNowMB ?? tab.rssMB}MB retained`;
-    case 'hibernated': return 'Hibernated – memory compressed, opens instantly';
-    case 'discarded': return 'Discarded – reloads when opened';
+    case 'active': return tab.boosted ? 'Open now, kept smooth for its animation' : 'Open now';
+    case 'warm': return `Running in the background · ${mb}`;
+    case 'cold': return `Quiet · ${mb}. It sleeps if memory runs short`;
+    case 'frozen': return `Asleep · paused, using no processor`;
+    case 'hibernated': return 'Asleep · memory squeezed down, wakes instantly';
+    case 'discarded': return 'Asleep · memory given back, reloads when you open it';
     default: return tab.tier;
   }
 }
@@ -1400,7 +1404,7 @@ function setScheme(kind) {
     else el.schemePaths[i].removeAttribute('d');
   });
   el.scheme.setAttribute('aria-label',
-    kind === 'secure' ? 'Connection is encrypted' : 'Connection is not encrypted');
+    kind === 'secure' ? 'Connection is encrypted' : 'Connection isn’t encrypted');
 }
 
 /** The zoom the badge shows, 0 when hidden. */
@@ -1912,7 +1916,7 @@ function renderPrivate(incognito) {
   el.privatePill.title = tor.state === 'ready'
     ? 'Private window – every page goes through Tor. Click for details.'
     : `Private window – ${tor.summary || 'connecting to Tor'} (${tor.progress || 0}%). Nothing loads until it is connected.`;
-  el.star.title = 'Bookmarks cannot be saved from a private window';
+  el.star.title = 'Bookmarks can’t be saved from a private window';
   el.onion.hidden = !incognito.onion;
   el.slowJs.hidden = !incognito.slowJs;
   // Tried from several exits and refused by every one: said, not looped.

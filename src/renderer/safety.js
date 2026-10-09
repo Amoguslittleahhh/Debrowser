@@ -50,7 +50,7 @@ async function load() {
 
   $('browser').replaceChildren(
     row({ label: `Debrowser ${s.version}`, detail: `Built on Chromium ${s.chromium}` }),
-    row({ state: s.autoUpdate ? 'ok' : 'off', label: s.autoUpdate ? 'Updates install automatically' : 'Updates are not automatic',
+    row({ state: s.autoUpdate ? 'ok' : 'off', label: s.autoUpdate ? 'Updates install automatically' : 'Updates aren’t automatic',
       detail: s.autoUpdate ? 'Chromium’s security fixes reach you as soon as a release carries them.'
         : 'Security fixes wait until you install an update yourself.',
       action: s.autoUpdate ? null : { text: 'Change', run: () => api.send('open-settings', { section: 'updates' }) } })

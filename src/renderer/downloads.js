@@ -118,7 +118,7 @@ function createRow(item) {
     safe.textContent = 'Making a safe copy…';
     const res = await api.request('safe-copy', { id: item.id });
     safe.disabled = false;
-    safe.textContent = res && res.ok ? `Saved: ${res.name}` : 'Could not make a safe copy';
+    safe.textContent = res && res.ok ? `Saved: ${res.name}` : 'Couldn’t make a safe copy';
     safe.title = res && res.ok ? `${res.pages} page(s), beside the original` : (res && res.reason) || '';
   });
 

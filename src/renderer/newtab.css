@@ -248,6 +248,26 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .br
   color: var(--text);
 }
 .brand-name { font-size: 20px; font-weight: 600; letter-spacing: -0.03em; }
+/*
+ * The page says hello rather than its own name: you know which browser you
+ * opened, and a start page that greets you by the time of day - with the date
+ * under it, as a diary page has - is one a person would have made. Set in the
+ * serif, which is the one place the page has a voice.
+ */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .brand { flex-wrap: wrap; row-gap: 4px; }
+body:is([data-design="ledger"], [data-design="paper"]) .brand-name {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.brand-date {
+  flex-basis: 100%;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+}
+.brand-date:empty { display: none; }
 
 /*
  * The field is an address bar, not a headline: boxed, at a size text is typed

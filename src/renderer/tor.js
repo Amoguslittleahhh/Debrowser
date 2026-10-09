@@ -109,8 +109,8 @@ function renderGuard(killSwitch, tripwire) {
   } else {
     el.guard.dataset.level = 'tripwire';
     strong.textContent = 'Leak protection: tripwire only.';
-    const why = killSwitch && killSwitch.reason ? ` The operating system's wall is not available: ${killSwitch.reason}.` : '';
-    const sees = tripwire && tripwire.available === false ? ' The tripwire itself is not running.' : '';
+    const why = killSwitch && killSwitch.reason ? ` The operating system's wall isn’t available: ${killSwitch.reason}.` : '';
+    const sees = tripwire && tripwire.available === false ? ' The tripwire itself isn’t running.' : '';
     rest = `${why} A stray connection is detected and the window closed, rather than prevented.${sees}`;
   }
   el.guard.replaceChildren(strong, document.createTextNode(rest));
@@ -130,11 +130,11 @@ function renderFingerprint(result) {
   let rest;
   if (result.error) {
     el.fp.dataset.level = 'tripwire';
-    strong.textContent = 'Fingerprint check: did not run.';
+    strong.textContent = 'Fingerprint check: didn’t run.';
     rest = ` ${result.error}. `;
   } else if (result.problems.length) {
     el.fp.dataset.level = 'tripwire';
-    strong.textContent = `Fingerprint check: ${result.problems.length} of ${result.checked} show something they should not.`;
+    strong.textContent = `Fingerprint check: ${result.problems.length} of ${result.checked} show something they shouldn’t.`;
     rest = ` ${result.problems.slice(0, 3).join('; ')}. `;
   } else {
     el.fp.dataset.level = 'os';

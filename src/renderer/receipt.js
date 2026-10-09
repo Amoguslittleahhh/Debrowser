@@ -32,7 +32,7 @@ async function load() {
 
   const freed = sum('freedMB');
   $('lead').textContent = freed >= 1
-    ? `Tabs you were not using gave back ${size(freed)} of memory this week – room your computer had for everything else.`
+    ? `Tabs you weren’t using gave back ${size(freed)} of memory this week – room your computer had for everything else.`
     : 'Nothing to show yet. As tabs you leave go to sleep, what they give back adds up here.';
 
   const most = Math.max(1, ...week.map((d) => d.freedMB || 0));

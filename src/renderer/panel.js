@@ -52,9 +52,9 @@ const FAILURE_TEXT = {
   'os 5': 'the system refused access to those processes',
   'os 87': 'the system rejected the request',
   'os 299': 'only part of the process could be read',
-  timeout: 'the helper did not answer in time',
-  gone: 'the helper is not running',
-  nonsense: 'the helper returned a figure that cannot be right',
+  timeout: 'the helper didn’t answer in time',
+  gone: 'the helper isn’t running',
+  nonsense: 'the helper returned a figure that can’t be right',
   unparsed: 'the helper returned something unrecognised'
 };
 
@@ -62,7 +62,7 @@ function coverageNote(state) {
   const cov = state.probeCoverage;
   if (!cov || !cov.total) return '';
   if (cov.measured === 0 && !(cov.failures || []).length) {
-    return ' The native helper is not measuring anything on this machine.';
+    return ' The native helper isn’t measuring anything on this machine.';
   }
 
   const worst = (cov.failures || [])[0];
@@ -106,7 +106,7 @@ function render(state) {
   // worse than the plain over-count it replaced.
   const proportional = state.accounting === 'pss' || state.accounting === 'probe';
   el.total.title = state.accounting === 'suspect'
-    ? 'The native helper ran and covered every process, but its total is not ' +
+    ? 'The native helper ran and covered every process, but its total isn’t ' +
       `meaningfully below summed working set (${state.probeRatio}x of it), so it is ` +
       'not delivering a proportional figure. On Windows the likely cause is that ' +
       'the share count a page carries is three bits wide and saturates at seven: ' +
@@ -117,7 +117,7 @@ function render(state) {
         ? 'Physical footprint, the figure macOS charges each process and shows in ' +
           'Activity Monitor. It excludes clean file-backed pages – one copy of ' +
           'Chromium in every renderer – which is where the over-counting came from. ' +
-          'It does not divide shared dirty pages, so it is not proportional set size.'
+          'It doesn’t divide shared dirty pages, so it isn’t proportional set size.'
         : 'Proportional set size, computed by walking each process\'s working set ' +
           'and dividing every shared page by the number of processes sharing it. ' +
           'Windows caps that share count at 7, so a page shared by more processes ' +

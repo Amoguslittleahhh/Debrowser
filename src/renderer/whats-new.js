@@ -28,7 +28,7 @@ async function load() {
   if (!notes || !notes.sections.length) {
     const p = document.createElement('p');
     p.className = 'lead';
-    p.textContent = 'The notes for this version are not in this build.';
+    p.textContent = 'The notes for this version aren’t in this build.';
     root.replaceChildren(p);
     return;
   }

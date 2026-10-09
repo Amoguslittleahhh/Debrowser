@@ -619,6 +619,12 @@ body.calm *, body.calm *::before, body.calm *::after {
 
 * { box-sizing: border-box; }
 
+/* Every button gives a little under the pointer, as a key does under a
+   finger. Before, only the handful listed with `--press` did, and a click on
+   any other landed with nothing to feel. `scale` rather than `transform`, so
+   it composes with a button that is positioned by a transform of its own. */
+button:not(:disabled):active { scale: 0.97; }
+
 body {
   margin: 0;
   background: var(--bg);
