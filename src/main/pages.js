@@ -185,7 +185,7 @@ function serve(log = () => {}, partitions = []) {
     if (url.hostname === 'icon') return icons.serve(request, log);
     // Extensions' calls to the browser (extensions.js `bridge`), each carrying
     // its extension's token: nothing is answered without a known one.
-    if (url.hostname === 'ext-bridge') return answerBridge(url);
+    if (url.hostname === 'ext-bridge') return answerBridge(url, request);
     // The host names the page; the path names a file belonging to it, so
     // `debrowser://settings/settings.css` works without a second registration.
     // `hasOwn`, because a bare index reaches the prototype chain:
@@ -222,11 +222,17 @@ function serve(log = () => {}, partitions = []) {
 let bridge = null;
 function setBridge(fn) { bridge = fn; }
 
-async function answerBridge(url) {
+async function answerBridge(url, request) {
   const headers = { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
   if (!bridge) return new Response(JSON.stringify({ error: 'extensions are off' }), { status: 503, headers });
   let args = null;
-  try { args = JSON.parse(url.searchParams.get('a') || 'null'); } catch { /* none */ }
+  // Large arguments - thousands of request rules at once - come as the body,
+  // since an address that long is refused before it gets here.
+  let raw = url.searchParams.get('a');
+  if (request && request.method === 'POST') {
+    try { raw = await request.text(); } catch { raw = null; }
+  }
+  try { args = JSON.parse(raw || 'null'); } catch { /* none */ }
   try {
     const value = await bridge(url.searchParams.get('t'), String(url.searchParams.get('op') || ''), args);
     return new Response(JSON.stringify({ value: value === undefined ? null : value }), { headers });

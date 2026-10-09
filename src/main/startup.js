@@ -51,11 +51,15 @@ function parseSites(text) {
   return out;
 }
 
-/** The same place for this purpose: host and path, ignoring a trailing slash and www. */
+/**
+ * The same page for this purpose: ignoring the scheme, www and a trailing
+ * slash, but not the query or the hash - youtube.com/watch?v=A and ?v=B are
+ * two videos, and Gmail's #inbox and #inbox/thread two places.
+ */
 function placeKey(url) {
   try {
     const u = new URL(url);
-    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/$/, '')}`;
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/$/, '')}${u.search}${u.hash}`;
   } catch {
     return String(url);
   }

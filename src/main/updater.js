@@ -378,14 +378,24 @@ class Updater {
     this.state = 'installing';
     this.onChange();
     setTimeout(() => {
-      try {
-        this.impl.quitAndInstall(true, true);
-      } catch (err) {
-        this.log('updates', `could not install: ${err.message}`);
+      const failed = (why) => {
+        if (this.state !== 'installing') return;
+        this.log('updates', `could not install: ${why}`);
         this.state = 'ready';
         this.onChange();
         onFailed();
+      };
+      try {
+        this.impl.quitAndInstall(true, true);
+      } catch (err) {
+        failed(err.message);
+        return;
       }
+      // A quit that was turned down - a page asking to stay, a dialog
+      // cancelled - leaves the browser running. Still here a while later, the
+      // update is ready again rather than stuck at "Installing" with its
+      // button off until the next launch.
+      setTimeout(() => failed('the browser did not close'), 20_000);
     }, 400);
     return true;
   }

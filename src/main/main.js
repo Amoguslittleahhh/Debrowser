@@ -70,14 +70,19 @@ function endTabCycle() {
   clearTimeout(tabCycleTimer);
   const run = tabCycle;
   tabCycle = null;
-  if (!run || run.at === 0) return;
-  const now = Date.now();
-  run.order.forEach((id, i) => {
-    const tab = run.lookup(id);
-    if (!tab) return;
-    if (i === run.at) tab.lastActiveAt = now;
-    else if (i === 0) tab.lastActiveAt = now - 1;
-    else if (run.saved.has(id)) tab.lastActiveAt = run.saved.get(id);
+  if (!run) return;
+  // After the last switch has finished: a sleeping tab still waking would
+  // otherwise stamp the one it replaced as used, after this had set it back.
+  Promise.resolve(run.pending).finally(() => {
+    const now = Date.now();
+    run.order.forEach((id, i) => {
+      const tab = run.lookup(id);
+      if (!tab) return;
+      // Landing back where it started still passed through the others.
+      if (i === run.at) tab.lastActiveAt = now;
+      else if (i === 0) tab.lastActiveAt = now - 1;
+      else if (run.saved.has(id)) tab.lastActiveAt = run.saved.get(id);
+    });
   });
 }
 const { History } = require('./data/history');
@@ -901,7 +906,14 @@ function main() {
     const listening = () => Boolean(extensions && extensions.listening && prefs.get('labExtensions') === true);
     const send = (name, ...args) => { if (listening()) extensions.broadcast(name, args); };
     const nav = (extra) => ({ tabId: id, frameId: 0, parentFrameId: -1, timeStamp: Date.now(), ...extra });
-    send('tabs.onCreated', extensionTabInfo(tab));
+    // A tab put to sleep and woken comes back with a new page, and so a new
+    // id: to an extension that is one tab replaced, as Chrome says it after
+    // discarding, not one closed and another opened - which lost whatever it
+    // kept about the tab.
+    const was = tab.extensionId;
+    tab.extensionId = id;
+    if (was != null && was !== id) send('tabs.onReplaced', id, was);
+    else send('tabs.onCreated', extensionTabInfo(tab));
     wc.on('did-start-navigation', (d) => {
       if (d && d.isMainFrame && !d.isSameDocument) send('webNavigation.onBeforeNavigate', nav({ url: d.url }));
     });
@@ -926,7 +938,11 @@ function main() {
       if (isMainFrame && code !== -3) send('webNavigation.onErrorOccurred', nav({ url, error: description }));
     });
     wc.on('page-title-updated', (_e, title) => send('tabs.onUpdated', id, { title }, extensionTabInfo(tab)));
-    wc.once('destroyed', () => send('tabs.onRemoved', id, { windowId: 1, isWindowClosing: false }));
+    wc.once('destroyed', () => {
+      // Asleep, not closed: onReplaced follows when it wakes.
+      if (!tab.closed) return;
+      send('tabs.onRemoved', id, { windowId: 1, isWindowClosing: false });
+    });
   };
 
   /**
@@ -2099,6 +2115,9 @@ function main() {
   });
 
   app.on('window-all-closed', () => app.quit());
+  // Ctrl let go in another app is never seen here: a run of Ctrl+Tab ends
+  // when the window loses focus.
+  app.on('browser-window-blur', () => endTabCycle());
   app.on('will-quit', () => { quittingForGood = true; });
 
   // Keep a private window ready, if asked: after the ordinary window exists,
@@ -3209,12 +3228,14 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               saved: new Map(order.map((t) => [t.id, t.lastActiveAt])) };
           }
           clearTimeout(tabCycleTimer);
-          // In case the release is never seen - focus moved to another app.
-          tabCycleTimer = setTimeout(endTabCycle, 1500);
+          // In case the release is never seen. Focus moving to another app
+          // ends the run at once (browser-window-blur); this is the backstop,
+          // long enough that a slow hand still holding Ctrl goes further back.
+          tabCycleTimer = setTimeout(endTabCycle, 6000);
           const n = tabCycle.order.length;
           tabCycle.at = ((tabCycle.at + (Number(payload.delta) || 1)) % n + n) % n;
           const next = tabs.byId(tabCycle.order[tabCycle.at]);
-          if (next) goTo(next.id);
+          if (next) tabCycle.pending = goTo(next.id);
           break;
         }
         const at = list.findIndex((tab) => tab.id === tabs.activeId);

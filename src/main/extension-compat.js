@@ -99,9 +99,15 @@
   const token = g.__debrowserExt && g.__debrowserExt.token;
   const fetchBridge = (op, args) => {
     if (!token) return Promise.reject(new Error(`${op} isn’t available from here in Debrowser`));
-    const url = `debrowser://ext-bridge/?t=${encodeURIComponent(token)}&op=${encodeURIComponent(op)}` +
-      `&a=${encodeURIComponent(JSON.stringify(args === undefined ? null : args))}`;
-    return fetch(url).then((r) => r.json()).then((r) => {
+    const base = `debrowser://ext-bridge/?t=${encodeURIComponent(token)}&op=${encodeURIComponent(op)}`;
+    const json = JSON.stringify(args === undefined ? null : args);
+    // Small calls in the address; large ones - updateDynamicRules with
+    // thousands of rules - as a body, past the length an address may have.
+    // text/plain, so the request needs no preflight.
+    const call = json.length < 8000
+      ? fetch(`${base}&a=${encodeURIComponent(json)}`)
+      : fetch(base, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: json });
+    return call.then((r) => r.json()).then((r) => {
       if (r && r.error) throw new Error(r.error);
       return r ? r.value : undefined;
     });

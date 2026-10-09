@@ -107,8 +107,10 @@ class RuleSet {
 function matches(rule, req) {
   const c = rule.condition;
   if (c.resourceTypes && !c.resourceTypes.includes(req.type)) return false;
-  // With no resourceTypes, Chrome leaves the main frame out.
-  if (!c.resourceTypes && req.type === 'main_frame' && rule.action.type !== 'allowAllRequests') return false;
+  // With neither resourceTypes nor excludedResourceTypes, Chrome leaves the
+  // main frame out; naming only the exclusions counts the main frame in.
+  if (!c.resourceTypes && !c.excludedResourceTypes && req.type === 'main_frame' &&
+      rule.action.type !== 'allowAllRequests') return false;
   if (c.excludedResourceTypes && c.excludedResourceTypes.includes(req.type)) return false;
   if (c.requestMethods && !c.requestMethods.includes(req.method)) return false;
   if (c.excludedRequestMethods && c.excludedRequestMethods.includes(req.method)) return false;
@@ -293,6 +295,7 @@ class DeclarativeNetRequest {
     this.byExt = new Map();
     this.origins = new Map();
     this.hooked = new WeakSet();
+    this.allowances = new Map();
     this.matched = 0;
   }
 
@@ -304,7 +307,7 @@ class DeclarativeNetRequest {
 
   setOrigin(extId, origin) { this.origins.set(extId, origin); }
 
-  drop(extId) { this.byExt.delete(extId); this.origins.delete(extId); }
+  drop(extId) { this.byExt.delete(extId); this.origins.delete(extId); this.allowances.clear(); }
 
   /** The request as the rules see it. */
   static describe(details) {
@@ -332,6 +335,12 @@ class DeclarativeNetRequest {
       if (!rule) continue;
       const type = rule.action.type;
       if (type === 'allow' || type === 'allowAllRequests') continue;
+      // allowAllRequests on a page covers everything that page then loads,
+      // unless a rule of higher priority says otherwise. It matched only the
+      // navigation, so uBlock Origin Lite's "no filtering on this site" let
+      // the page through and went on blocking its every image and script.
+      const pageAllow = this.pageAllowance(id, rules, details, req);
+      if (pageAllow && (pageAllow.priority || 1) >= (rule.priority || 1)) continue;
       this.matched += 1;
       if (type === 'block') return { cancel: true };
       if (type === 'upgradeScheme' && /^(http|ws):/.test(req.url)) {
@@ -343,6 +352,33 @@ class DeclarativeNetRequest {
       }
     }
     return undefined;
+  }
+
+  /**
+   * The allowAllRequests rule, if any, that the document making this request
+   * was loaded under. Remembered for a moment per document, so a page loading
+   * two hundred things asks once rather than two hundred times.
+   */
+  pageAllowance(id, rules, details, req) {
+    if (req.type === 'main_frame') return null;
+    const frame = details.frame;
+    let doc = '';
+    let top = true;
+    try {
+      doc = frame?.url || '';
+      top = !frame?.parent;
+    } catch { /* a frame already gone */ }
+    if (!doc && details.webContents && !details.webContents.isDestroyed()) doc = details.webContents.getURL();
+    if (!/^https?:/i.test(doc)) return null;
+    const key = `${id}\n${top ? 'm' : 's'}\n${doc}`;
+    const now = Date.now();
+    const hit = this.allowances.get(key);
+    if (hit && now - hit.at < 2000) return hit.rule;
+    const docReq = DeclarativeNetRequest.describe({ url: doc, resourceType: top ? 'mainFrame' : 'subFrame', method: 'GET' });
+    const rule = rules.decide(docReq, ['allowAllRequests']);
+    if (this.allowances.size > 512) this.allowances.clear();
+    this.allowances.set(key, { at: now, rule });
+    return rule;
   }
 
   /** modifyHeaders on one list of headers: `request` or `response`. */

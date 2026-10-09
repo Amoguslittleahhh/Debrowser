@@ -68,6 +68,8 @@ const contextSource = (tabId, token) => `globalThis.__debrowserActiveTab = ${Num
   `globalThis.__debrowserExt = ${JSON.stringify({ token: token || null })};\n`;
 /** Recorded beside each copy: where it came from, so the list can say so. */
 const META_FILE = 'debrowser-meta.json';
+/** State an extension builds up while running, carried over when it is updated. */
+const KEPT_FILES = ['debrowser-dnr.json', 'debrowser-alarms.json'];
 
 /* ---- Unpacking ------------------------------------------------------------ */
 
@@ -187,7 +189,12 @@ function adaptManifest(manifest) {
     delete out.background;
   }
   if (Array.isArray(out.content_scripts)) {
-    for (const cs of out.content_scripts) if (Array.isArray(cs.js)) cs.js = [COMPAT_FILE, ...cs.js];
+    // Not into the page's own world: there it has no extension API to fill
+    // in, and would hand every page a `browser` object to find - a tell that
+    // an extension is installed, and a wrong answer to Firefox sniffing.
+    for (const cs of out.content_scripts) {
+      if (Array.isArray(cs.js) && String(cs.world || '').toUpperCase() !== 'MAIN') cs.js = [COMPAT_FILE, ...cs.js];
+    }
   }
   delete out.browser_specific_settings;
   delete out.applications;
@@ -699,7 +706,10 @@ class Extensions {
           id, dir, name: displayName(dir, manifest), version: String(manifest.version || ''),
           from: meta.from || 'chrome', addedAt: meta.addedAt || 0, manifestVersion: manifest.manifest_version || 2,
           popup: popupOf(manifest), background: meta.background || null, token: meta.token || null,
-          rules: Boolean(manifest.declarative_net_request),
+          // Rules it ships, or only ones it adds while running: those are
+          // saved too, and must be in force from the next start.
+          rules: Boolean(manifest.declarative_net_request) || [...(manifest.permissions || [])].some((p) =>
+            /^declarativeNetRequest/.test(String(p))),
           worker: Boolean(manifest.background && manifest.background.service_worker)
         });
       } catch { /* a half-written folder: not listed, not loaded */ }
@@ -762,6 +772,11 @@ class Extensions {
     if (adapted.backgroundHtml) fs.writeFileSync(path.join(temp, BACKGROUND_FILE), adaptPage(adapted.backgroundHtml));
     fs.writeFileSync(path.join(temp, META_FILE), JSON.stringify({ from, addedAt: Date.now(), source: path.basename(source),
       background: adapted.background, token }));
+    // What the extension built up while running - its own request rules, the
+    // rulesets it switched, its alarms - survives an update, as in Chrome.
+    for (const kept of KEPT_FILES) {
+      try { fs.copyFileSync(path.join(dir, kept), path.join(temp, kept)); } catch { /* none yet */ }
+    }
     this.unloadEverywhere(id);
     fs.rmSync(dir, { recursive: true, force: true });
     fs.renameSync(temp, dir);
