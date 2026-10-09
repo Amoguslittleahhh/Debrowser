@@ -94,7 +94,8 @@ function inTime(promise, ms, fallback = null) {
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
                           openInternalPage, senderPage, bookmarks,
                           runCommand = () => {}, history = null, context = { model: null },
-                          credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null, passkeys = null }) {
+                          credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null, passkeys = null,
+                          getExtensions = () => null }) {
   console.log('\n=== Debrowser smoke test ===\n');
   // Every uncaught error in the browser's own pages, for the whole run. A page
   // that throws half-way through drawing looks finished in a screenshot -
@@ -5424,6 +5425,75 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     for (const [key, value] of saved) prefs.set(key, value);
   }
 
+  // Extensions (a Lab): a Chrome one from its folder and a Firefox one from a
+  // packed .xpi, each proving it ran on a page - the Firefox one through
+  // `browser.*`, which only the shim provides - then gone again when removed.
+  if (getExtensions()) {
+    const ext = getExtensions();
+    const os = require('os');
+    const zlib = require('zlib');
+    const fixtures = path.join(__dirname, '..', '..', '..', 'test', 'extensions');
+    // A real .xpi: the Firefox folder, zipped (stored, no compression).
+    const zip = (dir) => {
+      const parts = [];
+      const central = [];
+      let offset = 0;
+      for (const name of fs.readdirSync(dir)) {
+        const data = fs.readFileSync(path.join(dir, name));
+        const nameBuf = Buffer.from(name);
+        const head = Buffer.alloc(30);
+        head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4);
+        head.writeUInt32LE(zlib.crc32(data), 14); head.writeUInt32LE(data.length, 18); head.writeUInt32LE(data.length, 22);
+        head.writeUInt16LE(nameBuf.length, 26);
+        const dirEntry = Buffer.alloc(46);
+        dirEntry.writeUInt32LE(0x02014b50, 0); dirEntry.writeUInt16LE(20, 4); dirEntry.writeUInt16LE(20, 6);
+        dirEntry.writeUInt32LE(zlib.crc32(data), 16); dirEntry.writeUInt32LE(data.length, 20); dirEntry.writeUInt32LE(data.length, 24);
+        dirEntry.writeUInt16LE(nameBuf.length, 28); dirEntry.writeUInt32LE(offset, 42);
+        parts.push(head, nameBuf, data);
+        central.push(dirEntry, nameBuf);
+        offset += head.length + nameBuf.length + data.length;
+      }
+      const cd = Buffer.concat(central);
+      const end = Buffer.alloc(22);
+      end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10);
+      end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+      return Buffer.concat([...parts, cd, end]);
+    };
+    const xpi = path.join(os.tmpdir(), `debrowser-firefox-hello-${process.pid}.xpi`);
+    fs.writeFileSync(xpi, zip(path.join(fixtures, 'firefox-hello')));
+    const wasLab = prefs.get('labExtensions');
+    runCommand('set-pref', { key: 'labExtensions', value: true });
+    let chromeExt = null;
+    let firefoxExt = null;
+    let installError = '';
+    try {
+      chromeExt = ext.install(path.join(fixtures, 'chrome-hello'));
+      firefoxExt = ext.install(xpi);
+      await ext.loadEverywhere(chromeExt.id);
+      await ext.loadEverywhere(firefoxExt.id);
+    } catch (err) { installError = err.message; }
+    const page = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
+    const marks = () => page.wc.executeJavaScript(
+      '({ c: document.documentElement.dataset.debrowserChromeExt, f: document.documentElement.dataset.debrowserFirefoxExt })')
+      .catch(() => ({}));
+    await waitFor(async () => { const m = await marks(); return m.c === 'ran' && m.f === 'ran'; }, { timeoutMs: 10_000 });
+    const seen = await inTime(marks(), 3000, {});
+    const listed = ext.list().map((e) => `${e.from}:${e.name}`).sort().join(', ');
+    if (chromeExt) ext.remove(chromeExt.id);
+    if (firefoxExt) ext.remove(firefoxExt.id);
+    page.wc.reload();
+    await waitFor(() => !page.loading, { timeoutMs: 10_000 });
+    await sleep(500);
+    const after = await inTime(marks(), 3000, {});
+    tabs.close(page.id);
+    runCommand('set-pref', { key: 'labExtensions', value: wasLab });
+    fs.rmSync(xpi, { force: true });
+    check('Labs: a Chrome extension and a Firefox .xpi both run on a page, and stop when removed',
+      !installError && seen.c === 'ran' && seen.f === 'ran' && !after.c && !after.f && ext.list().length === 0,
+      `install ${installError || 'ok'}; listed ${listed}; ran chrome=${seen.c} firefox=${seen.f}; ` +
+      `after removing chrome=${after.c} firefox=${after.f}`);
+  }
+
   // A start: pinned tabs from last time, then the startup sites that are not
   // already one of them, cleaned of anything that is not a web address.
   {
@@ -5475,6 +5545,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     runCommand('cycle-tab', { delta: 1, recent: true });
     const second = tabs.activeId;
     await sleep(1700);   // the run ends by itself when no release is seen
+    // As Alt+Tab: one press now goes back to where the run began (1), not
+    // to the tab it only passed through (2).
     runCommand('cycle-tab', { delta: 1, recent: true });
     const afterEnd = tabs.activeId;
     prefs.set('tabCycleOrder', 'strip');
@@ -5483,10 +5555,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const strip = tabs.activeId;
     const list = tabs.all().filter((t) => t.spaceId === tabs.byId(stripFrom).spaceId);
     const stripNext = list[(list.findIndex((t) => t.id === stripFrom) + 1) % list.length].id;
-    check('Ctrl+Tab goes to the tab used last, then the one before, or along the strip if set',
-      first === made[2].id && second === made[0].id && afterEnd === made[2].id && strip === stripNext,
+    check('Ctrl+Tab goes to the tab used last, then the one before, back to the start after a run, or along the strip if set',
+      first === made[2].id && second === made[0].id && afterEnd === made[1].id && strip === stripNext,
       `first ${first} (want ${made[2].id}), second ${second} (want ${made[0].id}), ` +
-      `after the run ${afterEnd} (want ${made[2].id}), strip ${strip} (want ${stripNext})`);
+      `after the run ${afterEnd} (want ${made[1].id}), strip ${strip} (want ${stripNext})`);
     prefs.set('tabCycleOrder', wasOrder);
 
     // "Put to sleep" on a tab in the background: asleep at once, saying how

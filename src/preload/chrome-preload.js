@@ -249,6 +249,10 @@ const COMMANDS = new Set([
 
   // The new tab page's tiles.
   'top-sites',
+  // Extensions, a Lab (Settings).
+  'extensions-list',
+  'extension-add',
+  'extension-remove',
   'forget-site',
   'recent-pages',
   'hide-continue-card'

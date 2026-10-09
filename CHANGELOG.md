@@ -28,6 +28,11 @@
 - **Windows: no white flash when you pin or unpin the tab bar.** With a see-through window, pinning and unpinning the tabs switched the window's glass off and on again, and Windows painted the window white for a moment each time; the glass now stays, covered where the layout is solid.
 - **Windows: the private window's taskbar icon shows its ring.** At taskbar sizes the ring on the private window's icon was drawn under 5 pixels across and blurred into a squashed "o"; at small sizes it is now larger and bolder, and reads as a ring.
 
+### In Labs
+
+- **Chrome and Firefox extensions.** Turn on Settings → Labs → "Chrome and Firefox extensions", then add one from a .crx (Chrome), a .xpi (Firefox) or an unpacked folder. Extensions that work on the page itself - dark modes, script and element blockers, page tweaks - mostly run; toolbar buttons and popups don't show yet, and extensions can't be installed from the Chrome Web Store or Firefox Add-ons sites. Firefox extensions run through a small translation of Firefox's extension API, so ones that rely on Firefox-only features won't start. Never in private windows.
+
+
 ## 2.2.1
 
 Debrowser 2.2.1 lets Windows installs of 2.1.0 update again, which every one of them failed to do, and makes the updating window move smoothly.

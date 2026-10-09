@@ -243,6 +243,8 @@ const SCHEMA = {
   // to an ordinary setting, or goes, in a later release.
   labTabGroups: { def: false, ok: (v) => typeof v === 'boolean' },
   labQuickWindow: { def: false, ok: (v) => typeof v === 'boolean' },
+  // Chrome and Firefox extensions (extensions.js). Off: none are loaded.
+  labExtensions: { def: false, ok: (v) => typeof v === 'boolean' },
 
   // Where a tab opened from a link lands. 'after-current' keeps a page's
   // spawned tabs beside it rather than at the far end of a long strip.

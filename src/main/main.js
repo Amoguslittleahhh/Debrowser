@@ -52,14 +52,32 @@ const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bo
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
 const { startupTabs, placeKey } = require('./startup');
 const { duplicateTabs } = require('./tabs/duplicates');
+const { Extensions } = require('./extensions');
 
 // A Ctrl+Tab run in progress: the recent-use order it started with and where
 // in it the keyboard is (`cycle-tab`). Ended by letting go of Ctrl.
 let tabCycle = null;
 let tabCycleTimer = null;
+/**
+ * The run is over. As Alt+Tab does: the tab it landed on is the one used
+ * last, the one it started from the one before - so the next single press
+ * goes back there - and tabs only passed through on the way keep the place
+ * they had, rather than counting as used because they were on screen for a
+ * keystroke.
+ */
 function endTabCycle() {
   clearTimeout(tabCycleTimer);
+  const run = tabCycle;
   tabCycle = null;
+  if (!run || run.at === 0) return;
+  const now = Date.now();
+  run.order.forEach((id, i) => {
+    const tab = run.lookup(id);
+    if (!tab) return;
+    if (i === run.at) tab.lastActiveAt = now;
+    else if (i === 0) tab.lastActiveAt = now - 1;
+    else if (run.saved.has(id)) tab.lastActiveAt = run.saved.get(id);
+  });
 }
 const { History } = require('./data/history');
 const icons = require('./icons');
@@ -563,6 +581,7 @@ function main() {
   let sitePermissions = null;
   let sitePrefs = null;
   let blocker = null;
+  let extensions = null;
   let receipts = null;
   /** What every ordinary browsing session gets (web-hooks, the blocker...), in order. */
   const browsingSetup = [];
@@ -1340,6 +1359,19 @@ function main() {
       if (prefs.get('blockAds') !== false && !OFFLINE_MODE) setTimeout(() => blocker.load(), 3000).unref?.();
     }
 
+    // Extensions (a Lab, extensions.js): every browsing session is known, so
+    // switching the Lab on reaches the ones already open; loaded only while
+    // it is on. Never in a private window.
+    if (!INCOGNITO) {
+      extensions = new Extensions(OFFLINE_MODE && !process.env.DEBROWSER_EXT_DIR
+        ? path.join(app.getPath('temp'), `debrowser-ext-${process.pid}`)
+        : process.env.DEBROWSER_EXT_DIR || path.join(app.getPath('userData'), 'extensions'), log);
+      browsingSetup.push((ses) => {
+        extensions.sessions.add(ses);
+        if (prefs.get('labExtensions') === true) extensions.attach(ses).catch((e) => log(`extensions: ${e.message}`));
+      });
+    }
+
     // Everything above, on the browsing session - and on each container
     // space's own session as it is first used (onNewSession).
     for (const setup of browsingSetup) setup(session.fromPartition(BROWSING_PARTITION));
@@ -1626,6 +1658,7 @@ function main() {
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, previousSession, context, find, quitState, siteZoom, circuits, slowJs,
       sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
+      getExtensions: () => extensions,
       passkeys,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
@@ -1684,7 +1717,7 @@ function main() {
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs, shell, credentials, vault, bookmarks, history, downloads, prefs, log, context,
       sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts,
-      getArchive: () => archive });
+      getArchive: () => archive, getExtensions: () => extensions });
 
     /*
      * The tabs from last time, or one new one.
@@ -1879,7 +1912,7 @@ function main() {
       });
     } else if (SMOKE_TEST) {
       runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
-        blocker, sitePrefs, spaces, passkeys });
+        blocker, sitePrefs, spaces, passkeys, getExtensions: () => extensions });
     } else if (SPEED_TEST) {
       // Startup, from this process starting to the first tab drawn.
       const startedAt = Date.now() - process.uptime() * 1000;
@@ -2151,7 +2184,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
                        getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null,
-                       passkeys = null }) {
+                       passkeys = null, getExtensions = () => null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
     for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
@@ -2954,7 +2987,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           if (!tabCycle) {
             const order = [...list].sort((a, b) => (b.id === tabs.activeId) - (a.id === tabs.activeId) ||
               (b.lastActiveAt || 0) - (a.lastActiveAt || 0));
-            tabCycle = { order: order.map((t) => t.id), at: 0 };
+            tabCycle = { order: order.map((t) => t.id), at: 0, lookup: (id) => tabs.byId(id),
+              saved: new Map(order.map((t) => [t.id, t.lastActiveAt])) };
           }
           clearTimeout(tabCycleTimer);
           // In case the release is never seen - focus moved to another app.
@@ -3505,6 +3539,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         }
         if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
         if (payload.key === 'secureDns') applySecureDns(prefs, log);
+        const extensions = getExtensions();
+        if (payload.key === 'labExtensions' && extensions) {
+          if (payload.value === true) for (const ses of extensions.sessions) extensions.attach(ses).catch(() => {});
+          else extensions.detachAll();
+        }
         if (payload.key === 'batteryMode' && governor && governor.applySaver) governor.applySaver();
         // Turned off: the kept state goes now, not when a private window next
         // opens - it may never open again.
@@ -4125,6 +4164,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
  * there cannot be abused, whatever the sender.
  */
 const INCOGNITO_REFUSED = new Set([
+  'extensions-list', 'extension-add', 'extension-remove',
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
   'check-passwords',
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
@@ -4295,7 +4335,8 @@ function pageMay(page, channel, name) {
 
 function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
-                       getReceipts = () => null, getArchive = () => null, context = { model: null } }) {
+                       getReceipts = () => null, getArchive = () => null, getExtensions = () => null,
+                       context = { model: null } }) {
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     // Stricter than the command channel: only the passwords page may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
@@ -4725,6 +4766,36 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           log('history', past.ok ? `imported ${pages} page(s) from ${profile.browser}` : past.reason);
         }
         return { ok: true, ...result, pages, browser: profile.browser };
+      }
+
+      // Extensions (a Lab): the list, adding one from a file or a folder the
+      // user picks - the page never names a path - and removing one.
+      case 'extensions-list': {
+        const ext = getExtensions();
+        if (!ext) return { items: [] };
+        return { items: ext.list().map(({ id, name, version, from }) =>
+          ({ id, name, version, from, error: ext.errors?.[id] || null })) };
+      }
+      case 'extension-add': {
+        const ext = getExtensions();
+        if (!ext || prefs.get('labExtensions') !== true) return { ok: false, reason: 'Turn on Extensions in Labs first.' };
+        const folder = payload?.folder === true;
+        const { canceled, filePaths: picked } = await dialog.showOpenDialog(shell.window, folder
+          ? { title: 'Add an unpacked extension', properties: ['openDirectory'] }
+          : { title: 'Add an extension', properties: ['openFile'],
+            filters: [{ name: 'Chrome or Firefox extension', extensions: ['crx', 'xpi', 'zip'] }] });
+        if (canceled || !picked || !picked.length) return { ok: false, cancelled: true };
+        try {
+          const added = ext.install(picked[0]);
+          const [loaded] = await ext.loadEverywhere(added.id);
+          return { ok: true, name: added.name, from: added.from, loadError: loaded && !loaded.ok ? loaded.error : null };
+        } catch (err) {
+          return { ok: false, reason: `That couldn’t be added: ${err.message}.` };
+        }
+      }
+      case 'extension-remove': {
+        const ext = getExtensions();
+        return { ok: Boolean(ext && ext.remove(payload?.id)) };
       }
 
       // An exported file the user picks. Read in main rather than in the
@@ -5692,7 +5763,7 @@ function applySecureDns(prefs, log) {
 /* ------------------------------------------------------------------ */
 
 function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
-                       blocker, sitePrefs, spaces, passkeys }) {
+                       blocker, sitePrefs, spaces, passkeys, getExtensions = () => null }) {
   const { runSmoke } = require('./testing/smoke');
   runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
@@ -5700,7 +5771,8 @@ function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, his
             // the context menu the way a keystroke does rather than by calling
             // into their parts.
             runCommand: (command, payload, sender = null) => runCommand(command, payload, sender),
-            history, context, credentials, vault, blocker, sitePrefs, spaces, passkeys }).then((code) => {
+            history, context, credentials, vault, blocker, sitePrefs, spaces, passkeys,
+            getExtensions }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

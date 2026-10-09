@@ -587,6 +587,12 @@ const SECTIONS = {
       label: 'A small window for links from other apps',
       hint: 'Links from other apps open in a small window. Keep one as a tab with Open in Debrowser.',
       type: 'checkbox'
+    },
+    {
+      key: 'labExtensions',
+      label: 'Chrome and Firefox extensions',
+      hint: 'Ones that work on the page, like dark modes and script blockers, mostly run. Toolbar buttons and popups don’t show yet. Never in private windows.',
+      type: 'checkbox'
     }
   ],
 
@@ -643,12 +649,65 @@ function buildAll(state = {}) {
   if (!state.incognito) {
     document.querySelector('[data-rows="appearance"]').prepend(welcomeRow());
     document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow(), safetyRow());
+    extensionRows(document.querySelector('[data-rows="labs"]'));
     const advanced = document.querySelector('[data-rows="advanced"]');
     setupRows(advanced);
     window.addEventListener('focus', () => setupRows(advanced));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) setupRows(advanced); });
   }
   built = true;
+}
+
+/*
+ * Extensions (a Lab): each installed one - its name, where it came from, and
+ * Remove - then Add, from a packed file (.crx, .xpi, .zip) or an unpacked
+ * folder. Shown while the Lab is on; the browser picks the file, so this
+ * page never sees a path.
+ */
+function extensionRows(host) {
+  const box = document.createElement('div');
+  box.className = 'extension-rows';
+  host.append(box);
+  // From the preference as the browser last sent it, not the box: the first
+  // state arrives after the page is built.
+  let on = false;
+  const toggle = () => on;
+  const render = async () => {
+    box.hidden = !toggle();
+    if (box.hidden) return;
+    const res = await api.request('extensions-list');
+    const rows = ((res && res.items) || []).map((ext) => {
+      const where = ext.from === 'firefox' ? 'Firefox' : 'Chrome';
+      const { row, control } = simpleRow(`${ext.name} ${ext.version}`,
+        ext.error ? `${where} extension. It didn’t start: ${ext.error}` : `${where} extension`);
+      const remove = smallButton('Remove');
+      remove.addEventListener('click', async () => {
+        await api.request('extension-remove', { id: ext.id });
+        render();
+      });
+      control.append(remove);
+      return row;
+    });
+    const { row: addRow, note, control } = simpleRow('Add an extension',
+      'A .crx from Chrome, a .xpi from Firefox, or an unpacked folder.');
+    const addFile = smallButton('From a file');
+    const addFolder = smallButton('From a folder');
+    const add = async (folder) => {
+      const r = await api.request('extension-add', { folder });
+      if (r && r.ok) note.textContent = r.loadError ? `${r.name} was added but didn’t start: ${r.loadError}` : `${r.name} added.`;
+      else if (r && !r.cancelled) note.textContent = r.reason || 'That couldn’t be added.';
+      if (r && r.ok) render();
+    };
+    addFile.addEventListener('click', () => add(false));
+    addFolder.addEventListener('click', () => add(true));
+    control.append(addFile, addFolder);
+    box.replaceChildren(...rows, addRow);
+  };
+  api.onState((state) => {
+    const now = state?.prefs?.labExtensions === true;
+    if (now !== on) { on = now; render(); }
+  });
+  render();
 }
 
 function welcomeRow() {
