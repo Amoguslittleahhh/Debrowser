@@ -15,6 +15,10 @@
  *  - `chrome.tabs.query` from a popup: Electron counts the popup itself as
  *    the active tab, so "the page I am on" was the popup. Debrowser writes
  *    the real one into `__debrowser_context.js` as it opens the popup.
+ *  - Through the browser (debrowser://ext-bridge, or a worker's relay page):
+ *    right-click items, alarms, notifications, tabs opened and closed,
+ *    declarativeNetRequest, webRequest listeners, tabs and webNavigation
+ *    events, the toolbar badge, and runtime.reload.
  *  - Firefox's `browser.*`: the same API with promises, `menus` for
  *    `contextMenus`, and `onMessage` listeners that answer with a promise -
  *    installed over the `browser` newer Chromium has, which lacks all of
@@ -36,10 +40,21 @@
   // the browser (through the relay page, extensions.js `dispatch`) or from
   // its own timers.
   const named = new Map();
+  // Events the browser sends only to extensions that listen (tabs.*,
+  // webNavigation.*): the first listener says so (`events.listen`).
+  const SUBSCRIBED = /^(tabs|webNavigation)\./;
+  let callLater = null;
   const event = (name) => {
     const ls = new Set();
+    let told = false;
     const ev = {
-      addListener: (f) => { ls.add(f); },
+      addListener: (f) => {
+        ls.add(f);
+        if (name && !told && SUBSCRIBED.test(name)) {
+          told = true;
+          Promise.resolve().then(() => callLater && callLater('events.listen', { name })).catch(() => {});
+        }
+      },
       removeListener: (f) => { ls.delete(f); },
       hasListener: (f) => ls.has(f),
       hasListeners: () => ls.size > 0,
@@ -114,6 +129,7 @@
     attempt();
   });
   const call = isWorker ? viaRelay : fetchBridge;
+  callLater = call;
   const isRelay = typeof location !== 'undefined' && location.pathname === '/debrowser-relay.html';
   // The browser's events arrive as runtime messages; the extension's own
   // onMessage listeners never see them.
@@ -143,6 +159,10 @@
   }
 
   if (c.extension && c.runtime && c.runtime.getURL) define(c.extension, 'getURL', (p) => c.runtime.getURL(p));
+  // Restarting itself: Electron unloads the extension and never loads it
+  // again, so the browser does both, as Chrome does. uBlock Origin restarts
+  // once on its first run in a Chromium browser, on purpose.
+  if (c.runtime && token) define(c.runtime, 'reload', () => { call('runtime.reload', {}).catch(() => {}); }, true);
 
   const theWindow = () => ({ id: 1, focused: true, top: 0, left: 0, type: 'normal', state: 'normal',
     incognito: false, alwaysOnTop: false });
@@ -193,51 +213,25 @@
     ContextType: {}, ItemType: {}
   });
 
-  // Alarms, on this page's own timers - for a service worker, while it runs.
-  const alarms = new Map();
+  // Alarms, kept by the browser (extensions.js): one set for an hour from now
+  // goes off then, even if this worker has stopped meanwhile - its arrival
+  // starts it again.
   const onAlarm = event('alarms.onAlarm');
   define(c, 'alarms', {
     create: (name, info, cb) => {
-      if (typeof name === 'object') { cb = info; info = name; name = ''; }
-      name = String(name || '');
-      info = info || {};
-      const had = alarms.get(name);
-      if (had) { clearTimeout(had.timer); clearInterval(had.repeat); }
-      const delay = info.when ? Math.max(0, info.when - Date.now())
-        : Math.max(0, (info.delayInMinutes ?? info.periodInMinutes ?? 0) * 60000);
-      const alarm = { name, scheduledTime: Date.now() + delay, periodInMinutes: info.periodInMinutes };
-      alarm.timer = setTimeout(() => {
-        onAlarm.fire({ name, scheduledTime: alarm.scheduledTime, periodInMinutes: alarm.periodInMinutes });
-        if (alarm.periodInMinutes) {
-          alarm.repeat = setInterval(() => {
-            alarm.scheduledTime = Date.now();
-            onAlarm.fire({ name, scheduledTime: alarm.scheduledTime, periodInMinutes: alarm.periodInMinutes });
-          }, alarm.periodInMinutes * 60000);
-        } else {
-          alarms.delete(name);
-        }
-      }, delay);
-      alarms.set(name, alarm);
-      return answer(Promise.resolve(), cb);
+      if (typeof name === 'object' && name !== null) { cb = info; info = name; name = ''; }
+      return answer(call('alarms.create', { name: String(name || ''), info: info || {} }), cb);
     },
     get: (name, cb) => {
       if (typeof name === 'function') { cb = name; name = ''; }
-      const a = alarms.get(String(name || ''));
-      return answer(Promise.resolve(a ? { name: a.name, scheduledTime: a.scheduledTime, periodInMinutes: a.periodInMinutes } : undefined), cb);
+      return answer(call('alarms.get', { name: String(name || '') }).then((a) => a || undefined), cb);
     },
-    getAll: (cb) => answer(Promise.resolve([...alarms.values()].map((a) =>
-      ({ name: a.name, scheduledTime: a.scheduledTime, periodInMinutes: a.periodInMinutes }))), cb),
+    getAll: (cb) => answer(call('alarms.getAll', {}), cb),
     clear: (name, cb) => {
       if (typeof name === 'function') { cb = name; name = ''; }
-      const a = alarms.get(String(name || ''));
-      if (a) { clearTimeout(a.timer); clearInterval(a.repeat); alarms.delete(a.name); }
-      return answer(Promise.resolve(Boolean(a)), cb);
+      return answer(call('alarms.clear', { name: String(name || '') }), cb);
     },
-    clearAll: (cb) => {
-      for (const a of alarms.values()) { clearTimeout(a.timer); clearInterval(a.repeat); }
-      alarms.clear();
-      return answer(Promise.resolve(true), cb);
-    },
+    clearAll: (cb) => answer(call('alarms.clear', {}), cb),
     onAlarm
   }, true);
 
@@ -254,6 +248,80 @@
     onClicked: event('notifications.onClicked'), onClosed: event('notifications.onClosed'),
     onButtonClicked: event('notifications.onButtonClicked'), TemplateType: { BASIC: 'basic', IMAGE: 'image', LIST: 'list', PROGRESS: 'progress' }
   });
+
+  // Tab and navigation events, from the browser's own tabs.
+  if (c.tabs) {
+    for (const n of ['onCreated', 'onUpdated', 'onActivated', 'onRemoved', 'onReplaced', 'onMoved', 'onHighlighted',
+      'onAttached', 'onDetached', 'onZoomChange']) define(c.tabs, n, event(`tabs.${n}`), true);
+  }
+  const navigation = {};
+  for (const n of ['onBeforeNavigate', 'onCommitted', 'onDOMContentLoaded', 'onCompleted', 'onErrorOccurred',
+    'onCreatedNavigationTarget', 'onHistoryStateUpdated', 'onReferenceFragmentUpdated', 'onTabReplaced']) {
+    navigation[n] = event(`webNavigation.${n}`);
+  }
+  navigation.getFrame = (d, cb) => answer((c.tabs && c.tabs.get ? Promise.resolve(c.tabs.get(d.tabId)) : Promise.resolve(null))
+    .then((t) => (t ? { frameId: d.frameId || 0, parentFrameId: d.frameId ? 0 : -1, url: t.url, errorOccurred: false } : null)), cb);
+  navigation.getAllFrames = (d, cb) => answer((c.tabs && c.tabs.get ? Promise.resolve(c.tabs.get(d.tabId)) : Promise.resolve(null))
+    .then((t) => (t ? [{ frameId: 0, parentFrameId: -1, url: t.url, errorOccurred: false }] : [])), cb);
+  define(c, 'webNavigation', navigation, true);
+
+  /*
+   * webRequest: the extension's listeners on the request path. Adding one
+   * tells the browser which requests it wants; the browser hands each over
+   * (__debrowserWebRequest, or a message for a worker) and, for a blocking
+   * listener in a background page, waits for the answer.
+   */
+  const wr = new Map();
+  let wrCount = 0;
+  const takes = (filter, d) => {
+    if (filter && Array.isArray(filter.types) && filter.types.length && !filter.types.includes(d.type)) return false;
+    return true;   // URL patterns are matched by the browser before it asks
+  };
+  const wrEvent = (name) => {
+    const mine = new Map();
+    return {
+      addListener(fn, filter, extra) {
+        const id = `w${++wrCount}`;
+        mine.set(fn, id);
+        wr.set(id, { fn, name, filter: filter || {} });
+        call('webRequest.listen', { id, event: name, filter: filter || {}, extra: extra || [],
+          blocking: Array.isArray(extra) && extra.includes('blocking') }).catch(() => {});
+      },
+      removeListener(fn) {
+        const id = mine.get(fn);
+        if (!id) return;
+        mine.delete(fn);
+        wr.delete(id);
+        call('webRequest.unlisten', { id }).catch(() => {});
+      },
+      hasListener: (fn) => mine.has(fn),
+      hasListeners: () => mine.size > 0
+    };
+  };
+  const runRequest = async (name, details, ids) => {
+    const out = {};
+    for (const id of ids || []) {
+      const l = wr.get(id);
+      if (!l || l.name !== name || !takes(l.filter, details)) continue;
+      let r;
+      try { r = await l.fn({ ...details }); } catch (e) { console.error(e); }
+      if (r && typeof r === 'object') {
+        if (r.cancel) return { cancel: true };
+        if (r.redirectUrl) out.redirectUrl = r.redirectUrl;
+        if (r.requestHeaders) out.requestHeaders = r.requestHeaders;
+        if (r.responseHeaders) out.responseHeaders = r.responseHeaders;
+      }
+    }
+    return out;
+  };
+  g.__debrowserWebRequest = runRequest;
+  event('webRequest.event').addListener((name, details, ids) => { runRequest(name, details, ids); });
+  const webRequest = { MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES: 20,
+    handlerBehaviorChanged: (cb) => answer(Promise.resolve(), cb),
+    OnBeforeRequestOptions: {}, OnBeforeSendHeadersOptions: {}, OnHeadersReceivedOptions: {}, ResourceType: {} };
+  for (const n of ['onBeforeRequest', 'onBeforeSendHeaders', 'onSendHeaders', 'onHeadersReceived', 'onAuthRequired',
+    'onResponseStarted', 'onBeforeRedirect', 'onCompleted', 'onErrorOccurred']) webRequest[n] = wrEvent(n);
+  define(c, 'webRequest', webRequest, true);
 
   // Request rules: run by Debrowser (extension-dnr.js).
   const dnr = (op) => (arg, cb) => answer(call(`dnr.${op}`, typeof arg === 'function' ? {} : (arg || {})),
@@ -298,8 +366,31 @@
     onAdded: event(), onRemoved: event()
   });
   // The toolbar API under both names: V2's browserAction and V3's action.
+  // Where Electron has neither (a V2 background), Debrowser's: the badge text
+  // goes beside the extension's name in the puzzle menu, a click on an
+  // extension with no popup arrives as onClicked, and the rest - icon, title,
+  // colours - is accepted.
+  if (!c.action && !c.browserAction) {
+    const badges = {};
+    const later = (v) => (_d, cb) => answer(Promise.resolve(v), typeof _d === 'function' ? _d : cb);
+    define(c, 'action', {
+      setBadgeText: (d, cb) => {
+        const text = String((d && d.text) || '');
+        badges[(d && d.tabId) ?? 'all'] = text;
+        return answer(call('action.badge', { text, tabId: d && d.tabId }).catch(() => {}), cb);
+      },
+      getBadgeText: (d, cb) => answer(Promise.resolve(badges[(d && d.tabId) ?? 'all'] || badges.all || ''), cb),
+      setIcon: later(undefined), setTitle: later(undefined), getTitle: later(''),
+      setBadgeBackgroundColor: later(undefined), getBadgeBackgroundColor: later([0, 0, 0, 0]),
+      setBadgeTextColor: later(undefined), getBadgeTextColor: later([255, 255, 255, 255]),
+      setPopup: later(undefined), getPopup: later(''), enable: later(undefined), disable: later(undefined),
+      isEnabled: later(true), getUserSettings: later({ isOnToolbar: true }), openPopup: later(undefined),
+      onClicked: event('action.onClicked')
+    });
+  }
   if (c.action && !c.browserAction) define(c, 'browserAction', c.action);
   if (c.browserAction && !c.action) define(c, 'action', c.browserAction);
+  if (c.action && !c.pageAction) define(c, 'pageAction', c.action);
 
   if (c.tabs) {
     // Opened and closed by the browser, from anywhere the extension runs -
@@ -350,25 +441,36 @@
    */
   const NAMESPACES = ['bookmarks', 'browsingData', 'commands', 'contentSettings', 'cookies',
     'declarativeContent', 'downloads', 'fontSettings', 'history', 'identity', 'idle', 'offscreen', 'omnibox', 'pageCapture', 'power', 'privacy', 'proxy', 'search', 'sessions',
-    'sidePanel', 'tabGroups', 'topSites', 'tts', 'userScripts', 'webNavigation', 'webRequest'];
+    'sidePanel', 'tabGroups', 'topSites', 'tts', 'userScripts'];
   const standIns = new Map();
-  const standIn = (name) => {
-    if (!standIns.has(name)) {
-      const members = new Map();
-      standIns.set(name, new Proxy({}, {
-        get(_t, key) {
-          if (typeof key !== 'string' || key === 'then') return undefined;
-          if (!members.has(key)) {
-            members.set(key, /^on[A-Z]/.test(key) ? event(`${name}.${key}`)
-              : /^[A-Z_]+$/.test(key) ? {}
-                : (...args) => answer(Promise.resolve(undefined), args.find((a) => typeof a === 'function')));
-          }
-          return members.get(key);
+  const isStandIn = new WeakSet();
+  // Any depth: privacy.network.networkPredictionEnabled.set(...) is a chain
+  // of members, each callable. A setting's get answers as Chrome's does, with
+  // a value no extension controls.
+  const member = (path) => {
+    if (standIns.has(path)) return standIns.get(path);
+    const leaf = path.split('.').pop();
+    const fn = function standInCall(...args) {
+      const value = leaf === 'get' ? { value: undefined, levelOfControl: 'not_controllable' } : undefined;
+      return answer(Promise.resolve(value), args.find((x) => typeof x === 'function'));
+    };
+    const proxy = new Proxy(fn, {
+      get(_t, key) {
+        if (typeof key !== 'string' || key === 'then') return undefined;
+        if (/^on[A-Z]/.test(key)) {
+          const name = `${path}.${key}`;
+          if (!standIns.has(name)) standIns.set(name, event(name));
+          return standIns.get(name);
         }
-      }));
-    }
-    return standIns.get(name);
+        if (/^[A-Z_]+$/.test(key)) return {};
+        return member(`${path}.${key}`);
+      }
+    });
+    standIns.set(path, proxy);
+    isStandIn.add(proxy);
+    return proxy;
   };
+  const standIn = (name) => member(name);
 
   // `chrome` itself becomes a wrapper serving what was refused in place and
   // the stand-ins, and `browser` (below) is built on it whether or not the
@@ -451,6 +553,8 @@
           let value = target[prop];
           if (value === undefined && typeof prop === 'string' && ALIAS[prop] && !path) value = target[ALIAS[prop]];
           const name = path ? `${path}.${String(prop)}` : String(prop);
+          // Stand-ins already answer with promises, and carry their events.
+          if (isStandIn.has(value)) return value;
           if (typeof value === 'function') return wrapFn(value, target, name);
           if (value && typeof value === 'object') {
             if (/(^|\.)on(Message|MessageExternal)$/.test(name)) return wrapMessages(value);

@@ -140,6 +140,7 @@ const COMMANDS = new Set([
   'add-extension-from-page',
   'add-extension-from-store',
   'extension-menu-click',
+  'click-extension',
   'sleep-tab',
   'close-other-tabs',
   'close-tabs-right',

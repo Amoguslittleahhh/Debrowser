@@ -90,6 +90,23 @@ class WebHooks {
     });
   }
 
+  /**
+   * Watch an event that changes nothing - onSendHeaders, onResponseStarted,
+   * onBeforeRedirect, onCompleted, onErrorOccurred. Every handler hears every
+   * request; none can answer. Electron keeps one listener per event here too,
+   * so the downloads watch and extensions' webRequest share these.
+   */
+  observe(event, handler) {
+    const list = (this.observers ||= {})[event] ||= [];
+    list.push(handler);
+    if (list.length > 1) return;
+    this.session.webRequest[event](FILTER, (details) => {
+      for (const h of list) {
+        try { h(details); } catch { /* one watcher must not stop the rest */ }
+      }
+    });
+  }
+
   onHeadersReceived(handler) {
     this.headers.push(handler);
     if (this.installed.headers) return;

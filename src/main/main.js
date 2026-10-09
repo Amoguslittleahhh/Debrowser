@@ -52,6 +52,7 @@ const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bo
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
 const { startupTabs, placeKey } = require('./startup');
 const { duplicateTabs } = require('./tabs/duplicates');
+const { WebHooks } = require('./web-hooks');
 const { Extensions, storeTarget, downloadFromStore } = require('./extensions');
 
 // A Ctrl+Tab run in progress: the recent-use order it started with and where
@@ -624,7 +625,7 @@ function main() {
     // the error or sign-in page it got was saved under the file's name.
     // Those stay with Chromium, which still has the request it made.
     const posted = new Map();
-    ses.webRequest.onSendHeaders({ urls: ['http://*/*', 'https://*/*'] }, (details) => {
+    WebHooks.for(ses).observe('onSendHeaders', (details) => {
       if (details.method === 'GET' || details.method === 'HEAD') return;
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return;
       posted.set(details.url, Date.now());
@@ -883,6 +884,52 @@ function main() {
   };
 
   /**
+   * What extensions hear about this tab (a Lab): its navigation as
+   * webNavigation events and its state as tabs events, by its page id as
+   * every other part of the extension API knows it - and only for the
+   * extensions that listen, so with none listening this costs nothing.
+   */
+  const extensionTabInfo = (tab) => ({
+    id: tab.wc.id, index: tabs.all().indexOf(tab), windowId: 1, url: tab.url, title: tab.title, active: tab.visible,
+    highlighted: tab.visible, pinned: tab.pinned, status: tab.loading ? 'loading' : 'complete', incognito: false,
+    audible: Boolean(tab.audible), discarded: false, mutedInfo: { muted: Boolean(tab.muted) }
+  });
+  const bindExtensionEvents = (tab) => {
+    if (INCOGNITO || !tab.isLive) return;
+    const wc = tab.wc;
+    const id = wc.id;
+    const listening = () => Boolean(extensions && extensions.listening && prefs.get('labExtensions') === true);
+    const send = (name, ...args) => { if (listening()) extensions.broadcast(name, args); };
+    const nav = (extra) => ({ tabId: id, frameId: 0, parentFrameId: -1, timeStamp: Date.now(), ...extra });
+    send('tabs.onCreated', extensionTabInfo(tab));
+    wc.on('did-start-navigation', (d) => {
+      if (d && d.isMainFrame && !d.isSameDocument) send('webNavigation.onBeforeNavigate', nav({ url: d.url }));
+    });
+    wc.on('did-navigate', (_e, url) => {
+      send('webNavigation.onCommitted', nav({ url, transitionType: 'link', transitionQualifiers: [] }));
+      send('tabs.onUpdated', id, { status: 'loading', url }, extensionTabInfo(tab));
+    });
+    wc.on('did-frame-navigate', (_e, url, _code, _status, isMainFrame, _pid, routingId) => {
+      if (!isMainFrame) send('webNavigation.onCommitted', nav({ url, frameId: routingId, parentFrameId: 0, transitionType: 'auto_subframe', transitionQualifiers: [] }));
+    });
+    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (!isMainFrame) return;
+      send('webNavigation.onHistoryStateUpdated', nav({ url, transitionType: 'link', transitionQualifiers: [] }));
+      send('tabs.onUpdated', id, { url }, extensionTabInfo(tab));
+    });
+    wc.on('dom-ready', () => send('webNavigation.onDOMContentLoaded', nav({ url: wc.getURL() })));
+    wc.on('did-finish-load', () => {
+      send('webNavigation.onCompleted', nav({ url: wc.getURL() }));
+      send('tabs.onUpdated', id, { status: 'complete' }, extensionTabInfo(tab));
+    });
+    wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
+      if (isMainFrame && code !== -3) send('webNavigation.onErrorOccurred', nav({ url, error: description }));
+    });
+    wc.on('page-title-updated', (_e, title) => send('tabs.onUpdated', id, { title }, extensionTabInfo(tab)));
+    wc.once('destroyed', () => send('tabs.onRemoved', id, { windowId: 1, isWindowClosing: false }));
+  };
+
+  /**
    * Draw our own menu when a page is right-clicked.
    *
    * Bound per realisation, like the shortcut table above and for the same
@@ -988,6 +1035,7 @@ function main() {
         // renderer, and the listener died with the old one.
         bindPageShortcuts(tab);
         bindContextMenu(tab);
+        bindExtensionEvents(tab);
         // Side by side, the half you click into becomes the tab in front, so
         // the address bar and the keyboard follow it.
         tab.wc.on('focus', () => {
@@ -1262,7 +1310,12 @@ function main() {
       // Awaited before a tab is shown, so it is never presented while frozen.
       onPresent: async (tab) => {
         if (shell) shell.attachTab(tab);
-        if (extensions && tab.wc && !tab.wc.isDestroyed()) extensions.announceActiveTab(tab.wc.id);
+        if (extensions && tab.wc && !tab.wc.isDestroyed()) {
+          extensions.announceActiveTab(tab.wc.id);
+          if (extensions.listening && prefs.get('labExtensions') === true) {
+            extensions.broadcast('tabs.onActivated', [{ tabId: tab.wc.id, windowId: 1 }]);
+          }
+        }
         if (governor) await governor.onTabActivated(tab);
       },
       onCover: (tab) => (shell ? shell.showPlaceholder(tab) : false),
@@ -2944,9 +2997,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const anchor = { x, y, right };
         const here = tabs.activeTab();
         const store = here && storeTarget(here.url);
+        // Its badge beside its name - uBlock's blocked count, a mail checker's unread.
+        const label = (e) => (ext.badges?.get(e.id) ? `${e.name}  ·  ${ext.badges.get(e.id)}` : e.name);
         const items = ext.list().map((e) => (e.popup
-          ? { id: 'open-extension-popup', label: e.name, icon: 'puzzle', payload: { id: e.id, ...anchor } }
-          : { id: 'open-extension-popup', label: `${e.name} – works on pages, no popup`, icon: 'puzzle', payload: { id: e.id }, enabled: false }));
+          ? { id: 'open-extension-popup', label: label(e), icon: 'puzzle', payload: { id: e.id, ...anchor } }
+          : { id: 'click-extension', label: label(e), icon: 'puzzle', payload: { id: e.id } }));
         if (store) items.unshift({ id: 'add-extension-from-page', label: 'Add this extension to Debrowser', icon: 'plus', payload: {} },
           ...(items.length ? [{ kind: 'separator' }] : []));
         items.push({ kind: 'separator' }, { id: 'open-settings', label: 'Manage extensions', icon: 'gear', payload: { section: 'labs' } });
@@ -2999,6 +3054,18 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // A click anywhere else closes it, as a popup does.
         popup.on('blur', () => { if (!popup.isDestroyed() && !ext.keepPopupOpen) popup.destroy(); });
         popup.loadURL(`chrome-extension://${loaded}/${entry.popup}`).catch((e) => log(`extension popup: ${e.message}`));
+        break;
+      }
+
+      // An extension with no popup, chosen from the puzzle button: it hears
+      // the click as action.onClicked, as from its button in Chrome.
+      case 'click-extension': {
+        const ext = getExtensions();
+        const here = tabs.activeTab();
+        if (!ext || !payload?.id) break;
+        const tabInfo = here && here.wc && !here.wc.isDestroyed()
+          ? { id: here.wc.id, url: here.url, title: here.title, active: true, windowId: 1, index: tabs.all().indexOf(here) } : undefined;
+        ext.dispatch(String(payload.id), 'action.onClicked', [tabInfo]);
         break;
       }
 

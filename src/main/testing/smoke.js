@@ -5474,6 +5474,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         if (r && !r.ok) installError += `${added.name}: ${r.error}; `;
       }
     } catch (err) { installError += err.message; }
+    // Started, as they would be long before a page is opened: the Firefox
+    // one listening for tab events.
+    await waitFor(() => [...ext.subscriptions.values()].some((names) => names.has('tabs.onUpdated')), { timeoutMs: 8000 });
     const page = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
     const marks = () => page.wc.executeJavaScript(`({ c: document.documentElement.dataset.debrowserChromeExt,
       f: document.documentElement.dataset.debrowserFirefoxExt, m: document.documentElement.dataset.debrowserFirefoxMv3 })`)
@@ -5505,7 +5508,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `fetch('/${name}').then((r) => r.status, () => 'blocked')`).catch(() => 'error');
     await waitFor(async () => (await fetched('debrowser-dnr-dynamic.txt')) === 'blocked', { timeoutMs: 8000 });
     const blocked = { stat: await fetched('debrowser-dnr-static.txt'), dyn: await fetched('debrowser-dnr-dynamic.txt'),
-      fine: await fetched('idle.html') };
+      fine: await fetched('idle.html'), webRequest: await fetched('debrowser-wr-block.txt') };
+    const readTabs = () => page.wc.executeJavaScript('document.documentElement.dataset.debrowserFirefoxTabs || ""').catch(() => '');
+    await waitFor(async () => (await readTabs()) !== '', { timeoutMs: 5000 });
+    const tabsSaid = await readTabs();
     const tabWith = (frag) => tabs.all().find((t) => String(t.url || '').includes(frag));
     const alarmed = await waitFor(() => Boolean(tabWith('#alarm-soon')), { timeoutMs: 10_000 });
     await waitFor(() => ext.menuItemsFor({ selectionText: 'hi' }, page.url).length > 0, { timeoutMs: 5000 });
@@ -5514,10 +5520,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     if (tools && menu[0]) runCommand('extension-menu-click', { ext: tools.id, menu: menu[0].menuId });
     const clicked = await waitFor(() => Boolean(tabWith('#clicked-hi')), { timeoutMs: 10_000 });
     for (const t of [tabWith('#alarm-soon'), tabWith('#clicked-hi')]) if (t) tabs.close(t.id);
-    check('Labs: an extension’s request rules block, its alarm fires, and its right-click item shows and answers',
-      blocked.stat === 'blocked' && blocked.dyn === 'blocked' && blocked.fine === 200 && alarmed &&
-        menu.length === 1 && menu[0].label === 'Say “hi”' && clicked,
-      `requests ${JSON.stringify(blocked)}; alarm ${alarmed}; menu ${JSON.stringify(menu.map((m) => m.label))}; click ${clicked}`);
+    check('Labs: an extension’s request rules and its own request code block, its alarm fires, tab events reach it, and its right-click item shows and answers',
+      blocked.stat === 'blocked' && blocked.dyn === 'blocked' && blocked.webRequest === 'blocked' && blocked.fine === 200 &&
+        alarmed && tabsSaid.includes('idle.html') && menu.length === 1 && menu[0].label === 'Say “hi”' && clicked,
+      `requests ${JSON.stringify(blocked)}; tabs.onUpdated said ${tabsSaid || '(nothing)'}; alarm ${alarmed}; ` +
+      `menu ${JSON.stringify(menu.map((m) => m.label))}; click ${clicked}`);
 
     for (const e of installed) ext.remove(e.id);
     page.wc.reload();

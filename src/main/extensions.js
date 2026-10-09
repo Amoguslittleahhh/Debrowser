@@ -23,8 +23,12 @@
  *    notifications, and tabs opened and closed from anywhere, the background
  *    included; events come back through a relay page of the extension's own.
  *
- * What is still missing is said in the changelog: an extension that watches
- * requests in its own code (webRequest blocking) has nothing to watch.
+ *  - webRequest: the extension's own code on the request path. A listener's
+ *    filter is matched here, and a blocking one in a background Debrowser
+ *    hosts is asked and waited for (`requestEvent`); tabs and webNavigation
+ *    events come from the browser's tabs (main.js `bindExtensionEvents`).
+ *  - Alarms kept by the browser and saved, delivered as messages, which
+ *    start a worker that had gone to sleep.
  *
  * Installed copies live unpacked under `<userData>/extensions/<id>/`, and are
  * loaded into every ordinary browsing session at start (and when one is
@@ -302,6 +306,12 @@ class Extensions {
     // Each extension's right-click menu items, as it declared them.
     this.menus = new Map();
     this.dnr = new DeclarativeNetRequest({ log });
+    // Each extension's webRequest listeners: id -> { event, filter, blocking }.
+    this.listeners = new Map();
+    // The browser events each extension listens to (tabs.*, webNavigation.*).
+    this.subscriptions = new Map();
+    // Alarms, kept by the browser so they can wake a sleeping worker.
+    this.alarmTimers = new Map();
   }
 
   /* -- The bridge: calls from an extension's own code (extension-compat.js). -- */
@@ -353,6 +363,34 @@ class Extensions {
         }
         return id;
       }
+      case 'runtime.reload': {
+        // After answering: the caller is the page about to be replaced.
+        setTimeout(() => {
+          this.unloadEverywhere(ext.id);
+          this.loadEverywhere(ext.id).catch((e) => this.log(`extensions: ${ext.name} did not restart: ${e.message}`));
+        }, 50).unref?.();
+        return undefined;
+      }
+      case 'action.badge': {
+        (this.badges ||= new Map()).set(ext.id, String(a.text || '').slice(0, 6));
+        return undefined;
+      }
+      case 'webRequest.listen': {
+        if (!this.listeners.has(ext.id)) this.listeners.set(ext.id, new Map());
+        this.listeners.get(ext.id).set(String(a.id), { event: String(a.event), filter: a.filter || {}, blocking: a.blocking === true,
+          extra: Array.isArray(a.extra) ? a.extra : [] });
+        return undefined;
+      }
+      case 'webRequest.unlisten': this.listeners.get(ext.id)?.delete(String(a.id)); return undefined;
+      case 'events.listen': {
+        if (!this.subscriptions.has(ext.id)) this.subscriptions.set(ext.id, new Set());
+        this.subscriptions.get(ext.id).add(String(a.name));
+        return undefined;
+      }
+      case 'alarms.create': return this.alarmCreate(ext, a);
+      case 'alarms.get': return this.alarmList(ext).find((x) => x.name === String(a.name || '')) || null;
+      case 'alarms.getAll': return this.alarmList(ext);
+      case 'alarms.clear': return this.alarmClear(ext, a.name === undefined ? null : String(a.name || ''));
       case 'dnr.updateDynamicRules': rules().updateDynamicRules(a); return undefined;
       case 'dnr.getDynamicRules': return rules().getRules(rules().dynamic, a);
       case 'dnr.updateSessionRules': rules().updateSessionRules(a); return undefined;
@@ -378,14 +416,213 @@ class Extensions {
     for (const ses of this.sessions) {
       const loaded = this.loadedId(ses, extId);
       if (!loaded) continue;
-      const relay = this.ensureRelay(ses, ext, loaded);
       const message = JSON.stringify({ __debrowserEvent: eventName, args: args || [] });
+      // A background Debrowser hosts hears it directly; a worker through the relay.
+      const host = ses.__debrowserBg?.get(extId);
+      if (host && !host.webContents.isDestroyed()) {
+        host.webContents.executeJavaScript(`globalThis.__debrowserFire && globalThis.__debrowserFire(${message});`).catch(() => {});
+        continue;
+      }
+      const relay = this.ensureRelay(ses, ext, loaded);
       relay.ready.then(() => {
         if (relay.view.webContents.isDestroyed()) return;
         relay.view.webContents.executeJavaScript(
           `chrome.runtime.sendMessage(${message}).catch(() => {}); globalThis.__debrowserFire && globalThis.__debrowserFire(${message});`)
           .catch(() => {});
       });
+    }
+  }
+
+  /* -- Alarms: the browser's, saved beside the extension, so one set for an
+     hour from now goes off then even if the worker that set it has long
+     stopped - delivered as a message, which starts it again. -- */
+
+  alarmFile(ext) { return path.join(ext.dir, 'debrowser-alarms.json'); }
+
+  alarmList(ext) {
+    try { return JSON.parse(fs.readFileSync(this.alarmFile(ext), 'utf8')); } catch { return []; }
+  }
+
+  alarmSave(ext, list) {
+    try { fs.writeFileSync(this.alarmFile(ext), JSON.stringify(list)); } catch { /* kept in memory only */ }
+    this.alarmSchedule(ext, list);
+  }
+
+  alarmCreate(ext, a) {
+    const name = String(a.name || '');
+    const info = a.info || {};
+    const minutes = (m) => Math.max(0.5 / 60, Number(m) || 0) * 60000;  // at least 0.5s apart
+    const when = Number(info.when) || Date.now() + (info.delayInMinutes !== undefined ? minutes(info.delayInMinutes)
+      : info.periodInMinutes !== undefined ? minutes(info.periodInMinutes) : 0);
+    const list = this.alarmList(ext).filter((x) => x.name !== name);
+    list.push({ name, scheduledTime: when, ...(info.periodInMinutes ? { periodInMinutes: Number(info.periodInMinutes) } : {}) });
+    this.alarmSave(ext, list);
+    return undefined;
+  }
+
+  alarmClear(ext, name) {
+    const list = this.alarmList(ext);
+    const keep = name === null ? [] : list.filter((x) => x.name !== name);
+    this.alarmSave(ext, keep);
+    return keep.length !== list.length;
+  }
+
+  /** The next alarm due for an extension, on one timer. */
+  alarmSchedule(ext, list = this.alarmList(ext)) {
+    clearTimeout(this.alarmTimers.get(ext.id));
+    if (!list.length) return;
+    const next = list.reduce((a, b) => (a.scheduledTime <= b.scheduledTime ? a : b));
+    const timer = setTimeout(() => {
+      const now = Date.now();
+      const due = this.alarmList(ext).filter((x) => x.scheduledTime <= now + 50);
+      for (const alarm of due) this.dispatch(ext.id, 'alarms.onAlarm', [alarm]);
+      const rest = this.alarmList(ext)
+        .map((x) => (x.scheduledTime <= now + 50 && x.periodInMinutes
+          ? { ...x, scheduledTime: now + x.periodInMinutes * 60000 } : x))
+        .filter((x) => x.scheduledTime > now + 50);
+      this.alarmSave(ext, rest);
+    }, Math.max(0, Math.min(next.scheduledTime - Date.now(), 2 ** 31 - 1)));
+    timer.unref?.();
+    this.alarmTimers.set(ext.id, timer);
+  }
+
+  /* -- Browser events: tabs and navigation, to the extensions listening. -- */
+
+  /** An event every extension listening to it should hear. */
+  broadcast(name, args) {
+    // A background Debrowser hosts hears every one - its listeners pick - so
+    // there is no window between it starting and it saying what it wants. A
+    // worker only what it asked for: each message would start it.
+    const to = new Set();
+    for (const [extId, names] of this.subscriptions) if (names.has(name)) to.add(extId);
+    for (const ses of this.sessions) for (const extId of (ses.__debrowserBg || new Map()).keys()) to.add(extId);
+    for (const extId of to) this.dispatch(extId, name, args);
+  }
+
+  /** Whether any extension would hear browser events: one hosting a background, or one that asked. */
+  get listening() {
+    if (this.subscriptions.size) return true;
+    for (const ses of this.sessions) if (ses.__debrowserBg && ses.__debrowserBg.size) return true;
+    return false;
+  }
+
+  /* -- webRequest: an extension's own code on the request path. -- */
+
+  /**
+   * Chrome's description of a request, from Electron's - what a webRequest
+   * listener is handed. Tab ids are the tab's page id, as everywhere else the
+   * extension API is answered.
+   */
+  static requestDetails(d) {
+    const type = { mainFrame: 'main_frame', subFrame: 'sub_frame', xhr: 'xmlhttprequest', cspReport: 'csp_report',
+      webSocket: 'websocket' }[d.resourceType] || d.resourceType || 'other';
+    let initiator;
+    try { if (d.referrer) initiator = new URL(d.referrer).origin; } catch { /* none */ }
+    const out = {
+      requestId: String(d.id), url: d.url, method: d.method, type, timeStamp: d.timestamp || Date.now(),
+      tabId: d.webContentsId || -1, frameId: d.resourceType === 'mainFrame' ? 0 : (d.frame && d.frame.routingId) || 0,
+      parentFrameId: d.resourceType === 'mainFrame' ? -1 : 0, initiator,
+      // Firefox's names for the same, which its extensions read.
+      originUrl: d.referrer || undefined, documentUrl: d.resourceType === 'mainFrame' ? undefined : d.referrer || undefined
+    };
+    if (d.statusCode) Object.assign(out, { statusCode: d.statusCode, statusLine: d.statusLine, fromCache: Boolean(d.fromCache), ip: d.ip });
+    if (d.error) out.error = d.error;
+    if (d.redirectURL) out.redirectUrl = d.redirectURL;
+    const asList = (h) => Object.entries(h || {}).flatMap(([name, v]) => [].concat(v).map((value) => ({ name, value: String(value) })));
+    if (d.requestHeaders) out.requestHeaders = asList(d.requestHeaders);
+    if (d.responseHeaders) out.responseHeaders = asList(d.responseHeaders);
+    return out;
+  }
+
+  /** Does a listener's filter take this request? Match patterns and types. */
+  static filterTakes(filter, details) {
+    if (Array.isArray(filter.types) && filter.types.length && !filter.types.includes(details.type)) return false;
+    if (Number.isInteger(filter.tabId) && filter.tabId !== details.tabId) return false;
+    const urls = Array.isArray(filter.urls) ? filter.urls : ['<all_urls>'];
+    return urls.some((p) => {
+      if (p === '<all_urls>' || p === '*://*/*') return /^(https?|wss?):/.test(details.url);
+      const m = /^(\*|https?|wss?|ftp|file):\/\/(\*|\*\.[^/]+|[^/*]+)(\/.*)$/.exec(p);
+      if (!m) return false;
+      let u;
+      try { u = new URL(details.url); } catch { return false; }
+      const scheme = u.protocol.slice(0, -1);
+      if (m[1] === '*' ? !/^(https?|wss?)$/.test(scheme) : m[1] !== scheme) return false;
+      if (m[2] !== '*') {
+        if (m[2].startsWith('*.')) { const base = m[2].slice(2); if (u.hostname !== base && !u.hostname.endsWith(`.${base}`)) return false; }
+        else if (u.hostname !== m[2]) return false;
+      }
+      const pathRe = new RegExp(`^${m[3].replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+      return pathRe.test(u.pathname + u.search);
+    });
+  }
+
+  /**
+   * Hand one request event to every extension listening. Blocking listeners
+   * in a background Debrowser hosts are asked and waited for - up to a second,
+   * so a stuck extension slows a page rather than stopping it; everything else
+   * is told, without waiting. Returns the combined answer: cancel, a redirect,
+   * or changed headers.
+   */
+  requestEvent(event, electronDetails) {
+    if (!this.listeners.size) return undefined;
+    let details = null;
+    const answers = [];
+    for (const [extId, list] of this.listeners) {
+      const ids = [];
+      let blocking = false;
+      for (const [id, l] of list) {
+        if (l.event !== event) continue;
+        details = details || Extensions.requestDetails(electronDetails);
+        if (!Extensions.filterTakes(l.filter, details)) continue;
+        ids.push(id);
+        if (l.blocking) blocking = true;
+      }
+      if (!ids.length) continue;
+      const host = [...this.sessions].map((ses) => ses.__debrowserBg?.get(extId)).find((v) => v && !v.webContents.isDestroyed());
+      const script = `globalThis.__debrowserWebRequest && globalThis.__debrowserWebRequest(${JSON.stringify(event)}, ${JSON.stringify(details)}, ${JSON.stringify(ids)})`;
+      if (host) {
+        const asked = host.webContents.executeJavaScript(script, true).catch(() => null);
+        if (blocking) {
+          answers.push(Promise.race([asked, new Promise((r) => { const t = setTimeout(() => r(null), 1000); t.unref?.(); })]));
+        }
+      } else {
+        // A worker: told through the relay, never waited for (Chrome's MV3
+        // workers cannot block either).
+        this.dispatch(extId, 'webRequest.event', [event, details, ids]);
+      }
+    }
+    // Synchronous when nothing has to be waited for, which is nearly always.
+    if (!answers.length) return undefined;
+    return Promise.all(answers).then((all) => Extensions.combine(event, all.filter(Boolean)));
+  }
+
+  /** Several listeners' answers as one, as Chrome combines them. */
+  static combine(event, results) {
+    const out = {};
+    for (const r of results) {
+      if (r.cancel) return { cancel: true };
+      if (r.redirectUrl && !out.redirectURL) out.redirectURL = r.redirectUrl;
+      const toMap = (list) => {
+        const m = {};
+        for (const h of list || []) m[h.name] = event === 'onHeadersReceived' ? [...(m[h.name] || []), h.value] : h.value;
+        return m;
+      };
+      if (r.requestHeaders) out.requestHeaders = toMap(r.requestHeaders);
+      if (r.responseHeaders) out.responseHeaders = toMap(r.responseHeaders);
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+
+  /** On a session's request hooks, once: the blocking events and the watched ones. */
+  attachRequests(hooks) {
+    if ((this.hookedRequests ||= new WeakSet()).has(hooks)) return;
+    this.hookedRequests.add(hooks);
+    const quick = (event) => (details) => (this.listeners.size ? this.requestEvent(event, details) : undefined);
+    hooks.onBeforeRequest(quick('onBeforeRequest'));
+    hooks.onBeforeSendHeaders(quick('onBeforeSendHeaders'));
+    hooks.onHeadersReceived(quick('onHeadersReceived'));
+    for (const event of ['onSendHeaders', 'onResponseStarted', 'onBeforeRedirect', 'onCompleted', 'onErrorOccurred']) {
+      hooks.observe(event, (details) => { if (this.listeners.size) this.requestEvent(event, details); });
     }
   }
 
@@ -580,7 +817,10 @@ class Extensions {
         this.dnr.forExtension(ext);
         this.dnr.setOrigin(ext.id, `chrome-extension://${loaded.id}`);
       }
-      this.dnr.attach(require('./web-hooks').WebHooks.for(ses));
+      const hooks = require('./web-hooks').WebHooks.for(ses);
+      this.dnr.attach(hooks);
+      this.attachRequests(hooks);
+      this.alarmSchedule(ext);
       return { id: ext.id, ok: true };
     } catch (err) {
       this.log(`extensions: ${ext.name} did not load: ${err.message}`);
@@ -629,6 +869,9 @@ class Extensions {
 
   unloadEverywhere(id) {
     this.dnr.drop(id);
+    this.listeners.delete(id);
+    this.subscriptions.delete(id);
+    clearTimeout(this.alarmTimers.get(id));
     if (this.menus.delete(id) && this.hooks.menusChanged) this.hooks.menusChanged();
     for (const ses of this.sessions) {
       const relay = ses.__debrowserRelay?.get(id);

@@ -1,4 +1,7 @@
 // Firefox's way to ask: browser.runtime.sendMessage returns a promise.
-browser.runtime.sendMessage('ping').then((answer) => {
-  document.documentElement.dataset.debrowserFirefoxExt = answer;
-}, (e) => { document.documentElement.dataset.debrowserFirefoxExt = `error:${e.message}`; });
+const root = document.documentElement.dataset;
+browser.runtime.sendMessage('ping').then((answer) => { root.debrowserFirefoxExt = answer; },
+  (e) => { root.debrowserFirefoxExt = `error:${e.message}`; });
+setTimeout(() => {
+  browser.runtime.sendMessage('last-url').then((url) => { root.debrowserFirefoxTabs = url; }, () => {});
+}, 500);
