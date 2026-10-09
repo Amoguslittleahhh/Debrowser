@@ -2,7 +2,8 @@
   "manifest_version": 2,
   "name": "Debrowser test: Firefox hello",
   "version": "1.0",
-  "description": "Uses Firefox's browser.* API, so the smoke test can see the shim working.",
+  "description": "Written for Firefox: a background script that answers with a promise, asked through browser.* from a content script.",
   "browser_specific_settings": { "gecko": { "id": "firefox-hello@debrowser.test" } },
+  "background": { "scripts": ["background.js"] },
   "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_end" }]
 }

@@ -1463,6 +1463,8 @@ function renderMeter(state) {
   if (el.meterText.textContent !== text) el.meterText.textContent = text;
   // An SVG element has no `hidden` property to set; the attribute itself.
   document.getElementById('meter-leaf').toggleAttribute('hidden', !state.saver);
+  const showExtensions = Number(state.extensionCount) > 0;
+  if (extensionsBtn.hidden === showExtensions) extensionsBtn.hidden = !showExtensions;
   el.meter.title = (state.saver ? 'Battery mode: tabs sleep sooner to save power\n' : '') +
     `${shownMB} MB of ${state.budgetMB} MB budget\n` +
     `${state.liveTabs} tabs holding a renderer ` +
@@ -1526,6 +1528,12 @@ el.star.addEventListener('click', async () => {
   setStar(Boolean(res.bookmarked));
 });
 el.meter.addEventListener('click', () => api.send('toggle-panel'));
+// Extensions (a Lab): the list, and each one's popup, hang off this button.
+const extensionsBtn = document.getElementById('extensions');
+extensionsBtn.addEventListener('click', () => {
+  const box = extensionsBtn.getBoundingClientRect();
+  api.send('extensions-menu', { x: Math.round(box.left), y: Math.round(box.bottom), right: Math.round(box.right) });
+});
 
 // The menu is drawn in a view of its own, which cannot see where the button is.
 // Both edges are sent: the menu is eight times the button's width and hangs off

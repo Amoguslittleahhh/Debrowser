@@ -5463,24 +5463,39 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     fs.writeFileSync(xpi, zip(path.join(fixtures, 'firefox-hello')));
     const wasLab = prefs.get('labExtensions');
     runCommand('set-pref', { key: 'labExtensions', value: true });
-    let chromeExt = null;
-    let firefoxExt = null;
+    const installed = [];
     let installError = '';
     try {
-      chromeExt = ext.install(path.join(fixtures, 'chrome-hello'));
-      firefoxExt = ext.install(xpi);
-      await ext.loadEverywhere(chromeExt.id);
-      await ext.loadEverywhere(firefoxExt.id);
-    } catch (err) { installError = err.message; }
+      for (const source of [path.join(fixtures, 'chrome-hello'), xpi, path.join(fixtures, 'firefox-mv3')]) {
+        const added = ext.install(source);
+        installed.push(added);
+        const [r] = await ext.loadEverywhere(added.id);
+        if (r && !r.ok) installError += `${added.name}: ${r.error}; `;
+      }
+    } catch (err) { installError += err.message; }
     const page = tabs.create({ url: pageUrl('idle.html'), activate: true, realise: true });
-    const marks = () => page.wc.executeJavaScript(
-      '({ c: document.documentElement.dataset.debrowserChromeExt, f: document.documentElement.dataset.debrowserFirefoxExt })')
+    const marks = () => page.wc.executeJavaScript(`({ c: document.documentElement.dataset.debrowserChromeExt,
+      f: document.documentElement.dataset.debrowserFirefoxExt, m: document.documentElement.dataset.debrowserFirefoxMv3 })`)
       .catch(() => ({}));
-    await waitFor(async () => { const m = await marks(); return m.c === 'ran' && m.f === 'ran'; }, { timeoutMs: 10_000 });
+    await waitFor(async () => { const m = await marks(); return m.c && m.f && m.m; }, { timeoutMs: 15_000 });
     const seen = await inTime(marks(), 3000, {});
     const listed = ext.list().map((e) => `${e.from}:${e.name}`).sort().join(', ');
-    if (chromeExt) ext.remove(chromeExt.id);
-    if (firefoxExt) ext.remove(firefoxExt.id);
+
+    // The popup, from the toolbar's button: it opens, and from inside it the
+    // active tab is the page it was opened over, not the popup.
+    await waitFor(() => !page.loading, { timeoutMs: 10_000 });
+    ext.keepPopupOpen = true;
+    const chromeExt = installed.find((e) => e.from === 'chrome');
+    if (chromeExt) runCommand('open-extension-popup', { id: chromeExt.id, right: 600, y: 40 });
+    const popupTitle = () => (ext.popupWindow && !ext.popupWindow.isDestroyed() ? ext.popupWindow.webContents.getTitle() : '');
+    await waitFor(() => /^popup(-error)?:/.test(popupTitle()), { timeoutMs: 10_000 });
+    const popupSaid = popupTitle();
+    let popupInfo = {};
+    try { popupInfo = JSON.parse(popupSaid.replace(/^popup:/, '')); } catch { /* an error title */ }
+    if (ext.popupWindow && !ext.popupWindow.isDestroyed()) ext.popupWindow.destroy();
+    ext.keepPopupOpen = false;
+
+    for (const e of installed) ext.remove(e.id);
     page.wc.reload();
     await waitFor(() => !page.loading, { timeoutMs: 10_000 });
     await sleep(500);
@@ -5488,10 +5503,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     tabs.close(page.id);
     runCommand('set-pref', { key: 'labExtensions', value: wasLab });
     fs.rmSync(xpi, { force: true });
-    check('Labs: a Chrome extension and a Firefox .xpi both run on a page, and stop when removed',
-      !installError && seen.c === 'ran' && seen.f === 'ran' && !after.c && !after.f && ext.list().length === 0,
-      `install ${installError || 'ok'}; listed ${listed}; ran chrome=${seen.c} firefox=${seen.f}; ` +
-      `after removing chrome=${after.c} firefox=${after.f}`);
+    check('Labs: Chrome and Firefox extensions run - Firefox ones through promise-style browser.*, MV2 and MV3 - and stop when removed',
+      !installError && seen.c === 'ran' && seen.f === 'pong:ping' && seen.m === 'mv3:pong' &&
+        !after.c && !after.f && !after.m && ext.list().length === 0,
+      `install ${installError || 'ok'}; listed ${listed}; chrome=${seen.c} firefox=${seen.f} firefox-mv3=${seen.m}; ` +
+      `after removing ${JSON.stringify(after)}`);
+    check('Labs: an extension’s popup opens from the toolbar, sees the page it was opened over, and has windows and menus',
+      popupInfo.url === page.url && popupInfo.win === true && popupInfo.menu === 'hello',
+      `popup said ${popupSaid || '(nothing)'}; page ${page.url}`);
+  }
+
+  // Store pages: which extension each address means, on each store, and
+  // nothing for an address that is not one.
+  {
+    const { storeTarget } = require('../extensions');
+    const cases = [
+      ['https://chromewebstore.google.com/detail/ublock-origin-lite/ddkjiahejlhfcafbddmgiahcphecmpfh', 'chrome:ddkjiahejlhfcafbddmgiahcphecmpfh'],
+      ['https://chrome.google.com/webstore/detail/dark-reader/eimadpbcbfnmbkopoojfekhnkhdbieeh?hl=en', 'chrome:eimadpbcbfnmbkopoojfekhnkhdbieeh'],
+      ['https://microsoftedge.microsoft.com/addons/detail/ublock-origin/odfafepnkmbhccpbejgmiehpchacaeak', 'edge:odfafepnkmbhccpbejgmiehpchacaeak'],
+      ['https://addons.mozilla.org/en-US/firefox/addon/ublock-origin/', 'firefox:ublock-origin'],
+      ['https://example.com/detail/ddkjiahejlhfcafbddmgiahcphecmpfh', 'none'],
+      ['not a url', 'none']
+    ];
+    const got = cases.map(([u]) => { const t = storeTarget(u); return t ? `${t.store}:${t.id}` : 'none'; });
+    check('Labs: a Chrome Web Store, Edge Add-ons or Firefox Add-ons page is recognised as the extension to add',
+      got.every((g, i) => g === cases[i][1]), got.join(', '));
   }
 
   // A start: pinned tabs from last time, then the startup sites that are not

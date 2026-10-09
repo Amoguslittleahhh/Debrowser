@@ -2,6 +2,8 @@
   "manifest_version": 3,
   "name": "Debrowser test: Chrome hello",
   "version": "1.0",
-  "description": "Marks every page it runs on, so the smoke test can see a Chrome extension working.",
+  "description": "Marks every page it runs on, and has a popup that asks which tab it is over, so the smoke test can see both working.",
+  "permissions": ["tabs"],
+  "action": { "default_popup": "popup.html", "default_title": "Chrome hello" },
   "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_end" }]
 }

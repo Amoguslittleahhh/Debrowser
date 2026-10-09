@@ -18,7 +18,7 @@ const bootMark = (name) => { if (!(name in boot)) boot[name] = Math.round(proces
  *   IpcHub       carries signals from pages and commands from the UI
  */
 
-const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, powerMonitor,
+const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, BrowserWindow, powerMonitor,
         systemPreferences, shell: electronShell, net: electronNet } = require('electron');
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
@@ -52,7 +52,7 @@ const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bo
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
 const { startupTabs, placeKey } = require('./startup');
 const { duplicateTabs } = require('./tabs/duplicates');
-const { Extensions } = require('./extensions');
+const { Extensions, storeTarget, downloadFromStore } = require('./extensions');
 
 // A Ctrl+Tab run in progress: the recent-use order it started with and where
 // in it the keyboard is (`cycle-tab`). Ended by letting go of Ctrl.
@@ -684,7 +684,9 @@ function main() {
     ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {}),
     ...(prefs && prefs.get('labTabGroups') === true ? { groups: tabGroups.describe() } : {}),
     ...(!INCOGNITO && systemAccentNow ? { systemAccent: systemAccentNow } : {}),
-    ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {})
+    ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {}),
+    // The toolbar's puzzle button, while the Lab is on and something is installed.
+    ...(extensions && prefs && prefs.get('labExtensions') === true ? { extensionCount: extensions.list().length } : {})
   });
 
   let publishQueued = false;
@@ -1244,6 +1246,7 @@ function main() {
       // Awaited before a tab is shown, so it is never presented while frozen.
       onPresent: async (tab) => {
         if (shell) shell.attachTab(tab);
+        if (extensions && tab.wc && !tab.wc.isDestroyed()) extensions.announceActiveTab(tab.wc.id);
         if (governor) await governor.onTabActivated(tab);
       },
       onCover: (tab) => (shell ? shell.showPlaceholder(tab) : false),
@@ -2892,6 +2895,103 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       // Put every tab but the one in front to sleep, from the command bar.
+      // The toolbar's puzzle button: each extension, its popup a click away;
+      // the store page in front, if it is one, to add; and the list in Settings.
+      case 'extensions-menu': {
+        const ext = getExtensions();
+        if (!ext || prefs.get('labExtensions') !== true) break;
+        const x = Math.round(Number(payload?.x) || 0);
+        const y = Math.round(Number(payload?.y) || 0);
+        const right = Math.round(Number(payload?.right) || x);
+        const anchor = { x, y, right };
+        const here = tabs.activeTab();
+        const store = here && storeTarget(here.url);
+        const items = ext.list().map((e) => (e.popup
+          ? { id: 'open-extension-popup', label: e.name, icon: 'puzzle', payload: { id: e.id, ...anchor } }
+          : { id: 'open-extension-popup', label: `${e.name} – works on pages, no popup`, icon: 'puzzle', payload: { id: e.id }, enabled: false }));
+        if (store) items.unshift({ id: 'add-extension-from-page', label: 'Add this extension to Debrowser', icon: 'plus', payload: {} },
+          ...(items.length ? [{ kind: 'separator' }] : []));
+        items.push({ kind: 'separator' }, { id: 'open-settings', label: 'Manage extensions', icon: 'gear', payload: { section: 'labs' } });
+        context.model = { items, params: {} };
+        shell.openSheet('context', anchor);
+        break;
+      }
+
+      // An extension's popup, in a small window under the button, as Chrome
+      // draws it - Electron runs the page but has nowhere to show it. The tab
+      // in front is written where the popup's tabs.query reads it, since from
+      // inside the popup Electron would answer with the popup itself.
+      case 'open-extension-popup': {
+        const ext = getExtensions();
+        const entry = ext && ext.list().find((e) => e.id === payload?.id);
+        const here = tabs.activeTab();
+        if (!entry || !entry.popup) break;
+        const ses = (here && here.wc && !here.wc.isDestroyed() && here.wc.session) || session.fromPartition(BROWSING_PARTITION);
+        const loaded = ext.loadedId(ses, entry.id);
+        if (!loaded) { runCommand.toast(`${entry.name} isn’t running. Try turning it off and on in Settings`); break; }
+        ext.setActiveTab(entry.id, here && here.wc && !here.wc.isDestroyed() ? here.wc.id : null);
+        if (ext.popupWindow && !ext.popupWindow.isDestroyed()) ext.popupWindow.destroy();
+        const popup = new BrowserWindow({
+          parent: shell.window, show: false, frame: false, resizable: false, skipTaskbar: true,
+          width: 360, height: 240, backgroundColor: '#ffffff',
+          webPreferences: { session: ses, sandbox: true, contextIsolation: true }
+        });
+        ext.popupWindow = popup;
+        // A link or tabs.create from the popup opens as a tab here, not a window.
+        popup.webContents.setWindowOpenHandler(({ url }) => {
+          if (/^(https?|chrome-extension):/i.test(url)) openLinkTab(tabs, prefs, tabs.activeTab(), url);
+          return { action: 'deny' };
+        });
+        // As tall and wide as the page wants, within Chrome's limits (800 x 600).
+        const fit = async () => {
+          if (popup.isDestroyed()) return;
+          const size = await popup.webContents.executeJavaScript(
+            '({ w: Math.ceil(document.documentElement.scrollWidth), h: Math.ceil(document.documentElement.scrollHeight) })')
+            .catch(() => null);
+          if (!size || popup.isDestroyed()) return;
+          const w = Math.min(800, Math.max(40, size.w));
+          const h = Math.min(600, Math.max(30, size.h));
+          const area = shell.window.getContentBounds();
+          const anchorRight = Number.isFinite(Number(payload?.right)) ? Number(payload.right) : area.width - 8;
+          const top = Number.isFinite(Number(payload?.y)) ? Number(payload.y) : 40;
+          popup.setBounds({ x: Math.round(area.x + Math.max(0, anchorRight - w)), y: Math.round(area.y + top + 4), width: w, height: h });
+          if (!popup.isVisible()) popup.show();
+        };
+        popup.webContents.on('did-finish-load', () => { fit(); setTimeout(fit, 200); setTimeout(fit, 700); });
+        // A click anywhere else closes it, as a popup does.
+        popup.on('blur', () => { if (!popup.isDestroyed() && !ext.keepPopupOpen) popup.destroy(); });
+        popup.loadURL(`chrome-extension://${loaded}/${entry.popup}`).catch((e) => log(`extension popup: ${e.message}`));
+        break;
+      }
+
+      // The extension on the store page in front: Chrome Web Store, Edge
+      // Add-ons or Firefox Add-ons.
+      case 'add-extension-from-page': {
+        const here = tabs.activeTab();
+        if (!here || !getExtensions()) break;
+        runCommand('add-extension-from-store', { url: here.url });
+        break;
+      }
+      case 'add-extension-from-store': {
+        const ext = getExtensions();
+        const target = storeTarget(payload?.url);
+        if (!ext || !target) { runCommand.toast('That isn’t an extension’s page on a store Debrowser knows'); break; }
+        if (prefs.get('labExtensions') !== true) runCommand('set-pref', { key: 'labExtensions', value: true });
+        const ses = session.fromPartition(BROWSING_PARTITION);
+        runCommand.toast('Adding the extension…');
+        downloadFromStore(target, (u) => ses.fetch(u), path.join(app.getPath('temp'), 'debrowser-store'), process.versions.chrome)
+          .then((file) => {
+            const added = ext.install(file);
+            fs.rmSync(file, { force: true });
+            return ext.loadEverywhere(added.id).then(([r]) => {
+              publish();
+              runCommand.toast(r && !r.ok ? `${added.name} was added but didn’t start: ${r.error}` : `${added.name} added`);
+            });
+          })
+          .catch((e) => runCommand.toast(`That couldn’t be added: ${e.message}`));
+        break;
+      }
+
       // "Put to sleep", from a tab's menu: now, not when the ladder gets there.
       case 'sleep-tab': {
         const tab = tabs.byId(payload?.id);

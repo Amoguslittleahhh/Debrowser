@@ -591,7 +591,7 @@ const SECTIONS = {
     {
       key: 'labExtensions',
       label: 'Chrome and Firefox extensions',
-      hint: 'Ones that work on the page, like dark modes and script blockers, mostly run. Toolbar buttons and popups don’t show yet. Never in private windows.',
+      hint: 'Add from the Chrome Web Store, Edge or Firefox Add-ons, or from a file; popups open from the puzzle button. Ad blockers load but can’t block here, so keep Debrowser’s own. Never in private windows.',
       type: 'checkbox'
     }
   ],
@@ -701,7 +701,26 @@ function extensionRows(host) {
     addFile.addEventListener('click', () => add(false));
     addFolder.addEventListener('click', () => add(true));
     control.append(addFile, addFolder);
-    box.replaceChildren(...rows, addRow);
+    // From a store: the extension's page address, pasted. The browser fetches
+    // and adds it, and says how it went at the foot of the window.
+    const { row: storeRow, control: storeControl } = simpleRow('Add from a store',
+      'Paste an extension’s page from the Chrome Web Store, Edge Add-ons or Firefox Add-ons.');
+    const link = document.createElement('input');
+    link.type = 'text';
+    link.placeholder = 'https://chromewebstore.google.com/detail/…';
+    link.setAttribute('aria-label', 'Store page address');
+    const addLink = smallButton('Add');
+    const go = () => {
+      const url = link.value.trim();
+      if (!url) return;
+      api.send('add-extension-from-store', { url });
+      link.value = '';
+      setTimeout(render, 4000);
+    };
+    addLink.addEventListener('click', go);
+    link.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+    storeControl.append(link, addLink);
+    box.replaceChildren(...rows, addRow, storeRow);
   };
   api.onState((state) => {
     const now = state?.prefs?.labExtensions === true;

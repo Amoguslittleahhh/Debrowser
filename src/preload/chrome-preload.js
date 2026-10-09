@@ -134,6 +134,11 @@ const COMMANDS = new Set([
   'mute-tab',
   'duplicate-tab',
   'close-duplicate-tabs',
+  // Extensions (a Lab): the puzzle button's menu, a popup, adding from a store.
+  'extensions-menu',
+  'open-extension-popup',
+  'add-extension-from-page',
+  'add-extension-from-store',
   'sleep-tab',
   'close-other-tabs',
   'close-tabs-right',

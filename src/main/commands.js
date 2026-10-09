@@ -26,6 +26,7 @@ const COMMANDS = [
   { title: 'Swap the two sides', command: 'split-swap', keywords: 'split side' },
   { title: 'Put other tabs to sleep', command: 'sleep-other-tabs', keywords: 'discard memory free' },
   { title: 'Close duplicate tabs', command: 'close-duplicate-tabs', keywords: 'same twice clean tidy' },
+  { title: 'Add the extension on this page', command: 'add-extension-from-page', keywords: 'chrome web store firefox add-on install', needsTab: true, lab: 'labExtensions', normalOnly: true },
   { title: 'Close other tabs', command: 'close-other-tabs', keywords: '', needsTab: true },
   { title: 'Put this tab in a new group', command: 'group-tab', keywords: 'tab group collect', needsTab: true, lab: 'labTabGroups' },
   { title: 'Fold or unfold this tab’s group', command: 'toggle-group', keywords: 'tab group collapse expand', needsTab: true, lab: 'labTabGroups' },
