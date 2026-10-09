@@ -20,6 +20,14 @@ body {
   cursor: default;
 }
 
+/* The column takes its room from the page in one step - growing it would lay
+   the page out again every frame - so its contents arrive instead, from the
+   side it opened on. Once per opening; nothing moves after that. */
+body > * { animation: panel-in var(--slow) var(--ease-out); }
+@keyframes panel-in { from { opacity: 0; transform: translateX(10px); } }
+body.calm > * { animation: none; }
+@media (prefers-reduced-motion: reduce) { body > * { animation: none; } }
+
 header {
   display: flex;
   align-items: center;

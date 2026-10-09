@@ -366,6 +366,10 @@ function renderDownloadsButton(summary) {
 
   const active = summary.active > 0;
   if (el.downloads.dataset.active !== String(active)) {
+    // The last one finishing: the ring closes and the arrow drops into the
+    // tray once, so a glance tells you it is done without opening anything.
+    if (el.downloads.dataset.active === 'true') landDownload();
+    else el.downloads.classList.remove('landed');
     el.downloads.dataset.active = String(active);
   }
 
@@ -375,6 +379,15 @@ function renderDownloadsButton(summary) {
   const part = active && typeof summary.progress === 'number' ? summary.progress : 0;
   el.downloadsRing.style.strokeDasharray = `${(part * 100).toFixed(1)} 100`;
 }
+
+function landDownload() {
+  el.downloads.classList.remove('landed');
+  void el.downloads.offsetWidth; // a second finish replays it
+  el.downloads.classList.add('landed');
+}
+el.downloads.addEventListener('animationend', (e) => {
+  if (e.animationName === 'download-ring-done') el.downloads.classList.remove('landed');
+});
 
 /** The flyout anchors to this button, so the chrome is what measures it. */
 function openDownloads() {
@@ -635,6 +648,7 @@ function renderTabs(tabs, groups = null) {
   if (heldOrder && (Date.now() > heldOrder.until ||
       tabs.findIndex((tab) => tab.id === heldOrder.id) === heldOrder.index)) heldOrder = null;
   const keepOrder = Boolean(heldOrder || tabDrag?.active);
+  const before = keepOrder ? null : tabPlaces(tabs);
 
   // Keep DOM order in sync with tab order without touching untouched nodes.
   // A cursor walks the strip, stepping over tabs still collapsing on their
@@ -666,10 +680,48 @@ function renderTabs(tabs, groups = null) {
   });
   // The first render, or a window's worth restored at once, just appears.
   if (tabsRendered && fresh.length <= 3) fresh.forEach(openTabElement);
+  if (before && !fresh.length) slideToPlaces(before);
   tabsRendered = true;
   updateStripFades();
 }
 let tabsRendered = false;
+
+/*
+ * A tab that changes place without being dragged - pinned, unpinned, moved
+ * from the menu or the keyboard, gathered into a group - slides there, and so
+ * do the tabs it passes. Jumping, it left the eye to hunt for where it went.
+ *
+ * Where every tab stood, read only when the order is about to change, so the
+ * usual render (a title, a favicon, a load finishing) measures nothing.
+ */
+function tabPlaces(tabs) {
+  if (!tabsRendered || stillTabs()) return null;
+  const order = [];
+  for (const child of el.tabs.children) {
+    if (!child.classList.contains('closing') && child.dataset.id) order.push(Number(child.dataset.id));
+  }
+  const next = tabs.map((tab) => tab.id).filter((id) => tabEls.has(id));
+  if (order.length === next.length && order.every((id, i) => id === next[i])) return null;
+  const places = new Map();
+  for (const id of order) places.set(id, tabEls.get(id).root.getBoundingClientRect());
+  return places;
+}
+
+/** Then each tab starts from where it stood and glides to where it is now. */
+function slideToPlaces(before) {
+  for (const [id, was] of before) {
+    const root = tabEls.get(id)?.root;
+    if (!root || !root.isConnected) continue;
+    const now = root.getBoundingClientRect();
+    const dx = was.left - now.left;
+    const dy = was.top - now.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    root.animate(
+      [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
+      { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
+    );
+  }
+}
 
 /**
  * The strip fades out at an edge with more tabs beyond it. It used to stop
@@ -983,7 +1035,7 @@ function updateGroup(node, tab, group, first) {
   node.root.classList.toggle('grouped', Boolean(group));
   node.root.classList.toggle('group-start', Boolean(group && first));
   const folded = Boolean(group && group.collapsed && !tab.visible);
-  node.root.classList.toggle('group-folded', folded && !first);
+  foldIntoGroup(node.root, folded && !first);
   // The first tab of a folded group is only its label.
   node.root.classList.toggle('group-head-folded', folded && first);
   const color = group ? group.color : '';
@@ -992,6 +1044,36 @@ function updateGroup(node, tab, group, first) {
     else node.root.style.removeProperty('--group');
     prev.groupColor = color;
   }
+}
+
+/*
+ * Folding a group takes its tabs away the way closing them would, and
+ * unfolding grows them back, so the label is seen to gather them rather than
+ * the strip losing a run of tabs in one frame.
+ */
+function foldIntoGroup(root, folded) {
+  const was = root.classList.contains('group-folded');
+  if (was === folded) {
+    // Unfolded again before the fold finished: stay.
+    if (!folded && root.folding) { root.folding.cancel(); root.folding = null; }
+    return;
+  }
+  if (!folded) {
+    root.folding?.cancel();
+    root.folding = null;
+    root.classList.remove('group-folded');
+    openTabElement(root);
+    return;
+  }
+  if (root.folding) return;
+  if (stillTabs() || !root.isConnected) { root.classList.add('group-folded'); return; }
+  const [full, none] = tabFold(root);
+  // Held at its end until the class takes over, so it never shows full size
+  // for the frame in between.
+  const fold = root.animate([full, none], { duration: 180, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' });
+  root.folding = fold;
+  fold.onfinish = () => { root.classList.add('group-folded'); fold.cancel(); };
+  fold.oncancel = () => { root.folding = null; };
 }
 
 /* ------------------------------------------------------------------ */

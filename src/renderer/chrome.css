@@ -1305,6 +1305,25 @@ body .bookmark-chip.has-icon {
    panel - but nothing about it should keep asking for attention. */
 .icon-btn.downloads[data-active="false"] .downloads-ring { opacity: 0; }
 
+/* Finished: the ring is drawn closed and fades, and the arrow drops into the
+   tray. Once, and not again until the next download finishes. */
+.icon-btn.downloads.landed .downloads-ring { animation: download-ring-done 700ms var(--ease) forwards; }
+.icon-btn.downloads.landed .ring-fill { stroke-dasharray: 100 100; transition: none; }
+.icon-btn.downloads.landed > svg:first-child { animation: download-drop 360ms var(--ease-out); }
+@keyframes download-ring-done {
+  0%, 45% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes download-drop {
+  0% { transform: translateY(-3px); }
+  60% { transform: translateY(1.5px); }
+  100% { transform: none; }
+}
+body.calm .icon-btn.downloads.landed :is(.downloads-ring, svg) { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.downloads.landed :is(.downloads-ring, svg) { animation: none; }
+}
+
 /* ------------------------------------------------------------------ */
 /* The sliding side strip                                              */
 /* ------------------------------------------------------------------ */

@@ -4270,10 +4270,16 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       bridge === 'undefined' && !start.realisedInternal, `window.debrowser is ${bridge}`);
 
     // Pinning moves the tab to the front of the strip.
+    // It slides there rather than jumping, if it had anywhere to go.
+    const wasAt = tabs.all().indexOf(start);
     tabs.setPinned(start.id, true);
     const pinnedFirst = tabs.all()[0] === start;
+    const slid = await waitFor(() => shell.chromeView.webContents.executeJavaScript(
+      `(document.querySelector('.tab[data-id="${start.id}"]')?.getAnimations() || []).length > 0`).catch(() => false),
+    { timeoutMs: 1000, pollMs: 20 });
     tabs.setPinned(start.id, false);
-    check('pinning a tab moves it to the start of the strip', pinnedFirst, `index ${tabs.all().indexOf(start)}`);
+    check('pinning a tab moves it to the start of the strip, sliding there',
+      pinnedFirst && (wasAt === 0 || slid), `index ${tabs.all().indexOf(start)}, was ${wasAt}, slid ${slid}`);
 
     // Focus comes back to the page when a panel closes.
     await tabs.activate(start.id);
