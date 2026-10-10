@@ -5721,7 +5721,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const longest = Math.max(0, ...(await chrome.executeJavaScript('window.__longTasks').catch(() => [])));
     for (const t of [a, b]) tabs.close(t.id);
 
-    // Nothing happening: the chrome's renderer should be all but idle.
+    // Nothing happening: the chrome's renderer should be all but idle. No tab
+    // may still be loading - each one draws a spinning ring in the strip,
+    // which is the chrome working as it should, and on a slow CI runner a tab
+    // from an earlier check was still loading when this measured.
+    await waitFor(() => !tabs.all().some((t) => t.isLive && (t.loading || t.wc.isLoading())), { timeoutMs: 15_000 });
     await sleep(3000);
     const chromePid = chrome.getOSProcessId();
     const cpuOf = () => app.getAppMetrics().find((m) => m.pid === chromePid)?.cpu.percentCPUUsage;
