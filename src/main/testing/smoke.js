@@ -4278,8 +4278,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `(document.querySelector('.tab[data-id="${start.id}"]')?.getAnimations() || []).length > 0`).catch(() => false),
     { timeoutMs: 1000, pollMs: 20 });
     tabs.setPinned(start.id, false);
-    check('pinning a tab moves it to the start of the strip, sliding there',
-      pinnedFirst && (wasAt === 0 || slid), `index ${tabs.all().indexOf(start)}, was ${wasAt}, slid ${slid}`);
+    // A system set to reduce motion - Windows runners are - gets no slide,
+    // as it should; there the move itself is what is checked.
+    const still = await shell.chromeView.webContents.executeJavaScript(
+      "matchMedia('(prefers-reduced-motion: reduce)').matches || document.body.classList.contains('calm')").catch(() => false);
+    check('pinning a tab moves it to the start of the strip, sliding there unless motion is reduced',
+      pinnedFirst && (wasAt === 0 || slid || still), `index ${tabs.all().indexOf(start)}, was ${wasAt}, slid ${slid}, reduced motion ${still}`);
 
     // Focus comes back to the page when a panel closes.
     await tabs.activate(start.id);
