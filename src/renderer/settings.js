@@ -1644,6 +1644,17 @@ api.onState((state) => {
   }
 });
 
+/** Which work the graphics card does and which the processor does (graphics.js, workLine). */
+function workSaid(work) {
+  if (!work) return '';
+  const names = { pages: 'pages', threeD: '3D (WebGL)', video: 'video decoding', drawing: 'drawing' };
+  const on = (where) => Object.keys(names).filter((k) => work[k] === where).map((k) => names[k]);
+  const parts = [];
+  if (on('card').length) parts.push(`${on('card').join(', ')} on the graphics card`);
+  if (on('processor').length) parts.push(`${on('processor').join(', ')} on the processor`);
+  return parts.length ? `${parts.join('; ')}.` : '';
+}
+
 /** Light graphics' line under the setting: the machine as found, and the choice it led to. */
 function graphicsHint(prefs) {
   const d = prefs.graphicsDetected;
@@ -1653,7 +1664,7 @@ function graphicsHint(prefs) {
   const found = d.noGpu ? `${where} with no graphics card in use (${d.adapter}).`
     : d.vm && d.virtualAdapter ? `${where}, drawing through its virtual display (${d.adapter}).`
       : `${where}, drawing with ${d.adapter}.`;
-  return `${found} ${on} Smooth scrolling follows from the next start.`;
+  return `${found} ${workSaid(d.work)} ${on} Smooth scrolling follows from the next start.`.replace(/\s+/g, ' ');
 }
 
 /**

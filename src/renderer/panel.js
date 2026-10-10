@@ -208,6 +208,12 @@ function render(state) {
     el.pressure.textContent += ` Pages are drawn by the processor here, not the graphics card` +
       (state.gpuCpuPercent >= 5 ? ` - drawing is using about ${state.gpuCpuPercent}% of it now` : '') +
       (g.overridden ? '.' : '. Settings → Advanced can try the graphics card.');
+  } else if (g && g.work) {
+    // A card in use, but not for everything: a virtual machine's display
+    // usually draws pages and 3D but leaves video to the processor.
+    const names = { threeD: '3D (WebGL)', video: 'video decoding', drawing: 'drawing' };
+    const cpu = Object.keys(names).filter((k) => g.work[k] === 'processor').map((k) => names[k]);
+    if (cpu.length) el.pressure.textContent += ` On the processor here, not the graphics card: ${cpu.join(', ')}.`;
   }
   if (state.prefs && state.prefs.lightGraphics) {
     el.pressure.textContent += ' Light graphics is on: less motion, background tabs asleep sooner, YouTube in H.264.';

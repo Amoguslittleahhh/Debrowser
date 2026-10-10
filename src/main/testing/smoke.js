@@ -5990,7 +5990,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       "document.getElementById('pressure').textContent.includes('drawn by the processor')").catch(() => false), { timeoutMs: 6000 });
     runCommand('toggle-panel');
     check('without a GPU the task manager says pages are drawn by the processor, and the graphics override is added only when chosen',
-      snap.graphics?.software === true && typeof snap.gpuCpuPercent === 'number' && said &&
+      snap.graphics?.software === true && snap.graphics?.work?.threeD === 'processor' && typeof snap.gpuCpuPercent === 'number' && said &&
         on.added.includes('ignore-gpu-blocklist') && !off.added.length && !noAccel.added.length,
       `graphics ${JSON.stringify(snap.graphics)}, gpu ${snap.gpuCpuPercent}%, panel says ${said}, on ${on.added}, off ${off.added}, no accel ${noAccel.added}`);
   }

@@ -2060,7 +2060,7 @@ function main() {
       if (!OFFLINE_MODE) runCommand('apply-light-graphics', { detected: prefs.get('graphicsDetected') });
       setTimeout(() => {
         graphics.detectMachine(app).then((found) => {
-          log('graphics', graphics.describe(found));
+          log('graphics', `${graphics.describe(found)}. ${graphics.workLine(found.work)}`);
           if (OFFLINE_MODE) { graphicsFound = found; return; }
           const wasLight = prefs.light === true;
           prefs.set('graphicsDetected', found);

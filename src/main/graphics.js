@@ -52,11 +52,21 @@ function status(app) {
   let features = {};
   try { features = app.getGPUFeatureStatus() || {}; } catch { /* before ready */ }
   const soft = (v) => typeof v === 'string' && /software|disabled|unavailable/.test(v);
+  // Each kind of work, as done by the card or by the processor: what a
+  // `chrome://gpu` page would say, in two words. Unknown before the graphics
+  // process has answered.
+  const by = (v) => (!v ? 'unknown' : /^enabled/.test(v) && !soft(v) ? 'card' : 'processor');
   return {
     // The page itself, and 3D in it: either one on the processor is what costs.
     software: soft(features.gpu_compositing) || soft(features.webgl),
     webgl: features.webgl || 'unknown',
     compositing: features.gpu_compositing || 'unknown',
+    work: {
+      pages: by(features.gpu_compositing),
+      threeD: by(features.webgl),
+      video: by(features.video_decode),
+      drawing: by(features.rasterization)
+    },
     overridden: app.commandLine.hasSwitch('ignore-gpu-blocklist')
   };
 }
@@ -132,10 +142,12 @@ async function detectAdapter(app) {
   const driver = String(active.driverVendor || active.deviceString || '');
   // Drawing in software whatever the adapter: Windows' fallback driver, or a
   // software renderer (SwiftShader reports Google's vendor id with no device).
-  const basic = vendorId === 0x1414 || /swiftshader|llvmpipe|softpipe|basic render/i.test(`${driver} ${active.deviceString || ''}`);
+  const basic = vendorId === 0 || vendorId === 0x1414 ||
+    /swiftshader|llvmpipe|softpipe|basic render/i.test(`${driver} ${active.deviceString || ''}`);
   return {
     vendorId,
-    name: virtualName || active.deviceString || GPU_VENDORS[vendorId] || driver || `vendor 0x${vendorId.toString(16)}`,
+    name: vendorId === 0 ? 'no graphics adapter' : virtualName || active.deviceString || GPU_VENDORS[vendorId] || driver ||
+      `vendor 0x${vendorId.toString(16)}`,
     // A hypervisor's display device. With the VM's 3D acceleration on it hands
     // work to the host's card, so on its own it is not "no graphics card".
     virtual: Boolean(virtualName) || basic,
@@ -155,6 +167,7 @@ async function detectMachine(app, opts = {}) {
     adapter: adapter.name,
     virtualAdapter: adapter.virtual,
     software: drawing.software,
+    work: drawing.work,
     // No graphics card doing the work: pages drawn in software, or by a
     // driver that is software underneath.
     noGpu: drawing.software || adapter.basic,
@@ -171,6 +184,19 @@ function isLight(mode, detected) {
   if (mode === 'light') return true;
   if (mode === 'full') return false;
   return Boolean(detected && (detected.noGpu || (detected.vm && detected.virtualAdapter)));
+}
+
+/** "3D and video on the processor; pages on the card" - which work goes where. */
+function workLine(work) {
+  if (!work) return '';
+  const names = { pages: 'pages', threeD: '3D (WebGL)', video: 'video decoding', drawing: 'drawing' };
+  const on = (where) => Object.keys(names).filter((k) => work[k] === where).map((k) => names[k]);
+  const card = on('card');
+  const cpu = on('processor');
+  const parts = [];
+  if (card.length) parts.push(`${card.join(', ')} on the graphics card`);
+  if (cpu.length) parts.push(`${cpu.join(', ')} on the processor`);
+  return parts.length ? `${parts.join('; ')}.` : '';
 }
 
 /** In plain words, for Settings and the task manager. */
@@ -191,5 +217,5 @@ function readText(file) {
   return require('fs').promises.readFile(file, 'utf8').catch(() => '');
 }
 
-module.exports = { applySwitches, guardOverride, status, detectVm, detectAdapter, detectMachine, hypervisorIn, isLight, describe,
+module.exports = { applySwitches, guardOverride, status, detectVm, detectAdapter, detectMachine, hypervisorIn, isLight, describe, workLine,
   VIRTUAL_ADAPTERS };
