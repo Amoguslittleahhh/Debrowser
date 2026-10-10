@@ -22,19 +22,35 @@
 const crypto = require('crypto');
 const { clipboard } = require('electron');
 
-/** A fingerprint of what the clipboard holds, or null when it is empty. */
-function signature() {
+/**
+ * A fingerprint of what the clipboard holds, or null when it is empty.
+ *
+ * Awaited throughout, and built from what this Electron's clipboard still
+ * offers: it answers with promises, and has only `has`, `readText` and
+ * `read` - no `availableFormats`, `readHTML` or `readImage`. Written for that
+ * older API, every call threw, and the guard below never once saw a copy, so
+ * a private window's copies outlived it. A build that still has the older
+ * calls gets the finer fingerprint.
+ */
+async function signature() {
   try {
-    const formats = clipboard.availableFormats();
-    if (!formats.length) return null;
+    const has = async (type) => (typeof clipboard.has === 'function' ? Boolean(await clipboard.has(type)) : false);
+    const text = String(await clipboard.readText() ?? '');
+    const kinds = ['text/plain', 'text/html', 'image/png'];
+    const present = [];
+    for (const kind of kinds) if (await has(kind)) present.push(kind);
+    if (typeof clipboard.availableFormats === 'function') present.push(...(await clipboard.availableFormats()));
+    if (!text && !present.length) return null;
     const hash = crypto.createHash('sha256');
-    hash.update(formats.join('\n'));
+    hash.update(present.join('\n'));
     hash.update('\0');
-    hash.update(clipboard.readText());
-    hash.update('\0');
-    hash.update(clipboard.readHTML());
-    const image = clipboard.readImage();
-    if (!image.isEmpty()) {
+    hash.update(text);
+    if (typeof clipboard.readHTML === 'function') {
+      hash.update('\0');
+      hash.update(String(await clipboard.readHTML() ?? ''));
+    }
+    const image = typeof clipboard.readImage === 'function' ? await clipboard.readImage() : null;
+    if (image && !image.isEmpty()) {
       // A corner and the size: enough to tell two pictures apart, without
       // turning a whole screenshot into a bitmap on every focus change.
       const { width, height } = image.getSize();
@@ -47,6 +63,11 @@ function signature() {
   }
 }
 
+/**
+ * What a private window copied, cleared when it closes - and nothing it did
+ * not copy. Each look at the clipboard waits for the one before, so focus,
+ * blur and close are judged in the order they happened.
+ */
 class ClipboardGuard {
   constructor({ read = signature, clear = () => clipboard.clear() } = {}) {
     this.read = read;
@@ -54,39 +75,52 @@ class ClipboardGuard {
     this.atFocus = null;
     this.ours = null;
     this.focused = false;
+    this.queue = Promise.resolve();
   }
+
+  /** Run after everything already asked of the guard. */
+  then(step) {
+    this.queue = this.queue.then(step, step).catch(() => {});
+    return this.queue;
+  }
+
+  /** Resolves once every look already asked for has been taken. */
+  idle() { return this.queue; }
 
   /** Follow a window: what changed while it had the keyboard is the window's. */
   watch(win) {
-    win.on('focus', () => {
+    const focus = () => {
       this.focused = true;
-      this.atFocus = this.read();
-    });
+      return this.then(async () => { this.atFocus = await this.read(); });
+    };
+    win.on('focus', focus);
     win.on('blur', () => {
       this.mark();
-      this.focused = false;
+      this.then(() => { this.focused = false; });
     });
-    if (typeof win.isFocused === 'function' && win.isFocused()) {
-      this.focused = true;
-      this.atFocus = this.read();
-    }
+    if (typeof win.isFocused === 'function' && win.isFocused()) focus();
   }
 
   mark() {
-    if (!this.focused) return;
-    const now = this.read();
-    if (now && now !== this.atFocus) this.ours = now;
-    this.atFocus = now;
+    return this.then(async () => {
+      if (!this.focused) return;
+      const now = await this.read();
+      if (now && now !== this.atFocus) this.ours = now;
+      this.atFocus = now;
+    });
   }
 
-  /** The window is going: clear the clipboard if it still holds the window's copy. */
-  clearIfOurs() {
+  /** The window is going: clear the clipboard if it still holds the window's copy. Resolves to whether it did. */
+  async clearIfOurs() {
     this.mark();
-    if (!this.ours) return false;
-    const still = this.read() === this.ours;
-    this.ours = null;
-    if (still) this.clearClipboard();
-    return still;
+    let cleared = false;
+    await this.then(async () => {
+      if (!this.ours) return;
+      const still = (await this.read()) === this.ours;
+      this.ours = null;
+      if (still) { await this.clearClipboard(); cleared = true; }
+    });
+    return cleared;
   }
 }
 

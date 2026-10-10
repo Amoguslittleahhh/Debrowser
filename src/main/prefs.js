@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const { readJson } = require('./data/store-file');
+const { DEFAULT_SHORTCUTS_TEXT } = require('./site-shortcuts');
 const path = require('path');
 const { app } = require('electron');
 
@@ -140,9 +141,15 @@ const SCHEMA = {
 
   showMemoryMeter: { def: true,  ok: (v) => typeof v === 'boolean' },
   showTierDots: { def: true,     ok: (v) => typeof v === 'boolean' },
+  /** A video playing with sound pops out when you switch away from its tab. */
+  autoPip:      { def: true,     ok: (v) => typeof v === 'boolean' },
+  /** A card under the tab the pointer rests on: its title, site and memory. */
+  hoverCards:   { def: true,     ok: (v) => typeof v === 'boolean' },
 
   /* --- Browsing --------------------------------------------------- */
   searchEngine: { def: 'google', ok: (v) => Object.hasOwn(SEARCH_ENGINES, v) },
+  /** Site search shortcuts, one per line: `yt  YouTube  https://…%s` (site-shortcuts.js). */
+  siteShortcuts: { def: DEFAULT_SHORTCUTS_TEXT, ok: (v) => typeof v === 'string' && v.length <= 20_000 },
   homepage:     { def: '',       ok: (v) => typeof v === 'string' && v.length < 2048 },
 
   /**

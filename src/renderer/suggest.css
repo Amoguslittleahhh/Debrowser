@@ -84,3 +84,6 @@ body { padding: 0 var(--s6) var(--s7); }
   font-size: var(--fs-small);
 }
 .row.selected .action { color: var(--accent-text); }
+
+/* An answer reads as a result: the figure, set firm. */
+.row.answer .title { font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }

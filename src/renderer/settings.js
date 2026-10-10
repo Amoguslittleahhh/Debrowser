@@ -179,6 +179,12 @@ const SECTIONS = {
       key: 'showTierDots',
       label: 'Mark sleeping tabs',
       type: 'checkbox'
+    },
+    {
+      key: 'hoverCards',
+      label: 'Show a card when you rest on a tab',
+      hint: 'Its whole title, its site, and how much memory it uses or gave back.',
+      type: 'checkbox'
     }
   ],
 
@@ -200,6 +206,20 @@ const SECTIONS = {
       startupFill: true
     },
     { key: 'searchEngine', label: 'Search engine', type: 'select', options: 'engines' },
+    {
+      key: 'siteShortcuts',
+      label: 'Site search shortcuts',
+      hint: 'Type the word, a space and your search in the address bar - "yt cats" searches YouTube. One per line: the word, a name, then the address with %s where the search goes.',
+      type: 'textarea',
+      placeholder: 'yt  YouTube  https://www.youtube.com/results?search_query=%s',
+      rows: 6
+    },
+    {
+      key: 'autoPip',
+      label: 'Keep a playing video in view when you switch tabs',
+      hint: 'A video playing with sound pops out into a small window over everything, and goes back when you return to its tab.',
+      type: 'checkbox'
+    },
     {
       key: 'inlineAutocomplete',
       label: 'Complete addresses as I type',
@@ -1041,7 +1061,7 @@ function buildControl(spec) {
 
     case 'textarea': {
       const input = document.createElement('textarea');
-      input.rows = 3;
+      input.rows = spec.rows || 3;
       input.spellcheck = false;
       input.placeholder = spec.placeholder || '';
       input.addEventListener('change', () => save(spec.key, input.value.trim()));

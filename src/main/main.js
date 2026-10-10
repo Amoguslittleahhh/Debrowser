@@ -50,7 +50,7 @@ const readerStore = new reader.ReaderStore();
 const { Credentials, originOf } = require('./data/credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
-const { startupTabs, placeKey } = require('./startup');
+const { startupTabs, placeKey, reopenable } = require('./startup');
 const { duplicateTabs } = require('./tabs/duplicates');
 const { WebHooks } = require('./web-hooks');
 const { Extensions, storeTarget, downloadFromStore } = require('./extensions');
@@ -86,6 +86,7 @@ function endTabCycle() {
   });
 }
 const { History } = require('./data/history');
+const { ReadingList } = require('./data/reading-list');
 const icons = require('./icons');
 const presence = require('./presence');
 const { Vault } = require('./data/vault');
@@ -114,6 +115,8 @@ const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
 const { suggest, TAB_SCOPE } = require('./suggest');
 const { classifyAddress } = require('./address');
+const { answer } = require('./answers');
+const { resolveShortcut } = require('./site-shortcuts');
 const palette = require('./palette');
 const uninstall = require('./setup/uninstall');
 const installer = require('./setup/install');
@@ -600,6 +603,31 @@ function main() {
   TabGroups.current = tabGroups;
   let siteStyles = null;
   let archive = null;
+  let readingList = null;
+  // The tab last brought to the front, for automatic picture-in-picture.
+  let lastPresented = null;
+
+  /**
+   * Out: the tab's playing video, with sound, into a picture-in-picture
+   * window. Back: out of it again, if it was this that put it there - a video
+   * the user popped out themselves stays where they put it.
+   *
+   * Run with a user gesture, which the page itself never has here: a site
+   * cannot use this to open a window of its own.
+   */
+  const autoPictureInPicture = (tab, out) => {
+    if (!tab.isLive || !prefs || prefs.get('autoPip') === false) return;
+    if (!out) tab.autoPip = false;
+    const code = out ? `(() => {
+      const v = [...document.querySelectorAll('video')].find((e) => !e.paused && !e.ended && e.readyState >= 2 &&
+        e.videoWidth > 0 && !e.muted && e.volume > 0 && !e.disablePictureInPicture);
+      if (!v || document.pictureInPictureElement) return false;
+      return v.requestPictureInPicture().then(() => true, () => false);
+    })()` : `(() => document.pictureInPictureElement ? document.exitPictureInPicture().then(() => true, () => false) : false)()`;
+    tab.wc.executeJavaScriptInIsolatedWorld(1002, [{ code }], true)
+      .then((done) => { if (out && done === true) tab.autoPip = true; })
+      .catch(() => { /* gone, or nothing to do */ });
+  };
   let permissionAsks = null;
   /** Passkeys in the browser's own list, where Windows can list them (passkeys.js). */
   let passkeys = null;
@@ -894,17 +922,26 @@ function main() {
    * every other part of the extension API knows it - and only for the
    * extensions that listen, so with none listening this costs nothing.
    */
+  // By the id the tab last had (`bindExtensionEvents`), never through `tab.wc`:
+  // a page's last events can arrive after the tab has gone to sleep and let
+  // its page go, and reading `tab.wc.id` then threw in the main process -
+  // which Electron answers with a modal error box that stops the browser.
   const extensionTabInfo = (tab) => ({
-    id: tab.wc.id, index: tabs.all().indexOf(tab), windowId: 1, url: tab.url, title: tab.title, active: tab.visible,
+    id: tab.extensionId ?? -1, index: tabs.all().indexOf(tab), windowId: 1, url: tab.url, title: tab.title, active: tab.visible,
     highlighted: tab.visible, pinned: tab.pinned, status: tab.loading ? 'loading' : 'complete', incognito: false,
-    audible: Boolean(tab.audible), discarded: false, mutedInfo: { muted: Boolean(tab.muted) }
+    audible: Boolean(tab.audible), discarded: !tab.isLive, mutedInfo: { muted: Boolean(tab.muted) }
   });
   const bindExtensionEvents = (tab) => {
     if (INCOGNITO || !tab.isLive) return;
     const wc = tab.wc;
     const id = wc.id;
     const listening = () => Boolean(extensions && extensions.listening && prefs.get('labExtensions') === true);
-    const send = (name, ...args) => { if (listening()) extensions.broadcast(name, args); };
+    // Built only when someone is listening: a function in the arguments is
+    // called then, so a browser with no extensions does no work per event.
+    const send = (name, ...args) => {
+      if (listening()) extensions.broadcast(name, args.map((a) => (typeof a === 'function' ? a() : a)));
+    };
+    const info = () => extensionTabInfo(tab);
     const nav = (extra) => ({ tabId: id, frameId: 0, parentFrameId: -1, timeStamp: Date.now(), ...extra });
     // A tab put to sleep and woken comes back with a new page, and so a new
     // id: to an extension that is one tab replaced, as Chrome says it after
@@ -913,13 +950,13 @@ function main() {
     const was = tab.extensionId;
     tab.extensionId = id;
     if (was != null && was !== id) send('tabs.onReplaced', id, was);
-    else send('tabs.onCreated', extensionTabInfo(tab));
+    else send('tabs.onCreated', info);
     wc.on('did-start-navigation', (d) => {
       if (d && d.isMainFrame && !d.isSameDocument) send('webNavigation.onBeforeNavigate', nav({ url: d.url }));
     });
     wc.on('did-navigate', (_e, url) => {
       send('webNavigation.onCommitted', nav({ url, transitionType: 'link', transitionQualifiers: [] }));
-      send('tabs.onUpdated', id, { status: 'loading', url }, extensionTabInfo(tab));
+      send('tabs.onUpdated', id, { status: 'loading', url }, info);
     });
     wc.on('did-frame-navigate', (_e, url, _code, _status, isMainFrame, _pid, routingId) => {
       if (!isMainFrame) send('webNavigation.onCommitted', nav({ url, frameId: routingId, parentFrameId: 0, transitionType: 'auto_subframe', transitionQualifiers: [] }));
@@ -927,17 +964,17 @@ function main() {
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (!isMainFrame) return;
       send('webNavigation.onHistoryStateUpdated', nav({ url, transitionType: 'link', transitionQualifiers: [] }));
-      send('tabs.onUpdated', id, { url }, extensionTabInfo(tab));
+      send('tabs.onUpdated', id, { url }, info);
     });
     wc.on('dom-ready', () => send('webNavigation.onDOMContentLoaded', nav({ url: wc.getURL() })));
     wc.on('did-finish-load', () => {
       send('webNavigation.onCompleted', nav({ url: wc.getURL() }));
-      send('tabs.onUpdated', id, { status: 'complete' }, extensionTabInfo(tab));
+      send('tabs.onUpdated', id, { status: 'complete' }, info);
     });
     wc.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
       if (isMainFrame && code !== -3) send('webNavigation.onErrorOccurred', nav({ url, error: description }));
     });
-    wc.on('page-title-updated', (_e, title) => send('tabs.onUpdated', id, { title }, extensionTabInfo(tab)));
+    wc.on('page-title-updated', (_e, title) => send('tabs.onUpdated', id, { title }, info));
     wc.once('destroyed', () => {
       // Asleep, not closed: onReplaced follows when it wakes.
       if (!tab.closed) return;
@@ -966,6 +1003,8 @@ function main() {
           canGoBack: tab.wc.navigationHistory.canGoBack(),
           canGoForward: tab.wc.navigationHistory.canGoForward(),
           bookmarked: Boolean(bookmarks && tab.url && bookmarks.has(tab.url)),
+          readingList: Boolean(readingList),
+          savedForLater: Boolean(readingList && tab.url && readingList.has(tab.url)),
           internal: tab.internal,
           incognito: INCOGNITO,
           engineName: prefs ? prefs.engineName() : null
@@ -1259,6 +1298,7 @@ function main() {
     const siteZoom = new SiteZoom(() => prefs.get('defaultZoom'), sitePrefs.view('zoom'));
     siteStyles = INCOGNITO ? null : new SiteStyles(sitePrefs);
     archive = INCOGNITO ? null : new Archive(OFFLINE_MODE ? null : path.join(app.getPath('userData'), 'archive.json'));
+    readingList = INCOGNITO ? null : new ReadingList(OFFLINE_MODE ? null : path.join(app.getPath('userData'), 'reading-list.json'));
     // Incognito: a Tor circuit and a partition per tab. See incognito/circuits.js.
     circuits = INCOGNITO ? new Circuits(incognitoCtx) : null;
     // Incognito, opt-in: a decoy page load beside every real one. See
@@ -1325,6 +1365,12 @@ function main() {
       log,
       // Awaited before a tab is shown, so it is never presented while frozen.
       onPresent: async (tab) => {
+        // A video playing in the tab just left pops out over everything, and
+        // goes back into its page when you return - as Chrome does.
+        const left = lastPresented;
+        lastPresented = tab;
+        if (left && left !== tab && !(shell && shell.inSplit(left) && shell.inSplit(tab))) autoPictureInPicture(left, true);
+        if (tab.autoPip) autoPictureInPicture(tab, false);
         if (shell) shell.attachTab(tab);
         if (extensions && tab.wc && !tab.wc.isDestroyed()) {
           extensions.announceActiveTab(tab.wc.id);
@@ -1545,8 +1591,16 @@ function main() {
       const { ClipboardGuard } = require('./incognito/clipboard');
       const guard = new ClipboardGuard();
       guard.watch(shell.window);
-      shell.window.on('close', () => guard.clearIfOurs());
-      app.on('will-quit', () => guard.clearIfOurs());
+      shell.window.on('close', () => { guard.clearIfOurs(); });
+      // The clipboard answers asynchronously, so the quit waits for it - a
+      // second at most - rather than leaving before the copy is cleared.
+      let guarded = false;
+      app.on('will-quit', (event) => {
+        if (guarded) return;
+        event.preventDefault();
+        guarded = true;
+        Promise.race([guard.clearIfOurs(), new Promise((resolve) => setTimeout(resolve, 1000))]).finally(() => app.quit());
+      });
     }
     shell.onSheetClosed =(page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
     shell.siteIsAsking = () => Boolean(permissionAsks && permissionAsks.shown);
@@ -1768,6 +1822,7 @@ function main() {
       tabs, shell, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, previousSession, context, find, quitState, siteZoom, circuits, slowJs,
       sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
+      getReadingList: () => readingList,
       getExtensions: () => extensions,
       passkeys,
       // A getter: the manager is made just below, once the commands exist.
@@ -1864,7 +1919,7 @@ function main() {
     // Not for someone who has history cleared on exit: last time's pages are
     // exactly what they asked not to be shown again.
     if (sessionStore && !unclean && !saved.tabs.length && !prefs.get('clearHistoryOnExit')) {
-      previousSession.tabs = sessionStore.load().tabs;
+      previousSession.tabs = reopenable(sessionStore.load().tabs, opening);
     }
 
     if (saved.tabs.length) {
@@ -1961,6 +2016,16 @@ function main() {
         }
         publish();
       }, 20_000);
+    }
+    // Closing the window closed the browser, and with tabs not reopened at
+    // start that window was one shortcut from gone for good, with nothing to
+    // say so. Said once, quietly, with the way back.
+    if (!crash && !lost.length && previousSession.tabs.length >= 2 && prefs.get('welcomeDone')) {
+      const n = previousSession.tabs.length;
+      setTimeout(() => {
+        if (previousSession.tabs.length !== n) return;   // already reopened with Ctrl+Shift+T
+        runCommand.toast(`Your ${n} tabs from last time can come back`, 'Reopen', () => runCommand('reopen-closed-tab'), 12_000);
+      }, 1500).unref?.();
     }
     if (prewarm) prewarm.holdUntil(firstTabLoaded(tabs.activeTab()));
     // A test's blocker starts once the first tab has painted - not merely
@@ -2296,7 +2361,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        bookmarks = null, closedTabs = [], previousSession = { tabs: [] }, context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null,
+                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null, getReadingList = () => null,
                        passkeys = null, getExtensions = () => null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
@@ -2327,6 +2392,17 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   };
 
   /** Activate a tab, repaint, and say so if it failed. Used by four commands. */
+  /** A tab's article in reader view, in the same tab; Back returns to the page. */
+  const showInReader = (tab, { quiet = false } = {}) => {
+    const from = tab.url;
+    reader.extract(tab.wc).then((article) => {
+      if (!article) { if (!quiet) toast('This page has no article to show in reader view'); return; }
+      const token = readerStore.put(article, from);
+      tab.rebuildFor(`${pages.READER_URL}?t=${token}`);
+      tab.insecureReturn = from;
+    }).catch((err) => log(`reader view failed: ${err.message}`));
+  };
+
   const goTo = (id) => tabs.activate(id)
     .then(publish)
     .catch((err) => log(`activate failed: ${err.message}`));
@@ -2516,6 +2592,14 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           runCommand(entry.command, forTab && active ? { id: active.id } : entry.payload);
           break;
         }
+        // An answer is copied, and says so; the bar keeps what was typed.
+        if (item.kind === 'answer') {
+          if (typeof item.copy === 'string') {
+            clipboard.writeText(item.copy);
+            runCommand.toast(`Copied ${item.copy}`);
+          }
+          break;
+        }
         // The go row is exactly what was typed, and goes as typed, so it gets
         // the same retry over http that Enter on the same text does.
         const url = item.kind === 'search'
@@ -2643,7 +2727,9 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         break;
 
       case 'navigate': {
-        const target = normaliseUrl(payload?.url, prefs.searchTemplate());
+        // `yt cats` from the address bar: the site's own search, not the engine's.
+        const shortcut = resolveShortcut(payload?.url, prefs.get('siteShortcuts'));
+        const target = shortcut ? shortcut.url : normaliseUrl(payload?.url, prefs.searchTemplate());
         if (!target) break;
 
         // One of our own pages always goes through the page opener, never into
@@ -2728,13 +2814,76 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           if (active.insecureReturn) active.rebuildFor(active.insecureReturn);
           break;
         }
-        const from = active.url;
-        reader.extract(active.wc).then((article) => {
-          if (!article) { toast('This page has no article to show in reader view'); return; }
-          const token = readerStore.put(article, from);
-          active.rebuildFor(`${pages.READER_URL}?t=${token}`);
-          active.insecureReturn = from;
-        }).catch((err) => log(`reader view failed: ${err.message}`));
+        showInReader(active);
+        break;
+      }
+
+      /*
+       * The reading list (data/reading-list.js): saved from a tab's menu, the
+       * page's menu or the command bar, listed from the app menu, and opened
+       * in reader view. None of it in a private window.
+       */
+      case 'save-for-later': {
+        const list = getReadingList();
+        const tab = (payload?.id != null && tabs.byId(payload.id)) || active;
+        if (!list) { toast('A private window keeps no reading list'); break; }
+        if (!tab || !/^https?:/i.test(tab.url || '')) { toast('Only web pages can be saved for later'); break; }
+        list.add(tab.url, tab.title);
+        toast('Saved for later · it’s in Reading list, in the menu');
+        break;
+      }
+
+      case 'open-reading-list': {
+        const list = getReadingList();
+        if (!list) break;
+        // Hung under the menu button, which only the chrome can measure.
+        const right = Number(payload?.right);
+        if (!(Number.isFinite(right) && right > 0)) { shell.toChrome('open-reading-list'); break; }
+        const label = (e) => e.title || e.url.replace(/^https?:\/\/(www\.)?/i, '');
+        const unread = list.unread.slice(0, 15);
+        const read = list.read.slice(0, 5);
+        const here = active && /^https?:/i.test(active.url || '') && !list.has(active.url);
+        const items = [
+          ...(unread.length ? unread.map((e) => ({ id: 'open-reading-item', label: label(e), icon: 'notes', payload: { url: e.url } }))
+            : [{ id: 'open-reading-list', label: 'Nothing saved to read yet', enabled: false, payload: {} }]),
+          ...(read.length ? [{ kind: 'separator' },
+            ...read.map((e) => ({ id: 'open-reading-item', label: label(e), icon: 'notes', accel: 'Read', payload: { url: e.url } }))] : []),
+          ...(here || read.length ? [{ kind: 'separator' }] : []),
+          ...(here ? [{ id: 'save-for-later', label: 'Save this page for later', icon: 'plus', payload: {} }] : []),
+          ...(read.length ? [{ id: 'clear-read-later', label: 'Clear pages you’ve read', icon: 'close', payload: {} }] : [])
+        ];
+        context.model = { items, params: {} };
+        shell.openSheet('context', { x: Math.round(Number(payload?.x) || right), y: Math.round(Number(payload?.y) || 0), right });
+        break;
+      }
+
+      // Only what is on the list opens from here: the address comes back from
+      // the menu, and is looked up rather than trusted.
+      case 'open-reading-item': {
+        const list = getReadingList();
+        const url = typeof payload?.url === 'string' ? payload.url : '';
+        if (!list || !list.has(url)) break;
+        list.markRead(url);
+        const tab = tabs.create({ url, spaceId: active?.spaceId });
+        publish();
+        // In reader view once it has loaded, wherever it redirected to; a page
+        // with no article stays as it is.
+        const started = Date.now();
+        const wait = setInterval(() => {
+          if (tab.closed || Date.now() - started > 20_000) { clearInterval(wait); return; }
+          if (!tab.isLive) return;
+          clearInterval(wait);
+          const wc = tab.wc;
+          const ready = () => { if (!tab.closed && tab.wc === wc && /^https?:/i.test(wc.getURL())) showInReader(tab, { quiet: true }); };
+          if (!wc.isLoading() && /^https?:/i.test(wc.getURL())) ready();
+          else wc.once('did-finish-load', ready);
+        }, 100);
+        break;
+      }
+
+      case 'clear-read-later': {
+        const list = getReadingList();
+        if (list) list.clearRead();
         break;
       }
 
@@ -3410,6 +3559,76 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'edit-paste': if (active?.isLive) active.wc.paste(); break;
       case 'edit-select-all': if (active?.isLive) active.wc.selectAll(); break;
 
+      // Right-clicking the address bar. Paste and go names what it will do:
+      // an address is gone to, anything else searched for.
+      case 'address-menu': {
+        if (!shell) break;
+        const x = Math.round(Number(payload?.x) || 0);
+        const y = Math.round(Number(payload?.y) || 0);
+        const selected = payload?.selected === true;
+        // The clipboard answers asynchronously in this Electron.
+        Promise.resolve(clipboard.readText()).catch(() => '').then((text) => {
+          const pasted = pasteable(text);
+          const isAddress = pasted && ['url', 'local', 'host'].includes(classifyAddress(pasted));
+          context.model = {
+            params: {},
+            items: [
+              { id: 'address-edit', label: 'Cut', icon: 'scissors', accel: 'Ctrl+X', enabled: selected, payload: { op: 'cut' } },
+              { id: 'address-edit', label: 'Copy', icon: 'copy', accel: 'Ctrl+C', enabled: selected, payload: { op: 'copy' } },
+              { id: 'address-edit', label: 'Paste', icon: 'clipboard', accel: 'Ctrl+V', enabled: Boolean(pasted), payload: { op: 'paste' } },
+              { id: 'paste-and-go', label: isAddress ? 'Paste and go' : pasted ? `Paste and search for “${contextMenu.ellipsis(pasted, 28)}”` : 'Paste and go',
+                icon: isAddress ? 'forward' : 'search', enabled: Boolean(pasted), payload: {} },
+              { kind: 'separator' },
+              { id: 'address-edit', label: 'Select all', icon: 'select', accel: 'Ctrl+A', payload: { op: 'select-all' } }
+            ]
+          };
+          shell.openSheet('context', { x, y, right: x });
+        });
+        break;
+      }
+
+      case 'address-edit': {
+        if (!shell) break;
+        const op = ['cut', 'copy', 'paste', 'select-all'].includes(payload?.op) ? payload.op : null;
+        if (!op) break;
+        // Back to the chrome first: the menu had the keyboard.
+        shell.chromeView.webContents.focus();
+        if (op !== 'paste') { shell.toChrome('address-edit', { op }); break; }
+        Promise.resolve(clipboard.readText()).catch(() => '')
+          .then((text) => shell.toChrome('address-edit', { op, text: pasteable(text) }));
+        break;
+      }
+
+      // A tab's hover card: shown where the strip says, or hidden.
+      case 'tab-hover-card':
+        if (!shell) break;
+        if (payload?.hide === true || !prefs.get('hoverCards') || typeof payload?.title !== 'string') shell.hideHoverCard();
+        else shell.showHoverCard(payload);
+        break;
+      case 'hover-card-size':
+        if (shell) shell.sizeHoverCard(payload?.height);
+        break;
+
+      // From the page menu on a selection: the page's address, built to
+      // scroll to the words and highlight them.
+      case 'copy-link-to-highlight': {
+        const link = typeof payload?.url === 'string' && /^https?:/i.test(payload.url)
+          ? contextMenu.highlightLink(payload.url, String(payload?.text || '').slice(0, 5000)) : null;
+        if (!link) break;
+        clipboard.writeText(link);
+        runCommand.toast('Link to highlight copied');
+        break;
+      }
+
+      // What was copied, opened straight away - read here, from the clipboard,
+      // never taken from a payload a page could have written.
+      case 'paste-and-go':
+        Promise.resolve(clipboard.readText()).catch(() => '').then((text) => {
+          const pasted = pasteable(text);
+          if (pasted) runCommand('navigate', { url: pasted });
+        });
+        break;
+
       // Opens the inspector on the element that was right-clicked. The dock is
       // ours, so the inspector has to exist before it can be pointed at a node.
       // The image under the pointer, onto the clipboard as a picture.
@@ -3899,6 +4118,10 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
               icon: 'mute',
               payload: { id }
             },
+            // To the reading list, to come back to without keeping the tab.
+            ...(getReadingList() && /^https?:/i.test(tab.url || '')
+              ? [{ id: 'save-for-later', label: getReadingList().has(tab.url) ? 'In your reading list' : 'Save for later',
+                icon: 'notes', enabled: !getReadingList().has(tab.url), payload: { id } }] : []),
             // Asleep now, for a tab that is awake and not the one in front.
             ...(tab.isLive && !tab.visible && governor
               ? [{ id: 'sleep-tab', label: 'Put to sleep', icon: 'moon', payload: { id } }] : []),
@@ -4808,7 +5031,9 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
           engine: prefs.engineName(),
           complete: payload?.complete !== false,
           commands: text.trim().startsWith('>') ? commandList({ incognito: INCOGNITO, hasTab: Boolean(active), labs: (key) => prefs.get(key) === true }) : [],
-          archived: scoped && getArchive() ? getArchive().items : []
+          archived: scoped && getArchive() ? getArchive().items : [],
+          shortcut: scoped ? null : resolveShortcut(text, prefs.get('siteShortcuts')),
+          answer: scoped || text.trim().startsWith('>') ? null : answer(text)
         });
         shell.suggestItems = result.items;
         shell.suggestSelected = -1;
@@ -5716,6 +5941,7 @@ function menuModel({ tabs, shell }) {
     { kind: 'separator' },
     { id: 'open-bookmarks', label: 'Bookmarks', accel: accel('open-bookmarks'), icon: 'star' },
     { id: 'open-history', label: 'History', accel: accel('open-history'), icon: 'clock' },
+    ...(INCOGNITO ? [] : [{ id: 'open-reading-list', label: 'Reading list', icon: 'notes' }]),
     { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },
     // Not in a private window, which has no saved passwords to show.
     ...(INCOGNITO ? [] : [{ id: 'open-passwords', label: 'Passwords', icon: 'key' }]),
@@ -5904,6 +6130,16 @@ function openableUrl(url) {
   } catch {
     return false;
   }
+}
+
+/**
+ * The clipboard as something to put in the address bar: one line, trimmed,
+ * and not a novel - or null when there is nothing worth offering.
+ */
+function pasteable(text) {
+  if (typeof text !== 'string') return null;
+  const line = text.replace(/\s*[\r\n]+\s*/g, ' ').trim();
+  return line && line.length <= 16384 ? line : null;
 }
 
 function normaliseUrl(input, searchTemplate = DEFAULT_SEARCH, { search = false } = {}) {

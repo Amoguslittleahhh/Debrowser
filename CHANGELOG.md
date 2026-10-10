@@ -8,6 +8,14 @@
 - **Pinned tabs come back every time.** Even with "Reopen your tabs when you start" off, the tabs you pinned are there at the next start, asleep until you click them.
 - **Ctrl+Tab goes to the tab you used last.** Press it once to go back to the tab you were just on, keep holding Ctrl and press again to go further back, as Alt+Tab does between windows. Ctrl+Page Down still goes along the strip, and Settings → Tabs and windows can switch Ctrl+Tab back to that.
 - **Put a tab to sleep now.** Right-click a tab and choose "Put to sleep" to free its memory straight away, pinned or not. A tab playing sound, on a call or holding text you haven't sent stays awake, and says why.
+- **Paste and go.** Right-click the address bar for Paste and go - or "Paste and search for …" when what you copied isn't an address - so a copied link opens in one click. Cut, Copy, Paste and Select all are there too.
+- **Tab hover cards.** Rest the pointer on a tab and a card shows its whole title, its site, and what it is costing or gave back - "Asleep · gave back 240 MB", say. Once one is up, moving along the strip shows the next straight away. Settings → Appearance can turn them off.
+- **Answers in the address bar.** Type a sum such as `12*7.5` or a conversion such as `5 km in miles` or `72 f to c` and the answer shows under the first row as you type, worked out on your computer with nothing sent anywhere. Click it to copy the answer. Lengths, weights, volumes, speeds, temperatures and file sizes are understood.
+- **Site search shortcuts.** Type `yt` and a space, then your search, to search YouTube directly - `w` for Wikipedia, `gh` for GitHub, `r` for Reddit, `maps` for Google Maps and `so` for Stack Overflow. Add your own under Settings → Search and startup.
+- **Copy link to highlight.** Select some words on a page, right-click, and choose Copy link to highlight: the link opens the page scrolled to those words, highlighted, in Debrowser, Chrome, Edge, Safari or Firefox.
+- **Reading list.** Save a page for later from its tab's menu, the page's right-click menu or the command bar (Ctrl+K), and find it under Reading list in the menu. A page opens from there in reader view and is marked read. Not in private windows.
+- **Videos keep playing in view when you switch tabs.** Switch away from a tab playing a video with sound and the video pops out into a small window over everything; go back to the tab and it returns to the page. A video you popped out yourself stays where you put it. Settings → Search and startup can turn it off.
+- **Get last time's window back.** When Debrowser starts without reopening your tabs, it now says once that last time's tabs can come back, with a Reopen button, and Ctrl+Shift+T still does the same. Pinned tabs and startup sites that already came back are no longer opened a second time.
 - **Close duplicate tabs.** When the same page is open more than once, the tab menu offers "Close duplicate tabs", which keeps one of each; it is also in the command bar (Ctrl+K), and Undo brings them back.
 
 ### Improved
@@ -25,6 +33,8 @@
 
 ### Fixed
 
+- **Private windows clear what you copied when they close, as they were meant to.** With this version of Electron the clipboard check behind it always failed quietly, so text copied in a private window stayed on the clipboard after the window had closed. It is cleared again now, and something you copied in another program since is still left alone.
+- **In a narrow window the address bar stays clear of the window buttons.** With the tabs down the side and tucked away, a window less than about 900 pixels wide - two apps side by side - had the address bar run under the minimise, maximise and close buttons, and the memory meter and the menu button pushed out of the window. The bar now takes only the room left between them.
 - **Unpinning the tab bar no longer flickers.** Pressing the button to tuck the tabs away made them vanish for a moment and slide back in from the edge under the pointer; they now stay where they are as the panel and go when the pointer leaves.
 - **Windows: no white flash when you pin or unpin the tab bar.** With a see-through window, pinning and unpinning the tabs switched the window's glass off and on again, and Windows painted the window white for a moment each time; the glass now stays, covered where the layout is solid.
 - **Windows: the private window's taskbar icon shows its ring.** At taskbar sizes the ring on the private window's icon was drawn under 5 pixels across and blurred into a squashed "o"; at small sizes it is now larger and bolder, and reads as a ring.

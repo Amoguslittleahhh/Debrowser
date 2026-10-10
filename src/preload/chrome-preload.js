@@ -141,6 +141,19 @@ const COMMANDS = new Set([
   'add-extension-from-store',
   'extension-menu-click',
   'click-extension',
+  // The address bar's own right-click menu.
+  'address-menu',
+  'address-edit',
+  'paste-and-go',
+  // A tab's hover card (chrome.js, hovercard.js).
+  'tab-hover-card',
+  'hover-card-size',
+  'copy-link-to-highlight',
+  // The reading list (data/reading-list.js).
+  'save-for-later',
+  'open-reading-list',
+  'open-reading-item',
+  'clear-read-later',
   'sleep-tab',
   'close-other-tabs',
   'close-tabs-right',

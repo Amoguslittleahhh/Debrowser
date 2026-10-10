@@ -4885,27 +4885,36 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   {
     const { EventEmitter } = require('events');
     const { ClipboardGuard } = require('../incognito/clipboard');
-    const run = (steps) => {
+    // The clipboard answers asynchronously, as this Electron's does.
+    const run = async (steps) => {
       let board = 'before';
       let cleared = false;
       const win = new EventEmitter();
-      const guard = new ClipboardGuard({ read: () => board, clear: () => { cleared = true; board = null; } });
+      const guard = new ClipboardGuard({ read: async () => board, clear: async () => { cleared = true; board = null; } });
       guard.watch(win);
       for (const step of steps) {
         if (step === 'focus' || step === 'blur') win.emit(step);
         else board = step;
+        await guard.idle();
       }
-      guard.clearIfOurs();
+      await guard.clearIfOurs();
       return cleared;
     };
-    const copiedHere = run(['focus', 'private text']);
-    const copiedThenLeft = run(['focus', 'private text', 'blur']);
-    const replacedElsewhere = run(['focus', 'private text', 'blur', 'other program']);
-    const nothingCopied = run(['focus', 'blur']);
+    const copiedHere = await run(['focus', 'private text']);
+    const copiedThenLeft = await run(['focus', 'private text', 'blur']);
+    const replacedElsewhere = await run(['focus', 'private text', 'blur', 'other program']);
+    const nothingCopied = await run(['focus', 'blur']);
+    // And the real clipboard, as the guard reads it: a copy gives a signature.
+    const { signature } = require('../incognito/clipboard');
+    const { clipboard: realBoard } = require('electron');
+    const keep = String(await realBoard.readText() ?? '');
+    await realBoard.writeText('debrowser clipboard signature');
+    const signed = typeof (await signature()) === 'string';
+    await realBoard.writeText(keep);
     check('a private window clears only its own copy from the clipboard when it closes',
-      copiedHere && copiedThenLeft && !replacedElsewhere && !nothingCopied,
+      copiedHere && copiedThenLeft && !replacedElsewhere && !nothingCopied && signed,
       `copied here ${copiedHere}, copied then left ${copiedThenLeft}, replaced elsewhere ${replacedElsewhere}, ` +
-      `nothing copied ${nothingCopied}`);
+      `nothing copied ${nothingCopied}, real clipboard read ${signed}`);
   }
 
   // The presence check exists to stop someone at an unlocked machine pressing
@@ -5754,6 +5763,212 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         !BW.getAllWindows().some((w) => !w.isDestroyed() && w.getTitle() === 'Uninstall Debrowser?'),
       `shown ${shown}, ${JSON.stringify(page)}, window ${contentHeight}px, refused ${refused}, quit ${quit}, ` +
       `one window ${again === win}, closed ${closed}`);
+  }
+
+  // Paste and go: the address bar's menu says what the clipboard holds will
+  // do - go to an address, or search for words - and does it in one click.
+  {
+    // This Electron's clipboard answers asynchronously, so every step waits.
+    const { clipboard } = require('electron');
+    const had = await clipboard.readText();
+    const target = pageUrl('idle.html');
+    const label = () => (context.model?.items || []).find((i) => i.id === 'paste-and-go')?.label;
+    await clipboard.writeText(`  ${target}\n`);
+    context.model = null;
+    runCommand('address-menu', { x: 200, y: 20, selected: false });
+    await waitFor(() => Boolean(label()), { timeoutMs: 3000, pollMs: 20 });
+    const goLabel = label();
+    await clipboard.writeText('debrowser paste words');
+    context.model = null;
+    runCommand('address-menu', { x: 200, y: 20, selected: false });
+    await waitFor(() => Boolean(label()), { timeoutMs: 3000, pollMs: 20 });
+    const searchLabel = label();
+    shell.closeSheet && shell.closeSheet();
+    await clipboard.writeText(target);
+    const front = tabs.activeTab();
+    runCommand('paste-and-go', {});
+    const went = await waitFor(() => tabs.activeTab()?.url === target, { timeoutMs: 8000 });
+    await clipboard.writeText(String(had ?? ''));
+    check('the address bar\'s menu offers Paste and go for a copied address and Paste and search for words, and goes',
+      goLabel === 'Paste and go' && /^Paste and search for “debrowser paste words”$/.test(searchLabel || '') && went,
+      `go "${goLabel}", search "${searchLabel}", went ${went} (${tabs.activeTab()?.url}, was ${front?.url})`);
+  }
+
+  // Hover cards: resting on a tab shows its whole title and site in a card
+  // of its own, sized to it; leaving the tab hides it.
+  {
+    const tab = tabs.all().find((t) => t.url && /^https?:/.test(t.url)) || tabs.activeTab();
+    const strip = shell.stripView && shell.chromeView ? [shell.chromeView, shell.stripView] : [shell.chromeView];
+    let hovered = false;
+    let hoverView = null;
+    for (const view of strip) {
+      if (!view || view.webContents.isDestroyed()) continue;
+      hovered = await view.webContents.executeJavaScript(`(() => {
+        const t = document.querySelector('.tab[data-id="${tab.id}"]');
+        if (!t || !t.getBoundingClientRect().width) return false;
+        t.dispatchEvent(new PointerEvent('pointerenter'));
+        return true;
+      })()`).catch(() => false);
+      if (hovered) { hoverView = view; break; }
+    }
+    const shown = hovered && await waitFor(() => shell.hoverCardView && shell.hoverCardView.getVisible(), { timeoutMs: 3000 });
+    const box = shown ? shell.hoverCardView.getBounds() : null;
+    const text = shown ? await shell.hoverCardView.webContents.executeJavaScript(
+      "document.getElementById('title').textContent + ' | ' + document.getElementById('host').textContent").catch(() => '') : '';
+    if (hoverView) {
+      await hoverView.webContents.executeJavaScript(
+        `document.querySelector('.tab[data-id="${tab.id}"]')?.dispatchEvent(new PointerEvent('pointerleave'))`).catch(() => {});
+    }
+    const hidden = await waitFor(() => !shell.hoverCardView || !shell.hoverCardView.getVisible(), { timeoutMs: 2000 });
+    const host = (() => { try { return new URL(tab.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+    check('resting on a tab shows a card with its title and site, sized to the card, and leaving hides it',
+      shown && text.startsWith(tab.title || '') && (!host || text.endsWith(host)) && box.height > 20 && box.height < 200 && hidden,
+      `hovered ${hovered}, shown ${shown}, "${text}", ${JSON.stringify(box)}, hidden ${hidden}`);
+  }
+
+  // Answers and site shortcuts in the address bar: a sum or a conversion is
+  // answered under the first row, and copied when picked; `yt …` makes the
+  // site's own search what Enter does.
+  {
+    const { clipboard } = require('electron');
+    const { answer } = require('../answers');
+    const sums = ['12*7.5', '(3+4)^2 / 7', '5 km in miles', '100 c in f', '2024', '2024-10-10', 'github.com']
+      .map((t) => answer(t)?.title || null);
+    const chrome = shell.chromeView.webContents;
+    const ask = (text) => chrome.executeJavaScript(`window.debrowser.request('suggest', { text: ${JSON.stringify(text)} })`);
+    const sum = await ask('12*7.5');
+    const answerRow = sum?.items?.[1];
+    const had = await clipboard.readText();
+    await clipboard.writeText('');
+    shell.suggestItems = sum?.items || [];
+    runCommand('suggest-pick', { index: 1 });
+    await waitFor(async () => (await clipboard.readText()) === '90', { timeoutMs: 3000, pollMs: 50 });
+    const copied = await clipboard.readText();
+    await clipboard.writeText(String(had ?? ''));
+    const yt = await ask('yt lofi beats');
+    const lead = yt?.items?.[0];
+    check('the address bar answers sums and conversions, copies the answer when picked, and turns "yt …" into a YouTube search',
+      JSON.stringify(sums) === JSON.stringify(['= 90', '= 7', '= 3.10686 miles', '= 212 °F', null, null, null]) &&
+        sum?.items?.[0]?.kind === 'search' && answerRow?.kind === 'answer' && answerRow.title === '= 90' && copied === '90' &&
+        lead?.kind === 'shortcut' && lead.isDefault === true &&
+        lead.url === 'https://www.youtube.com/results?search_query=lofi%20beats' && yt.inline === null,
+      `${JSON.stringify(sums)}; first ${sum?.items?.[0]?.kind}, answer ${JSON.stringify(answerRow)}, copied "${copied}"; ` +
+      `yt ${JSON.stringify(lead)}`);
+  }
+
+  // Copy link to highlight: a selection on a web page offers a link that
+  // scrolls to the words; not in a frame, and not on the browser's own pages.
+  {
+    const { clipboard } = require('electron');
+    const cm = require('../context-menu');
+    const params = { selectionText: 'quick brown-fox', pageURL: 'https://example.test/a?b=1#top', isEditable: false };
+    const item = cm.buildModel(params, {}).find((i) => i.id === 'copy-link-to-highlight');
+    const inFrame = cm.buildModel({ ...params, frameURL: 'https://ads.test/frame' }, {}).some((i) => i.id === 'copy-link-to-highlight');
+    const internal = cm.buildModel(params, { internal: true }).some((i) => i.id === 'copy-link-to-highlight');
+    const had = await clipboard.readText();
+    await clipboard.writeText('');
+    if (item) runCommand(item.id, item.payload);
+    await waitFor(async () => Boolean(await clipboard.readText()), { timeoutMs: 3000, pollMs: 50 });
+    const link = await clipboard.readText();
+    await clipboard.writeText(String(had ?? ''));
+    check('a selection on a page offers "Copy link to highlight", whose link names the words, not in frames or our own pages',
+      Boolean(item) && !inFrame && !internal && link === 'https://example.test/a?b=1#:~:text=quick%20brown%2Dfox',
+      `item ${Boolean(item)}, in frame ${inFrame}, internal ${internal}, link ${link}`);
+  }
+
+  // The reading list: a page saved from its tab's menu is listed under the
+  // app menu, and opening it marks it read and opens it in reader view.
+  {
+    const page = tabs.create({ url: pageUrl('article.html'), activate: false, realise: true });
+    await waitFor(() => page.isLive && !page.loading && /article\.html/.test(page.url), { timeoutMs: 10_000 });
+    runCommand('tab-menu', { id: page.id, x: 100, y: 20 });
+    const offered = (context.model?.items || []).find((i) => i.id === 'save-for-later');
+    shell.closeSheet && shell.closeSheet();
+    if (offered) runCommand(offered.id, offered.payload);
+    runCommand('open-reading-list', { x: 900, y: 40, right: 940 });
+    const listed = (context.model?.items || []).find((i) => i.id === 'open-reading-item' && i.payload?.url === page.url);
+    shell.closeSheet && shell.closeSheet();
+    const count = tabs.all().length;
+    if (listed) runCommand(listed.id, listed.payload);
+    const opened = await waitFor(() => tabs.all().length === count + 1, { timeoutMs: 3000 });
+    const fresh = tabs.all().find((t) => t !== page && !t.closed && (t.insecureReturn === page.url || t.url === page.url));
+    const inReader = await waitFor(() => fresh && pages.pageName(fresh.url) === 'reader', { timeoutMs: 15_000 });
+    runCommand('open-reading-list', { x: 900, y: 40, right: 940 });
+    const markedRead = (context.model?.items || []).some((i) => i.id === 'open-reading-item' && i.payload?.url === page.url && i.accel === 'Read');
+    shell.closeSheet && shell.closeSheet();
+    runCommand('clear-read-later', {});
+    runCommand('open-reading-item', { url: 'https://not-on-the-list.test/' });
+    const refused = tabs.all().length === count + 1;
+    for (const t of [page, fresh]) if (t && tabs.all().includes(t)) tabs.close(t.id);
+    check('a page saved for later is listed in Reading list, opens in reader view, is marked read, and nothing else opens from there',
+      Boolean(offered) && Boolean(listed) && opened && inReader && markedRead && refused,
+      `offered ${Boolean(offered)}, listed ${Boolean(listed)}, opened ${opened}, reader ${inReader} (${fresh?.url}), read ${markedRead}, refused ${refused}`);
+  }
+
+  // Automatic picture-in-picture: leaving a tab whose video plays with sound
+  // pops the video out; coming back puts it back in the page.
+  {
+    const back = tabs.activeTab();
+    const vid = tabs.create({ url: pageUrl('video.html'), activate: true });
+    await waitFor(() => vid.isLive && !vid.loading, { timeoutMs: 10_000 });
+    const playing = await waitFor(() => vid.wc.executeJavaScript('window.playing === true && document.getElementById("v").readyState >= 2')
+      .catch(() => false), { timeoutMs: 8000 });
+    const inPip = () => vid.wc.executeJavaScript('document.pictureInPictureElement === document.getElementById("v")').catch(() => null);
+    if (back && tabs.all().includes(back)) await tabs.activate(back.id);
+    const out = await waitFor(async () => (await inPip()) === true, { timeoutMs: 5000 });
+    await tabs.activate(vid.id);
+    const returned = await waitFor(async () => (await inPip()) === false, { timeoutMs: 5000 });
+    // Off in Settings: leaving it does nothing.
+    prefs.set('autoPip', false);
+    if (back && tabs.all().includes(back)) await tabs.activate(back.id);
+    await sleep(800);
+    const stayed = (await inPip()) === false;
+    prefs.set('autoPip', true);
+    tabs.close(vid.id);
+    if (back && tabs.all().includes(back)) await tabs.activate(back.id);
+    check('a video playing with sound pops out when you switch away, goes back when you return, and not when turned off',
+      playing && out && returned && stayed, `playing ${playing}, popped out ${out}, back ${returned}, off ${stayed}`);
+  }
+
+  // Last time's window comes back without what this start already opened.
+  {
+    const { reopenable } = require('../startup');
+    const back = reopenable([
+      { url: 'https://mail.example/inbox', pinned: true }, { url: 'https://www.news.example/' },
+      { url: 'https://video.example/watch?v=A' }, { url: 'https://video.example/watch?v=B' }
+    ], [{ url: 'https://mail.example/inbox' }, { url: 'https://news.example' }, { url: 'https://video.example/watch?v=A' }])
+      .map((e) => e.url);
+    check('reopening last time\'s window leaves out the pinned tabs and startup sites that already came back',
+      JSON.stringify(back) === JSON.stringify(['https://video.example/watch?v=B']), JSON.stringify(back));
+  }
+
+  // A narrow window - snapped to half the screen - with the tabs tucked away:
+  // the address bar ends before the meter and the menu, and nothing in the
+  // band runs under the window buttons.
+  {
+    const was = { pos: prefs.get('tabBarPosition'), pinned: prefs.get('sidebarPinned') };
+    const [w0, h0] = shell.window.getSize();
+    prefs.set('tabBarPosition', 'left');
+    prefs.set('sidebarPinned', false);
+    shell.window.setSize(820, Math.max(h0, 600));
+    const read = () => shell.chromeView.webContents.executeJavaScript(`(() => {
+      if (document.body.dataset.band !== 'true') return null;
+      const r = (s) => { const e = document.querySelector(s); return e && !e.hidden ? e.getBoundingClientRect() : null; };
+      const bar = r('.omnibox'), meter = r('.toolbar .meter'), menu = r('#menu');
+      const caption = parseFloat(getComputedStyle(document.body).getPropertyValue('--caption-right')) || 0;
+      return { width: innerWidth, bar: bar && [bar.left, bar.right], meter: meter && [meter.left, meter.right],
+        menu: menu && [menu.left, menu.right], limit: innerWidth - caption };
+    })()`).catch(() => null);
+    let at = null;
+    await waitFor(async () => { at = await read(); return Boolean(at && at.width <= 830 && at.bar); }, { timeoutMs: 5000 });
+    const clear = Boolean(at && at.bar && at.menu && at.bar[1] <= (at.meter ? at.meter[0] : at.menu[0]) + 1 &&
+      at.menu[1] <= at.limit + 1 && (!at.meter || at.meter[1] <= at.limit + 1));
+    shell.window.setSize(w0, h0);
+    prefs.set('tabBarPosition', was.pos);
+    prefs.set('sidebarPinned', was.pinned);
+    await sleep(500);
+    check('in a narrow window with the tabs tucked away, the address bar stops before the meter and menu, clear of the window buttons',
+      clear, JSON.stringify(at));
   }
 
   // Fuzzing the command channel: every command the browser's own pages may

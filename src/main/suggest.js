@@ -165,7 +165,7 @@ function suggestCommands(typed, commands) {
 }
 
 function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the web', complete = true, now = Date.now(),
-                   commands = [], archived = [] }) {
+                   commands = [], archived = [], shortcut = null, answer = null }) {
   const typed = String(text || '').trim();
   if (COMMAND_SCOPE.test(typed)) return suggestCommands(typed, commands);
   if (TAB_SCOPE.test(typed) || /^@tabs$/i.test(typed)) return suggestTabs(typed, tabs, archived);
@@ -246,16 +246,29 @@ function suggest({ text, tabs = [], bookmarks = [], history = [], engine = 'the 
   // list: no lower than third for words, last for something that is plainly
   // an address, where a second row repeating the typed text read as noise.
   // Room is kept for it before the matches are cut, rather than cutting it.
-  const room = MAX_ROWS - (lead === searchRow ? 1 : 2);
-  const matches = ranked.slice(0, room);
-  const rows = [{ ...lead, isDefault: true }];
-  if (lead === searchRow) rows.push(...matches);
-  else if (address) rows.push(...matches, searchRow);
-  else rows.push(...matches.slice(0, 1), searchRow, ...matches.slice(1));
+  //
+  // A site shortcut (`yt cats`) is what Enter does instead, and the ordinary
+  // search of the same words stays under it. An answer (`12*7.5`) sits second:
+  // it is there to be read, and a click copies it, but Enter still searches.
+  const extra = (shortcut ? 1 : 0) + (answer ? 1 : 0);
+  const room = MAX_ROWS - extra - (lead === searchRow ? 1 : 2);
+  const matches = ranked.slice(0, Math.max(0, room));
+  const rows = [];
+  if (shortcut) {
+    rows.push({ kind: 'shortcut', title: shortcut.query, engine: shortcut.name, url: shortcut.url, isDefault: true },
+      searchRow, ...matches);
+  } else {
+    rows.push({ ...lead, isDefault: true });
+    if (lead === searchRow) rows.push(...matches);
+    else if (address) rows.push(...matches, searchRow);
+    else rows.push(...matches.slice(0, 1), searchRow, ...matches.slice(1));
+  }
+  if (answer) rows.splice(1, 0, { kind: 'answer', title: answer.title, detail: answer.detail, copy: answer.copy });
   return {
-    items: rows.map(({ score, ...row }) => row),
-    inline,
-    inlineUrl
+    items: rows.slice(0, MAX_ROWS).map(({ score, ...row }) => row),
+    // A shortcut fills nothing in: `yt c` must not complete to youtube.com.
+    inline: shortcut ? null : inline,
+    inlineUrl: shortcut ? null : inlineUrl
   };
 }
 

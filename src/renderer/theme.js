@@ -489,6 +489,9 @@ function applyThemePrefs(prefs) {
   // page is off screen, because a throttled animation finishes in front of the
   // user instead of before them.
   body.classList.toggle('calm', prefs.reduceMotion === true);
+  // Read by the tab strip (chrome.js, hover cards); nothing is drawn from it.
+  const cards = prefs.hoverCards === false ? 'off' : 'on';
+  if (body.dataset.hoverCards !== cards) body.dataset.hoverCards = cards;
 }
 
 /**

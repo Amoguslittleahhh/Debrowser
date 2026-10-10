@@ -87,4 +87,15 @@ function startupTabs({ restoring, lastSession, sitesText }) {
   return [...pinned, ...sites];
 }
 
-module.exports = { parseSites, startupTabs, placeKey, MAX_SITES };
+/**
+ * Last time's window, as Ctrl+Shift+T brings it back: everything that was
+ * open, less what this start already opened (pinned tabs, startup sites) -
+ * reopened twice, those came back as duplicates.
+ */
+function reopenable(lastSession, opening) {
+  const open = new Set((opening || []).map((entry) => placeKey(entry.url)));
+  return (Array.isArray(lastSession) ? lastSession : [])
+    .filter((entry) => entry && typeof entry.url === 'string' && !open.has(placeKey(entry.url)));
+}
+
+module.exports = { parseSites, startupTabs, placeKey, reopenable, MAX_SITES };

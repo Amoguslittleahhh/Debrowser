@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Tab</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="hovercard.css">
+</head>
+<body>
+  <!--
+    The card under a tab the pointer rests on: its whole title, its site, and
+    what it costs or gave back. Its own small view (window.js, showHoverCard),
+    sized to the card, which never takes the keyboard or the pointer's place.
+  -->
+  <div class="card" id="card" hidden>
+    <p class="title" id="title"></p>
+    <p class="host" id="host"></p>
+    <p class="note" id="note" hidden></p>
+  </div>
+  <script src="theme.js"></script>
+  <script src="hovercard.js"></script>
+</body>
+</html>

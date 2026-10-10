@@ -127,6 +127,15 @@ function buildModel(params = {}, state = {}) {
       { id: 'search-selection',
         label: `Search ${state.engineName || 'the web'} for “${ellipsis(selection)}”`,
         icon: 'search', payload: { text: selection } });
+    // A link that opens this page scrolled to the words, highlighted. Only
+    // for text in the page itself, not in a frame inside it: the link names
+    // the page, and the words would not be found there.
+    const page = params.pageURL || '';
+    const inFrame = params.frameURL && params.frameURL !== page;
+    if (!state.internal && !inFrame && /^https?:/i.test(page)) {
+      items.push({ id: 'copy-link-to-highlight', label: 'Copy link to highlight', icon: 'copy',
+        payload: { url: page, text: selection } });
+    }
   }
 
   const inspect = {
@@ -155,6 +164,9 @@ function buildModel(params = {}, state = {}) {
     sep(),
     { id: 'bookmark-page', label: state.bookmarked ? 'Remove bookmark' : 'Bookmark this page',
       icon: 'star', accel: shortcuts.accelFor('bookmark-page'), enabled: !state.internal },
+    // Not in a private window, which keeps no list to save it to.
+    ...(state.readingList ? [{ id: 'save-for-later', label: state.savedForLater ? 'In your reading list' : 'Save for later',
+      icon: 'notes', enabled: !state.internal && !state.savedForLater }] : []),
     { id: 'save-page', label: 'Save page as…', icon: 'download', accel: shortcuts.accelFor('save-page'),
       enabled: !state.internal },
     { id: 'print', label: 'Print…', icon: 'print', accel: shortcuts.accelFor('print') },
@@ -165,10 +177,36 @@ function buildModel(params = {}, state = {}) {
   return items;
 }
 
+/**
+ * A link to words on a page (a text fragment, `#:~:text=`), which Chrome,
+ * Edge, Safari and Firefox all scroll to and highlight. A long selection is
+ * named by its first and last few words, as Chrome names it, so the link stays
+ * short and still finds the passage.
+ */
+function highlightLink(url, text) {
+  let base;
+  try {
+    const u = new URL(url);
+    u.hash = '';
+    base = u.toString();
+  } catch {
+    return null;
+  }
+  const words = String(text || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  if (!words.length) return null;
+  // The spec reserves - , & in a fragment's text: they are escaped as well.
+  const enc = (t) => encodeURIComponent(t).replace(/-/g, '%2D');
+  const long = words.length > 10 || words.join(' ').length > 80;
+  const directive = long
+    ? `${enc(words.slice(0, 5).join(' '))},${enc(words.slice(-5).join(' '))}`
+    : enc(words.join(' '));
+  return `${base}#:~:text=${directive}`;
+}
+
 /** Enough of the selection to recognise it, and no more than a menu can hold. */
 function ellipsis(text, max = 18) {
   const flat = text.replace(/\s+/g, ' ');
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-module.exports = { buildModel };
+module.exports = { buildModel, ellipsis, highlightLink };

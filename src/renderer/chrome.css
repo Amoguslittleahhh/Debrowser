@@ -2096,6 +2096,13 @@ body[data-band="true"][data-layout="left"] .toolbar .icon-btn {
 body[data-band="true"][data-layout="left"] .omnibox {
   --omni-side: 320px;       /* the window buttons, the meter and a pill beside them */
   order: 2;
+  /* What is left of the row, and no more. The rule for the pinned side panel
+     above makes it a line of its own (`1 0 100%`), and in a band that does not
+     wrap that was a bar the whole window wide: below 900px - a window snapped
+     to half the screen - it ran under the window buttons and pushed the meter
+     and the menu out of the window. */
+  flex: 1 1 auto;
+  min-width: 0;
   height: 28px;
   border-width: 1px;
   border-radius: var(--radius-pill);

@@ -52,6 +52,8 @@ const COMMANDS = [
   { title: 'History', command: 'open-history', keywords: 'visited' },
   { title: 'Downloads', command: 'open-downloads-page', keywords: 'files' },
   { title: 'Bookmarks', command: 'open-bookmarks' },
+  { title: 'Save this page for later', command: 'save-for-later', keywords: 'reading list read later', needsTab: true, normalOnly: true },
+  { title: 'Reading list', command: 'open-reading-list', keywords: 'read later saved', normalOnly: true },
   { title: 'Passwords', command: 'open-passwords', keywords: 'logins cards', normalOnly: true },
   { title: 'Settings', command: 'open-settings', keywords: 'preferences options' },
   { title: 'Safety check', command: 'open-safety', keywords: 'security privacy', normalOnly: true },

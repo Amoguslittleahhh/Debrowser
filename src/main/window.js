@@ -26,6 +26,8 @@ const PANEL_WIDTH = 360;
 /** The toast view: wide enough for a sentence and a button, tall enough for its shadow. */
 const TOAST_WIDTH = 460;
 const TOAST_HEIGHT = 84;
+/** The hover card's 264px and the room its shadow takes (hovercard.css). */
+const HOVER_CARD_WIDTH = 272;
 /** The gap between two tabs side by side: the divider's width. */
 const SPLIT_GAP = 8;
 /** Peek's card: its corners, and the room above it for the buttons. */
@@ -387,6 +389,7 @@ class BrowserShell {
     this.suggestView = null;
     this.crashView = null;
     this.toastView = null;
+    this.hoverCardView = null;
     /** Two tabs side by side: { left, right } tab ids and the left one's share. */
     this.split = null;
     this.dividerView = null;
@@ -473,7 +476,8 @@ class BrowserShell {
     // A resize with the menu open would leave it anchored to a button that has
     // moved. Closed rather than re-anchored: the user is dragging a window
     // edge, not reading a menu.
-    this.window.on('resize', () => { this.closeSheet(); this.hideSuggestions(); this.layout(); });
+    this.window.on('resize', () => { this.closeSheet(); this.hideSuggestions(); this.hideHoverCard(); this.layout(); });
+    this.window.on('blur', () => this.hideHoverCard());
     this.window.on('restore', () => { this.revive(); this.reapplyMaterial(); });
     this.window.on('show', () => this.revive());
     // Full screen changes which rectangle everything gets, in both layouts, so
@@ -752,6 +756,7 @@ class BrowserShell {
     if (this.window.isDestroyed()) return;
     const file = SHEET_PAGES[page];
     if (!file) return;
+    this.hideHoverCard();
     this.flushLeavingSheet();
 
     // Toggle: pressing the same button again closes it, as a system menu does
@@ -1698,6 +1703,67 @@ class BrowserShell {
     });
   }
 
+  /**
+   * A tab's hover card (hovercard.html), at the point the strip asked for, in
+   * a view of its own over the page - made on first use and kept, since one
+   * rest on a tab is usually followed by more. It never takes the keyboard,
+   * and it is sized to the card (`sizeHoverCard`) so it covers nothing else.
+   *
+   * @param {{x: number, y: number, title: string, host: string, note: string, asleep: boolean}} card
+   */
+  showHoverCard(card) {
+    if (this.window.isDestroyed()) return;
+    if (!this.hoverCardView) {
+      const view = new WebContentsView({
+        webPreferences: {
+          preload: CHROME_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          additionalArguments: preloadArgs(this.prefs),
+          transparent: true
+        }
+      });
+      try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
+      view.setVisible(false);
+      view.webContents.on('before-input-event', (event) => event.preventDefault());
+      this.hoverCardView = view;
+      this.hoverCardReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
+      view.webContents.loadFile(path.join(RENDERER_DIR, 'hovercard.html')).catch(() => {});
+    }
+    const token = (this.hoverCardToken || 0) + 1;
+    this.hoverCardToken = token;
+    this.hoverCardReady.then(() => {
+      if (!this.hoverCardView || this.window.isDestroyed() || this.hoverCardToken !== token) return;
+      const [width] = this.window.getContentSize();
+      const cardWidth = HOVER_CARD_WIDTH;
+      const x = Math.max(4, Math.min(Math.round(Number(card.x) || 0), width - cardWidth - 4));
+      const y = Math.max(0, Math.round(Number(card.y) || 0));
+      this.hoverCardAt = { x, y };
+      // Placed once its height is known (`sizeHoverCard`); until then, where
+      // the last one was, out of sight.
+      this.window.contentView.addChildView(this.hoverCardView);
+      send(this.hoverCardView, 'debrowser:ui', {
+        kind: 'hover-card', title: String(card.title || '').slice(0, 500), host: String(card.host || '').slice(0, 200),
+        note: String(card.note || '').slice(0, 200), asleep: card.asleep === true
+      });
+    });
+  }
+
+  /** The card says how tall it came out; now it can be shown, at that size. */
+  sizeHoverCard(height) {
+    if (!this.hoverCardView || !this.hoverCardAt || this.window.isDestroyed()) return;
+    const h = Math.min(Math.max(Math.round(Number(height) || 0), 20), 240);
+    this.hoverCardView.setBounds({ x: this.hoverCardAt.x, y: this.hoverCardAt.y, width: HOVER_CARD_WIDTH, height: h });
+    this.hoverCardView.setVisible(true);
+  }
+
+  hideHoverCard() {
+    this.hoverCardToken = (this.hoverCardToken || 0) + 1;
+    this.hoverCardAt = null;
+    if (this.hoverCardView) this.hoverCardView.setVisible(false);
+  }
+
   /** The toast went (timed out, undone or dismissed): hide it, and close the view later. */
   hideToast() {
     if (!this.toastView) return;
@@ -2063,6 +2129,7 @@ class BrowserShell {
     send(this.suggestView, 'debrowser:state', { prefs });
     send(this.crashView, 'debrowser:state', { prefs });
     send(this.toastView, 'debrowser:state', { prefs });
+    send(this.hoverCardView, 'debrowser:state', { prefs });
     send(this.dividerView, 'debrowser:state', { prefs });
     send(this.devToolsDivider, 'debrowser:state', { prefs });
 
@@ -2994,7 +3061,8 @@ class BrowserShell {
   isChromeSender(sender) {
     if (!sender) return false;
     for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
-      this.toastView, this.dividerView, this.devToolsDivider, this.passkeyView, this.peek && this.peek.backdrop, this.quick && this.quick.bar]) {
+      this.toastView, this.hoverCardView, this.dividerView, this.devToolsDivider, this.passkeyView, this.peek && this.peek.backdrop,
+      this.quick && this.quick.bar]) {
       const wc = view && view.webContents;
       if (wc && !wc.isDestroyed() && wc.id === sender.id) return true;
     }

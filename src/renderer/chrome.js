@@ -738,7 +738,7 @@ function updateStripFades() {
   if (t.style.getPropertyValue('--fade-start') !== start) t.style.setProperty('--fade-start', start);
   if (t.style.getPropertyValue('--fade-end') !== end) t.style.setProperty('--fade-end', end);
 }
-el.tabs.addEventListener('scroll', updateStripFades, { passive: true });
+el.tabs.addEventListener('scroll', () => { updateStripFades(); hoverCardHide(); }, { passive: true });
 window.addEventListener('resize', updateStripFades);
 
 /**
@@ -960,10 +960,11 @@ function createTabElement(id) {
   root.addEventListener('pointerenter', () => {
     cancelDwell();
     dwell = setTimeout(() => api.send('prefetch-tab', { id }), HOVER_DWELL_MS);
+    hoverCardEnter(id, root);
   });
-  root.addEventListener('pointerleave', cancelDwell);
+  root.addEventListener('pointerleave', () => { cancelDwell(); hoverCardLeave(); });
   // A click has already asked for the real thing; the speculation is redundant.
-  root.addEventListener('mousedown', cancelDwell);
+  root.addEventListener('mousedown', () => { cancelDwell(); hoverCardHide(); });
   // Stopped on `mousedown`, not only on `click`.
   //
   // The tab root listens on mousedown, which fires first - so pressing x sent
@@ -985,6 +986,69 @@ function createTabElement(id) {
   });
 
   return { root, group, tier, icon, favicon, chip, title, audio, close, state: {} };
+}
+
+/*
+ * Hover cards: rest on a tab and a card under it says what the strip has no
+ * room for - the whole title, the site, and what the tab is costing or gave
+ * back. Half a second the first time, so it does not flicker up on the way
+ * across the strip; then, while one is up, the next tab's card at once, as in
+ * Chrome. Drawn by the browser in a view of its own over the page (the chrome
+ * is only as tall as the toolbar).
+ */
+const HOVER_CARD_DELAY_MS = 500;
+const HOVER_CARD_WARM_MS = 600;
+let hoverCardTimer = null;
+let hoverCardShownAt = 0;
+let hoverCardId = null;
+
+function hoverCardEnter(id, root) {
+  clearTimeout(hoverCardTimer);
+  if (tabDrag?.active || document.body.dataset.hoverCards === 'off') return;
+  const warm = hoverCardId !== null || Date.now() - hoverCardShownAt < HOVER_CARD_WARM_MS;
+  hoverCardTimer = setTimeout(() => showHoverCard(id, root), warm ? 0 : HOVER_CARD_DELAY_MS);
+}
+
+function hoverCardLeave() {
+  clearTimeout(hoverCardTimer);
+  // A moment's grace, so sliding to the next tab keeps the card warm rather
+  // than hiding it and showing it again.
+  hoverCardTimer = setTimeout(hoverCardHide, 80);
+}
+
+function hoverCardHide() {
+  clearTimeout(hoverCardTimer);
+  if (hoverCardId === null) return;
+  hoverCardId = null;
+  hoverCardShownAt = Date.now();
+  api.send('tab-hover-card', { hide: true });
+}
+
+function showHoverCard(id, root) {
+  const tab = tabEls.get(id)?.tab;
+  if (!tab || !root.isConnected) return;
+  const box = root.getBoundingClientRect();
+  const vertical = document.body.dataset.layout === 'left';
+  let host = '';
+  try {
+    const u = new URL(tab.url);
+    host = u.protocol === 'debrowser:' ? 'Debrowser' : u.protocol === 'file:' ? 'File on this computer' : u.hostname.replace(/^www\./, '');
+  } catch { /* none */ }
+  hoverCardId = id;
+  api.send('tab-hover-card', {
+    title: tab.title || 'New tab', host, note: hoverCardNote(tab),
+    asleep: ['frozen', 'hibernated', 'discarded'].includes(tab.tier),
+    x: Math.round(vertical ? box.right + 6 : box.left),
+    y: Math.round(vertical ? box.top : box.bottom + 6)
+  });
+}
+
+/** One plain line about what the tab costs, or why it costs nothing. */
+function hoverCardNote(tab) {
+  if (tab.muted) return 'Muted';
+  if (tab.audible) return 'Playing sound';
+  if (tab.tier === 'active') return '';
+  return tierLabel(tab);
 }
 
 /** The label becomes a field for its new name; Enter keeps it, Escape does not. */
@@ -1255,7 +1319,9 @@ function updateTabElement(node, tab) {
   const asleep = tab.tier === 'frozen' || tab.tier === 'hibernated' || tab.tier === 'discarded';
   const tip = `${tab.title || ''}\n${tab.url || ''}${asleep ? `\n${tierLabel(tab)}` : ''}`;
   if (prev.tip !== tip) {
-    node.root.title = tip;
+    // Read out, not shown: the hover card shows it, and a system tooltip
+    // landing on top of the card would say it twice.
+    node.root.setAttribute('aria-description', tip);
     prev.tip = tip;
   }
 
@@ -1792,6 +1858,35 @@ el.url.addEventListener('input', async () => {
 /** What the bar shows while a row is highlighted: that row's address, or the search. */
 const shown = (item) => (item.kind === 'search' || item.kind === 'go' ? item.title : item.url);
 
+/*
+ * The address bar's right-click menu: the clipboard set, and Paste and go -
+ * a copied link opened in one click instead of paste, then Enter. Drawn by the
+ * browser in the sheet every other menu uses; the edits come back here
+ * (`address-edit`), since the field and its selection live in this page.
+ */
+let addressSelection = null;
+el.url.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  addressSelection = [el.url.selectionStart, el.url.selectionEnd];
+  api.send('address-menu', {
+    x: Math.round(event.clientX), y: Math.round(event.clientY),
+    selected: el.url.selectionStart !== el.url.selectionEnd
+  });
+});
+
+function editAddress({ op, text }) {
+  el.url.focus();
+  if (addressSelection) el.url.setSelectionRange(addressSelection[0], addressSelection[1]);
+  addressSelection = null;
+  if (op === 'select-all') { el.url.select(); return; }
+  if (op === 'copy' || op === 'cut') { document.execCommand(op); return; }
+  if (op === 'paste' && typeof text === 'string') {
+    // As typing it would: the list of suggestions follows.
+    el.url.setRangeText(text.replace(/\s*\n\s*/g, ' '), el.url.selectionStart, el.url.selectionEnd, 'end');
+    el.url.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
 el.url.addEventListener('keydown', (event) => {
   if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && listOpen) {
     event.preventDefault();
@@ -1930,6 +2025,15 @@ api.onMessage((message) => {
       el.url.value = shown(suggestions[selected]);
       el.url.setSelectionRange(el.url.value.length, el.url.value.length);
       break;
+    case 'address-edit':
+      editAddress(message);
+      break;
+    // The reading list hangs under the menu button, as the menu does.
+    case 'open-reading-list': {
+      const box = el.menu.getBoundingClientRect();
+      api.send('open-reading-list', { x: Math.round(box.left), y: Math.round(box.bottom), right: Math.round(box.right) });
+      break;
+    }
     case 'pointer-released':
       if (tabDrag && !tabDrag.active) tabDrag = null;
       break;
