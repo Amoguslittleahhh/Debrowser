@@ -23,7 +23,7 @@ const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, Brow
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
-const { sweepThumbnails, sweepThumbnailsSync } = require('./tabs/tab');
+const { sweepThumbnails, sweepThumbnailsSync, setLightVideo } = require('./tabs/tab');
 const { BrowserShell } = require('./window');
 const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB, SCHEMA } = require('./prefs');
 const { Updater } = require('./updater');
@@ -52,6 +52,9 @@ const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bo
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
 const { startupTabs, placeKey, reopenable } = require('./startup');
 const graphics = require('./graphics');
+// What the machine was found to be this run (graphics.js), for Settings and the
+// light graphics decision; set once the graphics process has answered.
+let graphicsFound = null;
 const { duplicateTabs } = require('./tabs/duplicates');
 const { WebHooks } = require('./web-hooks');
 const { Extensions, storeTarget, downloadFromStore } = require('./extensions');
@@ -387,6 +390,14 @@ if (earlyPrefs.get('hardwareAcceleration') === false) {
 // a site could tell this machine apart by, where the processor's is not.
 if (!INCOGNITO && graphics.applySwitches(app, earlyPrefs)) {
   log('config', 'using the graphics adapter despite the GPU blocklist, by preference');
+}
+// Light graphics, from what the last start found (graphics.js): smooth
+// scrolling animates every wheel step frame by frame, and without a graphics
+// card each of those frames is drawn by the processor. Only decidable before
+// Chromium starts, so it follows the machine one start behind.
+if (!INCOGNITO && graphics.isLight(earlyPrefs.get('graphicsMode'), earlyPrefs.get('graphicsDetected'))) {
+  app.commandLine.appendSwitch('disable-smooth-scrolling');
+  log('config', 'light graphics: smooth scrolling off');
 }
 
 // After the preferences, which choose the ordinary browser's JavaScript
@@ -1745,11 +1756,15 @@ function main() {
         const mode = prefs.get('batteryMode');
         let onBattery = false;
         try { onBattery = powerMonitor.isOnBatteryPower(); } catch { onBattery = false; }
-        const saver = mode === 'always' || (mode === 'auto' && onBattery);
+        const battery = mode === 'always' || (mode === 'auto' && onBattery);
+        // Light graphics (graphics.js) keeps battery mode's pace - background
+        // tabs frozen sooner, the governor ticking less - without the leaf:
+        // the processor is short of time, not the battery of charge.
+        const saver = battery || prefs.light === true;
+        shell.saver = battery;
         if (saver !== governor.saver) {
           governor.setSaver(saver);
-          shell.saver = saver;
-          log('governor', `battery mode ${saver ? 'on' : 'off'}`);
+          log('governor', `battery pace ${saver ? 'on' : 'off'}${prefs.light ? ' (light graphics)' : ''}`);
           publish();
           for (const tab of tabs.all()) if (tab.isLive && !tab.internal) steadyCaret(tab.wc);
         }
@@ -2033,15 +2048,32 @@ function main() {
         prefs.set('gpuOverrideFailed', false);
         setTimeout(() => runCommand.toast('Using the graphics card made Debrowser’s graphics crash, so that setting is off again',
           null, null, 10_000), 2500).unref?.();
-      } else if (!prefs.get('graphicsNoteShown') && prefs.get('hardwareAcceleration') !== false && prefs.get('welcomeDone')) {
-        setTimeout(() => {
-          const g = graphics.status(app);
-          if (!g.software || g.overridden) return;
-          prefs.set('graphicsNoteShown', true);
-          runCommand.toast('This computer’s pages are drawn by the processor, not the graphics card, so games and video cost more',
-            'Try the graphics card', () => runCommand('open-settings', { section: 'advanced' }), 15_000);
-        }, 8000).unref?.();
       }
+    }
+    // Light graphics: the machine is asked what it is - a virtual machine?
+    // a graphics card doing the work? - once the graphics process has
+    // answered, and the browser lightens itself where there is none. Applied
+    // now from last time's answer, so a start does not first run heavy.
+    // Under a test only looked at, never applied: the test machine has no
+    // GPU on purpose, and its checks of motion would find none.
+    if (!INCOGNITO) {
+      if (!OFFLINE_MODE) runCommand('apply-light-graphics', { detected: prefs.get('graphicsDetected') });
+      setTimeout(() => {
+        graphics.detectMachine(app).then((found) => {
+          log('graphics', graphics.describe(found));
+          if (OFFLINE_MODE) { graphicsFound = found; return; }
+          const wasLight = prefs.light === true;
+          prefs.set('graphicsDetected', found);
+          graphicsFound = found;
+          runCommand('apply-light-graphics', { detected: found });
+          // Said once, the first time it turns itself on.
+          if (!wasLight && prefs.light && !prefs.get('graphicsNoteShown') && prefs.get('welcomeDone')) {
+            prefs.set('graphicsNoteShown', true);
+            runCommand.toast(`${found.vm ? `In ${found.vm === 'a virtual machine' ? 'a virtual machine' : `a ${found.vm} virtual machine`}` : 'With no graphics card'}, Debrowser uses light graphics: less motion, background tabs asleep sooner, YouTube in H.264`,
+              'Settings', () => runCommand('open-settings', { section: 'advanced' }), 15_000);
+          }
+        }).catch((err) => log('graphics', `could not check the machine: ${err.message}`));
+      }, OFFLINE_MODE ? 500 : 4000).unref?.();
     }
     // Closing the window closed the browser, and with tabs not reopened at
     // start that window was one shortcut from gone for good, with nothing to
@@ -4029,6 +4061,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
           else extensions.detachAll();
         }
         if (payload.key === 'batteryMode' && governor && governor.applySaver) governor.applySaver();
+        if (payload.key === 'graphicsMode') runCommand('apply-light-graphics', {});
         // Turned off: the kept state goes now, not when a private window next
         // opens - it may never open again.
         if (payload.key === 'incognitoKeepTorState' && payload.value === false && !INCOGNITO) {
@@ -4047,6 +4080,22 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // The governor reads cfg on its next tick, so a budget or cap change
         // takes effect there. Everything else is the UI's to apply, and it gets
         // it from the state snapshot publish() is about to send.
+        break;
+      }
+
+      // Light graphics on or off (graphics.js): from what the machine was found
+      // to be and the setting, or `on` given outright. Not a page's to send.
+      case 'apply-light-graphics': {
+        const on = typeof payload?.on === 'boolean' ? payload.on
+          : graphics.isLight(prefs.get('graphicsMode'), payload?.detected ?? graphicsFound ?? prefs.get('graphicsDetected'));
+        if ((prefs.light === true) === on) break;
+        prefs.setLight(on);
+        setLightVideo(on);
+        log('graphics', `light graphics ${on ? 'on' : 'off'}`);
+        applyPrefs(cfg, prefs, log);
+        shell.applyWindowPrefs();
+        if (governor && governor.applySaver) governor.applySaver();
+        publish();
         break;
       }
 

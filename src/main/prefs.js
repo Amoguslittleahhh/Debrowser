@@ -348,6 +348,16 @@ const SCHEMA = {
   gpuOverrideFailed: { def: false, ok: (v) => typeof v === 'boolean' },
   /** The one-time note that pages are drawn by the processor has been shown. */
   graphicsNoteShown: { def: false, ok: (v) => typeof v === 'boolean' },
+  /**
+   * Light graphics (graphics.js): 'auto' turns it on where the machine has no
+   * graphics card doing the work, or is a virtual machine drawing through its
+   * own display; 'light' and 'full' decide for it.
+   */
+  graphicsMode: { def: 'auto', ok: (v) => v === 'auto' || v === 'light' || v === 'full' },
+  /** What the last check found, so the next start can set its switches before it can look again. */
+  graphicsDetected: { def: null, ok: (v) => v === null || (typeof v === 'object' && !Array.isArray(v)) },
+  /** Settings changed by hand while light graphics was on: it no longer decides those. */
+  lightChosen: { def: [], ok: (v) => Array.isArray(v) && v.length <= 20 && v.every((k) => typeof k === 'string') },
 
   /**
    * Fill a saved password automatically when a page loads and exactly one
@@ -447,6 +457,15 @@ const SCHEMA = {
   // A settings page whose controls do nothing is worse than one that is short.
 };
 
+/**
+ * What light graphics changes, where the setting is still at its default:
+ * the browser's own motion stilled, and no pages loaded ahead on a guess -
+ * both work a processor without a graphics card does instead of drawing.
+ * Background tabs also sleep sooner (battery mode's pace, main.js), and
+ * YouTube is asked for H.264 (probe-preload.js); those are not settings.
+ */
+const LIGHT_GRAPHICS = { reduceMotion: true, preloadPages: false, hoverPrefetch: false };
+
 /** Search engines, as query templates. `%s` is the URL-encoded term. */
 const SEARCH_ENGINES = {
   google:     { name: 'Google',     url: 'https://www.google.com/search?q=%s' },
@@ -543,13 +562,29 @@ class Prefs {
 
   get(key) {
     if (key === 'theme' && this.darkUnlessLight && this.values.theme === 'system') return 'dark';
+    if (this.light && this.lightApplies(key)) return LIGHT_GRAPHICS[key];
     return this.values[key];
   }
   all() {
     const all = { ...this.values };
     if (this.darkUnlessLight && all.theme === 'system') all.theme = 'dark';
+    if (this.light) for (const key of Object.keys(LIGHT_GRAPHICS)) if (this.lightApplies(key)) all[key] = LIGHT_GRAPHICS[key];
+    all.lightGraphics = this.light === true;
     return all;
   }
+
+  /**
+   * Light graphics decides a setting still at its default, and never one set
+   * by hand while it was on - otherwise switching it back would not stick,
+   * the default being exactly what it overrides.
+   */
+  lightApplies(key) {
+    return Object.hasOwn(LIGHT_GRAPHICS, key) && this.values[key] === SCHEMA[key].def &&
+      !(this.values.lightChosen || []).includes(key);
+  }
+
+  /** Light graphics on or off (graphics.js, decided in main.js). Not saved: it is found again each start. */
+  setLight(on) { this.light = on === true; }
 
   /**
    * Set one preference. Returns whether it was accepted, so the UI can tell
@@ -560,6 +595,12 @@ class Prefs {
     if (!spec || !spec.ok(value)) {
       this.log(`refusing preference "${key}" = ${JSON.stringify(value)}`);
       return false;
+    }
+    // Chosen by hand while light graphics was deciding it: from now on, the
+    // choice stands (see `lightApplies`).
+    if (this.light && Object.hasOwn(LIGHT_GRAPHICS, key) && !(this.values.lightChosen || []).includes(key)) {
+      this.values.lightChosen = [...(this.values.lightChosen || []), key];
+      if (this.values[key] === value) { this.save(); return true; }
     }
     if (this.values[key] === value) return true;
     this.values[key] = value;

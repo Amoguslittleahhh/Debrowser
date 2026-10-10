@@ -5995,6 +5995,44 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `graphics ${JSON.stringify(snap.graphics)}, gpu ${snap.gpuCpuPercent}%, panel says ${said}, on ${on.added}, off ${off.added}, no accel ${noAccel.added}`);
   }
 
+  // Light graphics: the machine is asked what it is, a VM drawing through its
+  // own display or one with no graphics card turns it on, and it eases the
+  // browser without taking a setting chosen by hand.
+  {
+    const graphics = require('../graphics');
+    const reg = (maker, product) => async () =>
+      `HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\BIOS\n    SystemManufacturer    REG_SZ    ${maker}\n    SystemProductName    REG_SZ    ${product}\n`;
+    const vmware = await graphics.detectVm({ platform: 'win32', run: reg('VMware, Inc.', 'VMware20,1') });
+    const dell = await graphics.detectVm({ platform: 'win32', run: reg('Dell Inc.', 'XPS 15 9530') });
+    const vbox = await graphics.detectVm({ platform: 'linux', read: async (f) => (f.endsWith('sys_vendor') ? 'innotek GmbH' : '') });
+    const decide = [
+      graphics.isLight('auto', { vm: 'VMware', virtualAdapter: true, noGpu: false }),   // VMware SVGA
+      graphics.isLight('auto', { vm: null, virtualAdapter: true, noGpu: true }),        // Basic Render Driver
+      graphics.isLight('auto', { vm: 'VMware', virtualAdapter: false, noGpu: false }),  // a card passed through
+      graphics.isLight('auto', { vm: null, virtualAdapter: false, noGpu: false }),      // an ordinary PC
+      graphics.isLight('full', { noGpu: true }), graphics.isLight('light', { noGpu: false })
+    ];
+    const found = await graphics.detectMachine(require('electron').app);
+    const before = { motion: prefs.get('reduceMotion'), saver: governor.saver };
+    runCommand('apply-light-graphics', { on: true });
+    const on = { motion: prefs.get('reduceMotion'), prefetch: prefs.get('hoverPrefetch'), flag: prefs.all().lightGraphics,
+      saver: governor.saver, leaf: shell.saver === true };
+    runCommand('set-pref', { key: 'reduceMotion', value: false });
+    const kept = prefs.get('reduceMotion') === false;
+    runCommand('apply-light-graphics', { on: false });
+    const off = { motion: prefs.get('reduceMotion'), flag: prefs.all().lightGraphics, saver: governor.saver };
+    prefs.set('lightChosen', []);
+    prefs.set('reduceMotion', before.motion);
+    check('light graphics: a VMware or VirtualBox machine is recognised, a VM drawing through its own display or one with no graphics card turns it on, and it eases the browser without overriding a setting chosen by hand',
+      vmware === 'VMware' && dell === null && vbox === 'VirtualBox' &&
+        JSON.stringify(decide) === JSON.stringify([true, true, false, false, false, true]) &&
+        typeof found.noGpu === 'boolean' && typeof found.adapter === 'string' &&
+        on.motion === true && on.prefetch === false && on.flag === true && on.saver === true && !on.leaf && kept &&
+        off.motion === false && off.flag === false && off.saver === before.saver,
+      `vm ${vmware}/${dell}/${vbox}, decide ${JSON.stringify(decide)}, found ${JSON.stringify(found)}, on ${JSON.stringify(on)}, ` +
+      `kept ${kept}, off ${JSON.stringify(off)}`);
+  }
+
   // Fuzzing the command channel: every command the browser's own pages may
   // send, with junk where its payload should be - nothing must throw, and the
   // browser must still work after. Left out: what opens a system dialog,

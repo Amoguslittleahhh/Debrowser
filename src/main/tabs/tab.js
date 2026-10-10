@@ -110,6 +110,14 @@ async function sweepThumbnails() {
  * which is built ahead of time and handed to a tab - so that it is exactly the
  * view the tab would have built for itself.
  */
+/**
+ * Light graphics (graphics.js): pages built from now on are told, and their
+ * preload asks YouTube for H.264 - the format a processor decodes cheapest,
+ * where VP9 and AV1 cost several times as much without a graphics card.
+ */
+let lightVideo = false;
+function setLightVideo(on) { lightVideo = on === true; }
+
 function createTabView({ session, url }) {
   const view = new WebContentsView({
     webPreferences: {
@@ -140,7 +148,7 @@ function createTabView({ session, url }) {
       plugins: true,
       // Tells the page preload it is in a private window: see the end of
       // probe-preload.js, where dropped and pasted files are cleaned.
-      additionalArguments: INCOGNITO ? ['--debrowser-private'] : []
+      additionalArguments: INCOGNITO ? ['--debrowser-private'] : lightVideo ? ['--debrowser-light-video'] : []
       // No `zoomFactor` here: Chromium records it against the site the page
       // loads, so a default applied this way pinned every site. The zoom is
       // set per document instead, by the tab - see zoom.js.
@@ -1246,4 +1254,4 @@ function safePid(wc) {
 }
 
 module.exports = {
-  createTabView, Tab, sweepThumbnails, sweepThumbnailsSync, thumbnailDir };
+  createTabView, Tab, sweepThumbnails, sweepThumbnailsSync, thumbnailDir, setLightVideo };

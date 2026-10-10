@@ -584,6 +584,19 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'graphicsMode',
+      label: 'Light graphics',
+      hint: 'Less motion, background tabs asleep sooner, YouTube in H.264 and no smooth scrolling - for a computer with no graphics card, or a virtual machine.',
+      type: 'select',
+      options: [
+        { value: 'auto', name: 'Automatic' },
+        { value: 'light', name: 'Always' },
+        { value: 'full', name: 'Never' }
+      ],
+      // What this computer was found to be, and so what Automatic chose.
+      liveHint: (state) => graphicsHint(state.prefs || {})
+    },
+    {
       key: 'gpuIgnoreBlocklist',
       label: 'Use the graphics card even if Chromium doesn’t trust it',
       hint: 'For virtual machines and older drivers, where pages - and games in them - are otherwise drawn by the processor. Needs a restart. Turned off again by itself if it makes the browser’s graphics crash.',
@@ -1624,8 +1637,24 @@ api.onState((state) => {
   for (const [key, control] of controls) {
     control.write(state.prefs[key]);
     if (control.spec?.unavailable) markUnavailable(control, control.spec.unavailable(state));
+    if (control.spec?.liveHint && control.hint) {
+      const text = control.spec.liveHint(state);
+      if (control.hint.textContent !== text) control.hint.textContent = text;
+    }
   }
 });
+
+/** Light graphics' line under the setting: the machine as found, and the choice it led to. */
+function graphicsHint(prefs) {
+  const d = prefs.graphicsDetected;
+  const on = prefs.lightGraphics === true ? 'Light graphics is on.' : 'Light graphics is off.';
+  if (!d || !d.at) return `Not checked yet - it is, a few seconds after Debrowser starts. ${on}`;
+  const where = d.vm ? (d.vm === 'a virtual machine' ? 'A virtual machine' : `A ${d.vm} virtual machine`) : 'This computer';
+  const found = d.noGpu ? `${where} with no graphics card in use (${d.adapter}).`
+    : d.vm && d.virtualAdapter ? `${where}, drawing through its virtual display (${d.adapter}).`
+      : `${where}, drawing with ${d.adapter}.`;
+  return `${found} ${on} Smooth scrolling follows from the next start.`;
+}
 
 /**
  * A setting that cannot do anything here - on this platform, in this layout -

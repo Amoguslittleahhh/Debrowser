@@ -209,6 +209,9 @@ function render(state) {
       (state.gpuCpuPercent >= 5 ? ` - drawing is using about ${state.gpuCpuPercent}% of it now` : '') +
       (g.overridden ? '.' : '. Settings → Advanced can try the graphics card.');
   }
+  if (state.prefs && state.prefs.lightGraphics) {
+    el.pressure.textContent += ' Light graphics is on: less motion, background tabs asleep sooner, YouTube in H.264.';
+  }
 
   const merging = state.pageMerging;
   if (detail && merging && merging.active) {

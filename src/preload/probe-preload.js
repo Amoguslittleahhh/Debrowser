@@ -783,6 +783,44 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
 }
 
 /*
+ * Light graphics (src/main/graphics.js): on a machine with no graphics card,
+ * YouTube is asked for H.264 rather than VP9 or AV1. All three are decoded by
+ * the processor there, and H.264 costs a fraction of the others - the trick
+ * the h264ify extension is known for. YouTube only, because it always has
+ * H.264 to give; a site with nothing but VP9 would be left with no video.
+ */
+if (process.argv.includes('--debrowser-light-video') && /(^|\.)(youtube\.com|youtube-nocookie\.com)$/.test(location.hostname)) {
+  const { contextBridge } = require('electron');
+  try {
+    contextBridge.executeInMainWorld({
+      func: () => {
+        const costly = /\b(vp0?8|vp0?9|av01)\b/i;
+        const ms = window.MediaSource;
+        if (ms && typeof ms.isTypeSupported === 'function') {
+          const original = ms.isTypeSupported.bind(ms);
+          ms.isTypeSupported = (type) => !costly.test(String(type)) && original(type);
+        }
+        const proto = window.HTMLMediaElement && window.HTMLMediaElement.prototype;
+        if (proto && typeof proto.canPlayType === 'function') {
+          const canPlay = proto.canPlayType;
+          proto.canPlayType = function (type) { return costly.test(String(type)) ? '' : canPlay.call(this, type); };
+        }
+        const caps = navigator.mediaCapabilities;
+        if (caps && typeof caps.decodingInfo === 'function') {
+          const decodingInfo = caps.decodingInfo.bind(caps);
+          caps.decodingInfo = (config) => {
+            const type = config && config.video && config.video.contentType;
+            if (costly.test(String(type || ''))) return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
+            return decodingInfo(config);
+          };
+        }
+      },
+      args: []
+    });
+  } catch { /* an older bridge: the page chooses as it would */ }
+}
+
+/*
  * Passkeys, in the browser's own list (src/main/passkeys.js).
  *
  * A request for "any passkey of mine for this site" is asked of the browser
