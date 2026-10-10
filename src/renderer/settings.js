@@ -584,6 +584,12 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'gpuIgnoreBlocklist',
+      label: 'Use the graphics card even if Chromium doesn’t trust it',
+      hint: 'For virtual machines and older drivers, where pages - and games in them - are otherwise drawn by the processor. Needs a restart. Turned off again by itself if it makes the browser’s graphics crash.',
+      type: 'checkbox'
+    },
+    {
       key: 'devToolsDock',
       label: 'Developer tools open',
       type: 'select',

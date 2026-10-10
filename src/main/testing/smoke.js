@@ -5971,6 +5971,30 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       clear, JSON.stringify(at));
   }
 
+  // Graphics: this run has no GPU (--disable-gpu), so the governor reports
+  // pages drawn by the processor and the task manager says so; the override
+  // switch is only added when chosen, and never with acceleration off.
+  {
+    const graphics = require('../graphics');
+    const snap = governor.snapshot();
+    const fakeApp = () => {
+      const added = [];
+      return { added, commandLine: { appendSwitch: (n) => added.push(n), hasSwitch: (n) => added.includes(n) } };
+    };
+    const fakePrefs = (o) => ({ get: (k) => o[k] });
+    const on = fakeApp(); graphics.applySwitches(on, fakePrefs({ gpuIgnoreBlocklist: true }));
+    const off = fakeApp(); graphics.applySwitches(off, fakePrefs({ gpuIgnoreBlocklist: false }));
+    const noAccel = fakeApp(); graphics.applySwitches(noAccel, fakePrefs({ gpuIgnoreBlocklist: true, hardwareAcceleration: false }));
+    runCommand('toggle-panel');
+    const said = await waitFor(() => shell.panelView && shell.panelView.webContents.executeJavaScript(
+      "document.getElementById('pressure').textContent.includes('drawn by the processor')").catch(() => false), { timeoutMs: 6000 });
+    runCommand('toggle-panel');
+    check('without a GPU the task manager says pages are drawn by the processor, and the graphics override is added only when chosen',
+      snap.graphics?.software === true && typeof snap.gpuCpuPercent === 'number' && said &&
+        on.added.includes('ignore-gpu-blocklist') && !off.added.length && !noAccel.added.length,
+      `graphics ${JSON.stringify(snap.graphics)}, gpu ${snap.gpuCpuPercent}%, panel says ${said}, on ${on.added}, off ${off.added}, no accel ${noAccel.added}`);
+  }
+
   // Fuzzing the command channel: every command the browser's own pages may
   // send, with junk where its payload should be - nothing must throw, and the
   // browser must still work after. Left out: what opens a system dialog,

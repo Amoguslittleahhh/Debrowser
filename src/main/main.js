@@ -51,6 +51,7 @@ const { Credentials, originOf } = require('./data/credentials');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
 const { startupTabs, placeKey, reopenable } = require('./startup');
+const graphics = require('./graphics');
 const { duplicateTabs } = require('./tabs/duplicates');
 const { WebHooks } = require('./web-hooks');
 const { Extensions, storeTarget, downloadFromStore } = require('./extensions');
@@ -381,6 +382,11 @@ if (!INCOGNITO && !OFFLINE_MODE) {
 if (earlyPrefs.get('hardwareAcceleration') === false) {
   app.disableHardwareAcceleration();
   log('config', 'hardware acceleration disabled by preference');
+}
+// Not in a private window: the adapter's real name in WebGL is one more thing
+// a site could tell this machine apart by, where the processor's is not.
+if (!INCOGNITO && graphics.applySwitches(app, earlyPrefs)) {
+  log('config', 'using the graphics adapter despite the GPU blocklist, by preference');
 }
 
 // After the preferences, which choose the ordinary browser's JavaScript
@@ -2016,6 +2022,26 @@ function main() {
         }
         publish();
       }, 20_000);
+    }
+    // Graphics (graphics.js): the override is watched, and turned off if it
+    // brings the graphics process down; and a machine drawing pages with its
+    // processor is told so once, with where to try otherwise. Not under a
+    // test, which runs without a GPU on purpose.
+    if (!INCOGNITO && !OFFLINE_MODE) {
+      graphics.guardOverride(app, prefs, log);
+      if (prefs.get('gpuOverrideFailed')) {
+        prefs.set('gpuOverrideFailed', false);
+        setTimeout(() => runCommand.toast('Using the graphics card made Debrowser’s graphics crash, so that setting is off again',
+          null, null, 10_000), 2500).unref?.();
+      } else if (!prefs.get('graphicsNoteShown') && prefs.get('hardwareAcceleration') !== false && prefs.get('welcomeDone')) {
+        setTimeout(() => {
+          const g = graphics.status(app);
+          if (!g.software || g.overridden) return;
+          prefs.set('graphicsNoteShown', true);
+          runCommand.toast('This computer’s pages are drawn by the processor, not the graphics card, so games and video cost more',
+            'Try the graphics card', () => runCommand('open-settings', { section: 'advanced' }), 15_000);
+        }, 8000).unref?.();
+      }
     }
     // Closing the window closed the browser, and with tabs not reopened at
     // start that window was one shortcut from gone for good, with nothing to

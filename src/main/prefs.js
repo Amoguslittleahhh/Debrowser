@@ -338,6 +338,16 @@ const SCHEMA = {
    * - so the settings page says a restart is needed rather than pretending.
    */
   hardwareAcceleration: { def: true, ok: (v) => typeof v === 'boolean' },
+  /**
+   * Use the graphics adapter even where Chromium does not trust it - often
+   * the case in a virtual machine, where pages are otherwise drawn by the
+   * processor (graphics.js). Needs a restart; turned off by itself if the
+   * graphics process crashes with it on (`gpuOverrideFailed` says so once).
+   */
+  gpuIgnoreBlocklist: { def: false, ok: (v) => typeof v === 'boolean' },
+  gpuOverrideFailed: { def: false, ok: (v) => typeof v === 'boolean' },
+  /** The one-time note that pages are drawn by the processor has been shown. */
+  graphicsNoteShown: { def: false, ok: (v) => typeof v === 'boolean' },
 
   /**
    * Fill a saved password automatically when a page loads and exactly one

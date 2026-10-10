@@ -21,6 +21,16 @@
  */
 
 const { MB } = require('../config');
+const os = require('os');
+const { status: graphicsStatusOf } = require('../graphics');
+
+/** Graphics, read once a second at most: the answer only changes on a GPU crash. */
+let graphicsCache = { at: 0, value: null };
+function graphicsStatus(app) {
+  if (!app || typeof app.getGPUFeatureStatus !== 'function') return null;
+  if (Date.now() - graphicsCache.at > 1000) graphicsCache = { at: Date.now(), value: graphicsStatusOf(app) };
+  return graphicsCache.value;
+}
 /**
  * How old a native probe reading may be before the process counts as
  * unmeasured again.
@@ -446,6 +456,12 @@ class Metrics {
       overheadMB: Math.round(this.browserOverheadMB),
       reclaimableMB: Math.round(this.reclaimableMB()),
       processCount: this.byPid.size + (this.unreportedCount || 0),
+      // The graphics process, as a share of the whole machine: on a machine
+      // drawing pages with its processor (graphics.js), this is where a game
+      // in a tab shows up.
+      gpuCpuPercent: Math.round([...this.byPid.values()].filter((p) => p.type === 'GPU')
+        .reduce((sum, p) => sum + (p.cpu || 0), 0) / Math.max(1, os.cpus().length)),
+      graphics: graphicsStatus(this.app),
       // Renderers holding tabs; the browser's own interface is counted in the processes, not here.
       rendererCount: [...this.byPid.values()].filter((p) => p.hostsTab).length
     };

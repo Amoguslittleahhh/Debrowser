@@ -201,6 +201,15 @@ function render(state) {
       `against the same inflated figure, so it reclaims earlier rather than later.`;
   }
 
+  // Pages drawn by the processor, not the graphics card (main graphics.js):
+  // said, with what it is costing now and where to try otherwise.
+  const g = state.graphics;
+  if (g && g.software) {
+    el.pressure.textContent += ` Pages are drawn by the processor here, not the graphics card` +
+      (state.gpuCpuPercent >= 5 ? ` - drawing is using about ${state.gpuCpuPercent}% of it now` : '') +
+      (g.overridden ? '.' : '. Settings → Advanced can try the graphics card.');
+  }
+
   const merging = state.pageMerging;
   if (detail && merging && merging.active) {
     el.pressure.textContent += ` Page merging is active (KSM): ~${merging.profitMB} MB saved system-wide. ` +
