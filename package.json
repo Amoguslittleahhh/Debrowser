@@ -1,6 +1,6 @@
 {
   "name": "debrowser",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "license": "MIT",
   "private": true,
   "description": "A memory-adaptive web browser: minimum RAM and CPU per tab, without costing smoothness.",

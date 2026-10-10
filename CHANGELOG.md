@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.3.0
+
+Debrowser 2.3.0 notices when it runs without a graphics card - a virtual machine, or an old driver - and lightens itself, says which work the graphics card does and which the processor does, and adds Paste and go, answers and site shortcuts in the address bar, tab hover cards, a reading list and picture-in-picture that follows you between tabs; it also makes private windows clear what you copied again.
 
 ### New
 
