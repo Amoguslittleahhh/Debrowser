@@ -339,9 +339,18 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     const tlsTab = tabs.create({ url: 'about:blank' });
     await waitFor(() => tlsTab.isLive && !tlsTab.loading, 10_000);
     let failure = null;
-    tlsTab.wc.once('did-fail-load', (_e, code, description) => { failure = `${description} (${code})`; });
+    // Heard from the app as well as the page: the certificate decision is the
+    // app's (main.js, certificate-error), and a private tab can be rebuilt on
+    // a new circuit mid-load, after which the first renderer's did-fail-load
+    // never comes - which on a slow CI runner read as no refusal at all.
+    const onCertificate = (_event, _wc, url, error) => {
+      if (String(url).includes(`tls.test:${tlsPort}`)) failure = failure || `${error} (refused by the browser)`;
+    };
+    require('electron').app.on('certificate-error', onCertificate);
+    tlsTab.wc.once('did-fail-load', (_e, code, description) => { failure = failure || `${description} (${code})`; });
     tlsTab.wc.loadURL(`https://tls.test:${tlsPort}/`).catch(() => {});
-    await waitFor(() => failure !== null, 10_000);
+    await waitFor(() => failure !== null, 15_000);
+    require('electron').app.removeListener('certificate-error', onCertificate);
     await sleep(500);
     const seen = await within(tlsTab.wc.executeJavaScript(
       '({ title: document.title, text: document.body ? document.body.innerText : "" })'), 4000, { title: '', text: '' });
