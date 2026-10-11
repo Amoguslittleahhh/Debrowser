@@ -47,6 +47,16 @@ const FILE = 'session.json';
 /** A window with more tabs than this is a file we should not trust. */
 const MAX_TABS = 500;
 
+/** More windows than this is a file we should not trust either. */
+const MAX_WINDOWS = 20;
+
+/** A window's position and size, or null when they are not ones to trust. */
+function validBounds(b) {
+  const [x, y, width, height] = [b?.x, b?.y, b?.width, b?.height].map(Number);
+  if (![x, y, width, height].every(Number.isInteger) || width < 200 || height < 200) return null;
+  return { x, y, width, height, maximized: b.maximized === true };
+}
+
 /** Longest title kept; anything past this is decoration. */
 const MAX_TITLE = 300;
 
@@ -118,15 +128,28 @@ class Session {
         pinned: entry?.pinned === true,
         spaceId: typeof entry?.spaceId === 'string' && /^[a-z0-9-]{1,24}$/.test(entry.spaceId) ? entry.spaceId : 'home',
         groupId: typeof entry?.groupId === 'string' && GROUP_ID.test(entry.groupId) ? entry.groupId : null,
-        lastActiveAt: Number.isFinite(entry?.lastActiveAt) ? entry.lastActiveAt : null
+        lastActiveAt: Number.isFinite(entry?.lastActiveAt) ? entry.lastActiveAt : null,
+        // Which window it was in, by order: 0 is the first, and every tab of
+        // a session from before there were several.
+        window: Number.isInteger(entry?.window) && entry.window > 0 && entry.window < MAX_WINDOWS ? entry.window : 0
       });
     }
 
     const index = Number(parsed?.activeIndex);
+    // Each window after the first: where it was, and the tab in front of it
+    // (an index into `tabs`, as `activeIndex` is for the first).
+    const windows = (Array.isArray(parsed?.windows) ? parsed.windows : []).slice(0, MAX_WINDOWS).map((w) => {
+      const at = Number(w?.activeIndex);
+      return {
+        activeIndex: Number.isInteger(at) && at >= 0 && at < kept.length ? at : null,
+        bounds: validBounds(w?.bounds)
+      };
+    });
     return {
       tabs: kept,
       groups: Array.isArray(parsed?.groups) ? parsed.groups : [],
-      activeIndex: Number.isInteger(index) && index >= 0 && index < kept.length ? index : 0
+      activeIndex: Number.isInteger(index) && index >= 0 && index < kept.length ? index : 0,
+      windows
     };
   }
 
@@ -137,6 +160,10 @@ class Session {
    * a session and no second list to keep in step.
    */
   snapshot(tabs, activeId) {
+    // One window's front tab, or every window: [{ id, activeId, bounds }],
+    // oldest first.
+    const windows = Array.isArray(activeId) ? activeId : null;
+    const windowOf = (tab) => (windows ? Math.max(0, windows.findIndex((w) => w.id === tab.windowId)) : 0);
     const open = tabs
       .filter((tab) => safeUrl(tab.url))
       .map((tab) => ({
@@ -146,14 +173,21 @@ class Session {
         pinned: tab.pinned === true,
         spaceId: tab.spaceId || 'home',
         groupId: tab.groupId || null,
-        lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : null
+        lastActiveAt: Number.isFinite(tab.lastActiveAt) ? tab.lastActiveAt : null,
+        window: windowOf(tab)
       }));
 
-    const activeIndex = Math.max(0, open.findIndex((t) => t.id === activeId));
+    const indexOf = (id) => open.findIndex((t) => t.id === id);
+    const activeIndex = Math.max(0, indexOf(windows ? windows[0]?.activeId : activeId));
     return {
       version: 1,
       activeIndex,
-      tabs: open.map(({ url, title, pinned, spaceId, groupId, lastActiveAt }) => ({ url, title, pinned, spaceId, groupId, lastActiveAt })),
+      tabs: open.map(({ url, title, pinned, spaceId, groupId, lastActiveAt, window }) =>
+        ({ url, title, pinned, spaceId, groupId, lastActiveAt, ...(window ? { window } : {}) })),
+      // The windows after the first, when there are any.
+      ...(windows && windows.length > 1 ? {
+        windows: windows.slice(1).map((w) => ({ activeIndex: Math.max(0, indexOf(w.activeId)), bounds: validBounds(w.bounds) }))
+      } : {}),
       // Tab groups (tab-groups.js): only those a saved tab is in.
       groups: TabGroups.current ? TabGroups.current.save(open) : []
     };
@@ -237,10 +271,7 @@ const WINDOW_FILE = 'window.json';
 
 function loadWindowState(dir = null) {
   try {
-    const raw = JSON.parse(fs.readFileSync(path.join(dir || app.getPath('userData'), WINDOW_FILE), 'utf8'));
-    const [x, y, width, height] = [raw?.x, raw?.y, raw?.width, raw?.height].map(Number);
-    if (![x, y, width, height].every(Number.isInteger) || width < 200 || height < 200) return null;
-    return { x, y, width, height, maximized: raw.maximized === true };
+    return validBounds(JSON.parse(fs.readFileSync(path.join(dir || app.getPath('userData'), WINDOW_FILE), 'utf8')));
   } catch {
     return null;                                 // first run, or a file not worth trusting
   }

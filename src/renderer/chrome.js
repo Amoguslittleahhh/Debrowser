@@ -1159,6 +1159,12 @@ function foldIntoGroup(root, folded) {
  * allowed to undo the drop on screen.
  */
 const DRAG_THRESHOLD = 4;
+/**
+ * How far past the strip's edge a tab is pulled before it comes out of the
+ * strip - to go into a window of its own, or another window's, where it is
+ * let go (`tear-tab`). Back within it, and it is an ordinary drag again.
+ */
+const TEAR_DISTANCE = 28;
 let tabDrag = null;
 /** A drop the browser has not confirmed yet: {id, index, until}. */
 let heldOrder = null;
@@ -1171,15 +1177,23 @@ function armTabDrag(event, id, root) {
   const button = event.target.closest('button');
   if (event.button !== 0 || (button && !button.classList.contains('tab-close'))) return;
   const vertical = document.body.dataset.layout === 'left';
+  const box = root.getBoundingClientRect();
   tabDrag = { id, root, vertical, pointer: event.pointerId,
-    start: vertical ? event.clientY : event.clientX, active: false };
+    start: vertical ? event.clientY : event.clientX,
+    cross: vertical ? event.clientX : event.clientY,
+    // Where on the tab it was taken, so a window made from it opens with the
+    // tab under the pointer as it was.
+    grabX: event.clientX - box.left, grabY: event.clientY - box.top,
+    active: false, torn: false };
 }
 
 function beginTabDrag() {
   const d = tabDrag;
   const nodes = [...el.tabs.children].filter((n) => !n.classList.contains('closing'));
   d.from = nodes.indexOf(d.root);
-  if (d.from === -1 || nodes.length < 2) { tabDrag = null; return false; }
+  // A lone tab has nowhere to go in the strip, but can still be pulled out of
+  // it - into another window, or taking its own window along.
+  if (d.from === -1) { tabDrag = null; return false; }
   const edge = (r) => (d.vertical ? [r.top, r.bottom] : [r.left, r.right]);
   d.nodes = nodes;
   d.slots = nodes.map((n) => edge(n.getBoundingClientRect()));
@@ -1239,6 +1253,11 @@ function endTabDrag(cancelled) {
   const d = tabDrag;
   tabDrag = null;
   if (!d || !d.active) return;
+  if (d.torn) {
+    d.root.classList.remove('torn');
+    document.body.classList.remove('tab-tearing');
+    api.send('tear-preview', { hide: true });
+  }
   // A drag that began on the close button ends in that button's click, which
   // must not close the tab just moved.
   const swallow = (event) => { event.stopPropagation(); event.preventDefault(); };
@@ -1270,15 +1289,65 @@ function endTabDrag(cancelled) {
   }
 }
 
+/**
+ * Out of the strip, or back into it. Out, the tab stays where it was, dimmed,
+ * the others close the gap they had opened, and a picture of the page follows
+ * the pointer (the browser draws it: this view ends at its own edge).
+ */
+function setTorn(d, torn, event) {
+  if (d.torn !== torn) {
+    d.torn = torn;
+    d.root.classList.toggle('torn', torn);
+    document.body.classList.toggle('tab-tearing', torn);
+    if (torn) {
+      d.root.style.transform = '';
+      for (const node of d.nodes) if (node !== d.root) node.style.transform = '';
+      d.to = d.from;
+    }
+  }
+  api.send('tear-preview', torn ? { id: d.id, screenX: event.screenX, screenY: event.screenY } : { hide: true });
+}
+
+/** Whether the pointer has left the strip by more than `TEAR_DISTANCE`. */
+function pulledOut(d, event) {
+  const box = el.tabs.getBoundingClientRect();
+  return d.vertical
+    ? event.clientX > box.right + TEAR_DISTANCE || event.clientX < box.left - TEAR_DISTANCE
+    : event.clientY > box.bottom + TEAR_DISTANCE || event.clientY < box.top - TEAR_DISTANCE;
+}
+
 el.tabs.addEventListener('pointermove', (event) => {
   const d = tabDrag;
   if (!d || event.pointerId !== d.pointer) return;
   const delta = (d.vertical ? event.clientY : event.clientX) - d.start;
-  if (!d.active && (Math.abs(delta) < DRAG_THRESHOLD || !beginTabDrag())) return;
+  const across = (d.vertical ? event.clientX : event.clientY) - d.cross;
+  // Either way counts as a drag: pulled straight out of the strip is one too.
+  if (!d.active && ((Math.abs(delta) < DRAG_THRESHOLD && Math.abs(across) < DRAG_THRESHOLD) || !beginTabDrag())) return;
+  if (pulledOut(d, event)) { setTorn(d, true, event); return; }
+  if (d.torn) setTorn(d, false, event);
   moveTabDrag(delta);
 });
-el.tabs.addEventListener('pointerup', () => endTabDrag(false));
+el.tabs.addEventListener('pointerup', (event) => {
+  const d = tabDrag;
+  if (d && d.active && d.torn) {
+    // Let go outside the strip: the browser decides where it goes.
+    endTabDrag(true);
+    api.send('tear-tab', { id: d.id, screenX: event.screenX, screenY: event.screenY,
+      offsetX: tearOffset(d).x, offsetY: tearOffset(d).y });
+    return;
+  }
+  endTabDrag(false);
+});
 el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
+
+/**
+ * Where the pointer should be in a window opened from this tab: over the tab,
+ * which there is the first in the strip, at the spot it was taken by.
+ */
+function tearOffset(d) {
+  const first = el.tabs.firstElementChild ? el.tabs.firstElementChild.getBoundingClientRect() : { left: 0, top: 0 };
+  return { x: Math.round(first.left + d.grabX), y: Math.round(first.top + d.grabY) };
+}
 // A press that has not become a drag yet does not hold the pointer, so its
 // release can land on the page, which this view never hears of; the browser
 // does, and says so (`pointer-released`). Not read from the pointer here:

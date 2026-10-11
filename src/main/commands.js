@@ -15,6 +15,9 @@ const shortcuts = require('./shortcuts');
 
 const COMMANDS = [
   { title: 'New tab', command: 'new-tab', keywords: 'open' },
+  { title: 'New window', command: 'new-window', keywords: 'open another', normalOnly: true },
+  { title: 'Move this tab to a new window', command: 'move-tab-to-new-window', keywords: 'detach tear out separate', needsTab: true, normalOnly: true },
+  { title: 'Close window', command: 'close-window', keywords: 'quit exit', normalOnly: true },
   { title: 'New private window', command: 'new-incognito-window', keywords: 'incognito tor private', normalOnly: true },
   { title: 'Reopen closed tab', command: 'reopen-closed-tab', keywords: 'undo restore' },
   { title: 'Search open tabs', command: 'search-tabs', keywords: 'find switch' },

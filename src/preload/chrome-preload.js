@@ -112,6 +112,10 @@ const COMMANDS = new Set([
   'set-budget',
   'discard-tab',
   'move-tab',
+  // A tab dragged out of the strip: its picture following the pointer, and
+  // where it was let go.
+  'tear-preview',
+  'tear-tab',
   'bookmark-menu',
   'copy-image',
   'forget-bookmark',

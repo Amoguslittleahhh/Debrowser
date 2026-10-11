@@ -48,6 +48,7 @@ const SHIFT_LABEL = IS_MAC ? '⇧' : 'Shift';
 const TABLE = [
   // Tabs
   { command: 'new-tab', mod: true, key: 't' },
+  { command: 'new-window', mod: true, key: 'n' },
   { command: 'new-incognito-window', mod: true, shift: true, key: 'n' },
   // Private windows only; the same keys Tor Browser uses.
   // Matched only there: in the ordinary browser they do nothing, and taking
@@ -60,6 +61,8 @@ const TABLE = [
   // Windows' and Linux's other close-a-tab key, which every browser there takes.
   ...(IS_MAC ? [] : [{ command: 'close-tab', mod: true, key: 'f4' }]),
   { command: 'reopen-closed-tab', mod: true, shift: true, key: 't' },
+  // Closes the window and its tabs; the last one, the browser.
+  { command: 'close-window', mod: true, shift: true, key: 'w' },
   // Ctrl+Tab may go by when tabs were used (Settings); `recent` asks for that.
   { command: 'cycle-tab', payload: { delta: 1, recent: true }, mod: true, key: 'tab' },
   { command: 'cycle-tab', payload: { delta: -1, recent: true }, mod: true, shift: true, key: 'tab' },

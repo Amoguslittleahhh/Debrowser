@@ -552,6 +552,73 @@ function main() {
   /** @type {TabManager|null} */
   let tabs = null;
 
+  /*
+   * The browser's windows, oldest first: each a shell and a tab manager of its
+   * own, so a window's strip, its tab in front and its tab order are its own.
+   * `shell` and `tabs` above are the window in use - the one focused, or the
+   * one a command came from (`useWindow`) - which is what every command means
+   * by "the window". What belongs to a tab - its view, its placeholder, its
+   * menu - goes to that tab's own window (`shellOf`), wherever the focus is.
+   */
+  const windows = [];
+  let windowSeq = 0;
+  /** Builds a window's tab manager, once the browser is ready (see the ready handler). */
+  let makeTabs = null;
+  /** Builds a window's shell around its tabs; see the ready handler. */
+  let makeShell = null;
+  const winById = (id) => windows.find((w) => w.id === id) || null;
+  const winOf = (tab) => (tab ? winById(tab.windowId) : null);
+  const shellOf = (tab) => winOf(tab)?.shell || null;
+  const tabsOf = (tab) => winOf(tab)?.tabs || null;
+  const useWindow = (w) => {
+    if (!w || !w.shell || w.shell.window.isDestroyed()) return;
+    shell = w.shell;
+    tabs = w.tabs;
+    // The space in front is the one of this window's tab in front: two windows
+    // can be in two spaces, and the commands mean the window's.
+    const front = w.tabs.activeTab();
+    if (spaces && !INCOGNITO && front && spaces.byId(front.spaceId)) spaces.activeId = front.spaceId;
+  };
+  /** The window a renderer belongs to: one of its own views, or one of its tabs. */
+  const windowOfSender = (sender) => (sender ? windows.find((w) => w.shell && (w.shell.isChromeSender(sender) ||
+    w.tabs.all().some((t) => t.isLive && t.wc.id === sender.id))) || null : null);
+  /**
+   * Every tab in every window, for what is the browser's rather than a
+   * window's: the governor, the session, finding a tab by its page.
+   */
+  const allTabs = {
+    all: () => (windows.length ? windows.flatMap((w) => w.tabs.all()) : (tabs ? tabs.all() : [])),
+    byId: (id) => allTabs.all().find((t) => t.id === id) || null,
+    activeTab: () => (tabs ? tabs.activeTab() : null),
+    clearSpeculation: (tab) => { const owner = tabsOf(tab) || tabs; if (owner) owner.clearSpeculation(tab); },
+    get latency() { return tabs ? tabs.latency : null; }
+  };
+  /**
+   * `tabs` and `shell` as they are when used, not when handed over: for the
+   * code outside this function that is given them once (the commands, the
+   * requests, the test suite) and must follow the window in use as this does.
+   */
+  const following = (current) => new Proxy({}, {
+    get(_target, key) {
+      const target = current();
+      if (!target) return undefined;
+      const value = target[key];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set(_target, key, value) { const target = current(); if (target) target[key] = value; return true; },
+    has(_target, key) { const target = current(); return Boolean(target) && key in target; }
+  });
+  const tabsInUse = following(() => tabs);
+  /** Each window as the session keeps it: its tab in front, and where it is. */
+  const windowsInfo = () => windows.map((w) => {
+    let bounds = null;
+    try {
+      if (!w.shell.window.isDestroyed()) bounds = { ...w.shell.window.getNormalBounds(), maximized: w.shell.window.isMaximized() };
+    } catch { /* closing */ }
+    return { id: w.id, activeId: w.tabs.activeId, bounds };
+  });
+  const shellInUse = following(() => shell);
+
   // macOS hands a link to the default browser as an event, not an argument,
   // and can do so before the first window exists: held until there are tabs.
   const earlyUrls = [];
@@ -726,10 +793,10 @@ function main() {
    * the window runs `close` then `before-quit`; a quit from the OS runs them
    * the other way round. Set once the user says yes, so the second never asks.
    */
-  const quitState = { confirmed: false, asking: false };
+  const quitState = { confirmed: false, asking: false, quitting: false };
 
   /** What rides on the state broadcast beside the governor's own snapshot. */
-  const withExtras = (state) => ({
+  const withExtras = (state, shell) => ({
     ...state,
     ...(receipts ? { receipt: receipts.today() } : {}),
     ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {}),
@@ -740,6 +807,25 @@ function main() {
     ...(extensions && prefs && prefs.get('labExtensions') === true ? { extensionCount: extensions.list().length } : {})
   });
 
+  /**
+   * One window's share of a broadcast: its own tabs, in its own order, and the
+   * space of its own tab in front - two windows can be in two spaces.
+   */
+  const stateFor = (w, state) => {
+    const mine = new Set(w.tabs.all().map((t) => t.id));
+    const out = { ...withExtras(state, w.shell), windowCount: windows.length };
+    if (Array.isArray(state.tabs)) out.tabs = state.tabs.filter((t) => mine.has(t.id));
+    const front = w.tabs.activeTab();
+    if (out.spaces && front && front.spaceId) out.spaces = { ...out.spaces, activeId: front.spaceId };
+    return out;
+  };
+  /** The governor's state to every window, each with its own tabs. */
+  const publishState = (state) => {
+    for (const w of windows) {
+      if (w.shell && !w.shell.window.isDestroyed()) w.shell.publish(stateFor(w, state));
+    }
+  };
+
   let publishQueued = false;
   const publish = () => {
     // Tab events can arrive in bursts (a load fires several in a row).
@@ -748,10 +834,7 @@ function main() {
     publishQueued = true;
     setImmediate(() => {
       publishQueued = false;
-      if (shell && governor) {
-        const state = governor.snapshot();
-        shell.publish(withExtras(state));
-      }
+      if (shell && governor) publishState(governor.snapshot());
       // Tabs came or went: keep a spare new tab while it is cheap (prewarm.js).
       if (prewarm) prewarm.refresh();
     });
@@ -770,7 +853,7 @@ function main() {
    * own DOM. That is what made which shortcuts existed depend on where focus
    * happened to be, so the DOM table is gone and this is the only one.
    */
-  const bindShortcuts = (wc, tab = null, { only = null } = {}) => {
+  const bindShortcuts = (wc, tab = null, { only = null, win = null } = {}) => {
     if (!wc || wc.isDestroyed()) return;
     wc.on('before-input-event', (event, input) => {
       // Letting go of Ctrl (Cmd on a Mac) ends a Ctrl+Tab run through recent tabs.
@@ -791,6 +874,8 @@ function main() {
         return;
       }
       event.preventDefault();
+      // The window the key was pressed in, focused or not yet.
+      useWindow(tab ? winOf(tab) : win);
       runCommand(hit.command, hit.payload);
     });
   };
@@ -814,19 +899,19 @@ function main() {
     if (had) clearTimeout(had.timer);
     const timer = setTimeout(() => {
       pageKeys.delete(tab.id);
-      if (tab === tabs?.activeTab()) runCommand(command, null);
+      if (tab === tabsOf(tab)?.activeTab()) { useWindow(winOf(tab)); runCommand(command, null); }
     }, PAGE_KEY_WAIT_MS);
     pageKeys.set(tab.id, { command, timer });
   };
   ipcMain.on('debrowser:page-key', (event, command, used) => {
-    const tab = tabs?.all().find((t) => t.isLive && t.wc.id === event.sender.id);
+    const tab = allTabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
     const pending = tab && pageKeys.get(tab.id);
     // Only an answer to a key the browser saw pressed: a page cannot open a
     // dialog by sending this on its own.
     if (!pending || pending.command !== command) return;
     clearTimeout(pending.timer);
     pageKeys.delete(tab.id);
-    if (!used && tab === tabs.activeTab()) runCommand(command, null);
+    if (!used && tab === tabsOf(tab)?.activeTab()) { useWindow(winOf(tab)); runCommand(command, null); }
   });
 
   const bindPageShortcuts = (tab) => {
@@ -835,7 +920,7 @@ function main() {
     // A tab pressed in the strip and let go over the page: the strip never
     // sees that release, so it is told. See chrome.js, `pointer-released`.
     tab.wc.on('input-event', (_event, input) => {
-      if (input.type === 'mouseUp' && shell) shell.toChrome('pointer-released');
+      if (input.type === 'mouseUp' && shellOf(tab)) shellOf(tab).toChrome('pointer-released');
     });
   };
 
@@ -889,11 +974,11 @@ function main() {
     for (const [id, timer] of sleepTimers) if (id === nowIn) { clearTimeout(timer); sleepTimers.delete(id); }
     for (const space of spaces.list) {
       if (space.id === nowIn || sleepTimers.has(space.id)) continue;
-      if (!tabs.all().some((t) => t.spaceId === space.id && t.isLive)) continue;
+      if (!allTabs.all().some((t) => t.spaceId === space.id && t.isLive)) continue;
       const timer = setTimeout(() => {
         sleepTimers.delete(space.id);
         if (spaces.activeId === space.id || !governor) return;
-        for (const t of tabs.all()) {
+        for (const t of allTabs.all()) {
           if (t.spaceId !== space.id || !t.isLive || t.visible) continue;
           governor.enforceManualDiscard(t).catch((err) => log(`space sleep failed: ${err.message}`));
         }
@@ -912,7 +997,7 @@ function main() {
     const host = SitePrefs.hostOf(tab.url);
     if (!host || sitePrefs.get(host, 'forget') !== true) return;
     const site = require('./protection/third-party').siteOf(tab.url);
-    if (tabs.all().some((t) => t !== tab && require('./protection/third-party').siteOf(t.url) === site)) return;
+    if (allTabs.all().some((t) => t !== tab && require('./protection/third-party').siteOf(t.url) === site)) return;
     forgetSite(tab.session || session.fromPartition(BROWSING_PARTITION), host, site)
       .then(() => log('site', `forgot ${site}`))
       .catch((err) => log(`forgetting ${site} failed: ${err.message}`));
@@ -927,7 +1012,7 @@ function main() {
     // out of a space with its own cookies): not a tab the user closed.
     if (tab.notClosedByUser) return;
     closedTabs.push({ url: tab.url, title: tab.title || '', index: tab.closedIndex ?? null, pinned: tab.pinned === true,
-      spaceId: tab.spaceId || null });
+      spaceId: tab.spaceId || null, at: Date.now() });
     // Counted apart from the list, which stops growing at its cap.
     closedTabs.remembered = (closedTabs.remembered || 0) + 1;
     if (closedTabs.length > CLOSED_TABS_KEPT) closedTabs.shift();
@@ -944,7 +1029,7 @@ function main() {
   // its page go, and reading `tab.wc.id` then threw in the main process -
   // which Electron answers with a modal error box that stops the browser.
   const extensionTabInfo = (tab) => ({
-    id: tab.extensionId ?? -1, index: tabs.all().indexOf(tab), windowId: 1, url: tab.url, title: tab.title, active: tab.visible,
+    id: tab.extensionId ?? -1, index: (tabsOf(tab) || tabs).all().indexOf(tab), windowId: tab.windowId || 1, url: tab.url, title: tab.title, active: tab.visible,
     highlighted: tab.visible, pinned: tab.pinned, status: tab.loading ? 'loading' : 'complete', incognito: false,
     audible: Boolean(tab.audible), discarded: !tab.isLive, mutedInfo: { muted: Boolean(tab.muted) }
   });
@@ -995,7 +1080,7 @@ function main() {
     wc.once('destroyed', () => {
       // Asleep, not closed: onReplaced follows when it wakes.
       if (!tab.closed) return;
-      send('tabs.onRemoved', id, { windowId: 1, isWindowClosing: false });
+      send('tabs.onRemoved', id, { windowId: tab.windowId || 1, isWindowClosing: false });
     });
   };
 
@@ -1009,7 +1094,9 @@ function main() {
   const bindContextMenu = (tab) => {
     if (!tab.isLive) return;
     tab.wc.on('context-menu', (_event, params) => {
+      const shell = shellOf(tab);
       if (!shell || shell.window.isDestroyed()) return;
+      useWindow(winOf(tab));
       // Only for the tab in front. A background tab firing this - which a page
       // can cause by scripting a contextmenu event - must not put a menu over
       // the page the user is actually looking at.
@@ -1070,6 +1157,7 @@ function main() {
   const bindFind = (tab) => {
     if (!tab.isLive) return;
     tab.wc.on('found-in-page', (_event, result) => {
+      const shell = shellOf(tab);
       if (!shell || shell.window.isDestroyed() || !tab.visible) return;
       shell.toChrome('find-result', {
         matches: result.matches || 0,
@@ -1096,6 +1184,10 @@ function main() {
   };
 
   const onTabEvent = (tab, event, payload) => {
+    // The tab's own window, whichever one is in use: its view, its find bar
+    // and its split are drawn there.
+    const shell = shellOf(tab);
+    const tabs = tabsOf(tab) || tabsInUse;
     switch (event) {
       case 'rebuild':
         if (shell) shell.detachTab(tab);
@@ -1110,8 +1202,11 @@ function main() {
         bindExtensionEvents(tab);
         // Side by side, the half you click into becomes the tab in front, so
         // the address bar and the keyboard follow it.
+        // Looked up as it happens: the tab may have moved window since.
         tab.wc.on('focus', () => {
-          if (shell && shell.inSplit(tab) && tabs.activeId !== tab.id) {
+          const shell = shellOf(tab);
+          const tabs = tabsOf(tab);
+          if (shell && tabs && shell.inSplit(tab) && tabs.activeId !== tab.id) {
             tabs.activate(tab.id).then(publish).catch(() => {});
           }
         });
@@ -1120,7 +1215,9 @@ function main() {
         // question in Chrome's words; Leave is the default, as there. Answered
         // synchronously, because the event has to be.
         tab.wc.on('will-prevent-unload', (event) => {
-          if (!shell || shell.window.isDestroyed()) return;
+          const shell = shellOf(tab);
+          const tabs = tabsOf(tab);
+          if (!shell || !tabs || shell.window.isDestroyed()) return;
           // Only for the tab in front, or one the user is closing. A tab out
           // of sight that navigates itself in a loop would otherwise block the
           // whole browser behind a modal about a page nobody can see; it just
@@ -1186,7 +1283,7 @@ function main() {
         // And its highlights go with it. Closing the bar on a tab switch left
         // every match lit on the page behind, with no bar left to clear them.
         if (find && find.tabId && find.tabId !== tab.id) {
-          const searched = tabs.byId(find.tabId);
+          const searched = allTabs.byId(find.tabId);
           if (searched?.isLive) searched.wc.stopFindInPage('clearSelection');
           find.tabId = null;
         }
@@ -1245,7 +1342,7 @@ function main() {
     // three of them in a second, which is why this is a debounce and not a
     // write. `tabs` is passed as a function because it does not exist yet when
     // this closure is built.
-    if (sessionStore) sessionStore.schedule(() => tabs.all(), () => tabs.activeId);
+    if (sessionStore) sessionStore.schedule(() => allTabs.all(), windowsInfo);
     publish();
   };
 
@@ -1360,14 +1457,27 @@ function main() {
       const hostOf = (u) => { try { return new URL(u).hostname; } catch { return null; } };
       icons.useSession((url) => {
         const host = hostOf(url);
-        const tab = tabs && tabs.all().find((t) => !t.closed && (t.favicon === url || hostOf(t.url) === host));
+        const tab = allTabs.all().find((t) => !t.closed && (t.favicon === url || hostOf(t.url) === host));
         return tab ? tab.session : null;
       });
     }
 
     spaces = new Spaces(INCOGNITO || OFFLINE_MODE ? null : app.getPath('userData'), BROWSING_PARTITION);
-    tabs = new TabManager({
+    // A window's tabs. Every window's manager is made here, alike: the first
+    // now, the rest by `openWindow`. What is assigned to it afterwards - the
+    // permission questions, the spare new tab page - goes through
+    // `forEachManager`, so a later window's tabs have it too.
+    const managerSetup = [];
+    const forEachManager = (fn) => {
+      managerSetup.push(fn);
+      for (const w of windows) fn(w.tabs);
+      if (tabs && !windows.some((w) => w.tabs === tabs)) fn(tabs);
+    };
+    makeTabs = (windowId) => {
+      const made = new TabManager({
       cfg,
+      windowId,
+      shared: tabs ? tabs.shareWith() : null,
       // Private: a circuit per tab. Otherwise the tab's space decides - a
       // container space has a partition of its own (spaces.js).
       sessionFor: circuits ? () => circuits.newTabSession()
@@ -1386,27 +1496,32 @@ function main() {
         // goes back into its page when you return - as Chrome does.
         const left = lastPresented;
         lastPresented = tab;
+        const shell = shellOf(tab);
         if (left && left !== tab && !(shell && shell.inSplit(left) && shell.inSplit(tab))) autoPictureInPicture(left, true);
         if (tab.autoPip) autoPictureInPicture(tab, false);
         if (shell) shell.attachTab(tab);
         if (extensions && tab.wc && !tab.wc.isDestroyed()) {
           extensions.announceActiveTab(tab.wc.id);
           if (extensions.listening && prefs.get('labExtensions') === true) {
-            extensions.broadcast('tabs.onActivated', [{ tabId: tab.wc.id, windowId: 1 }]);
+            extensions.broadcast('tabs.onActivated', [{ tabId: tab.wc.id, windowId: tab.windowId || 1 }]);
           }
         }
         if (governor) await governor.onTabActivated(tab);
       },
-      onCover: (tab) => (shell ? shell.showPlaceholder(tab) : false),
-      onUncover: () => { if (shell) shell.hidePlaceholder(); },
+      onCover: (tab) => (shellOf(tab) ? shellOf(tab).showPlaceholder(tab) : false),
+      onUncover: (tab) => { if (shellOf(tab)) shellOf(tab).hidePlaceholder(); },
       // A speculative page load must never be the reason a frame is dropped,
       // and must never add to memory the governor is already trying to reclaim.
       // Never in incognito: loading a page because the pointer rested on its
       // tab tells that site what you were about to do.
       canSpeculate: () => !INCOGNITO && Boolean(governor) && governor.allowsSpeculation(),
       applyZoom: (wc) => siteZoom.apply(wc)
-    });
-    const ipcHub = new IpcHub(() => tabs.all(), log);
+      });
+      for (const fn of managerSetup) fn(made);
+      return made;
+    };
+    tabs = makeTabs(++windowSeq);
+    const ipcHub = new IpcHub(() => allTabs.all(), log);
     if (widevine) ipcHub.onDrmNeeded = (tab) => widevine.retry(tab);
 
 
@@ -1414,16 +1529,21 @@ function main() {
       // In memory under a test, which must not leave answers behind.
       sitePermissions = new SitePermissions(log, OFFLINE_MODE ? null : app.getPath('userData'));
       permissionAsks = new PermissionAsks(sitePermissions, {
-        tabFor: (wc) => tabs.all().find((t) => t.isLive && t.wc.id === wc.id) || null,
-        tabById: (id) => tabs.byId(id),
-        isActive: (tab) => tabs.activeTab() === tab,
-        // The chrome opens the panel, because only it knows where the padlock is.
-        show: () => { if (shell) shell.toChrome('site-ask'); },
+        tabFor: (wc) => allTabs.all().find((t) => t.isLive && t.wc.id === wc.id) || null,
+        tabById: (id) => allTabs.byId(id),
+        isActive: (tab) => tabsOf(tab)?.activeTab() === tab,
+        // The chrome opens the panel, because only it knows where the padlock
+        // is - the asking tab's window's chrome.
+        show: (tab) => { const sh = (tab && shellOf(tab)) || shell; if (sh) sh.toChrome('site-ask'); },
         // The page the panel was asking for is gone, so is its question.
-        withdrawn: () => { if (shell && shell.sheetPage === 'site') shell.closeSheet({ replacing: true }); }
+        withdrawn: () => {
+          for (const w of windows) if (w.shell.sheetPage === 'site') w.shell.closeSheet({ replacing: true });
+        }
       });
-      tabs.askPermission = (wc, kinds, details, callback) => permissionAsks.request(wc, kinds, details, callback);
-      tabs.permissionGranted = (origin, kinds) => sitePermissions.decide(originOf(origin), kinds) === 'allow';
+      forEachManager((m) => {
+        m.askPermission = (wc, kinds, details, callback) => permissionAsks.request(wc, kinds, details, callback);
+        m.permissionGranted = (origin, kinds) => sitePermissions.decide(originOf(origin), kinds) === 'allow';
+      });
       // Permissions a site has not used in three months go by themselves,
       // checked at start and daily after.
       const revoked = sitePermissions.expire();
@@ -1444,7 +1564,7 @@ function main() {
     if (!INCOGNITO && !argv.includes('--no-speculation')) {
       const speculation = new Speculation({
         enabled: () => prefs.get('preloadPages') !== false,
-        isTab: (sender) => tabs.all().some((t) => t.isLive && t.wc.id === sender.id && !t.internal)
+        isTab: (sender) => allTabs.all().some((t) => t.isLive && t.wc.id === sender.id && !t.internal)
       });
       browsingSetup.push((ses) => speculation.watch(ses));
       speculation.wire();
@@ -1525,7 +1645,7 @@ function main() {
           return { id: tab.wc && !tab.wc.isDestroyed() ? tab.wc.id : -1, url, active };
         },
         closeTabs: (ids) => {
-          for (const t of tabs.all()) if (t.wc && !t.wc.isDestroyed() && ids.includes(t.wc.id)) tabs.close(t.id);
+          for (const t of allTabs.all()) if (t.wc && !t.wc.isDestroyed() && ids.includes(t.wc.id)) tabsOf(t).close(t.id);
           publish();
         },
         notify: ({ title, message, iconPath }, onClick) => {
@@ -1580,29 +1700,55 @@ function main() {
     });
 
     bootMark('window');
-    shell = new BrowserShell({
-      tabManager: tabs,
-      prefs,
-      log,
-      // Two notices, and the window's own commands: a mouse's back and
-      // forward buttons, and links opened from Peek or the quick window -
-      // which this used to drop, so all of them did nothing.
-      onCommand: (name, payload = null) => {
-        if (name === 'chrome-ready' || name === 'view-ready') publish();
-        else runCommand(name, payload);
-      },
-      // Every view the shell owns answers the same table the tabs do - the
-      // chrome included, since its own DOM handler is gone.
-      bindShortcuts,
+    /**
+     * A window around a tab manager: the first one here, every other one
+     * from `openWindow`, wired the same way.
+     */
+    makeShell = (win, { bounds = null, held = false } = {}) => {
+      const made = new BrowserShell({
+        tabManager: win.tabs,
+        prefs,
+        log,
+        // Two notices, and the window's own commands: a mouse's back and
+        // forward buttons, and links opened from Peek or the quick window -
+        // which this used to drop, so all of them did nothing.
+        onCommand: (name, payload = null) => {
+          if (name === 'chrome-ready' || name === 'view-ready') publish();
+          else { useWindow(win); runCommand(name, payload); }
+        },
+        // Every view the shell owns answers the same table the tabs do - the
+        // chrome included, since its own DOM handler is gone.
+        bindShortcuts: (wc, tab = null, options = {}) => bindShortcuts(wc, tab, { ...options, win }),
+        bounds,
+        held
+      });
+      win.shell = made;
+      // The passkey list lost the keyboard: a click elsewhere, which is a dismissal.
+      made.onPasskeysBlur = () => { if (passkeys) passkeys.dismiss(); };
+      made.onSheetClosed = (page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
+      made.siteIsAsking = () => Boolean(permissionAsks && permissionAsks.shown);
+      // Made before these exist for the first window, which is given them
+      // as each is made below; any later window, here.
+      made.bookmarks = bookmarks;
+      made.downloads = downloads;
+      made.updater = updater;
+      made.saver = windows.length ? windows[0].shell.saver : false;
+      // Focused, it is the window in use.
+      made.window.on('focus', () => useWindow(win));
+      made.window.on('close', (event) => onWindowClose(win, event));
+      made.window.on('closed', () => onWindowClosed(win));
+      windows.push(win);
+      return made;
+    };
+    const firstWindow = { id: tabs.windowId, tabs, shell: null };
+    shell = makeShell(firstWindow, {
       // Never under a test or a benchmark, which assert on the default size.
       bounds: !OFFLINE_MODE && prefs.get('rememberWindowBounds')
         ? fitToDisplay(loadWindowState())
         : null,
       held: WARM
     });
-    // The passkey list lost the keyboard: a click elsewhere, which is a dismissal.
-    shell.onPasskeysBlur = () => { if (passkeys) passkeys.dismiss(); };
-    browserShell = shell;
+    browserShell = shellInUse;
     // A private window's copy goes with it: see incognito/clipboard.js.
     if (INCOGNITO) {
       const { ClipboardGuard } = require('./incognito/clipboard');
@@ -1619,26 +1765,12 @@ function main() {
         Promise.race([guard.clearIfOurs(), new Promise((resolve) => setTimeout(resolve, 1000))]).finally(() => app.quit());
       });
     }
-    shell.onSheetClosed =(page) => { if (page === 'site' && permissionAsks) permissionAsks.dismissShown(); };
-    shell.siteIsAsking = () => Boolean(permissionAsks && permissionAsks.shown);
     // What the main process paints - an error page, the surface behind a tab -
     // takes the window's palette and accent, as our own pages do.
     palette.useTheme(() => ({ light: shell.lightTheme(), chosen: prefs.get('theme'), accent: prefs.get('accent'), design: prefs.get('design') }));
     // A site the browser cannot find can be searched for instead, with the chosen engine.
     require('./error-page').useSearch((q) => prefs.searchTemplate().replace('%s', encodeURIComponent(q)));
 
-    shell.window.on('close', (event) => {
-      if (shouldAskToClose()) {
-        event.preventDefault();
-        askToClose(() => shell.close());
-        return;
-      }
-      if (!OFFLINE_MODE && prefs.get('rememberWindowBounds')) {
-        try {
-          saveWindowState({ ...shell.window.getNormalBounds(), maximized: shell.window.isMaximized() });
-        } catch (err) { log(`could not remember the window: ${err.message}`); }
-      }
-    });
 
     if (INCOGNITO) {
       // What the window shows about the private connection, on every broadcast.
@@ -1727,14 +1859,14 @@ function main() {
       governor = new Governor({
         app,
         cfg,
-        tabManager: tabs,
+        tabManager: allTabs,
         ipcHub,
         log,
         sitePolicy: (tab) => sitePrefs.get(SitePrefs.hostOf(tab.url), 'sleep'),
         onUpdate: (state) => {
           // Incognito: a page too heavy for Balanced JavaScript gets one hint.
           if (slowJs && slowJs.observe(tabs.activeTab())) log('incognito', 'slow-page hint shown');
-          if (shell) shell.publish(withExtras(state));
+          publishState(state);
         }
       });
       governor.start();
@@ -1761,12 +1893,12 @@ function main() {
         // tabs frozen sooner, the governor ticking less - without the leaf:
         // the processor is short of time, not the battery of charge.
         const saver = battery || prefs.light === true;
-        shell.saver = battery;
+        for (const w of windows) w.shell.saver = battery;
         if (saver !== governor.saver) {
           governor.setSaver(saver);
           log('governor', `battery pace ${saver ? 'on' : 'off'}${prefs.light ? ' (light graphics)' : ''}`);
           publish();
-          for (const tab of tabs.all()) if (tab.isLive && !tab.internal) steadyCaret(tab.wc);
+          for (const tab of allTabs.all()) if (tab.isLive && !tab.internal) steadyCaret(tab.wc);
         }
       };
       // The same steady cursor in websites as in the browser's own pages
@@ -1787,7 +1919,7 @@ function main() {
       app.on('web-contents-created', (_event, contents) => {
         contents.on('dom-ready', () => {
           caretLaid.delete(contents);
-          if (tabs.all().some((t) => t.wc === contents && !t.internal)) steadyCaret(contents);
+          if (allTabs.all().some((t) => t.wc === contents && !t.internal)) steadyCaret(contents);
         });
       });
       applySaver();
@@ -1803,7 +1935,7 @@ function main() {
     // depend on where a pointer had been.
     prewarm = new Prewarm({
       session: () => session.fromPartition(BROWSING_PARTITION),
-      hasLiveInternal: () => tabs.all().some((t) => t.internal && t.isLive),
+      hasLiveInternal: () => allTabs.all().some((t) => t.internal && t.isLive),
       // An animation to keep out of the way of, or memory getting tight: a
       // spare is the first thing to give up.
       busy: () => Boolean(governor && (governor.boost.quiesceRequested || governor.pressure !== 'none')),
@@ -1813,7 +1945,7 @@ function main() {
       log
     });
     // A new tab page takes the spare, already loaded and drawn.
-    tabs.takeSpare = () => prewarm.take();
+    forEachManager((m) => { m.takeSpare = () => prewarm.take(); });
 
     // Incognito reads the normal profile's bookmarks - they are how people get
     // to the sites they use - and cannot change them: a bookmark saved from a
@@ -1824,7 +1956,7 @@ function main() {
     bookmarks.onAdd = (entry) => unhideTile(prefs, entry.url);
     if (INCOGNITO) bookmarks.readOnly = true;
     // So the state broadcast can carry the revision the bookmarks bar watches.
-    shell.bookmarks = bookmarks;
+    for (const w of windows) w.shell.bookmarks = bookmarks;
     // Read live rather than captured, so switching recording off in the history
     // page stops the very next navigation from being written down.
     //
@@ -1839,8 +1971,31 @@ function main() {
     // letter until the site was visited again.
     icons.rememberAll(history.all().map((entry) => entry.icon));
 
+    // The commands, the requests and the tests act on the window in use.
+    const windowOps = {
+      open: openWindow,
+      moveTab: moveTabToWindow,
+      at: windowAt,
+      of: winOf,
+      count: () => windows.length,
+      current: () => winById(tabs?.windowId),
+      closed: closedWindows,
+      preview: tearPreview,
+      // `views` only: a page's requests come on their own, a background
+      // window's new tab page asking for its sites, and must not move the
+      // window in use to one the user is not in.
+      // A page's own commands, likewise, only from the window in front: a
+      // page sends some as it loads, wherever it is.
+      useSender: (sender, { views = false } = {}) => {
+        const view = windows.find((x) => x.shell && x.shell.isChromeSender(sender));
+        if (view) { useWindow(view); return; }
+        const page = views ? null : windowOfSender(sender);
+        if (page && BaseWindow.getFocusedWindow() === page.shell.window) useWindow(page);
+      },
+      all: allTabs
+    };
     runCommand = wireCommands({
-      tabs, shell, governor, prefs, publish, log, prewarm,
+      tabs: tabsInUse, shell: shellInUse, windowOps, governor, prefs, publish, log, prewarm,
       bookmarks, closedTabs, previousSession, context, find, quitState, siteZoom, circuits, slowJs,
       sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
       getReadingList: () => readingList,
@@ -1899,9 +2054,9 @@ function main() {
     });
     // So the state broadcast can carry the count and progress the toolbar
     // button draws, without carrying the list itself.
-    shell.downloads = downloads;
+    for (const w of windows) w.shell.downloads = downloads;
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
-    wireRequests({ tabs, shell, credentials, vault, bookmarks, history, downloads, prefs, log, context,
+    wireRequests({ tabs: tabsInUse, shell: shellInUse, windowOps, credentials, vault, bookmarks, history, downloads, prefs, log, context,
       sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts,
       getArchive: () => archive, getExtensions: () => extensions });
 
@@ -1945,7 +2100,11 @@ function main() {
 
     if (saved.tabs.length) {
       tabGroups.load(saved.groups);
-      saved.tabs.forEach((entry, i) => {
+      // The first window's tabs here; each other window's after, in a window
+      // of its own where it was (openWindow).
+      const firstWindowTabs = saved.tabs.filter((entry) => !entry.window);
+      const firstActive = firstWindowTabs.indexOf(saved.tabs[saved.activeIndex]);
+      (firstWindowTabs.length ? firstWindowTabs : saved.tabs).forEach((entry) => {
         const tab = tabs.create({ url: entry.url, activate: false, realise: false, spaceId: spaces.resolve(entry.spaceId) });
         tab.title = entry.title || tab.title;
         tab.pinned = entry.pinned === true;
@@ -1953,9 +2112,19 @@ function main() {
         // How long it has gone unopened carries across restarts (archive.js).
         if (Number.isFinite(entry.lastActiveAt)) tab.lastActiveAt = entry.lastActiveAt;
       });
-      const active = tabs.all()[saved.activeIndex] || tabs.all()[0];
+      const active = tabs.all()[firstActive] || tabs.all()[0];
       if (active) tabs.activate(active.id).catch((err) => log(`restore failed: ${err.message}`));
-      log('session', `restored ${saved.tabs.length} tab(s)`);
+      if (firstWindowTabs.length) {
+        (saved.windows || []).forEach((w, i) => {
+          const entries = saved.tabs.filter((entry) => entry.window === i + 1);
+          if (!entries.length) return;
+          const front = Math.max(0, entries.indexOf(saved.tabs[w.activeIndex]));
+          openWindow({ entries, activeIndex: front, bounds: w.bounds });
+        });
+        // The first window stays the one in use, and in front.
+        useWindow(firstWindow);
+      }
+      log('session', `restored ${saved.tabs.length} tab(s) in ${windows.length} window(s)`);
     } else if (INCOGNITO && tor && tor.status.state !== 'ready') {
       // Nothing can load until Tor is connected, so the first page is the one
       // that says how far along it is. It moves on to a new tab by itself.
@@ -2010,11 +2179,13 @@ function main() {
     const sweepArchive = () => {
       const days = Number(prefs.get('autoArchiveDays')) || 0;
       if (!archive || !days) return;
-      const due = Archive.due(tabs.all(), days);
-      if (!due.length || due.length >= tabs.all().length) return;
-      for (const t of due) { archive.add(t); tabs.close(t.id); }
+      const due = Archive.due(allTabs.all(), days);
+      // Never a window's last tab: the window would go with it.
+      const going = due.filter((t) => (tabsOf(t) || tabs).all().some((o) => !due.includes(o)));
+      if (!going.length) return;
+      for (const t of going) { archive.add(t); (tabsOf(t) || tabs).close(t.id); }
       publish();
-      runCommand.toast(`${due.length} tab${due.length === 1 ? '' : 's'} unopened for ${days} day${days === 1 ? '' : 's'} put in the archive`,
+      runCommand.toast(`${going.length} tab${going.length === 1 ? '' : 's'} unopened for ${days} day${days === 1 ? '' : 's'} put in the archive`,
         'Find them', () => runCommand('search-tabs'), 8000);
     };
     if (!INCOGNITO) {
@@ -2151,7 +2322,7 @@ function main() {
         updatedFrom
       });
       updater.start();
-      shell.updater = updater;
+      for (const w of windows) w.shell.updater = updater;
       // Coming back to the browser is when a stale answer gets refreshed;
       // see Updater#nudge.
       powerMonitor.on('resume', () => updater.nudge('woke'));
@@ -2168,7 +2339,7 @@ function main() {
         app.exit(1);
       });
     } else if (SMOKE_TEST) {
-      runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
+      runSmokeTest({ tabs: tabsInUse, governor, shell: shellInUse, windowOps, prefs, bookmarks, runCommand, history, context, credentials, vault,
         blocker, sitePrefs, spaces, passkeys, getExtensions: () => extensions });
     } else if (SPEED_TEST) {
       // Startup, from this process starting to the first tab drawn.
@@ -2194,7 +2365,7 @@ function main() {
           const heapAfter = heap();
           const growth = (heapAfter - heapBefore) / heapBefore;
           console.log(`SOAK ${runs} runs: browser heap ${Math.round(heapBefore / 1048576)} MB -> ` +
-            `${Math.round(heapAfter / 1048576)} MB (${(growth * 100).toFixed(1)}%), ${tabs.all().length} tabs open`);
+            `${Math.round(heapAfter / 1048576)} MB (${(growth * 100).toFixed(1)}%), ${allTabs.all().length} tabs open`);
           if (growth > 0.5) { console.error('SOAK FAILED: the browser process grew by more than half'); app.exit(1); return; }
         }
         speed.print(report, startup);
@@ -2292,6 +2463,8 @@ function main() {
       askToClose(() => app.quit());
       return;
     }
+    // Every window goes now, as the browser closing - not each kept to reopen.
+    quitState.quitting = true;
     if (startupGuard) startupGuard.clear();
     if (updater) updater.stop();
     if (prewarm) prewarm.drop();
@@ -2311,10 +2484,11 @@ function main() {
     // synchronously because quit does not wait for a timer, and the debounce
     // above means the last thing the user did is usually still pending.
     if (sessionStore && tabs) {
-      sessionStore.flush(tabs.all(), tabs.activeId);
+      sessionStore.flush(allTabs.all(), windowsInfo());
       sessionStore.releaseRun();
     }
-    if (tabs) tabs.closeAll();
+    for (const w of windows) w.tabs.closeAll();
+    if (tabs && !windows.some((w) => w.tabs === tabs)) tabs.closeAll();
     // The trim helper is a long-lived child process of ours. Nothing else ends
     // it, and it holds an open stdin on a pipe that outlives us.
     platform.stopTrimHelper();
@@ -2331,22 +2505,162 @@ function main() {
   /** Whether closing now needs the user's say-so: several tabs, and the setting on. */
   function shouldAskToClose() {
     return !OFFLINE_MODE && !quitState.confirmed && Boolean(prefs && tabs) &&
-      prefs.get('confirmCloseTabs') === true && tabs.all().length > 1;
+      prefs.get('confirmCloseTabs') === true && allTabs.all().length > 1;
+  }
+
+  /*
+   * Windows: one of several closing is only that window - its tabs kept to
+   * reopen with Ctrl+Shift+T, as Chrome keeps a closed window; the last one
+   * closing is the browser closing, asked about and remembered as it always
+   * was.
+   */
+  function onWindowClose(win, event) {
+    if (windows.length > 1 && !quitState.quitting) {
+      rememberClosedWindow(win);
+      win.tabs.closeEvery();
+      return;
+    }
+    if (shouldAskToClose()) {
+      event.preventDefault();
+      askToClose(() => win.shell.close());
+      return;
+    }
+    // A hidden window still counts as open, and would keep the browser from
+    // quitting with its last real one.
+    tearPreview.destroy();
+    // The first window's place is the one the next start opens at.
+    if (!OFFLINE_MODE && prefs.get('rememberWindowBounds') && win === windows[0]) {
+      try {
+        saveWindowState({ ...win.shell.window.getNormalBounds(), maximized: win.shell.window.isMaximized() });
+      } catch (err) { log(`could not remember the window: ${err.message}`); }
+    }
+  }
+
+  function onWindowClosed(win) {
+    const at = windows.indexOf(win);
+    if (at !== -1) windows.splice(at, 1);
+    // The window in use goes to whichever is in front now.
+    if (shell === win.shell && windows.length) {
+      const focused = BaseWindow.getFocusedWindow();
+      useWindow(windows.find((w) => w.shell.window === focused) || windows[windows.length - 1]);
+    }
+    if (sessionStore) sessionStore.schedule(() => allTabs.all(), windowsInfo);
+    publish();
+  }
+
+  /** The picture that follows a tab dragged out of the strip (tear-preview.js). */
+  const tearPreview = new (require('./tear-preview').TearPreview)();
+
+  /** The windows closed this run, newest last, for Ctrl+Shift+T. */
+  const closedWindows = [];
+  const CLOSED_WINDOWS_KEPT = 5;
+  function rememberClosedWindow(win) {
+    const front = win.tabs.activeTab();
+    const kept = win.tabs.all().filter((t) => t.url && t.url !== 'about:blank' && t.url !== pages.NEW_TAB_URL);
+    for (const t of win.tabs.all()) t.notClosedByUser = true;
+    if (!kept.length) return;
+    let bounds = null;
+    try { bounds = { ...win.shell.window.getNormalBounds(), maximized: win.shell.window.isMaximized() }; } catch { /* gone */ }
+    closedWindows.push({
+      tabs: kept.map((t) => ({ url: t.url, title: t.title || '', pinned: t.pinned === true, spaceId: t.spaceId || null })),
+      activeIndex: Math.max(0, kept.indexOf(front)),
+      bounds,
+      at: Date.now()
+    });
+    if (closedWindows.length > CLOSED_WINDOWS_KEPT) closedWindows.shift();
+  }
+
+  /**
+   * A new window, in front: with one new tab, with `entries` (a closed or
+   * saved window's tabs, asleep but the one in front), or holding `tab`, moved
+   * there from the window it was in. Placed at `bounds`, or a step down and
+   * right of the window in use - or, for a tab dragged out, under the pointer
+   * at `at`. Never from a private window, which is one window by design.
+   */
+  function openWindow({ url = null, entries = null, activeIndex = 0, bounds = null, tab = null, at = null, show = true } = {}) {
+    if (INCOGNITO || !makeTabs || !makeShell) return null;
+    const id = ++windowSeq;
+    const win = { id, tabs: makeTabs(id), shell: null };
+    let place = bounds ? fitToDisplay(bounds) : null;
+    const from = shell && !shell.window.isDestroyed() ? shell.window : null;
+    if (!place && from) {
+      const b = from.getNormalBounds();
+      place = { x: b.x + 32, y: b.y + 32, width: b.width, height: b.height };
+    }
+    if (at && place) place = { ...place, x: Math.round(at.x - (at.offsetX ?? 120)), y: Math.round(at.y - (at.offsetY ?? 20)) };
+    makeShell(win, { bounds: place ? fitToDisplay(place) : null, held: !show });
+    useWindow(win);
+    if (tab) moveTabToWindow(tab, win);
+    else if (entries && entries.length) {
+      const made = entries.map((entry) => {
+        const spaceId = spaces && entry.spaceId ? spaces.resolve(entry.spaceId) : undefined;
+        const t = win.tabs.create({ url: entry.url, activate: false, realise: false, spaceId });
+        t.title = entry.title || t.title;
+        if (entry.pinned) win.tabs.setPinned(t.id, true);
+        if (entry.groupId && tabGroups.get(entry.groupId)) t.groupId = entry.groupId;
+        if (Number.isFinite(entry.lastActiveAt)) t.lastActiveAt = entry.lastActiveAt;
+        return t;
+      });
+      const front = made[activeIndex] || made[0];
+      win.tabs.activate(front.id).catch((err) => log(`window restore failed: ${err.message}`));
+    } else {
+      win.tabs.create({ url: url || newTabUrl(prefs) });
+    }
+    if (sessionStore) sessionStore.schedule(() => allTabs.all(), windowsInfo);
+    publish();
+    return win;
+  }
+
+  /**
+   * A tab from its window into another, renderer, page and history intact -
+   * at `index` in that window's strip, or at the end. A window left with no
+   * tabs closes.
+   */
+  function moveTabToWindow(tab, to, { index = null, activate = true } = {}) {
+    const from = winOf(tab);
+    if (!from || !to || from === to || !to.shell || to.shell.window.isDestroyed()) return false;
+    if (from.shell.inSplit(tab)) from.shell.setSplit(null);
+    from.shell.detachTab(tab);
+    from.tabs.release(tab.id);
+    to.tabs.adopt(tab, { index, activate });
+    if (activate) {
+      useWindow(to);
+      if (to.shell.window.isMinimized()) to.shell.window.restore();
+      to.shell.window.focus();
+    }
+    if (!from.tabs.all().length) from.shell.close();
+    if (sessionStore) sessionStore.schedule(() => allTabs.all(), windowsInfo);
+    publish();
+    return true;
+  }
+
+  /**
+   * The browser window under a point on the screen, other than `except`:
+   * where a tab dragged out of one window is dropped into another.
+   */
+  function windowAt(point, except = null) {
+    for (const w of windows) {
+      if (w === except || !w.shell || w.shell.window.isDestroyed() || w.shell.window.isMinimized()) continue;
+      const b = w.shell.window.getBounds();
+      if (point.x >= b.x && point.x < b.x + b.width && point.y >= b.y && point.y < b.y + b.height) return w;
+    }
+    return null;
   }
 
   /** Ask once, however many close attempts arrive while the dialog is up. */
   function askToClose(proceed) {
     if (quitState.asking || !shell || shell.window.isDestroyed()) return;
     quitState.asking = true;
-    const count = tabs.all().length;
+    const count = allTabs.all().length;
+    const several = windows.length > 1;
     ask(shell, {
       buttons: ['Close tabs', 'Cancel'],
       // Asked because the user just pressed close: Enter confirms it.
       focusId: 0,
       defaultId: 0,
       cancelId: 1,
-      title: 'Close window?',
-      message: `Close the window and its ${count} tabs?`,
+      title: several ? 'Close windows?' : 'Close window?',
+      message: several ? `Close ${windows.length} windows and their ${count} tabs?` : `Close the window and its ${count} tabs?`,
       detail: prefs.get('restoreTabs')
         ? 'They reopen the next time you start the browser.'
         : `${shortcuts.accelFor('reopen-closed-tab')} brings them back the next time you start the browser.`,
@@ -2439,7 +2753,7 @@ function startIncognito({ prefs, log, warm = false }) {
  * while it has focus. Both must mean the same thing by 'new-tab', so there is
  * one switch and two ways in rather than a second copy for shortcuts.
  */
-function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = null,
+function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish, log, prewarm = null,
                        bookmarks = null, closedTabs = [], previousSession = { tabs: [] }, context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
@@ -2447,7 +2761,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                        passkeys = null, getExtensions = () => null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
-    for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
+    for (const t of everyTab()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
   };
 
   /** The tabs of the space in front: what the strip shows and the keyboard walks. */
@@ -2485,9 +2799,22 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
     }).catch((err) => log(`reader view failed: ${err.message}`));
   };
 
-  const goTo = (id) => tabs.activate(id)
-    .then(publish)
-    .catch((err) => log(`activate failed: ${err.message}`));
+  /** Every tab in every window, for what is the browser's rather than a window's. */
+  const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
+
+  // A tab in another window - picked in tab search, or from the new tab page's
+  // list - brings its window to the front.
+  const goTo = (id) => {
+    const there = !tabs.byId(id) && windowOps ? windowOps.of(windowOps.all.byId(id)) : null;
+    if (there) {
+      if (there.shell.window.isMinimized()) there.shell.window.restore();
+      there.shell.window.focus();
+      return there.tabs.activate(id).then(publish).catch((err) => log(`activate failed: ${err.message}`));
+    }
+    return tabs.activate(id)
+      .then(publish)
+      .catch((err) => log(`activate failed: ${err.message}`));
+  };
 
   /**
    * Close a tab once its page has agreed to go.
@@ -2540,6 +2867,13 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
   /** Put the last closed tab back where it was. */
   const reopenClosed = () => {
+    // A window closed more recently than any tab: the whole window back.
+    const lastWindow = windowOps && windowOps.closed[windowOps.closed.length - 1];
+    if (lastWindow && lastWindow.at >= (closedTabs[closedTabs.length - 1]?.at || 0)) {
+      windowOps.closed.pop();
+      const win = windowOps.open({ entries: lastWindow.tabs, activeIndex: lastWindow.activeIndex, bounds: lastWindow.bounds });
+      return win ? win.tabs.activeTab() : null;
+    }
     // Nothing closed this run yet: the last run's tabs, all of them, once.
     if (!closedTabs.length && previousSession.tabs.length) {
       const entries = previousSession.tabs.splice(0);
@@ -2579,14 +2913,16 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
 
   /** The strip just emptied: close the window, or keep it with a new tab. */
   const lastTabClosed = () => {
-    if (prefs.get('lastTabCloses') === 'new-tab') tabs.create({ url: newTabUrl(prefs) });
+    // One of several windows goes with its last tab, whatever the setting:
+    // the browser is still open in the others.
+    if (prefs.get('lastTabCloses') === 'new-tab' && !(windowOps && windowOps.count() > 1)) tabs.create({ url: newTabUrl(prefs) });
     else shell.close();
   };
 
   // Commands that change nothing the state broadcast carries. Each is sent as
   // the pointer moves, and repainting every view in the browser for each one
   // would cost more than the command itself.
-  const UNPUBLISHED = new Set(['suggest-hover', 'suggest-select', 'suggest-size', 'prefetch-tab',
+  const UNPUBLISHED = new Set(['tear-preview', 'suggest-hover', 'suggest-select', 'suggest-size', 'prefetch-tab',
     'passkey-pick', 'passkey-other', 'passkey-close', 'passkey-size', 'passkey-passcode']);
 
   const runCommand = (command, payload, sender = null) => {
@@ -2597,6 +2933,63 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'new-tab':
         tabs.create({ url: payload?.url || newTabUrl(prefs) });
         break;
+
+      // Windows: another one, this one closed, a tab sent to a window.
+      case 'new-window':
+        if (windowOps) windowOps.open({ url: payload?.url || null });
+        break;
+
+      case 'close-window':
+        shell.close();
+        break;
+
+      case 'move-tab-to-new-window': {
+        const tab = tabs.byId(payload?.id) || active;
+        // A window's only tab is already in a window of its own.
+        if (!tab || !windowOps || tabs.all().length < 2) break;
+        windowOps.open({ tab });
+        break;
+      }
+
+      case 'move-tab-to-window': {
+        const tab = tabs.byId(payload?.id);
+        const to = windowOps && windowOps.count() > 1 ? windowOps.all.all().find((t) => t.windowId === payload?.windowId) : null;
+        if (tab && to) windowOps.moveTab(tab, windowOps.of(to));
+        break;
+      }
+
+      /*
+       * A tab dragged out of the strip and let go at a point on the screen:
+       * into the window there, at the end of its strip; or a window of its
+       * own, opened with the tab where the pointer is. A window's only tab
+       * takes its window along instead - the window is moved there.
+       */
+      // Its picture, following the pointer while it is out of the strip.
+      case 'tear-preview': {
+        const tab = tabs.byId(payload?.id);
+        const point = { x: Number(payload?.screenX), y: Number(payload?.screenY) };
+        if (!windowOps) break;
+        if (!tab || payload?.hide || !Number.isFinite(point.x) || !Number.isFinite(point.y)) windowOps.preview.hide();
+        else windowOps.preview.show(tab, point).catch((err) => log(`tear preview: ${err.message}`));
+        break;
+      }
+
+      case 'tear-tab': {
+        if (windowOps) windowOps.preview.hide();
+        const tab = tabs.byId(payload?.id);
+        const point = { x: Math.round(Number(payload?.screenX)), y: Math.round(Number(payload?.screenY)) };
+        if (!tab || !windowOps || !Number.isFinite(point.x) || !Number.isFinite(point.y)) break;
+        const grab = { offsetX: Math.max(0, Math.round(Number(payload?.offsetX) || 0)), offsetY: Math.max(0, Math.round(Number(payload?.offsetY) || 0)) };
+        const into = windowOps.at(point, windowOps.of(tab));
+        if (into) { windowOps.moveTab(tab, into); break; }
+        if (tabs.all().length < 2) {
+          if (shell.window.isMaximized() || shell.window.isFullScreen()) break;
+          shell.window.setPosition(point.x - grab.offsetX, point.y - grab.offsetY);
+          break;
+        }
+        windowOps.open({ tab, at: { ...point, ...grab } });
+        break;
+      }
 
       case 'tor-retry':
         if (tor) tor.restart();
@@ -2670,7 +3063,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (item.kind === 'command') {
           const entry = commandList({ incognito: INCOGNITO, hasTab: Boolean(active), labs: (key) => prefs.get(key) === true })[item.commandIndex];
           if (!entry) break;
-          const forTab = ['close-other-tabs', 'duplicate-tab', 'pin-tab', 'mute-tab'].includes(entry.command);
+          const forTab = ['close-other-tabs', 'duplicate-tab', 'pin-tab', 'mute-tab', 'move-tab-to-new-window'].includes(entry.command);
           runCommand(entry.command, forTab && active ? { id: active.id } : entry.payload);
           break;
         }
@@ -3081,7 +3474,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
             toast('That part of the page can’t be hidden for good - try a larger area around it');
             return;
           }
-          for (const t of tabs.all()) if (t.isLive && SitePrefs.hostOf(t.url) === host) siteStyles.add(t, selector);
+          for (const t of everyTab()) if (t.isLive && SitePrefs.hostOf(t.url) === host) siteStyles.add(t, selector);
           toast('Hidden on this site', 'Undo', () => {
             sitePrefs.set(host, 'hide', (sitePrefs.get(host, 'hide') || []).filter((sel) => sel !== selector));
             restyle(host);
@@ -4075,7 +4468,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         shell.applyWindowPrefs();
         // Open pages follow a new default at once, bar the sites zoomed by hand.
         if (payload.key === 'defaultZoom') {
-          for (const tab of tabs.all()) if (tab.isLive) siteZoom.apply(tab.wc);
+          for (const tab of everyTab()) if (tab.isLive) siteZoom.apply(tab.wc);
         }
         if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
         if (payload.key === 'secureDns') applySecureDns(prefs, log);
@@ -4100,7 +4493,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         // What the main process painted in the old palette: error pages, and
         // the surface behind our own pages.
         if (payload.key === 'theme' || payload.key === 'accent' || payload.key === 'design') {
-          for (const tab of tabs.all()) {
+          for (const tab of everyTab()) {
             if (!tab.isLive) continue;
             if (tab.failed) tab.redrawError();
             try { tab.view.setBackgroundColor(palette.surfaceFor(tab.url)); } catch { /* view going away */ }
@@ -4242,6 +4635,11 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
                     .map((gid) => tabGroups.get(gid)).filter(Boolean).map((g) => ({
                       id: 'add-to-group', label: `Add to ${g.name}`, swatch: g.color, payload: { id, groupId: g.id }
                     }))])] : []),
+            // Out of this window: into a new one, or into another already open.
+            ...(windowOps && !INCOGNITO && (all.length > 1 || tabs.all().length > 1) ? [{ kind: 'separator' },
+              { id: 'move-tab-to-new-window', label: 'Move to new window', icon: 'expand', payload: { id } },
+              ...(windowOps.count() > 1 ? [{ id: 'move-tab-to-window', label: 'Move to the other window', icon: 'forward',
+                payload: { id, windowId: otherWindowId(windowOps, tab) } }] : [])] : []),
             ...(spaces && !INCOGNITO && spaces.list.length > 1 ? [{ kind: 'separator' },
               ...spaces.list.filter((sp) => sp.id !== tab.spaceId).map((sp) => ({
                 id: 'move-tab-to-space', label: `Move to ${sp.name}`, icon: 'forward', payload: { id, spaceId: sp.id }
@@ -4420,7 +4818,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         tab.groupId = group.id;
         if (last >= 0) tabs.move(tab.id, last + 1);
         tabGroups.toggle(group.id, false);
-        tabGroups.prune(tabs.all());
+        tabGroups.prune(everyTab());
         publish();
         break;
       }
@@ -4434,7 +4832,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         const rest = tabs.all().filter((t) => t !== tab);
         const last = rest.map((t) => t.groupId).lastIndexOf(group);
         if (last >= 0 && tabs.all().indexOf(tab) <= last) tabs.move(tab.id, last + 1);
-        tabGroups.prune(tabs.all());
+        tabGroups.prune(everyTab());
         publish();
         break;
       }
@@ -4442,7 +4840,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
       case 'ungroup-all': {
         const id = String(payload?.groupId || '');
         for (const t of tabs.all()) if (t.groupId === id) t.groupId = null;
-        tabGroups.prune(tabs.all());
+        tabGroups.prune(everyTab());
         publish();
         break;
       }
@@ -4455,7 +4853,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!folded) break;
         const timer = setTimeout(() => {
           if (!tabGroups.get(id)?.collapsed || !governor) return;
-          for (const t of tabs.all()) {
+          for (const t of everyTab()) {
             if (t.groupId !== id || !t.isLive || t.visible) continue;
             governor.enforceManualDiscard(t).catch((err) => log(`group sleep failed: ${err.message}`));
           }
@@ -4478,7 +4876,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         if (!doomed.length) break;
         const before = closedTabs.remembered || 0;
         for (const t of doomed.reverse()) tabs.close(t.id);
-        tabGroups.prune(tabs.all());
+        tabGroups.prune(everyTab());
         if (tabs.all().length === 0) lastTabClosed();
         else {
           // The group may have been all this space had: never an empty window.
@@ -4566,6 +4964,8 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
   };
 
   ipcMain.on('debrowser:command', (event, command, payload) => {
+    // The window it came from is the window it means.
+    if (windowOps) windowOps.useSender(event.sender);
     if (!pageMay(senderPage(tabs, shell, event.sender), 'commands', command)) return;
     runCommand(command, inWindow(payload ?? null, event.sender), event.sender);
   });
@@ -4599,7 +4999,7 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
    * its own scale - so this needs no sender check beyond being a tab we own.
    */
   ipcMain.on('debrowser:zoom-gesture', (event, payload) => {
-    const tab = tabs.all().find((t) => t.isLive && t.wc.id === event.sender.id);
+    const tab = (windowOps ? windowOps.all : tabs).all().find((t) => t.isLive && t.wc.id === event.sender.id);
     if (!tab) return;
     stepZoom(tab, payload?.direction === 'out' ? -1 : +1, siteZoom);
     publish();
@@ -4730,7 +5130,15 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
  * menu item and a page's request all meet the same wall. A command that is not
  * there cannot be abused, whatever the sender.
  */
+/** The window most recently in front other than `tab`'s: where "Move to the other window" sends it. */
+function otherWindowId(windowOps, tab) {
+  const others = windowOps.all.all().filter((t) => t.windowId !== tab.windowId);
+  const latest = others.sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))[0];
+  return latest ? latest.windowId : null;
+}
+
 const INCOGNITO_REFUSED = new Set([
+  'new-window', 'move-tab-to-new-window', 'move-tab-to-window', 'tear-tab', 'tear-preview',
   'extensions-list', 'extension-add', 'extension-remove',
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
   'check-passwords',
@@ -4900,11 +5308,13 @@ function pageMay(page, channel, name) {
   return allowed === ANY || Boolean(allowed?.has(name));
 }
 
-function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, history, downloads, prefs, log,
+function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
                        getReceipts = () => null, getArchive = () => null, getExtensions = () => null,
                        context = { model: null } }) {
+  const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
+    if (windowOps) windowOps.useSender(event.sender, { views: true });
     // Stricter than the command channel: only the passwords page may touch credentials.
     const sender = senderPage(tabs, shell, event.sender);
     if (!pageMay(sender, 'requests', command)) return null;
@@ -4944,7 +5354,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         // Pages open now are listed too, as the tab to switch to: left out,
         // a restart that reopened your last pages emptied the card, and the
         // new tab page changed its whole layout to favourites.
-        const open = new Map(tabs.all().map((t) => [t.url, t.id]));
+        const open = new Map(everyTab().map((t) => [t.url, t.id]));
         const limit = Math.min(Math.max(Number(payload?.limit) || 4, 1), 12);
         const items = [];
         for (const e of history.entries()) {
@@ -5122,7 +5532,7 @@ function wireRequests({ tabs, shell, credentials, vault = null, bookmarks, histo
         // Tab search sees every other tab, newest-used first, with what each
         // costs; the ordinary list only needs the websites among them.
         const scoped = TAB_SCOPE.test(text.trim()) || /^@tabs$/i.test(text.trim());
-        const others = tabs.all().filter((t) => t !== active);
+        const others = everyTab().filter((t) => t !== active);
         if (scoped) others.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
         const result = suggest({
           text,
@@ -6342,10 +6752,10 @@ function applySecureDns(prefs, log) {
 /* Smoke test - exercises the full lifecycle headlessly                */
 /* ------------------------------------------------------------------ */
 
-function runSmokeTest({ tabs, governor, shell, prefs, bookmarks, runCommand, history, context, credentials, vault,
+function runSmokeTest({ tabs, governor, shell, windowOps, prefs, bookmarks, runCommand, history, context, credentials, vault,
                        blocker, sitePrefs, spaces, passkeys, getExtensions = () => null }) {
   const { runSmoke } = require('./testing/smoke');
-  runSmoke({ tabs, governor, shell, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
+  runSmoke({ tabs, governor, shell, windowOps, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
             // The command dispatcher itself, so the suite exercises find and
             // the context menu the way a keystroke does rather than by calling

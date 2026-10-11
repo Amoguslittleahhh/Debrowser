@@ -70,6 +70,11 @@ class TabManager {
     onNewSession = () => {},
     // The space a new tab without an opener goes in (spaces.js).
     spaceOf = () => 'home',
+    // One per window, and what every window's manager has in common: the
+    // sessions already set up - set up twice, a session took each download
+    // twice - and the latency figures, which describe the browser, not a window.
+    shared = null,
+    windowId = 1,
     log = () => {}
   } = {}) {
     this.cfg = cfg;
@@ -77,8 +82,14 @@ class TabManager {
     this.sessionFor = sessionFor;
     this.onNewSession = onNewSession;
     this.spaceOf = spaceOf;
+    /** The window this manager's tabs are in. */
+    this.windowId = windowId;
     /** Sessions already given the permission policy. */
-    this.configured = new WeakSet([this.session]);
+    const firstOfAll = !shared || !shared.configured.has(this.session);
+    this.configured = shared ? shared.configured : new WeakSet();
+    // The refusals the shared sessions' handler records, read from any window.
+    this.deniedPermissions = shared ? shared.deniedPermissions : [];
+    this.configured.add(this.session);
     this.onEvent = onEvent;
     /**
      * Called with a tab that is about to be shown, and awaited before it is.
@@ -122,9 +133,26 @@ class TabManager {
      * What reclaim costs the user. Read by the governor's snapshot and asserted
      * in the smoke suite; see ../latency.js for why this is measured at all.
      */
-    this.latency = new LatencyTracker();
+    this.latency = shared ? shared.latency : new LatencyTracker();
 
-    this.configureSession();
+    if (firstOfAll) this.configureSession();
+  }
+
+  /** What a second window's manager shares with this one's (see the constructor). */
+  shareWith() {
+    return { configured: this.configured, latency: this.latency, deniedPermissions: this.deniedPermissions };
+  }
+
+  /**
+   * Each tab's events, through this manager: finishing a load frees an
+   * admission slot for whatever is queued. Re-pointed when a tab moves to
+   * another window, whose manager then owns its slot.
+   */
+  relayFor(tab) {
+    tab.onEvent = (t, event, payload) => {
+      if (event === 'updated' && !t.loading) this.pumpLoadQueue();
+      this.onEvent(t, event, payload);
+    };
   }
 
   configureSession(ses = this.session) {
@@ -224,16 +252,13 @@ class TabManager {
     const tab = new Tab({
       session: this.sessionForNew(opener, space),
       url,
-      onEvent: (t, event, payload) => {
-        // Finishing a load frees an admission slot for whatever is queued.
-        if (event === 'updated' && !t.loading) this.pumpLoadQueue();
-        this.onEvent(t, event, payload);
-      },
       applyZoom: this.applyZoom,
       log: this.log
     });
+    this.relayFor(tab);
 
     tab.spaceId = space;
+    tab.windowId = this.windowId;
     if (index == null) this.tabs.push(tab);
     else this.tabs.splice(index, 0, tab);
 
@@ -359,7 +384,7 @@ class TabManager {
   uncoverWhenReady(tab, id) {
     const wc = tab.wc;
     if (!wc) {
-      this.onUncover();
+      this.onUncover(tab);
       return;
     }
     const done = () => {
@@ -373,9 +398,9 @@ class TabManager {
       // ceiling in window.js expired. Clearing it whenever the tab that is now
       // active is live costs nothing: a live tab has real content behind the
       // placeholder by definition.
-      if (this.activeId === id) { this.onUncover(); return; }
+      if (this.activeId === id) { this.onUncover(tab); return; }
       const current = this.byId(this.activeId);
-      if (current && current.isLive) this.onUncover();
+      if (current && current.isLive) this.onUncover(tab);
     };
     wc.once('did-stop-loading', done);
     // The page's own failure, not a subframe's: a blocked tracker iframe took
@@ -515,6 +540,27 @@ class TabManager {
   close(id) {
     const index = this.tabs.findIndex((tab) => tab.id === id);
     if (index === -1) return false;
+    const tab = this.tabs[index];
+    // A picture of the page must not outlive the tab it was taken from.
+    tab.closed = true;
+    tab.discardThumbnail();
+    tab.teardownView();
+    this.release(id);
+
+    // Where it was, so "Undo" can put it back there.
+    tab.closedIndex = index;
+    this.onEvent(tab, 'closed');
+    return true;
+  }
+
+  /**
+   * Take a tab out of this window's strip, renderer and all, and hand it back:
+   * closing it, or moving it to another window (`adopt` there). The tab in
+   * front goes to its neighbour.
+   */
+  release(id) {
+    const index = this.tabs.findIndex((tab) => tab.id === id);
+    if (index === -1) return null;
 
     const [tab] = this.tabs.splice(index, 1);
     const queued = this.loadQueue.indexOf(tab);
@@ -525,10 +571,6 @@ class TabManager {
     // nothing in the log to say why. Only when it is *this* tab: closing any
     // other one used to free the slot while the speculated tab stayed resident.
     if (this.speculatingId === tab.id) this.clearSpeculation(tab);
-    // A picture of the page must not outlive the tab it was taken from.
-    tab.closed = true;
-    tab.discardThumbnail();
-    tab.teardownView();
 
     if (this.activeId === id) {
       // The neighbour in the same space: closing a tab never throws you into
@@ -540,11 +582,26 @@ class TabManager {
       this.activeId = null;
       if (next) this.activate(next.id).catch((err) => this.log(`activate failed: ${err.message}`));
     }
+    return tab;
+  }
 
-    // Where it was, so "Undo" can put it back there.
-    tab.closedIndex = index;
-    this.onEvent(tab, 'closed');
-    return true;
+  /**
+   * A tab from another window's strip (`release` there), into this one at
+   * `index` - or at the end - and, unless told otherwise, in front.
+   */
+  adopt(tab, { index = null, activate = true } = {}) {
+    this.relayFor(tab);
+    tab.windowId = this.windowId;
+    // Hidden until this window presents it: shown, it would be drawn into a
+    // window it is no longer in.
+    if (tab.view) tab.setVisible(false);
+    const pinned = this.tabs.filter((t) => t.pinned).length;
+    const at = index == null ? this.tabs.length
+      : Math.max(tab.pinned ? 0 : pinned, Math.min(tab.pinned ? pinned : this.tabs.length, index));
+    this.tabs.splice(at, 0, tab);
+    this.onEvent(tab, 'adopted');
+    if (activate) this.activate(tab.id).catch((err) => this.log(`activate failed: ${err.message}`));
+    return tab;
   }
 
   /**
@@ -581,6 +638,16 @@ class TabManager {
     const pids = new Set();
     for (const tab of this.tabs) if (tab.pid) pids.add(tab.pid);
     return pids;
+  }
+
+  /**
+   * Every tab, as their window closes: each closed as `close` closes one, but
+   * with nothing brought forward on the way - waking each next tab in turn
+   * only to close it was a renderer started per tab for nothing.
+   */
+  closeEvery() {
+    this.activeId = null;
+    for (const tab of [...this.tabs]) this.close(tab.id);
   }
 
   closeAll() {

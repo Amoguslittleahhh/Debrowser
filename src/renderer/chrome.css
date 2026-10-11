@@ -419,6 +419,12 @@ body.tab-dragging .tab:not(.dragging) {
 .tab.settling {
   transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
 }
+/* Pulled out of the strip: it stays in its place, faded, while its picture
+   follows the pointer outside - letting go there takes it to a window. */
+.tab.torn {
+  opacity: 0.4;
+  transition: opacity var(--fast) var(--ease);
+}
 
 /*
  * A pinned tab: its site's icon and nothing else, at the start of the strip,
