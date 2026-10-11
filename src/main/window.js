@@ -2472,6 +2472,26 @@ class BrowserShell {
     return { x: 0, y: 0 };
   }
 
+  /**
+   * A tab dropped on this window at `point` on the screen: the id of the tab
+   * it goes before in this window's strip, or null for the end - asked of
+   * the view drawing the strip, which alone knows where its tabs are.
+   */
+  async dropBefore(point) {
+    if (this.window.isDestroyed()) return null;
+    const content = this.window.getContentBounds();
+    const strip = this.stripView && this.stripView.getBounds().width > 0 ? this.stripView : this.chromeView;
+    const box = strip.getBounds();
+    const x = Math.round(point.x - content.x - box.x);
+    const y = Math.round(point.y - content.y - box.y);
+    try {
+      const id = await strip.webContents.executeJavaScript(`window.debrowserDropBefore(${x}, ${y})`);
+      return Number.isInteger(id) ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** A one-off message to the chrome, for the things that are not state. */
   toChrome(kind, payload = null) {
     send(this.chromeView, 'debrowser:ui', { kind, ...(payload || {}) });

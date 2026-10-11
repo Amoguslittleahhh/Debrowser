@@ -2988,7 +2988,15 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         const grab = { offsetX: Math.max(0, Math.round(Number(payload?.offsetX) || 0)), offsetY: Math.max(0, Math.round(Number(payload?.offsetY) || 0)) };
         const home = windowOps.of(tab);
         const into = windowOps.at(point, home);
-        if (into) { windowOps.moveTab(tab, into); break; }
+        // Into that window's strip where it was let go, between the tabs it
+        // was dropped between.
+        if (into) {
+          into.shell.dropBefore(point).then((beforeId) => {
+            const at = beforeId == null ? -1 : into.tabs.all().findIndex((t) => t.id === beforeId);
+            windowOps.moveTab(tab, into, { index: at === -1 ? null : at });
+          }).catch((err) => log(`tab drop failed: ${err.message}`));
+          break;
+        }
         if (home.tabs.all().length < 2) {
           const win = home.shell.window;
           if (win.isMaximized() || win.isFullScreen()) break;

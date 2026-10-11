@@ -1308,8 +1308,13 @@ function setTorn(d, torn, event) {
   api.send('tear-preview', torn ? { id: d.id, screenX: event.screenX, screenY: event.screenY } : { hide: true });
 }
 
-/** Whether the pointer has left the strip by more than `TEAR_DISTANCE`. */
+/**
+ * Whether the pointer has left the strip by more than `TEAR_DISTANCE` - or
+ * left this view at all, which is leaving the window: up out of a window
+ * whose strip is its top edge, onto another window's strip just above.
+ */
 function pulledOut(d, event) {
+  if (event.clientX < 0 || event.clientY < 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight) return true;
   const box = el.tabs.getBoundingClientRect();
   return d.vertical
     ? event.clientX > box.right + TEAR_DISTANCE || event.clientX < box.left - TEAR_DISTANCE
@@ -1339,6 +1344,23 @@ el.tabs.addEventListener('pointerup', (event) => {
   endTabDrag(false);
 });
 el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
+
+/**
+ * A tab dragged here from another window and let go at (x, y) in this view:
+ * the tab it goes before, as the strip lays them out now, or null for after
+ * the last. Along the strip's own axis only, so a drop on the toolbar below
+ * a tab still lands beside that tab. Asked by the browser (window.js).
+ */
+window.debrowserDropBefore = (x, y) => {
+  const vertical = document.body.dataset.layout === 'left';
+  const at = vertical ? y : x;
+  for (const node of el.tabs.children) {
+    if (node.classList.contains('closing') || !node.dataset.id) continue;
+    const box = node.getBoundingClientRect();
+    if (at < (vertical ? box.top + box.bottom : box.left + box.right) / 2) return Number(node.dataset.id);
+  }
+  return null;
+};
 
 /**
  * Where the pointer should be in a window opened from this tab: over the tab,

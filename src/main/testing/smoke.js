@@ -170,6 +170,17 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     runCommand('tear-tab', { id: moving.id, screenX: b.x + b.width - 20, screenY: b.y + b.height - 20, offsetX: 0, offsetY: 0 });
     await waitFor(() => windowOps.count() === before && second.tabs.activeTab() === moving, { timeoutMs: 5000 });
     const joined = second.tabs.all().includes(moving) && torn.shell.window.isDestroyed();
+    // And where it was let go: out once more, then dropped on that window's
+    // first tab, it is first in its strip.
+    runCommand('tear-tab', { id: moving.id, ...away, offsetX: 0, offsetY: 0 });
+    await waitFor(() => windowOps.count() === before + 1 && windowOps.of(moving) !== second, { timeoutMs: 5000 });
+    const firstTab = await second.shell.chromeView.webContents.executeJavaScript(`(() => {
+      const r = document.querySelector('#tabs > [data-id]').getBoundingClientRect();
+      return { x: r.left + 6, y: r.top + r.height / 2 }; })()`).catch(() => null);
+    const content = second.shell.window.getContentBounds();
+    if (firstTab) runCommand('tear-tab', { id: moving.id, screenX: content.x + firstTab.x, screenY: content.y + firstTab.y, offsetX: 0, offsetY: 0 });
+    await waitFor(() => windowOps.count() === before && second.tabs.all()[0] === moving, { timeoutMs: 5000 });
+    const landed = second.tabs.all()[0] === moving && second.tabs.activeTab() === moving;
     // The session: which window each tab is in, and back again.
     const { Session } = require('../data/session');
     const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-windows-'));
@@ -196,9 +207,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       first.shell.window.focus();
       windowOps.useSender(first.shell.chromeView.webContents);
     }
-    check('several windows: Ctrl+N opens one with its own tabs; a tab moves between windows with its page as it was, is dragged out into a window of its own and into another; closing one leaves the rest and Ctrl+Shift+T brings it back; the session keeps which window each tab was in',
-      opened && ownStrip && moved && tornOut && joined && remembered && closedOne && cameBack && windowOps.current() === first,
-      `opened ${opened}, own strip ${ownStrip}, moved ${moved}, torn out ${tornOut}, joined ${joined}, remembered ${remembered}, ` +
+    check('several windows: Ctrl+N opens one with its own tabs; a tab moves between windows with its page as it was, is dragged out into a window of its own and into another, landing where it is let go; closing one leaves the rest and Ctrl+Shift+T brings it back; the session keeps which window each tab was in',
+      opened && ownStrip && moved && tornOut && joined && landed && remembered && closedOne && cameBack && windowOps.current() === first,
+      `opened ${opened}, own strip ${ownStrip}, moved ${moved}, torn out ${tornOut}, joined ${joined}, landed where let go ${landed}, remembered ${remembered}, ` +
       `closed one ${closedOne}, came back ${cameBack}, windows now ${windowOps.count()}`);
   }
 
