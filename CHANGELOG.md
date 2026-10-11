@@ -4,7 +4,7 @@
 
 ### New
 
-- **VMware's graphics adapter is used.** Chromium doesn't trust VMware's SVGA adapter, so in a VMware virtual machine pages and 3D were drawn by the processor even with the VM's Accelerate 3D graphics on. Debrowser now recognises the adapter and, from the next start, draws with it. If the virtual machine has no 3D to give - Accelerate 3D graphics is off - or Debrowser's graphics crash with it, it is turned off again and Debrowser says why; Settings → Advanced → VMware 3D graphics shows what happened and tries again when you choose Use it.
+- **Virtual machines' graphics adapters are used.** Chromium doesn't trust the graphics adapters of VMware (SVGA), VirtualBox (VMSVGA and VBoxSVGA) or QEMU (virtio-gpu), so in those virtual machines pages and 3D were drawn by the processor even with the VM's 3D acceleration on. Debrowser now recognises the adapter and, from the next start, draws with it. If the virtual machine has no 3D to give - its 3D acceleration is off - or Debrowser's graphics crash with it, it is turned off again and Debrowser says why and which setting of that VM to change. QEMU's QXL, standard VGA and Cirrus adapters have no 3D at all, so they are not tried; Debrowser says so once and names virtio-gpu with 3D acceleration as the one to switch to. Settings → Advanced → Virtual machine 3D graphics shows what happened and tries again when you choose Use it.
 
 ## 2.3.0
 

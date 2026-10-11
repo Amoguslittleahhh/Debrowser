@@ -597,16 +597,16 @@ const SECTIONS = {
       liveHint: (state) => graphicsHint(state.prefs || {})
     },
     {
-      key: 'vmwareGpu',
-      label: 'VMware 3D graphics',
-      hint: 'In a VMware virtual machine, draw pages and 3D with VMware’s graphics adapter, which Chromium would otherwise not use. Needs Accelerate 3D graphics on in the VM’s Display settings, and a restart.',
+      key: 'vmGpu',
+      label: 'Virtual machine 3D graphics',
+      hint: 'In a VMware, VirtualBox or QEMU virtual machine, draw pages and 3D with its graphics adapter, which Chromium would otherwise not use. Needs the VM’s 3D acceleration on, and a restart.',
       type: 'select',
       options: [
         { value: 'auto', name: 'Use it' },
         { value: 'off', name: 'Off' }
       ],
-      liveHint: (state) => vmwareHint(state.prefs || {}),
-      unavailable: (state) => (vmwareFound(state.prefs || {}) ? null : 'For a VMware virtual machine. This computer isn’t one, or hasn’t been checked yet.')
+      liveHint: (state) => vmGpuHint(state.prefs || {}),
+      unavailable: (state) => vmGpuUnavailable(state.prefs || {})
     },
     {
       key: 'gpuIgnoreBlocklist',
@@ -1667,21 +1667,28 @@ function workSaid(work) {
   return parts.length ? `${parts.join('; ')}.` : '';
 }
 
-/** VMware's adapter found (main graphics.js, isVmware), in use or beside a software renderer. */
-function vmwareFound(prefs) {
-  const d = prefs.graphicsDetected;
-  return Boolean(d && (d.vendorId === 0x15ad || d.vmwarePresent === true));
+/** The VM adapter found (main graphics.js, vmGpuOf), in use or beside a software renderer, or null. */
+function vmGpuFound(prefs) {
+  return (prefs.graphicsDetected && prefs.graphicsDetected.vmGpu) || null;
 }
 
-/** What the last try with VMware's adapter found. */
-function vmwareHint(prefs) {
-  if (!vmwareFound(prefs)) return 'For a VMware virtual machine. This computer isn’t one, or hasn’t been checked yet.';
-  switch (prefs.vmwareGpuState) {
-    case 'working': return 'Drawing with VMware’s 3D graphics.';
-    case 'no-3d': return 'Tried, but this virtual machine has no 3D to give: turn on Accelerate 3D graphics in its Display settings, choose Use it, and restart Debrowser.';
+/** Why the setting can't be used here: not such a VM, or an adapter with no 3D. */
+function vmGpuUnavailable(prefs) {
+  const g = vmGpuFound(prefs);
+  if (!g) return 'For a VMware, VirtualBox or QEMU virtual machine. This computer isn’t one, or hasn’t been checked yet.';
+  return g.threeD ? '' : `${g.name} gives no 3D. To get it, ${g.how}, and restart Debrowser.`;
+}
+
+/** What the last try with the VM's adapter found. */
+function vmGpuHint(prefs) {
+  const g = vmGpuFound(prefs);
+  if (!g || !g.threeD) return vmGpuUnavailable(prefs);
+  switch (prefs.vmGpuState) {
+    case 'working': return `Drawing with the virtual machine’s 3D graphics (${g.name}).`;
+    case 'no-3d': return `Tried, but this virtual machine gives no 3D through ${g.name}: ${g.how}, choose Use it, and restart Debrowser.`;
     case 'crashed': return 'Tried, but Debrowser’s graphics crashed with it, so it is off. Choose Use it to try again after a restart.';
-    case 'pending': return 'VMware’s adapter found: Debrowser draws with it from the next start.';
-    default: return prefs.vmwareGpu === 'off' ? 'Off: pages are drawn the way Chromium chooses.' : 'VMware’s adapter found.';
+    case 'pending': return `${g.name} found: Debrowser draws with it from the next start.`;
+    default: return prefs.vmGpu === 'off' ? 'Off: pages are drawn the way Chromium chooses.' : `${g.name} found.`;
   }
 }
 

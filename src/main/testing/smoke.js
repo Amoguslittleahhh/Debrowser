@@ -6047,53 +6047,70 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `kept ${kept}, off ${JSON.stringify(off)}`);
   }
 
-  // VMware's SVGA adapter: found, it is drawn with from the next start; a
-  // start where it gave no 3D, or crashed, turns it off and says why; chosen
-  // again, it is tried again. Simulated: no VMware machine runs this suite.
+  // A VM's graphics adapter - VMware SVGA, VirtualBox's VMSVGA and VBoxSVGA,
+  // QEMU's virtio-gpu: found, it is drawn with from the next start; a start
+  // where it gave no 3D, or crashed, turns it off and says why; chosen again,
+  // it is tried again. QEMU's adapters with no 3D (QXL, standard VGA) are
+  // never tried. Simulated: no virtual machine with 3D runs this suite.
   {
     const graphics = require('../graphics');
     const store = (o) => ({ values: { ...o }, get(k) { return this.values[k]; }, set(k, v) { this.values[k] = v; return true; } });
-    const fakeApp = (switches = []) => {
+    const fakeApp = (switches = [], devices = [
+      { vendorId: 0x1ae0, deviceId: 0xc0de, active: true, deviceString: 'Google SwiftShader' },
+      { vendorId: 0x15ad, deviceId: 0x0405, active: false, deviceString: 'VMware SVGA 3D' }]) => {
       const added = [...switches];
       const handlers = {};
       return { added, commandLine: { appendSwitch: (n) => added.push(n), hasSwitch: (n) => added.includes(n) },
         on: (e, f) => { handlers[e] = f; }, emit: (e, ...a) => handlers[e] && handlers[e](...a),
-        getGPUFeatureStatus: () => ({}), getGPUInfo: async () => ({ gpuDevice: [
-          { vendorId: 0x1ae0, deviceId: 0xc0de, active: true, deviceString: 'Google SwiftShader' },
-          { vendorId: 0x15ad, deviceId: 0x0405, active: false, deviceString: 'VMware SVGA 3D' }] }) };
+        getGPUFeatureStatus: () => ({}), getGPUInfo: async () => ({ gpuDevice: devices }) };
     };
-    const vmware = { vendorId: 0x15ad, software: false };
-    const switched = fakeApp(); const why = graphics.applySwitches(switched, store({ graphicsDetected: vmware, vmwareGpu: 'auto' }));
-    const offApp = fakeApp(); const whyOff = graphics.applySwitches(offApp, store({ graphicsDetected: vmware, vmwareGpu: 'off' }));
-    const noVm = fakeApp(); const whyNone = graphics.applySwitches(noVm, store({ graphicsDetected: { vendorId: 0x10de } }));
+    const found = (id, vm, more = {}) => ({ vendorId: id, software: false, vm, vmGpu: graphics.vmGpuOf(id, vm), ...more });
+    const vmware = found(0x15ad, 'VMware');
+    const vmsvga = found(0x15ad, 'VirtualBox');
+    const vboxsvga = found(0x80ee, 'VirtualBox');
+    const virtio = found(0x1af4, 'QEMU/KVM');
+    const qxl = found(0x1b36, 'QEMU/KVM');
+    const why = (detected, more = {}) => graphics.applySwitches(fakeApp(), store({ graphicsDetected: detected, vmGpu: 'auto', ...more }));
+    const whys = [why(vmware), why(vmsvga), why(vboxsvga), why(virtio), why(qxl), why(vmware, { vmGpu: 'off' }), why({ vendorId: 0x10de, vmGpu: null })];
+    const switched = fakeApp(); graphics.applySwitches(switched, store({ graphicsDetected: vmware, vmGpu: 'auto' }));
     const on = fakeApp(['ignore-gpu-blocklist']);
     const outcomes = [
-      graphics.vmwareOutcome(on, store({}), { vendorId: 0x15ad, software: false }),
-      graphics.vmwareOutcome(on, store({}), { vendorId: 0x1ae0, vmwarePresent: true, software: true }),
-      graphics.vmwareOutcome(fakeApp(), store({}), { vendorId: 0x15ad, software: false }),
-      graphics.vmwareOutcome(on, store({ gpuIgnoreBlocklist: true }), { vendorId: 0x15ad, software: true })
+      graphics.vmGpuOutcome(on, store({}), vmware),
+      graphics.vmGpuOutcome(on, store({}), vboxsvga),
+      graphics.vmGpuOutcome(on, store({}), virtio),
+      graphics.vmGpuOutcome(on, store({}), { ...virtio, vendorId: 0x1ae0, software: true }),
+      graphics.vmGpuOutcome(on, store({}), qxl),
+      graphics.vmGpuOutcome(fakeApp(), store({}), vmware),
+      graphics.vmGpuOutcome(on, store({ gpuIgnoreBlocklist: true }), { ...vmware, software: true })
     ];
+    // Each VM's own words for its 3D setting.
+    const words = [vmware, vmsvga, vboxsvga, virtio, qxl].map((f) => f.vmGpu.how);
+    const named = [vmsvga.vmGpu.name, vboxsvga.vmGpu.name, virtio.vmGpu.name, qxl.vmGpu.threeD, graphics.vmGpuOf(0x10de, null)];
     const adapter = await graphics.detectAdapter(fakeApp());
-    // Two graphics crashes with VMware's adapter asked for: off, and said.
+    const qemuAdapter = await graphics.detectAdapter(fakeApp([], [{ vendorId: 0x1234, active: true, deviceString: 'QEMU VGA' }]));
+    // Two graphics crashes with the VM's adapter asked for: off, and said.
     const crashed = fakeApp(['ignore-gpu-blocklist']);
-    const crashPrefs = store({ graphicsDetected: vmware, vmwareGpu: 'auto' });
+    const crashPrefs = store({ graphicsDetected: vboxsvga, vmGpu: 'auto' });
     graphics.guardOverride(crashed, crashPrefs);
     crashed.emit('child-process-gone', {}, { type: 'GPU', reason: 'crashed' });
     crashed.emit('child-process-gone', {}, { type: 'GPU', reason: 'crashed' });
     // Chosen again in Settings: tried again from the next start.
-    runCommand('set-pref', { key: 'vmwareGpu', value: 'off' });
-    prefs.set('vmwareGpuFailed', true);
-    runCommand('set-pref', { key: 'vmwareGpu', value: 'auto' });
-    const retried = prefs.get('vmwareGpuFailed') === false && prefs.get('vmwareGpuState') === 'pending';
-    prefs.set('vmwareGpuState', '');
-    check('VMware SVGA: found, it is drawn with from the next start; no 3D or a crash turns it off and says why; chosen again, it is tried again',
-      why === 'vmware' && switched.added.includes('ignore-gpu-blocklist') && whyOff === false && whyNone === false &&
-        JSON.stringify(outcomes) === JSON.stringify(['working', 'no-3d', null, null]) &&
-        adapter.vmwarePresent === true && adapter.basic === true &&
-        crashPrefs.get('vmwareGpu') === 'off' && crashPrefs.get('vmwareGpuState') === 'crashed' && crashPrefs.get('gpuOverrideFailed') === true &&
+    runCommand('set-pref', { key: 'vmGpu', value: 'off' });
+    prefs.set('vmGpuFailed', true);
+    runCommand('set-pref', { key: 'vmGpu', value: 'auto' });
+    const retried = prefs.get('vmGpuFailed') === false && prefs.get('vmGpuState') === 'pending';
+    prefs.set('vmGpuState', '');
+    check('VM graphics: VMware, VirtualBox and QEMU virtio adapters are drawn with from the next start, QXL and standard VGA never; no 3D or a crash turns it off and says how to fix it in that VM\'s words; chosen again, it is tried again',
+      JSON.stringify(whys) === JSON.stringify(['vm', 'vm', 'vm', 'vm', false, false, false]) && switched.added.includes('ignore-gpu-blocklist') &&
+        JSON.stringify(outcomes) === JSON.stringify(['working', 'working', 'working', 'no-3d', null, null, null]) &&
+        /Accelerate 3D graphics/.test(words[0]) && /Enable 3D Acceleration/.test(words[1]) && /Enable 3D Acceleration/.test(words[2]) &&
+        /Virtio/.test(words[3]) && /Virtio/.test(words[4]) &&
+        JSON.stringify(named) === JSON.stringify(['VirtualBox VMSVGA', 'VirtualBox graphics', 'virtio-gpu', false, null]) &&
+        adapter.vmAdapterId === 0x15ad && adapter.basic === true && qemuAdapter.vmAdapterId === 0x1234 &&
+        crashPrefs.get('vmGpu') === 'off' && crashPrefs.get('vmGpuState') === 'crashed' && crashPrefs.get('gpuOverrideFailed') === true &&
         retried,
-      `why ${why}/${whyOff}/${whyNone}, outcomes ${JSON.stringify(outcomes)}, adapter ${JSON.stringify(adapter)}, ` +
-      `crash ${JSON.stringify(crashPrefs.values)}, retried ${retried}`);
+      `why ${JSON.stringify(whys)}, outcomes ${JSON.stringify(outcomes)}, named ${JSON.stringify(named)}, words ${JSON.stringify(words)}, ` +
+      `adapter ${JSON.stringify(adapter)}/${JSON.stringify(qemuAdapter)}, crash ${JSON.stringify(crashPrefs.values)}, retried ${retried}`);
   }
 
   // Fuzzing the command channel: every command the browser's own pages may

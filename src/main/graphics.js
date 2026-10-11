@@ -19,41 +19,40 @@
 
 const CRASH_WINDOW_MS = 60_000;
 
-/** VMware's PCI vendor id: its SVGA display adapter, in every VMware guest. */
-const VMWARE_VENDOR = 0x15ad;
-
 /**
- * VMware's SVGA adapter, used rather than drawn around.
+ * A virtual machine's graphics adapter, used rather than drawn around.
  *
- * Chromium keeps VMware's adapter on its list of graphics it does not trust,
- * so in a VMware guest pages and WebGL are drawn by the processor even with
- * the VM's "Accelerate 3D graphics" on - when VMware would hand that work to
- * the host's card. Where the last start found VMware's adapter in use, the
- * next one asks Chromium to use it (`ignore-gpu-blocklist`), then checks:
- * still drawing in software means the VM has no 3D to give (the setting is
- * off), and two crashes of the graphics process mean the adapter is not up
- * to it - either way it stops asking, and says why once.
+ * Chromium keeps the virtual adapters of VMware, VirtualBox and QEMU on its
+ * list of graphics it does not trust, so in such a guest pages and WebGL are
+ * drawn by the processor even with the VM's 3D acceleration on - when the VM
+ * would hand that work to the host's card. Where the last start found an
+ * adapter that can give 3D (VM_3D), the next one asks Chromium to use it
+ * (`ignore-gpu-blocklist`), then checks: still drawing in software means the
+ * VM has no 3D to give (its setting is off), and two crashes of the graphics
+ * process mean the adapter is not up to it - either way it stops asking, and
+ * says why once. An adapter that never gives 3D (VM_NO_3D) is not tried; the
+ * browser says which one to switch to instead.
  *
- * 'auto' does this, 'off' never does; `vmwareGpuFailed` remembers a try that
- * did not work, so it is not tried again every start.
+ * 'auto' does this, 'off' never does; `vmGpuFailed` remembers a try that did
+ * not work, so it is not tried again every start.
  */
-function vmwareWanted(prefs) {
-  return isVmware(prefs.get('graphicsDetected')) && prefs.get('vmwareGpu') !== 'off' &&
-    prefs.get('vmwareGpuFailed') !== true;
+function vmGpuWanted(prefs) {
+  const g = vmGpu(prefs.get('graphicsDetected'));
+  return Boolean(g && g.threeD) && prefs.get('vmGpu') !== 'off' && prefs.get('vmGpuFailed') !== true;
 }
 
-/** VMware's adapter in use - or listed beside a software renderer, which is what a VM without 3D shows. */
-function isVmware(found) {
-  return Boolean(found && (found.vendorId === VMWARE_VENDOR || found.vmwarePresent === true));
+/** The VM adapter found - in use, or listed beside a software renderer, which is what a VM without 3D shows - or null. */
+function vmGpu(found) {
+  return (found && found.vmGpu) || null;
 }
 
 /**
  * The switches to add before the app is ready: the override chosen by hand,
- * or VMware's adapter found last time. Returns why, or false.
+ * or a VM's adapter found last time. Returns why, or false.
  */
 function applySwitches(app, prefs) {
   if (prefs.get('hardwareAcceleration') === false) return false;
-  const why = prefs.get('gpuIgnoreBlocklist') === true ? 'chosen' : vmwareWanted(prefs) ? 'vmware' : false;
+  const why = prefs.get('gpuIgnoreBlocklist') === true ? 'chosen' : vmGpuWanted(prefs) ? 'vm' : false;
   if (!why) return false;
   app.commandLine.appendSwitch('ignore-gpu-blocklist');
   return why;
@@ -61,8 +60,8 @@ function applySwitches(app, prefs) {
 
 /**
  * Watch the graphics process while the override is on: two crashes soon
- * after start and the override goes - the hand-chosen one and VMware's
- * alike - with a note for the next start.
+ * after start and the override goes - the hand-chosen one and a VM
+ * adapter's alike - with a note for the next start.
  */
 function guardOverride(app, prefs, log = () => {}) {
   if (!app.commandLine.hasSwitch('ignore-gpu-blocklist')) return;
@@ -75,10 +74,10 @@ function guardOverride(app, prefs, log = () => {}) {
     log('graphics', `graphics process gone (${details.reason}) with the override on, ${crashes} time(s)`);
     if (crashes >= 2 && !prefs.get('gpuOverrideFailed')) {
       if (prefs.get('gpuIgnoreBlocklist') === true) prefs.set('gpuIgnoreBlocklist', false);
-      if (vmwareWanted(prefs)) {
-        prefs.set('vmwareGpuFailed', true);
-        prefs.set('vmwareGpuState', 'crashed');
-        prefs.set('vmwareGpu', 'off');   // choosing it again is the way to retry
+      if (vmGpuWanted(prefs)) {
+        prefs.set('vmGpuFailed', true);
+        prefs.set('vmGpuState', 'crashed');
+        prefs.set('vmGpu', 'off');   // choosing it again is the way to retry
       }
       prefs.set('gpuOverrideFailed', true);
     }
@@ -86,14 +85,15 @@ function guardOverride(app, prefs, log = () => {}) {
 }
 
 /**
- * After a start that asked for VMware's adapter: did it give 3D? Returns
+ * After a start that asked for a VM's adapter: did it give 3D? Returns
  * 'working', 'no-3d' (still drawn in software - the VM's 3D is off), or
  * null when this start did not ask.
  */
-function vmwareOutcome(app, prefs, found) {
+function vmGpuOutcome(app, prefs, found) {
   if (!app.commandLine.hasSwitch('ignore-gpu-blocklist') || prefs.get('gpuIgnoreBlocklist') === true) return null;
-  if (!isVmware(found)) return null;
-  return found.software || found.vendorId !== VMWARE_VENDOR ? 'no-3d' : 'working';
+  const g = vmGpu(found);
+  if (!g || !g.threeD) return null;
+  return found.software || found.vendorId !== g.id ? 'no-3d' : 'working';
 }
 
 /** The feature status Chromium reports, read as one plain answer. */
@@ -133,11 +133,39 @@ const VIRTUAL_ADAPTERS = {
   0x80ee: 'VirtualBox graphics',
   0x1414: 'Microsoft Basic Render Driver',
   0x1234: 'QEMU standard VGA',
-  0x1af4: 'virtio graphics',
+  0x1af4: 'virtio-gpu',
   0x1b36: 'QXL',
   0x1ab8: 'Parallels graphics',
   0x1013: 'Cirrus Logic (emulated)'
 };
+/**
+ * Of those, the VMs' own: the ones that hand 3D to the host's card when the
+ * VM is set up for it - VMware SVGA (VirtualBox's VMSVGA reports the same id),
+ * VirtualBox's VBoxSVGA, QEMU's virtio-gpu with virgl or Venus - and QEMU's
+ * that never do.
+ */
+const VM_3D = [0x15ad, 0x80ee, 0x1af4];
+const VM_NO_3D = [0x1234, 0x1b36, 0x1013];
+
+/** How to give the VM 3D, in the words of its own settings. */
+function how3d(id, vm) {
+  if (!VM_3D.includes(id)) return 'switch the VM’s video to Virtio with 3D acceleration on, and its display to Spice with OpenGL on (virt-manager’s names)';
+  if (vm === 'VirtualBox' || id === 0x80ee) return 'turn on Enable 3D Acceleration under Display in the VM’s settings, with VMSVGA or VBoxSVGA as the graphics controller';
+  if (id === 0x15ad) return 'turn on Accelerate 3D graphics in the VM’s Display settings';
+  return 'turn on 3D acceleration for the VM’s Virtio video and OpenGL for its Spice display (virt-manager’s names); Windows guests have no 3D driver for it';
+}
+
+/** A VM adapter by vendor id, with what it can do and how to turn that on; null for any other. */
+function vmGpuOf(id, vm) {
+  if (!VM_3D.includes(id) && !VM_NO_3D.includes(id)) return null;
+  return {
+    id,
+    name: id === 0x15ad && vm === 'VirtualBox' ? 'VirtualBox VMSVGA' : VIRTUAL_ADAPTERS[id],
+    threeD: VM_3D.includes(id),
+    how: how3d(id, vm)
+  };
+}
+
 const GPU_VENDORS = { 0x10de: 'NVIDIA', 0x1002: 'AMD', 0x1022: 'AMD', 0x8086: 'Intel', 0x106b: 'Apple', 0x5143: 'Qualcomm', 0x13b5: 'Arm' };
 
 /** The hypervisor named by a manufacturer or product string, or null. */
@@ -185,9 +213,11 @@ async function detectAdapter(app) {
   try { info = await app.getGPUInfo('basic'); } catch { /* none */ }
   const devices = (info && Array.isArray(info.gpuDevice)) ? info.gpuDevice : [];
   const active = devices.find((d) => d.active) || devices[0] || null;
-  const vmwarePresent = devices.some((d) => Number(d.vendorId) === VMWARE_VENDOR);
-  if (!active) return { name: 'none found', virtual: true, basic: true, vendorId: 0, vmwarePresent };
-  const vendorId = Number(active.vendorId) || 0;
+  const vendorId = active ? Number(active.vendorId) || 0 : 0;
+  // A VM's adapter, the one in use or one listed beside a software renderer.
+  const isVm = (id) => VM_3D.includes(id) || VM_NO_3D.includes(id);
+  const vmAdapterId = isVm(vendorId) ? vendorId : devices.map((d) => Number(d.vendorId)).find(isVm) || 0;
+  if (!active) return { name: 'none found', virtual: true, basic: true, vendorId: 0, vmAdapterId };
   const virtualName = VIRTUAL_ADAPTERS[vendorId];
   const driver = String(active.driverVendor || active.deviceString || '');
   // Drawing in software whatever the adapter: Windows' fallback driver, or a
@@ -202,7 +232,7 @@ async function detectAdapter(app) {
     // work to the host's card, so on its own it is not "no graphics card".
     virtual: Boolean(virtualName) || basic,
     basic,
-    vmwarePresent
+    vmAdapterId
   };
 }
 
@@ -217,7 +247,7 @@ async function detectMachine(app, opts = {}) {
     vm,
     adapter: adapter.name,
     vendorId: adapter.vendorId,
-    vmwarePresent: adapter.vmwarePresent === true,
+    vmGpu: vmGpuOf(adapter.vmAdapterId, vm),
     virtualAdapter: adapter.virtual,
     software: drawing.software,
     work: drawing.work,
@@ -270,5 +300,5 @@ function readText(file) {
   return require('fs').promises.readFile(file, 'utf8').catch(() => '');
 }
 
-module.exports = { applySwitches, guardOverride, vmwareWanted, vmwareOutcome, isVmware, VMWARE_VENDOR, status, detectVm, detectAdapter, detectMachine, hypervisorIn, isLight, describe, workLine,
+module.exports = { applySwitches, guardOverride, vmGpuWanted, vmGpuOutcome, vmGpu, vmGpuOf, status, detectVm, detectAdapter, detectMachine, hypervisorIn, isLight, describe, workLine,
   VIRTUAL_ADAPTERS };
