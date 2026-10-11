@@ -589,6 +589,10 @@ body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: non
   width: 32px;
   height: 32px;
   flex: none;
+  /* None of the button's own: its 6px a side left the 26px buttons in the
+     address bar 14px for a 16px icon, which hung a pixel right of centre -
+     under the downloads ring, which centres on the whole button, plainly so. */
+  padding: 0;
   border: none;
   border-radius: 50%;
   background: transparent;
