@@ -334,8 +334,7 @@ class BrowserShell {
       // A private window wears its own icon on Windows and Linux, where the
       // window's icon is the taskbar's (private-icon.js). macOS takes the
       // Dock's, set in main.js.
-      ...(INCOGNITO && process.platform !== 'darwin' && require('./private-icon').privateIconPath()
-        ? { icon: require('./private-icon').privateIconPath() } : {}),
+      ...windowIconOption(),
       // The theme's own surface from the first frame. A fixed dark one flashed
       // on every launch in the light theme.
       backgroundColor: this.surface(),
@@ -3165,6 +3164,20 @@ class BrowserShell {
     this.togglePanel(false);
     if (!this.window.isDestroyed()) this.window.destroy();
   }
+}
+
+/**
+ * The window's own icon: a private window's on Windows and Linux, and
+ * Debrowser's on Linux - where, on X11, the dock and the window switcher take
+ * the window's icon when no menu entry matches it, and drew a gear without one.
+ * macOS takes the Dock's (main.js).
+ */
+function windowIconOption() {
+  const icons = require('./private-icon');
+  const file = INCOGNITO && process.platform !== 'darwin' ? icons.privateIconPath()
+    : !INCOGNITO && process.platform === 'linux' ? icons.appIconPath() : null;
+  const icon = icons.windowIcon(file);
+  return icon ? { icon } : {};
 }
 
 function send(view, channel, payload) {

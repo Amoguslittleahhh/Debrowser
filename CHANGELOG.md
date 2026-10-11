@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **Linux: Debrowser's icon in the dock and the window switcher.** Every window showed a generic gear. A Linux window's icon is handed to the system in one go, and Debrowser's, at full size, was too big to be taken - so windows had none, private windows included; they now carry it at a size that is. And on Wayland, Ubuntu's default, the dock finds an app's icon only through its menu entry, which an AppImage or a folder copy has only once Add to your apps is chosen; until then Debrowser keeps a hidden entry for the icon alone, which adds nothing to the apps menu and goes when Debrowser is uninstalled.
 - **The downloads button is drawn straight.** Its arrow sat a pixel right of the progress ring around it, so the button looked crooked while a download ran. The star and the other buttons at the end of the address bar were off by the same pixel and are centred too.
 
 ## 2.3.0

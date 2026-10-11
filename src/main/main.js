@@ -545,6 +545,11 @@ if (STREAMVIEW_TEST) {
 /* ------------------------------------------------------------------ */
 
 function main() {
+  // The dock's icon on Linux, whether or not Add to apps is taken up - before
+  // the first window, which a Wayland dock matches to its entry as it opens.
+  if (!INCOGNITO && !OFFLINE_MODE) {
+    try { installer.ensureDockIcon(log); } catch (err) { log('install', `dock icon: ${err.message}`); }
+  }
   /** @type {BrowserShell|null} */
   let shell = null;
   /** @type {Governor|null} */

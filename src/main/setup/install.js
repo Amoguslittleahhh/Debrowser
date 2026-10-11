@@ -141,8 +141,73 @@ function writeEntry(exe) {
   require('child_process').execFile('update-desktop-database', [path.dirname(desktopFile())], () => {});
 }
 
+/**
+ * The dock's icon, before anyone has said yes to the menu entry.
+ *
+ * A desktop on Wayland - Ubuntu's, by default - has no way for a window to
+ * give its own icon: the dock finds it through the entry named for the app,
+ * debrowser.desktop, and without one draws a gear. So an AppImage or folder
+ * copy with no entry anywhere writes a hidden one (NoDisplay): the icon, and
+ * nothing in the apps menu, which stays the offer's to add. Marked as such,
+ * so Add to apps replaces it and uninstalling removes it.
+ */
+const QUIET = 'X-Debrowser-Icon-Only=';
+function ensureDockIcon(log = () => {}) {
+  const kind = linuxKind();
+  if (kind !== 'appimage' && kind !== 'folder') return false;
+  const dirs = [dataHome(), ...(process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':')].filter(Boolean);
+  const existing = dirs.map((d) => path.join(d, 'applications', 'debrowser.desktop')).find((f) => fs.existsSync(f));
+  if (existing) {
+    // Another program's entry, or the full one, is left alone; a hidden one
+    // of ours is pointed at this copy.
+    let text = '';
+    try { text = fs.readFileSync(existing, 'utf8'); } catch { return false; }
+    if (existing !== desktopFile() || !text.includes(`\n${QUIET}`) || text.includes(`\n${QUIET}${launcher()}\n`)) return false;
+  }
+  try {
+    const icon = [path.join(process.resourcesPath, 'icon.png'), process.env.APPDIR && path.join(process.env.APPDIR, '.DirIcon')]
+      .filter(Boolean).find((p) => fs.existsSync(p));
+    if (icon) {
+      fs.mkdirSync(path.dirname(iconFile()), { recursive: true });
+      fs.copyFileSync(icon, iconFile());
+    }
+    fs.mkdirSync(path.dirname(desktopFile()), { recursive: true });
+    fs.writeFileSync(desktopFile(), [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=Debrowser',
+      `Exec=${execArg(launcher())} %U`,
+      `Icon=${icon ? iconFile() : 'debrowser'}`,
+      'Terminal=false',
+      'NoDisplay=true',
+      'StartupWMClass=Debrowser',
+      `${QUIET}${launcher()}`,
+      ''
+    ].join('\n'));
+    log('install', 'hidden menu entry written, for the dock\'s icon');
+    return true;
+  } catch (err) {
+    log('install', `no dock icon: ${err.message}`);
+    return false;
+  }
+}
+
+/** This copy's hidden entry (ensureDockIcon), if that is what is there. */
+function quietEntryIsOurs() {
+  try {
+    return fs.readFileSync(desktopFile(), 'utf8').includes(`\n${QUIET}${launcher()}\n`);
+  } catch {
+    return false;
+  }
+}
+
 /** This copy's menu entry and icon, if it has one; another copy's is left. Used by uninstall.js. */
 function removeEntry() {
+  if (quietEntryIsOurs()) {
+    fs.rmSync(desktopFile(), { force: true });
+    fs.rmSync(iconFile(), { force: true });
+    return;
+  }
   if (!integrated()) return;
   fs.rmSync(desktopFile(), { force: true });
   fs.rmSync(iconFile(), { force: true });
@@ -271,4 +336,4 @@ function offer({ prefs, log, force = false, owner = null }) {
   return win;
 }
 
-module.exports = { offer, offerFor, linuxKind, removeEntry, appImage, tilde };
+module.exports = { offer, offerFor, linuxKind, removeEntry, appImage, tilde, ensureDockIcon };
