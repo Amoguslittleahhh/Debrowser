@@ -1733,8 +1733,10 @@ function main() {
       made.downloads = downloads;
       made.updater = updater;
       made.saver = windows.length ? windows[0].shell.saver : false;
-      // Focused, it is the window in use.
-      made.window.on('focus', () => useWindow(win));
+      // Focused, it is the window in use - and the one on top, for a drop
+      // where windows overlap (windowAt).
+      win.frontAt = Date.now();
+      made.window.on('focus', () => { win.frontAt = Date.now(); useWindow(win); });
       made.window.on('close', (event) => onWindowClose(win, event));
       made.window.on('closed', () => onWindowClosed(win));
       windows.push(win);
@@ -2625,6 +2627,7 @@ function main() {
     to.tabs.adopt(tab, { index, activate });
     if (activate) {
       useWindow(to);
+      to.frontAt = Date.now();
       if (to.shell.window.isMinimized()) to.shell.window.restore();
       to.shell.window.focus();
     }
@@ -2639,7 +2642,8 @@ function main() {
    * where a tab dragged out of one window is dropped into another.
    */
   function windowAt(point, except = null) {
-    for (const w of windows) {
+    // Where windows overlap, the one most recently in front is the one on top.
+    for (const w of [...windows].sort((a, b) => (b.frontAt || 0) - (a.frontAt || 0))) {
       if (w === except || !w.shell || w.shell.window.isDestroyed() || w.shell.window.isMinimized()) continue;
       const b = w.shell.window.getBounds();
       if (point.x >= b.x && point.x < b.x + b.width && point.y >= b.y && point.y < b.y + b.height) return w;
@@ -2801,6 +2805,8 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
 
   /** Every tab in every window, for what is the browser's rather than a window's. */
   const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
+  /** A tab by id in this window, or failing that in any. */
+  const tabAnywhere = (id) => tabs.byId(id) || (windowOps ? windowOps.all.byId(id) : null);
 
   // A tab in another window - picked in tab search, or from the new tab page's
   // list - brings its window to the front.
@@ -2944,15 +2950,15 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         break;
 
       case 'move-tab-to-new-window': {
-        const tab = tabs.byId(payload?.id) || active;
+        const tab = tabAnywhere(payload?.id) || active;
         // A window's only tab is already in a window of its own.
-        if (!tab || !windowOps || tabs.all().length < 2) break;
+        if (!tab || !windowOps || windowOps.of(tab).tabs.all().length < 2) break;
         windowOps.open({ tab });
         break;
       }
 
       case 'move-tab-to-window': {
-        const tab = tabs.byId(payload?.id);
+        const tab = tabAnywhere(payload?.id);
         const to = windowOps && windowOps.count() > 1 ? windowOps.all.all().find((t) => t.windowId === payload?.windowId) : null;
         if (tab && to) windowOps.moveTab(tab, windowOps.of(to));
         break;
@@ -2966,7 +2972,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
        */
       // Its picture, following the pointer while it is out of the strip.
       case 'tear-preview': {
-        const tab = tabs.byId(payload?.id);
+        const tab = tabAnywhere(payload?.id);
         const point = { x: Number(payload?.screenX), y: Number(payload?.screenY) };
         if (!windowOps) break;
         if (!tab || payload?.hide || !Number.isFinite(point.x) || !Number.isFinite(point.y)) windowOps.preview.hide();
@@ -2976,15 +2982,17 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
 
       case 'tear-tab': {
         if (windowOps) windowOps.preview.hide();
-        const tab = tabs.byId(payload?.id);
+        const tab = tabAnywhere(payload?.id);
         const point = { x: Math.round(Number(payload?.screenX)), y: Math.round(Number(payload?.screenY)) };
         if (!tab || !windowOps || !Number.isFinite(point.x) || !Number.isFinite(point.y)) break;
         const grab = { offsetX: Math.max(0, Math.round(Number(payload?.offsetX) || 0)), offsetY: Math.max(0, Math.round(Number(payload?.offsetY) || 0)) };
-        const into = windowOps.at(point, windowOps.of(tab));
+        const home = windowOps.of(tab);
+        const into = windowOps.at(point, home);
         if (into) { windowOps.moveTab(tab, into); break; }
-        if (tabs.all().length < 2) {
-          if (shell.window.isMaximized() || shell.window.isFullScreen()) break;
-          shell.window.setPosition(point.x - grab.offsetX, point.y - grab.offsetY);
+        if (home.tabs.all().length < 2) {
+          const win = home.shell.window;
+          if (win.isMaximized() || win.isFullScreen()) break;
+          win.setPosition(point.x - grab.offsetX, point.y - grab.offsetY);
           break;
         }
         windowOps.open({ tab, at: { ...point, ...grab } });

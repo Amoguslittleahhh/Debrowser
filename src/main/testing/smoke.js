@@ -126,6 +126,93 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   let siteIndex = 0;
   pageUrl = (name) => fixtures.url(name, siteIndex++);
 
+  // Several windows: Ctrl+N opens one with its own strip; a tab moves into
+  // another window with its page as it was; dragged out and let go over the
+  // desktop it gets a window of its own, over another window it joins that
+  // one; closing one of several leaves the rest, and Ctrl+Shift+T brings it
+  // back; the session keeps which window each tab was in.
+  async function checkWindows() {
+    if (!windowOps) return;
+    const first = windowOps.current();
+    const startCount = windowOps.count();
+    const firstTabs = first.tabs.all().length;
+    runCommand('new-window', null);
+    const second = windowOps.current();
+    // Shown once its toolbar has drawn, as the first window is.
+    await waitFor(() => second && second !== first && second.tabs.activeTab()?.isLive && second.shell.window.isVisible(), { timeoutMs: 8000 });
+    const opened = windowOps.count() === startCount + 1 && second.tabs.all().length === 1 && first.tabs.all().length === firstTabs &&
+      tabs.all().length === 1 && second.shell.window.isVisible();
+    // Commands go to the window in use: a new tab here lands in the second.
+    runCommand('new-tab', { url: pageUrl('idle.html') });
+    const moving = second.tabs.activeTab();
+    await waitFor(() => moving.isLive && !moving.loading, { timeoutMs: 8000 });
+    const ownStrip = second.tabs.all().length === 2 && first.tabs.all().length === firstTabs;
+    // Moved, its page kept: the same renderer, now drawn in the first window.
+    await moving.wc.executeJavaScript('window.__kept = 42');
+    windowOps.moveTab(moving, first);
+    await waitFor(() => first.tabs.activeTab() === moving && moving.visible, { timeoutMs: 5000 });
+    const moved = first.tabs.all().includes(moving) && !second.tabs.all().includes(moving) && moving.windowId === first.id &&
+      first.shell.window.contentView.children.includes(moving.view) &&
+      !second.shell.window.contentView.children.includes(moving.view) &&
+      await moving.wc.executeJavaScript('window.__kept').catch(() => null) === 42;
+    // Dragged out and let go over the desktop: a window of its own there.
+    // Past every window's edge: open desktop, on whatever screen CI has.
+    const edges = [first, second].map((w) => w.shell.window.getBounds());
+    const away = { screenX: Math.max(...edges.map((e) => e.x + e.width)) + 50, screenY: Math.max(...edges.map((e) => e.y + e.height)) + 50 };
+    const before = windowOps.count();
+    runCommand('tear-tab', { id: moving.id, ...away, offsetX: 0, offsetY: 0 });
+    const torn = windowOps.of(moving);
+    await waitFor(() => torn && torn.tabs.activeTab() === moving && moving.visible, { timeoutMs: 5000 });
+    const tornOut = windowOps.count() === before + 1 && torn !== first && torn.tabs.all().length === 1 && !first.tabs.all().includes(moving);
+    // Let go over another window: into it, and the window it leaves, now
+    // empty, closes.
+    const b = second.shell.window.getBounds();
+    runCommand('tear-tab', { id: moving.id, screenX: b.x + b.width - 20, screenY: b.y + b.height - 20, offsetX: 0, offsetY: 0 });
+    await waitFor(() => windowOps.count() === before && second.tabs.activeTab() === moving, { timeoutMs: 5000 });
+    const joined = second.tabs.all().includes(moving) && torn.shell.window.isDestroyed();
+    // The session: which window each tab is in, and back again.
+    const { Session } = require('../data/session');
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-windows-'));
+    const store = new Session(() => {}, dir);
+    const info = [first, second].map((w) => ({ id: w.id, activeId: w.tabs.activeId, bounds: w.shell.window.getNormalBounds() }));
+    store.save(windowOps.all.all(), info);
+    const back = store.load();
+    const remembered = back.windows.length === 1 && back.tabs.filter((t) => t.window === 1).length === second.tabs.all().filter((t) => /^https?:/.test(t.url)).length &&
+      back.windows[0].bounds && back.tabs[back.windows[0].activeIndex]?.url === moving.url;
+    fs.rmSync(dir, { recursive: true, force: true });
+    // Closing one of several: only that one, and Ctrl+Shift+T brings it back.
+    runCommand('close-window', null);
+    await waitFor(() => windowOps.count() === startCount, { timeoutMs: 5000 });
+    const closedOne = windowOps.count() === startCount && !first.shell.window.isDestroyed() && windowOps.closed.length > 0;
+    runCommand('reopen-closed-tab', null);
+    const reopened = windowOps.current();
+    await waitFor(() => windowOps.count() === startCount + 1 && reopened !== first, { timeoutMs: 5000 });
+    const cameBack = windowOps.count() === startCount + 1 && reopened.tabs.all().some((t) => t.url === moving.url);
+    if (reopened && reopened !== first) {
+      reopened.shell.close();
+      await waitFor(() => windowOps.count() === startCount, { timeoutMs: 5000 });
+    }
+    if (!first.shell.window.isDestroyed()) {
+      first.shell.window.focus();
+      windowOps.useSender(first.shell.chromeView.webContents);
+    }
+    check('several windows: Ctrl+N opens one with its own tabs; a tab moves between windows with its page as it was, is dragged out into a window of its own and into another; closing one leaves the rest and Ctrl+Shift+T brings it back; the session keeps which window each tab was in',
+      opened && ownStrip && moved && tornOut && joined && remembered && closedOne && cameBack && windowOps.current() === first,
+      `opened ${opened}, own strip ${ownStrip}, moved ${moved}, torn out ${tornOut}, joined ${joined}, remembered ${remembered}, ` +
+      `closed one ${closedOne}, came back ${cameBack}, windows now ${windowOps.count()}`);
+  }
+
+  // One part of the suite on its own, while working on it:
+  // DEBROWSER_SMOKE_ONLY=windows.
+  if (process.env.DEBROWSER_SMOKE_ONLY === 'windows') {
+    await checkWindows();
+    const failedOnly = results.filter((r) => !r.passed);
+    console.log(`\n=== ${results.length - failedOnly.length}/${results.length} checks passed ===\n`);
+    if (fixtures) await fixtures.close();
+    app.exit(failedOnly.length ? 1 : 0);
+    return;
+  }
+
   // Compress the idle ladder so the test exercises hours of behaviour in
   // seconds. Policy is unchanged; only the clock is.
   cfg.coldAfterMs = 1500;
@@ -6188,75 +6275,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       failures.length === 0, `${names.length} requests; ${failures.length ? failures.slice(0, 5).join(' | ') : 'none threw'}`);
   }
 
-  // Several windows: Ctrl+N opens one with its own strip; a tab moves into
-  // another window with its page as it was; dragged out and let go over the
-  // desktop it gets a window of its own, over another window it joins that
-  // one; closing one of several leaves the rest, and Ctrl+Shift+T brings it
-  // back; the session keeps which window each tab was in.
-  if (windowOps) {
-    const first = windowOps.current();
-    const startCount = windowOps.count();
-    const firstTabs = first.tabs.all().length;
-    runCommand('new-window', null);
-    const second = windowOps.current();
-    await waitFor(() => second && second !== first && second.tabs.activeTab()?.isLive, { timeoutMs: 8000 });
-    const opened = windowOps.count() === startCount + 1 && second.tabs.all().length === 1 && first.tabs.all().length === firstTabs &&
-      tabs.all().length === 1 && second.shell.window.isVisible();
-    // Commands go to the window in use: a new tab here lands in the second.
-    runCommand('new-tab', { url: pageUrl('idle.html') });
-    const moving = second.tabs.activeTab();
-    await waitFor(() => moving.isLive && !moving.loading, { timeoutMs: 8000 });
-    const ownStrip = second.tabs.all().length === 2 && first.tabs.all().length === firstTabs;
-    // Moved, its page kept: the same renderer, now drawn in the first window.
-    await moving.wc.executeJavaScript('window.__kept = 42');
-    windowOps.moveTab(moving, first);
-    await waitFor(() => first.tabs.activeTab() === moving && moving.visible, { timeoutMs: 5000 });
-    const moved = first.tabs.all().includes(moving) && !second.tabs.all().includes(moving) && moving.windowId === first.id &&
-      first.shell.window.contentView.children.includes(moving.view) &&
-      !second.shell.window.contentView.children.includes(moving.view) &&
-      await moving.wc.executeJavaScript('window.__kept').catch(() => null) === 42;
-    // Dragged out and let go over the desktop: a window of its own there.
-    // Past every window's edge: open desktop, on whatever screen CI has.
-    const edges = [first, second].map((w) => w.shell.window.getBounds());
-    const away = { screenX: Math.max(...edges.map((e) => e.x + e.width)) + 50, screenY: Math.max(...edges.map((e) => e.y + e.height)) + 50 };
-    const before = windowOps.count();
-    runCommand('tear-tab', { id: moving.id, ...away, offsetX: 0, offsetY: 0 });
-    const torn = windowOps.of(moving);
-    await waitFor(() => torn && torn.tabs.activeTab() === moving && moving.visible, { timeoutMs: 5000 });
-    const tornOut = windowOps.count() === before + 1 && torn !== first && torn.tabs.all().length === 1 && !first.tabs.all().includes(moving);
-    // Let go over another window: into it, and the window it leaves, now
-    // empty, closes.
-    const b = second.shell.window.getBounds();
-    runCommand('tear-tab', { id: moving.id, screenX: b.x + 40, screenY: b.y + 20, offsetX: 0, offsetY: 0 });
-    await waitFor(() => windowOps.count() === before && second.tabs.activeTab() === moving, { timeoutMs: 5000 });
-    const joined = second.tabs.all().includes(moving) && torn.shell.window.isDestroyed();
-    // The session: which window each tab is in, and back again.
-    const { Session } = require('../data/session');
-    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-windows-'));
-    const store = new Session(() => {}, dir);
-    const info = [first, second].map((w) => ({ id: w.id, activeId: w.tabs.activeId, bounds: w.shell.window.getNormalBounds() }));
-    store.save(windowOps.all.all(), info);
-    const back = store.load();
-    const remembered = back.windows.length === 1 && back.tabs.filter((t) => t.window === 1).length === second.tabs.all().filter((t) => /^https?:/.test(t.url)).length &&
-      back.windows[0].bounds && back.tabs[back.windows[0].activeIndex]?.url === moving.url;
-    fs.rmSync(dir, { recursive: true, force: true });
-    // Closing one of several: only that one, and Ctrl+Shift+T brings it back.
-    runCommand('close-window', null);
-    await waitFor(() => windowOps.count() === startCount, { timeoutMs: 5000 });
-    const closedOne = windowOps.count() === startCount && !first.shell.window.isDestroyed() && windowOps.closed.length > 0;
-    runCommand('reopen-closed-tab', null);
-    const reopened = windowOps.current();
-    await waitFor(() => windowOps.count() === startCount + 1 && reopened !== first, { timeoutMs: 5000 });
-    const cameBack = windowOps.count() === startCount + 1 && reopened.tabs.all().some((t) => t.url === moving.url);
-    reopened.shell.close();
-    await waitFor(() => windowOps.count() === startCount, { timeoutMs: 5000 });
-    first.shell.window.focus();
-    windowOps.useSender(first.shell.chromeView.webContents);
-    check('several windows: Ctrl+N opens one with its own tabs; a tab moves between windows with its page as it was, is dragged out into a window of its own and into another; closing one leaves the rest and Ctrl+Shift+T brings it back; the session keeps which window each tab was in',
-      opened && ownStrip && moved && tornOut && joined && remembered && closedOne && cameBack && windowOps.current() === first,
-      `opened ${opened}, own strip ${ownStrip}, moved ${moved}, torn out ${tornOut}, joined ${joined}, remembered ${remembered}, ` +
-      `closed one ${closedOne}, came back ${cameBack}, windows now ${windowOps.count()}`);
-  }
+  await checkWindows();
 
   check('no page of the browser\'s own threw an uncaught error during the run',
     pageErrors.length === 0, pageErrors.length ? pageErrors.slice(0, 5).join(' | ') : 'none');
