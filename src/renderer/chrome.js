@@ -1327,22 +1327,30 @@ el.tabs.addEventListener('pointermove', (event) => {
   const delta = (d.vertical ? event.clientY : event.clientX) - d.start;
   const across = (d.vertical ? event.clientX : event.clientY) - d.cross;
   // Either way counts as a drag: pulled straight out of the strip is one too.
+  d.lastScreen = { screenX: event.screenX, screenY: event.screenY };
   if (!d.active && ((Math.abs(delta) < DRAG_THRESHOLD && Math.abs(across) < DRAG_THRESHOLD) || !beginTabDrag())) return;
   if (pulledOut(d, event)) { setTorn(d, true, event); return; }
   if (d.torn) setTorn(d, false, event);
   moveTabDrag(delta);
 });
-el.tabs.addEventListener('pointerup', (event) => {
+el.tabs.addEventListener('pointerup', (event) => dropTabDrag(event));
+
+/**
+ * Let go: in the strip, the tab takes its new place; out of it, the browser
+ * decides where it goes. `at` is where - the release itself, or the last
+ * place the pointer was seen when the release happened somewhere this view
+ * did not hear of (`pointer-released`).
+ */
+function dropTabDrag(at) {
   const d = tabDrag;
   if (d && d.active && d.torn) {
-    // Let go outside the strip: the browser decides where it goes.
     endTabDrag(true);
-    api.send('tear-tab', { id: d.id, screenX: event.screenX, screenY: event.screenY,
+    api.send('tear-tab', { id: d.id, screenX: at?.screenX, screenY: at?.screenY,
       offsetX: tearOffset(d).x, offsetY: tearOffset(d).y });
     return;
   }
   endTabDrag(false);
-});
+}
 el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
 
 /**
@@ -2125,8 +2133,12 @@ api.onMessage((message) => {
       api.send('open-reading-list', { x: Math.round(box.left), y: Math.round(box.bottom), right: Math.round(box.right) });
       break;
     }
+    // Let go over the page. Where the system does not keep the pointer for
+    // the view it was pressed in (Wayland), a drag under way never heard its
+    // own release, and stayed half done - the tab faded out, the strip stuck.
     case 'pointer-released':
       if (tabDrag && !tabDrag.active) tabDrag = null;
+      else if (tabDrag) dropTabDrag(tabDrag.lastScreen);
       break;
     case 'suggest-done':
       closeList();

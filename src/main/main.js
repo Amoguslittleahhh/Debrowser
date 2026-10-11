@@ -24,7 +24,7 @@ const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
 const { sweepThumbnails, sweepThumbnailsSync, setLightVideo } = require('./tabs/tab');
-const { BrowserShell } = require('./window');
+const { BrowserShell, WAYLAND } = require('./window');
 const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB, SCHEMA } = require('./prefs');
 const { Updater } = require('./updater');
 const { SiteZoom } = require('./zoom');
@@ -2647,6 +2647,10 @@ function main() {
    * where a tab dragged out of one window is dropped into another.
    */
   function windowAt(point, except = null) {
+    // On Wayland no window knows where it is - each reports the place it was
+    // asked for - so a drop cannot be matched to the window under it: a tab
+    // dragged out there always gets a window of its own.
+    if (WAYLAND) return null;
     // Where windows overlap, the one most recently in front is the one on top.
     for (const w of [...windows].sort((a, b) => (b.frontAt || 0) - (a.frontAt || 0))) {
       if (w === except || !w.shell || w.shell.window.isDestroyed() || w.shell.window.isMinimized()) continue;
@@ -2979,7 +2983,9 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
       case 'tear-preview': {
         const tab = tabAnywhere(payload?.id);
         const point = { x: Number(payload?.screenX), y: Number(payload?.screenY) };
-        if (!windowOps) break;
+        // Not on Wayland, where a window cannot be put under the pointer: it
+        // would stand wherever the desktop chose, away from the drag.
+        if (!windowOps || WAYLAND) break;
         if (!tab || payload?.hide || !Number.isFinite(point.x) || !Number.isFinite(point.y)) windowOps.preview.hide();
         else windowOps.preview.show(tab, point).catch((err) => log(`tear preview: ${err.message}`));
         break;
@@ -3004,6 +3010,8 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         }
         if (home.tabs.all().length < 2) {
           const win = home.shell.window;
+          // Wayland moves windows itself; asking does nothing there.
+          if (WAYLAND) break;
           if (win.isMaximized() || win.isFullScreen()) break;
           win.setPosition(point.x - grab.offsetX, point.y - grab.offsetY);
           break;

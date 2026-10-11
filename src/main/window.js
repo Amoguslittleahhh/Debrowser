@@ -21,6 +21,23 @@ const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
 const { INCOGNITO } = require('./incognito/mode');
 const { letterbox } = require('./incognito/fingerprint');
 
+/**
+ * Native Wayland - Ubuntu's desktop by default. No app there can read where
+ * the pointer is on the screen, or where its own window is: Electron answers
+ * 0,0 for the pointer, always, and a made-up place for the window - measured.
+ * Everything here that read the pointer from the screen (the edge that brings
+ * the tucked-away tabs out, the strip closing when the pointer leaves it,
+ * dragging a divider) reads it instead from the window's own views, as each
+ * sees it move (`trackPointer`).
+ */
+const WAYLAND = process.platform === 'linux' && (() => {
+  const { app } = require('electron');
+  const ozone = app.commandLine.getSwitchValue('ozone-platform') || process.env.ELECTRON_OZONE_PLATFORM_HINT || '';
+  if (ozone === 'x11') return false;
+  if (ozone === 'wayland') return true;
+  return Boolean(process.env.WAYLAND_DISPLAY) && process.env.XDG_SESSION_TYPE !== 'x11';
+})();
+
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
 /** The toast view: wide enough for a sentence and a button, tall enough for its shadow. */
@@ -553,6 +570,7 @@ class BrowserShell {
     });
 
     this.window.contentView.addChildView(this.chromeView);
+    this.trackPointer(this.chromeView);
     // The chrome answers the same shortcut table as every other view. It used
     // to run a second one in its own DOM, which is how the browser ended up
     // with shortcuts that existed only while the toolbar had focus.
@@ -583,9 +601,51 @@ class BrowserShell {
 
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Where the pointer is, as a point on the screen: the system's answer, or
+   * on Wayland the last place one of this window's views saw it, placed by the
+   * window's own idea of where it is - so code that takes the window's corner
+   * off again gets the pointer in the window either way. Out of the window,
+   * somewhere far away.
+   */
+  cursorPoint() {
+    if (!WAYLAND) return screen.getCursorScreenPoint();
+    const win = this.window.getContentBounds();
+    const p = this.pointer;
+    return p ? { x: win.x + p.x, y: win.y + p.y } : { x: -1e6, y: -1e6 };
+  }
+
+  /**
+   * Follow the pointer through a view of this window: where it moves, in the
+   * window's own coordinates, and when it leaves the window altogether. Bound
+   * once per view; a no-op where the system says where the pointer is.
+   */
+  trackPointer(view) {
+    if (!WAYLAND || !view || view.pointerTracked) return;
+    const wc = view.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    view.pointerTracked = true;
+    wc.on('input-event', (_event, input) => {
+      if (!input || !/^mouse/.test(input.type) || !Number.isFinite(input.x) || !Number.isFinite(input.y)) return;
+      let box;
+      try { box = view.getBounds(); } catch { return; }
+      const x = box.x + input.x;
+      const y = box.y + input.y;
+      if (input.type === 'mouseLeave') {
+        // Into another view of this window, which says so itself; out of the
+        // window, gone.
+        const { width, height } = this.window.getContentBounds();
+        if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1) this.pointer = null;
+        return;
+      }
+      this.pointer = { x, y };
+    });
+  }
+
   /** Attach a tab's view to the window. Called when a tab is realised. */
   attachTab(tab) {
     if (!tab.view) return;
+    this.trackPointer(tab.view);
     // A tap on the page is leaving the strip. Touch sends no mouse-leave, so
     // a strip brought out by a tap at the edge otherwise stayed over the page
     // until the next tap landed back on the strip itself.
@@ -597,7 +657,7 @@ class BrowserShell {
         // A tap moves the system cursor to where it landed, so this holds for
         // touch too.
         if (!this.sidebarOpen || this.window.isDestroyed()) return;
-        const at = screen.getCursorScreenPoint();
+        const at = this.cursorPoint();
         const win = this.window.getContentBounds();
         // Tucked away in a window the view is the whole window while the tabs
         // are out, and the strip is only its left column under the band.
@@ -1439,6 +1499,7 @@ class BrowserShell {
       try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
       view.webContents.loadFile(path.join(RENDERER_DIR, 'divider.html')).catch(() => {});
       this.dividerView = view;
+      this.trackPointer(view);
     }
     const root = this.window.contentView;
     // Over the pages, under the chrome and anything floating above it.
@@ -1454,7 +1515,7 @@ class BrowserShell {
   dragSplit() {
     if (!this.split || this.window.isDestroyed()) return;
     const area = this.contentBounds();
-    const at = screen.getCursorScreenPoint();
+    const at = this.cursorPoint();
     const win = this.window.getContentBounds();
     const x = at.x - win.x - area.x;
     this.split.ratio = Math.min(0.8, Math.max(0.2, x / Math.max(1, area.width)));
@@ -2031,6 +2092,7 @@ class BrowserShell {
       view.webContents.loadFile(path.join(RENDERER_DIR, 'divider.html'),
         { query: row ? { for: 'devtools', axis: 'row' } : { for: 'devtools' } }).catch(() => {});
       this.devToolsDivider = view;
+      this.trackPointer(view);
     }
     const at = root.children.indexOf(this.devToolsView);
     if (root.children.indexOf(this.devToolsDivider) !== at + 1) {
@@ -2048,7 +2110,7 @@ class BrowserShell {
   dragDevTools() {
     if (!this.devToolsView || this.window.isDestroyed()) return;
     const area = this.contentArea();
-    const at = screen.getCursorScreenPoint();
+    const at = this.cursorPoint();
     const win = this.window.getContentBounds();
     const row = this.dockMode() === 'bottom';
     const room = row ? area.height : area.width;
@@ -2462,6 +2524,7 @@ class BrowserShell {
     view.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'), { query: { role: 'strip' } }).catch(() => {});
     this.window.contentView.addChildView(view);
     this.stripView = view;
+    this.trackPointer(view);
   }
 
   /** Where a view of the chrome's sits in the window, for coordinates it sends. */
@@ -2655,7 +2718,7 @@ class BrowserShell {
       if (this.window.isDestroyed() || !this.detached() || this.sidebarOpen) { this.watchEdge(); return; }
       let near = false;
       if (this.window.isFocused()) {
-        const at = screen.getCursorScreenPoint();
+        const at = this.cursorPoint();
         const b = this.window.getContentBounds();
         const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
         const rows = at.y >= top && at.y < b.y + b.height;
@@ -2699,7 +2762,7 @@ class BrowserShell {
       // Off for a test driving the strip with events of its own, where the
       // real cursor is parked outside the window on purpose.
       if (this.watchAwayOff) return;
-      const at = screen.getCursorScreenPoint();
+      const at = this.cursorPoint();
       const b = this.window.getContentBounds();
       const width = this.band() ? STRIP_VIEW_WIDTH : this.chromeView.getBounds().width;
       const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
@@ -3190,6 +3253,7 @@ function send(view, channel, payload) {
 }
 
 module.exports = {
+  WAYLAND,
   BrowserShell, CHROME_HEIGHT, BOOKMARKS_BAR_HEIGHT, PANEL_WIDTH,
   SIDEBAR_WIDTH, SIDEBAR_EDGE, SIDEBAR_SENSE, SIDEBAR_TOP_BAND, CONTENT_GAP, STRIP_VIEW_WIDTH
 };
