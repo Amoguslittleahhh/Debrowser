@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### New
+
+- **VMware's graphics adapter is used.** Chromium doesn't trust VMware's SVGA adapter, so in a VMware virtual machine pages and 3D were drawn by the processor even with the VM's Accelerate 3D graphics on. Debrowser now recognises the adapter and, from the next start, draws with it. If the virtual machine has no 3D to give - Accelerate 3D graphics is off - or Debrowser's graphics crash with it, it is turned off again and Debrowser says why; Settings → Advanced → VMware 3D graphics shows what happened and tries again when you choose Use it.
+
 ## 2.3.0
 
 Debrowser 2.3.0 notices when it runs without a graphics card - a virtual machine, or an old driver - and lightens itself, says which work the graphics card does and which the processor does, and adds Paste and go, answers and site shortcuts in the address bar, tab hover cards, a reading list and picture-in-picture that follows you between tabs; it also makes private windows clear what you copied again.

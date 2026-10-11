@@ -597,6 +597,18 @@ const SECTIONS = {
       liveHint: (state) => graphicsHint(state.prefs || {})
     },
     {
+      key: 'vmwareGpu',
+      label: 'VMware 3D graphics',
+      hint: 'In a VMware virtual machine, draw pages and 3D with VMware’s graphics adapter, which Chromium would otherwise not use. Needs Accelerate 3D graphics on in the VM’s Display settings, and a restart.',
+      type: 'select',
+      options: [
+        { value: 'auto', name: 'Use it' },
+        { value: 'off', name: 'Off' }
+      ],
+      liveHint: (state) => vmwareHint(state.prefs || {}),
+      unavailable: (state) => (vmwareFound(state.prefs || {}) ? null : 'For a VMware virtual machine. This computer isn’t one, or hasn’t been checked yet.')
+    },
+    {
       key: 'gpuIgnoreBlocklist',
       label: 'Use the graphics card even if Chromium doesn’t trust it',
       hint: 'For virtual machines and older drivers, where pages - and games in them - are otherwise drawn by the processor. Needs a restart. Turned off again by itself if it makes the browser’s graphics crash.',
@@ -1653,6 +1665,24 @@ function workSaid(work) {
   if (on('card').length) parts.push(`${on('card').join(', ')} on the graphics card`);
   if (on('processor').length) parts.push(`${on('processor').join(', ')} on the processor`);
   return parts.length ? `${parts.join('; ')}.` : '';
+}
+
+/** VMware's adapter found (main graphics.js, isVmware), in use or beside a software renderer. */
+function vmwareFound(prefs) {
+  const d = prefs.graphicsDetected;
+  return Boolean(d && (d.vendorId === 0x15ad || d.vmwarePresent === true));
+}
+
+/** What the last try with VMware's adapter found. */
+function vmwareHint(prefs) {
+  if (!vmwareFound(prefs)) return 'For a VMware virtual machine. This computer isn’t one, or hasn’t been checked yet.';
+  switch (prefs.vmwareGpuState) {
+    case 'working': return 'Drawing with VMware’s 3D graphics.';
+    case 'no-3d': return 'Tried, but this virtual machine has no 3D to give: turn on Accelerate 3D graphics in its Display settings, choose Use it, and restart Debrowser.';
+    case 'crashed': return 'Tried, but Debrowser’s graphics crashed with it, so it is off. Choose Use it to try again after a restart.';
+    case 'pending': return 'VMware’s adapter found: Debrowser draws with it from the next start.';
+    default: return prefs.vmwareGpu === 'off' ? 'Off: pages are drawn the way Chromium chooses.' : 'VMware’s adapter found.';
+  }
 }
 
 /** Light graphics' line under the setting: the machine as found, and the choice it led to. */

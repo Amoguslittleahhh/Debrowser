@@ -388,9 +388,9 @@ if (earlyPrefs.get('hardwareAcceleration') === false) {
 }
 // Not in a private window: the adapter's real name in WebGL is one more thing
 // a site could tell this machine apart by, where the processor's is not.
-if (!INCOGNITO && graphics.applySwitches(app, earlyPrefs)) {
-  log('config', 'using the graphics adapter despite the GPU blocklist, by preference');
-}
+const gpuOverride = INCOGNITO ? false : graphics.applySwitches(app, earlyPrefs);
+if (gpuOverride === 'chosen') log('config', 'using the graphics adapter despite the GPU blocklist, by preference');
+if (gpuOverride === 'vmware') log('config', 'using VMware\'s SVGA adapter despite the GPU blocklist');
 // Light graphics, from what the last start found (graphics.js): smooth
 // scrolling animates every wheel step frame by frame, and without a graphics
 // card each of those frames is drawn by the processor. Only decidable before
@@ -2066,6 +2066,22 @@ function main() {
           prefs.set('graphicsDetected', found);
           graphicsFound = found;
           runCommand('apply-light-graphics', { detected: found });
+          // VMware's adapter (graphics.js): asked for this start - did it give
+          // 3D? - or found for the first time, to be asked for next start.
+          const vmware = graphics.vmwareOutcome(app, prefs, found);
+          if (vmware === 'working' && prefs.get('vmwareGpuState') !== 'working') {
+            prefs.set('vmwareGpuState', 'working');
+            runCommand.toast('Debrowser now draws with VMware’s 3D graphics', null, null, 8000);
+          } else if (vmware === 'no-3d') {
+            prefs.set('vmwareGpuFailed', true);
+            prefs.set('vmwareGpuState', 'no-3d');
+            prefs.set('vmwareGpu', 'off');   // choosing it again is the way to retry
+            runCommand.toast('VMware’s 3D graphics is off for this virtual machine. Turn on Accelerate 3D graphics in its Display settings, then choose Use it under VMware 3D graphics in Debrowser',
+              'Settings', () => runCommand('open-settings', { section: 'advanced' }), 15_000);
+          } else if (!vmware && graphics.vmwareWanted(prefs) && !prefs.get('vmwareGpuState')) {
+            prefs.set('vmwareGpuState', 'pending');
+            runCommand.toast('Found VMware’s graphics adapter: Debrowser will draw with it from the next start', null, null, 10_000);
+          }
           // Said once, the first time it turns itself on.
           if (!wasLight && prefs.light && !prefs.get('graphicsNoteShown') && prefs.get('welcomeDone')) {
             prefs.set('graphicsNoteShown', true);
@@ -4062,6 +4078,12 @@ function wireCommands({ tabs, shell, governor, prefs, publish, log, prewarm = nu
         }
         if (payload.key === 'batteryMode' && governor && governor.applySaver) governor.applySaver();
         if (payload.key === 'graphicsMode') runCommand('apply-light-graphics', {});
+        // Chosen again after a try that failed (turned the VM's 3D on, say):
+        // tried again from the next start.
+        if (payload.key === 'vmwareGpu' && payload.value === 'auto') {
+          prefs.set('vmwareGpuFailed', false);
+          prefs.set('vmwareGpuState', 'pending');
+        }
         // Turned off: the kept state goes now, not when a private window next
         // opens - it may never open again.
         if (payload.key === 'incognitoKeepTorState' && payload.value === false && !INCOGNITO) {

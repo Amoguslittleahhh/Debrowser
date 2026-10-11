@@ -346,6 +346,15 @@ const SCHEMA = {
    */
   gpuIgnoreBlocklist: { def: false, ok: (v) => typeof v === 'boolean' },
   gpuOverrideFailed: { def: false, ok: (v) => typeof v === 'boolean' },
+  /**
+   * VMware's SVGA adapter (graphics.js): 'auto' draws with it in a VMware
+   * guest, 'off' never does. `vmwareGpuFailed` is a try that did not work -
+   * no 3D, or crashes - so it is not tried every start; choosing 'auto' again
+   * clears it. `vmwareGpuState` is what the last try found, for Settings.
+   */
+  vmwareGpu: { def: 'auto', ok: (v) => v === 'auto' || v === 'off' },
+  vmwareGpuFailed: { def: false, ok: (v) => typeof v === 'boolean' },
+  vmwareGpuState: { def: '', ok: (v) => ['', 'pending', 'working', 'no-3d', 'crashed'].includes(v) },
   /** The one-time note that pages are drawn by the processor has been shown. */
   graphicsNoteShown: { def: false, ok: (v) => typeof v === 'boolean' },
   /**

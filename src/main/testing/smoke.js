@@ -6047,6 +6047,55 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `kept ${kept}, off ${JSON.stringify(off)}`);
   }
 
+  // VMware's SVGA adapter: found, it is drawn with from the next start; a
+  // start where it gave no 3D, or crashed, turns it off and says why; chosen
+  // again, it is tried again. Simulated: no VMware machine runs this suite.
+  {
+    const graphics = require('../graphics');
+    const store = (o) => ({ values: { ...o }, get(k) { return this.values[k]; }, set(k, v) { this.values[k] = v; return true; } });
+    const fakeApp = (switches = []) => {
+      const added = [...switches];
+      const handlers = {};
+      return { added, commandLine: { appendSwitch: (n) => added.push(n), hasSwitch: (n) => added.includes(n) },
+        on: (e, f) => { handlers[e] = f; }, emit: (e, ...a) => handlers[e] && handlers[e](...a),
+        getGPUFeatureStatus: () => ({}), getGPUInfo: async () => ({ gpuDevice: [
+          { vendorId: 0x1ae0, deviceId: 0xc0de, active: true, deviceString: 'Google SwiftShader' },
+          { vendorId: 0x15ad, deviceId: 0x0405, active: false, deviceString: 'VMware SVGA 3D' }] }) };
+    };
+    const vmware = { vendorId: 0x15ad, software: false };
+    const switched = fakeApp(); const why = graphics.applySwitches(switched, store({ graphicsDetected: vmware, vmwareGpu: 'auto' }));
+    const offApp = fakeApp(); const whyOff = graphics.applySwitches(offApp, store({ graphicsDetected: vmware, vmwareGpu: 'off' }));
+    const noVm = fakeApp(); const whyNone = graphics.applySwitches(noVm, store({ graphicsDetected: { vendorId: 0x10de } }));
+    const on = fakeApp(['ignore-gpu-blocklist']);
+    const outcomes = [
+      graphics.vmwareOutcome(on, store({}), { vendorId: 0x15ad, software: false }),
+      graphics.vmwareOutcome(on, store({}), { vendorId: 0x1ae0, vmwarePresent: true, software: true }),
+      graphics.vmwareOutcome(fakeApp(), store({}), { vendorId: 0x15ad, software: false }),
+      graphics.vmwareOutcome(on, store({ gpuIgnoreBlocklist: true }), { vendorId: 0x15ad, software: true })
+    ];
+    const adapter = await graphics.detectAdapter(fakeApp());
+    // Two graphics crashes with VMware's adapter asked for: off, and said.
+    const crashed = fakeApp(['ignore-gpu-blocklist']);
+    const crashPrefs = store({ graphicsDetected: vmware, vmwareGpu: 'auto' });
+    graphics.guardOverride(crashed, crashPrefs);
+    crashed.emit('child-process-gone', {}, { type: 'GPU', reason: 'crashed' });
+    crashed.emit('child-process-gone', {}, { type: 'GPU', reason: 'crashed' });
+    // Chosen again in Settings: tried again from the next start.
+    runCommand('set-pref', { key: 'vmwareGpu', value: 'off' });
+    prefs.set('vmwareGpuFailed', true);
+    runCommand('set-pref', { key: 'vmwareGpu', value: 'auto' });
+    const retried = prefs.get('vmwareGpuFailed') === false && prefs.get('vmwareGpuState') === 'pending';
+    prefs.set('vmwareGpuState', '');
+    check('VMware SVGA: found, it is drawn with from the next start; no 3D or a crash turns it off and says why; chosen again, it is tried again',
+      why === 'vmware' && switched.added.includes('ignore-gpu-blocklist') && whyOff === false && whyNone === false &&
+        JSON.stringify(outcomes) === JSON.stringify(['working', 'no-3d', null, null]) &&
+        adapter.vmwarePresent === true && adapter.basic === true &&
+        crashPrefs.get('vmwareGpu') === 'off' && crashPrefs.get('vmwareGpuState') === 'crashed' && crashPrefs.get('gpuOverrideFailed') === true &&
+        retried,
+      `why ${why}/${whyOff}/${whyNone}, outcomes ${JSON.stringify(outcomes)}, adapter ${JSON.stringify(adapter)}, ` +
+      `crash ${JSON.stringify(crashPrefs.values)}, retried ${retried}`);
+  }
+
   // Fuzzing the command channel: every command the browser's own pages may
   // send, with junk where its payload should be - nothing must throw, and the
   // browser must still work after. Left out: what opens a system dialog,
