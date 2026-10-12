@@ -233,8 +233,56 @@ the difference between "still works in three years" and "silently unsigned".
   `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. `hardenedRuntime` and the
   entitlements in `build/entitlements.mac.plist` are already configured for it.
   Unlike Windows, there is no reputation clock — notarizing works immediately.
-- **Linux.** Nothing to sign; the `.deb` is unsigned, which is normal outside a
-  distribution repository.
+- **Linux.** The `.deb` itself is not signed - nothing on Ubuntu checks a
+  downloaded `.deb`'s signature, and App Center warns "Potentially unsafe" about
+  every package from outside its store, Chrome's included. What is signed is the
+  apt repository below, which is what checks every update.
+
+### The apt repository
+
+Every stable release carries a signed apt index of its own `.deb` (`InRelease`,
+`Release`, `Release.gpg`, `Packages`, `Packages.gz`). The `.deb`'s install script
+adds a source pointing at `releases/latest/download/`, which GitHub redirects to
+the newest stable release's files, so the repository is always that release: no
+server, nothing to host, nothing to pay for. apt then installs updates with the
+rest of the system, and refuses any whose index is not signed by the key the
+`.deb` carries (`/usr/share/debrowser/archive-keyring.asc`). Betas are never
+"latest", so they are not in it.
+
+Until there is a key, nothing changes: the release has no index and the `.deb`
+adds no source. Turning it on, once, on any Linux machine (free; the key never
+expires unless you choose otherwise):
+
+```sh
+gpg --batch --passphrase '' --quick-gen-key "Debrowser packages" ed25519 sign never
+gpg --armor --export-secret-keys "Debrowser packages"   # → the APT_SIGNING_KEY secret
+gpg --armor --export "Debrowser packages" > build/linux/archive-keyring.asc   # → commit this
+```
+
+1. Settings → Secrets and variables → Actions → New repository secret:
+   `APT_SIGNING_KEY`, the whole private key block, `-----BEGIN` to `-----END`.
+2. Commit `build/linux/archive-keyring.asc` (public; it is what installs check
+   against).
+3. Keep a copy of the private key somewhere safe and offline. Losing it means a
+   new key, and every existing install would need the new one by hand.
+
+The release job refuses to publish if the secret's key is not the committed one.
+The private key is only ever seen by the release job, never the build job, which
+runs dependency install scripts. Its passphrase is empty because nothing could
+type one in CI; the secret store is what protects it.
+
+Removing `/etc/apt/sources.list.d/debrowser.sources` turns apt updates off for
+good on that machine; installing again does not add it back. Uninstalling the
+package removes it.
+
+### What software centres show
+
+`build/linux/debrowser.metainfo.xml` is the AppStream entry App Center, GNOME
+Software and Discover read: name, summary, licence, developer, screenshots and
+the release date, filled in per build by `build/linux/before-pack.js`. The icon
+is installed at every hicolor size from `build/linux/icons/`
+(`electron tools/make-icon.js --linux-only` redraws them). Check the entry with
+`appstreamcli validate --pedantic`.
 
 An unsigned macOS build produced *on Linux* is doubly worth flagging: it has
 never been through `codesign` at all, so it is strictly for trying the app, not

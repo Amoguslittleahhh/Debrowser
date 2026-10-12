@@ -1,14 +1,19 @@
 // Draw the app icon: build/icon.png (1024 px, which electron-builder turns
-// into the macOS .icns and the Linux sizes) and build/icon.ico (Windows, with
-// its small sizes drawn for their size rather than scaled down). And the
-// private window's own, build/icon-private.{png,svg,ico}.
+// into the macOS .icns), build/icon.ico (Windows, with its small sizes drawn
+// for their size rather than scaled down) and build/linux/icons/ (the sizes
+// the .deb installs into the hicolor theme - given only the 1024 px one, it
+// installed that alone, a size the theme does not list, and software centres
+// showed a placeholder). And the private window's own,
+// build/icon-private.{png,svg,ico}.
+//
+// `--linux-only` writes build/linux/icons/ and nothing else.
 //
 // The private icon is the same frame on a violet-black tile, and the dot is a
 // ring: the tab with nothing kept in it. Violet is the private window's colour
 // everywhere else (--private in theme.css), so the taskbar says which window
 // is which before either is looked at.
 //
-//   node_modules/.bin/electron tools/make-icon.js
+//   node_modules/.bin/electron tools/make-icon.js [--linux-only]
 //
 // The mark is the one on the new tab page: a frame - one tab - with a dot in
 // its corner, the one awake. On the icon it sits on a dark tile, the frame in
@@ -94,6 +99,13 @@ app.whenReady().then(async () => {
     show: false, transparent: true, frame: false, useContentSize: true, backgroundColor: '#00000000',
     webPreferences: { offscreen: true }
   });
+  const linux = path.join(OUT, 'linux', 'icons');
+  fs.mkdirSync(linux, { recursive: true });
+  const linuxSizes = [16, 24, 32, 48, 64, 128, 256, 512];
+  for (const size of linuxSizes) fs.writeFileSync(path.join(linux, `${size}x${size}.png`), await render(win, size));
+  console.log(`wrote build/linux/icons/ (${linuxSizes.join(', ')})`);
+  if (process.argv.includes('--linux-only')) { app.exit(0); return; }
+
   const sizes = [16, 24, 32, 48, 64, 128, 256];
   for (const [name, look] of [['icon', NORMAL], ['icon-private', PRIVATE]]) {
     fs.writeFileSync(path.join(OUT, `${name}.png`), await render(win, 1024, false, look));

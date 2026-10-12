@@ -18,6 +18,8 @@ electronDownload:
 ## Prime need on Windows and macOS. macOS signs before code signing (the VMP
 ## signature lives inside the bundle it seals), Windows after it. Skipped, with
 ## a warning, when no EVS account is set up; see build/vmp-sign.js.
+## Linux: the AppStream entry and the apt key for this build. See the file.
+beforePack: build/linux/before-pack.js
 afterPack: build/vmp-after-pack.js
 afterSign: build/vmp-after-sign.js
 copyright: Debrowser
@@ -351,6 +353,9 @@ linux:
       arch: [x64]
     - target: tar.gz
       arch: [x64]
+  # Every size the hicolor theme lists, drawn by tools/make-icon.js; from one
+  # 1024 px file only that size was installed, and software centres found none.
+  icon: build/linux/icons
   category: Network;WebBrowser
   mimeTypes:
     - text/html
@@ -377,6 +382,16 @@ deb:
   # The default profile plus one entry for the private-window launcher, which
   # needs to make a network namespace. See build/apparmor-profile.tpl.
   appArmorProfile: build/apparmor-profile.tpl
+  # electron-builder's own scripts plus the apt repository's source - added on
+  # install, removed with the package. See the end of each file.
+  afterInstall: build/linux/after-install.tpl
+  afterRemove: build/linux/after-remove.tpl
+  # Files outside /opt, written by build/linux/before-pack.js: the AppStream
+  # entry software centres read (name, licence, icon, developer, release date)
+  # and the key the apt source is checked against.
+  fpm:
+    - build/linux/generated/debrowser.metainfo.xml=/usr/share/metainfo/dev.debrowser.app.metainfo.xml
+    - build/linux/generated/archive-keyring.asc=/usr/share/debrowser/archive-keyring.asc
   depends:
     - libgtk-3-0
     - libnotify4
