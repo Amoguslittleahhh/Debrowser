@@ -233,54 +233,72 @@ the difference between "still works in three years" and "silently unsigned".
   `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. `hardenedRuntime` and the
   entitlements in `build/entitlements.mac.plist` are already configured for it.
   Unlike Windows, there is no reputation clock — notarizing works immediately.
-- **Linux.** The `.deb` itself is not signed - nothing on Ubuntu checks a
-  downloaded `.deb`'s signature, and App Center warns "Potentially unsafe" about
-  every package from outside its store, Chrome's included. What is signed is the
-  apt repository below, which is what checks every update.
+- **Linux.** Signed with one key of the project's own (free, made once; see
+  below). The `.rpm` is signed itself, because dnf and zypper check package
+  signatures. The `.deb` is not - nothing on Ubuntu checks a downloaded `.deb`'s
+  signature, and App Center warns "Potentially unsafe" about every package from
+  outside its store, Chrome's included - so what is signed there is the apt
+  repository, which is what checks every update.
 
-### The apt repository
+### The Linux repositories
 
-Every stable release carries a signed apt index of its own `.deb` (`InRelease`,
-`Release`, `Release.gpg`, `Packages`, `Packages.gz`). The `.deb`'s install script
-adds a source pointing at `releases/latest/download/`, which GitHub redirects to
-the newest stable release's files, so the repository is always that release: no
-server, nothing to host, nothing to pay for. apt then installs updates with the
-rest of the system, and refuses any whose index is not signed by the key the
-`.deb` carries (`/usr/share/debrowser/archive-keyring.asc`). Betas are never
-"latest", so they are not in it.
+Each package's install script adds a repository, so updates arrive with the
+rest of the system's and the package manager refuses any not signed by the key
+the package carries (`/usr/share/debrowser/archive-keyring.asc`). Betas are never
+"latest", so they are in neither.
 
-Until there is a key, nothing changes: the release has no index and the `.deb`
-adds no source. Turning it on, once, on any Linux machine (free; the key never
+- **apt** (Debian, Ubuntu, Mint, Pop!_OS, elementary): every stable release
+  carries a signed index of its own `.deb` (`InRelease`, `Release`,
+  `Release.gpg`, `Packages`, `Packages.gz`). The source points at
+  `releases/latest/download/`, which GitHub redirects to the newest stable
+  release's files, so the repository is always that release.
+- **dnf and zypper** (Fedora, RHEL and its rebuilds, openSUSE): a signed index
+  (`repodata/`, with `repomd.xml.asc`) on the project's GitHub Pages site at
+  `/rpm/`, rebuilt by `pages.yml` from the newest release, its entries pointing
+  at that release's `.rpm`. Pages rather than the release, because dnf wants a
+  `repodata/` folder and a release's files cannot be in folders.
+
+No server, nothing to host, nothing to pay for. Until there is a key, nothing
+changes: the packages are not signed, there are no indexes, and the packages add
+no repository. Turning it on, once, on any Linux machine (free; the key never
 expires unless you choose otherwise):
 
 ```sh
-gpg --batch --passphrase '' --quick-gen-key "Debrowser packages" ed25519 sign never
-gpg --armor --export-secret-keys "Debrowser packages"   # → the APT_SIGNING_KEY secret
+gpg --batch --passphrase '' --quick-gen-key "Debrowser packages" rsa4096 sign never
+gpg --armor --export-secret-keys "Debrowser packages"   # → the LINUX_SIGNING_KEY secret
 gpg --armor --export "Debrowser packages" > build/linux/archive-keyring.asc   # → commit this
 ```
 
+RSA rather than ed25519: rpm 4.14 - RHEL 8, openSUSE Leap 15 - cannot check an
+ed25519 signature.
+
 1. Settings → Secrets and variables → Actions → New repository secret:
-   `APT_SIGNING_KEY`, the whole private key block, `-----BEGIN` to `-----END`.
+   `LINUX_SIGNING_KEY`, the whole private key block, `-----BEGIN` to `-----END`.
 2. Commit `build/linux/archive-keyring.asc` (public; it is what installs check
    against).
 3. Keep a copy of the private key somewhere safe and offline. Losing it means a
    new key, and every existing install would need the new one by hand.
 
-The release job refuses to publish if the secret's key is not the committed one.
-The private key is only ever seen by the release job, never the build job, which
-runs dependency install scripts. Its passphrase is empty because nothing could
-type one in CI; the secret store is what protects it.
+The release job refuses to publish if the secret's key is not the committed one,
+and the Pages job indexes only packages signed with it. The private key is seen
+only by those two jobs, never the build job, which runs dependency install
+scripts. Its passphrase is empty because nothing could type one in CI; the
+secret store is what protects it.
 
-Removing `/etc/apt/sources.list.d/debrowser.sources` turns apt updates off for
-good on that machine; installing again does not add it back. Uninstalling the
-package removes it.
+Removing the repository file (`/etc/apt/sources.list.d/debrowser.sources`,
+`/etc/yum.repos.d/debrowser.repo` or `/etc/zypp/repos.d/debrowser.repo`) turns
+those updates off for good on that machine; installing again does not add it
+back. Uninstalling the package removes it.
+
+Arch and other distributions use the AppImage or the `.tar.gz`; the AppImage
+updates itself.
 
 ### What software centres show
 
 `build/linux/before-pack.js` writes Debrowser's AppStream entry for each build,
-twice from one description: as installed metainfo
-(`/usr/share/metainfo/dev.debrowser.app.metainfo.xml`, read by GNOME Software and
-Discover) and as a one-app catalogue (`/usr/share/swcatalog/yaml/debrowser.yml`).
+twice from one description, into both the `.deb` and the `.rpm`: as installed
+metainfo (`/usr/share/metainfo/dev.debrowser.app.metainfo.xml`, read by GNOME
+Software and Discover) and as a one-app catalogue (`/usr/share/swcatalog/yaml/debrowser.yml`).
 Ubuntu's App Center reads only catalogues, and its page for a catalogue app
 takes the publisher from the developer name, the licence from the project
 licence and "last updated" from the newest release - so once Debrowser is

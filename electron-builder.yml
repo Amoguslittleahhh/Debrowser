@@ -351,6 +351,8 @@ linux:
       arch: [x64]
     - target: deb
       arch: [x64]
+    - target: rpm
+      arch: [x64]
     - target: tar.gz
       arch: [x64]
   # Every size the hicolor theme lists, drawn by tools/make-icon.js; from one
@@ -406,3 +408,16 @@ deb:
     - xdg-utils
     - libatspi2.0-0
     - libsecret-1-0
+
+## Fedora, RHEL and openSUSE: the same files outside /opt as the .deb, and the
+## same scripts with a dnf or zypper repository in place of the apt source.
+## The package is signed in the release job; the repository index is on GitHub
+## Pages (.github/workflows/pages.yml), since dnf wants a repodata/ folder and a
+## release cannot hold one.
+rpm:
+  afterInstall: build/linux/rpm-after-install.tpl
+  afterRemove: build/linux/rpm-after-remove.tpl
+  fpm:
+    - build/linux/generated/debrowser.metainfo.xml=/usr/share/metainfo/dev.debrowser.app.metainfo.xml
+    - build/linux/generated/debrowser.yml=/usr/share/swcatalog/yaml/debrowser.yml
+    - build/linux/generated/archive-keyring.asc=/usr/share/debrowser/archive-keyring.asc

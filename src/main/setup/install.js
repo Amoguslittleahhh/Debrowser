@@ -49,11 +49,28 @@ function appImage() {
   return APPIMAGE && APPDIR && process.execPath.startsWith(path.resolve(APPDIR) + path.sep) ? APPIMAGE : null;
 }
 
-/** How this copy is installed: 'appimage', 'deb', 'folder', or null when unpackaged or not Linux. */
+/** Whether the rpm database has Debrowser in it; asked once. */
+let rpmInstalled = null;
+function inRpmDatabase() {
+  if (rpmInstalled === null) {
+    try {
+      rpmInstalled = require('child_process').spawnSync('rpm', ['-q', '--quiet', 'debrowser'], { timeout: 5000 }).status === 0;
+    } catch {
+      rpmInstalled = false;
+    }
+  }
+  return rpmInstalled;
+}
+
+/** How this copy is installed: 'appimage', 'deb', 'rpm', 'folder', or null when unpackaged or not Linux. */
 function linuxKind() {
   if (process.platform !== 'linux' || !app.isPackaged) return null;
   if (appImage()) return 'appimage';
-  if (process.execPath.startsWith('/opt/') && fs.existsSync('/var/lib/dpkg/info/debrowser.list')) return 'deb';
+  if (process.execPath.startsWith('/opt/')) {
+    if (fs.existsSync('/var/lib/dpkg/info/debrowser.list')) return 'deb';
+    // Before asking rpm: only a package puts this file there.
+    if (fs.existsSync('/usr/share/metainfo/dev.debrowser.app.metainfo.xml') && inRpmDatabase()) return 'rpm';
+  }
   return 'folder';
 }
 

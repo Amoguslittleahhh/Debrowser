@@ -197,26 +197,31 @@ function plan() {
     };
   }
   const kind = install.linuxKind();
-  if (kind === 'deb') {
+  if (kind === 'deb' || kind === 'rpm') {
+    // dpkg and rpm rather than apt, dnf or zypper: nothing depends on this
+    // package, so there is nothing to resolve, and no lock to wait on. A .deb
+    // is purged, so its AppArmor profile in /etc goes too: nothing of it is
+    // left behind.
+    const [command, manual] = kind === 'deb'
+      ? [['/usr/bin/dpkg', '--purge', 'debrowser'], 'sudo apt remove debrowser']
+      : [['/usr/bin/rpm', '-e', 'debrowser'], 'sudo dnf remove debrowser (sudo zypper remove debrowser on openSUSE)'];
+    const tool = kind === 'deb' ? 'dpkg' : 'rpm';
     return {
       does: 'be removed from this computer',
       note: 'Your system will ask for your password.',
       async remove({ removeData }) {
         await closePrivateWindows();
-        // dpkg rather than apt: nothing depends on this package, so there is
-        // nothing to resolve, and no apt lock to wait on. Purged, so its
-        // AppArmor profile in /etc goes too: nothing of it is left behind.
-        const { code, stderr } = await run(PKEXEC, ['/usr/bin/dpkg', '--purge', 'debrowser']);
-        const instead = 'Remove Debrowser with your software manager, or with: sudo apt remove debrowser';
+        const { code, stderr } = await run(PKEXEC, command);
+        const instead = `Remove Debrowser with your software manager, or with: ${manual}`;
         // pkexec: 126 is a dismissed prompt. 127 is either a refusal - a wrong
         // password, or an account that may not - or no prompt to show at all,
-        // and only its message tells them apart. Anything else is dpkg's.
+        // and only its message tells them apart. Anything else is dpkg's or rpm's.
         if (code === 126) throw new Error('The password was not given, so nothing was removed.');
         if (code === 127 && /not authori[sz]ed/i.test(stderr)) {
           throw new Error('The password was not accepted, or this account may not remove programs, so nothing was removed.');
         }
         if (code === 127 || code < 0) throw new Error(`Your system could not ask for a password. ${instead}`);
-        if (code !== 0) throw new Error(`Removing the package failed (dpkg ${code}). ${instead}`);
+        if (code !== 0) throw new Error(`Removing the package failed (${tool} ${code}). ${instead}`);
         if (removeData) removeAfterExit(dataPaths());
       }
     };

@@ -31,6 +31,7 @@ Chromium (through Electron), so real websites work.
 | **macOS** | `Debrowser-<version>-mac-arm64.dmg` (`-x64` on Intel) | Drag Debrowser into Applications. The first launch needs System Settings → Privacy & Security → **Open Anyway**. |
 | **Linux** | `Debrowser-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
 | **Debian/Ubuntu** | `Debrowser-<version>-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
+| **Fedora/openSUSE** | `Debrowser-<version>-linux-x86_64.rpm` | `sudo dnf install ./Debrowser-*.rpm` (`sudo zypper install ./Debrowser-*.rpm` on openSUSE) |
 
 A portable Windows build and a `.tar.gz` are on each release too.
 

@@ -34,6 +34,62 @@ jobs:
         with:
           node-version: 22
       - run: node tools/changelog-site.js site
+      # The dnf and zypper repository: a signed index (repodata/) of the newest
+      # stable release's .rpm, whose entries point at that release's download,
+      # so only a few kilobytes live here. The .rpm's install script adds it
+      # (build/linux/rpm-after-install.tpl). Rebuilt with the site, from
+      # whatever release is latest, so the two never disagree. Signed with the
+      # same LINUX_SIGNING_KEY as the packages, and only once they are signed.
+      - name: The rpm repository
+        env:
+          LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$LINUX_SIGNING_KEY" ]; then
+            echo "::notice::No LINUX_SIGNING_KEY secret, so no rpm repository."
+            exit 0
+          fi
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          work=$(mktemp -d)
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern '*.rpm' -D "$work" || true
+          if ! ls "$work"/*.rpm >/dev/null 2>&1; then
+            echo "::notice::$tag has no .rpm, so no rpm repository yet."
+            exit 0
+          fi
+          export GNUPGHOME=$(mktemp -d)
+          printf '%s\n' "$LINUX_SIGNING_KEY" | gpg --batch --quiet --import
+          signing=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr:/{print $10; exit}')
+          sudo apt-get install -y --no-install-recommends createrepo-c rpm >/dev/null
+          # Only packages signed with this key: dnf would refuse the rest anyway.
+          db=$(mktemp -d)
+          rpm --dbpath "$db" --initdb
+          rpm --dbpath "$db" --import build/linux/archive-keyring.asc
+          for f in "$work"/*.rpm; do
+            if ! rpm --dbpath "$db" -K "$f" | grep -q 'digests signatures OK'; then
+              echo "::notice::$(basename "$f") in $tag is not signed with this key, so no rpm repository yet."
+              exit 0
+            fi
+          done
+          mkdir -p site/rpm
+          createrepo_c --baseurl "${{ github.server_url }}/$GITHUB_REPOSITORY/releases/download/$tag/" \
+            --outputdir site/rpm "$work"
+          gpg --batch --yes --local-user "$signing" --armor --detach-sign site/rpm/repodata/repomd.xml
+          gpg --batch --export "$signing" > "$GNUPGHOME/check.gpg"
+          gpgv --keyring "$GNUPGHOME/check.gpg" site/rpm/repodata/repomd.xml.asc site/rpm/repodata/repomd.xml
+          # For setting it up by hand: `sudo dnf config-manager addrepo --from-repofile=<this>`.
+          cp build/linux/archive-keyring.asc site/rpm/debrowser-archive-keyring.asc
+          cat > site/rpm/debrowser.repo <<REPO
+          [debrowser]
+          name=Debrowser
+          baseurl=https://amoguslittleahhh.github.io/Debrowser/rpm/
+          enabled=1
+          gpgcheck=1
+          repo_gpgcheck=1
+          gpgkey=https://amoguslittleahhh.github.io/Debrowser/rpm/debrowser-archive-keyring.asc
+          REPO
+          sed -i 's/^ *//' site/rpm/debrowser.repo
+          ls -R site/rpm
+          rm -rf "$GNUPGHOME"
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
