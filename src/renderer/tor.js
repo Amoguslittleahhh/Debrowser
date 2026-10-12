@@ -76,7 +76,7 @@ function render(incognito) {
   fonts.className = f.available ? 'yes' : 'no';
   fonts.textContent = f.available
     ? `Hidden: pages see only ${f.families.length} common fonts`
-    : `Visible: ${f.reason || 'not controllable here'}`;
+    : `Visible: ${f.reason || 'Debrowser can’t change this here'}`;
   const capture = document.getElementById('capture');
   if (incognito.contentProtection === false) {
     capture.className = 'no';
@@ -105,13 +105,13 @@ function renderGuard(killSwitch, tripwire) {
   if (killSwitch && killSwitch.available) {
     el.guard.dataset.level = 'os';
     strong.textContent = 'Leak protection: enforced by the operating system.';
-    rest = ` ${killSwitch.mechanism}. A connection that ignored the proxy would have nowhere to go.`;
+    rest = ` ${killSwitch.mechanism}. Anything that tried to get around Tor would have nowhere to go.`;
   } else {
     el.guard.dataset.level = 'tripwire';
-    strong.textContent = 'Leak protection: tripwire only.';
-    const why = killSwitch && killSwitch.reason ? ` The operating system's wall isn’t available: ${killSwitch.reason}.` : '';
-    const sees = tripwire && tripwire.available === false ? ' The tripwire itself isn’t running.' : '';
-    rest = `${why} A stray connection is detected and the window closed, rather than prevented.${sees}`;
+    strong.textContent = 'Leak protection: watching, not blocking.';
+    const why = killSwitch && killSwitch.reason ? ` Your system can’t shut this window off from the network: ${killSwitch.reason}.` : '';
+    const sees = tripwire && tripwire.available === false ? ' The watch itself isn’t running.' : '';
+    rest = `${why} If anything tries to connect around Tor, the window closes at once – after the attempt, not before it.${sees}`;
   }
   el.guard.replaceChildren(strong, document.createTextNode(rest));
 }

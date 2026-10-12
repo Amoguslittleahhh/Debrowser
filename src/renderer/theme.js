@@ -95,34 +95,52 @@ function failureReason(error) {
 }
 
 /**
+ * How long a download has left, as a person would say it - rounded, because
+ * a countdown that jumps between 47 and 52 seconds every tick reads as noise.
+ * Empty while there is no total or no speed to go on yet.
+ */
+function timeLeft(item) {
+  if (!item.total || !item.bytesPerSecond) return '';
+  const s = (item.total - item.received) / item.bytesPerSecond;
+  if (!(s > 0) || !Number.isFinite(s)) return '';
+  if (s < 5) return 'almost done';
+  if (s < 60) return `${Math.ceil(s / 5) * 5} seconds left`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} left`;
+  const h = Math.round(s / 3600);
+  return `about ${h} hour${h === 1 ? '' : 's'} left`;
+}
+
+/**
  * The line under a download's filename, in one wording for every view.
  *
- * What the browser is doing, how far through, and over how many connections -
- * that last because a download split across several is otherwise invisible.
- * Three views each carried a copy, and a fix made to one ("Failed — undefined")
- * had to be made three times. `brief` is the flyout's shorter line: no
- * connection count, and nothing for a finished file, whose row offers
- * "Open file" instead.
+ * What the browser is doing, how far through and how long it has left. Three
+ * views each carried a copy, and a fix made to one ("Failed — undefined") had
+ * to be made three times. `brief` is the flyout's shorter line: nothing for a
+ * finished file, whose row offers "Open file" instead.
+ *
+ * How many connections a download is split across is left out: it is how the
+ * file arrives, not anything about it, and "over 4 connections" read as the
+ * browser talking to itself.
  */
 /* eslint-disable-next-line no-unused-vars -- read by downloads.js, flyout.js, settings.js */
 function describeDownload(item, { brief = false } = {}) {
-  // Only worth saying when there is more than one: "over 1 connection" is a
-  // fact about the plumbing, not about the file.
-  const over = brief || !(item.segments > 1) ? '' : ` over ${item.segments} connections`;
   switch (item.state) {
     case 'done':
       if (item.missing) return 'Moved or deleted';
-      return brief ? null : `Finished – ${formatBytes(item.received)}${over}`;
+      return brief ? null : `Finished – ${formatBytes(item.received)}`;
     case 'failed':
       return failureReason(item.error);
     case 'cancelled':
       return 'Cancelled';
     default: {
-      const rate = item.bytesPerSecond
-        ? `${brief ? ' · ' : ', '}${formatBytes(item.bytesPerSecond)}/s` : '';
+      // Time left where it can be told; the speed where it cannot.
+      const left = timeLeft(item);
+      const rate = item.bytesPerSecond ? `${formatBytes(item.bytesPerSecond)}/s` : '';
+      const after = left || rate;
       return item.total
-        ? `${formatBytes(item.received)} of ${formatBytes(item.total)}${over}${rate}`
-        : `${formatBytes(item.received)}${rate}`;
+        ? `${formatBytes(item.received)} of ${formatBytes(item.total)}${after ? ` · ${after}` : ''}`
+        : `${formatBytes(item.received)}${rate ? ` · ${rate}` : ''}`;
     }
   }
 }

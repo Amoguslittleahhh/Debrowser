@@ -12,6 +12,7 @@
 
 ### Improved
 
+- **Debrowser talks like a person, not like its own engine.** Downloads say how long they have left instead of how many connections they use, history shows 2:35 PM rather than 02:35 PM, and the Memory settings, task manager, Safety check and private connection page drop words like "governor", "renderer", "resident" and "tripwire" for plain ones. Tabs are open, quiet, paused or asleep in the task manager, the same words the tab strip uses.
 - **One download per system, named for it, and a page that picks it for you.** A release now offers `Debrowser-Windows-Setup.exe`, `Debrowser-macOS-arm64.dmg` (Apple silicon) or `Debrowser-macOS-x64.dmg` (Intel), and `Debrowser-Linux.deb`, `.rpm` or `.AppImage`, and its notes open with a table of which to take. The new download page on the project's site works out which your computer needs and offers that one first. The portable Windows build and the Linux .tar.gz are gone: use the installer, which asks nothing and installs for you alone, or the AppImage.
 
 ### Fixed

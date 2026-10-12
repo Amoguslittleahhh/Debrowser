@@ -80,8 +80,10 @@ async function load() {
   $('permissions-empty').hidden = s.permissions.length > 0;
   if (s.revoked.length) {
     $('revoked').hidden = false;
-    $('revoked').textContent = `Removed by themselves from ${s.revoked.map((r) => new URL(r.origin).host).join(', ')}: ` +
-      'not used for three months. They will ask again if they need to.';
+    const sites = s.revoked.map((r) => new URL(r.origin).host);
+    $('revoked').textContent = `${sites.join(', ')} ${sites.length === 1 ? 'hasn’t' : 'haven’t'} been used for three months, ` +
+      `so Debrowser took back what ${sites.length === 1 ? 'it was' : 'they were'} allowed. ` +
+      `${sites.length === 1 ? 'It' : 'They'}’ll ask again if ${sites.length === 1 ? 'it needs' : 'they need'} to.`;
   }
 
   $('summary').textContent = off.length

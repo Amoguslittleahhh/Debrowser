@@ -340,7 +340,7 @@ const SHOTS = [
     hash: encodeURIComponent(JSON.stringify({"userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36", "major": "152", "timezone": "UTC", "locale": "en-US", "languages": "en-US,en", "sharedWorkerLanguages": "en-US", "cores": 4})) },
   { name: 'tor-failed', file: 'tor.html', w: 1280, h: 820,
     incognito: { tor: { state: 'failed', progress: 10, summary: 'Connected to a relay',
-                        warning: 'No progress for 45 seconds at 10% - the network may be blocking Tor' },
+                        warning: 'Stuck at 10% for 45 seconds. Your network may be blocking Tor.' },
                  killSwitch: { available: false, reason: 'macOS offers no per-app network control without root' },
                  tripwire: { available: true } } }
 ];

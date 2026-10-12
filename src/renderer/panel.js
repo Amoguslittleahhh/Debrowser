@@ -29,13 +29,15 @@ let budgetPinnedByUser = false;
 /** What the last release of the slider asked for, until the browser reports it. */
 let budgetSent = null;
 
+// In the words the tab strip's hover card uses (chrome.js, tierLabel), not
+// the governor's own names for its tiers: one tab, one description.
 const TIER_TEXT = {
-  active: 'Active',
-  warm: 'Background',
-  cold: 'Idle · discardable',
-  frozen: 'Frozen · 0% CPU',
-  hibernated: 'Hibernated · compressed',
-  discarded: 'Discarded · 0 MB'
+  active: 'Open now',
+  warm: 'Running in the background',
+  cold: 'Quiet · sleeps if memory runs short',
+  frozen: 'Asleep · paused, using no processor',
+  hibernated: 'Asleep · memory squeezed down',
+  discarded: 'Asleep · memory given back'
 };
 
 /**
@@ -75,10 +77,10 @@ function coverageNote(state) {
 }
 
 const PRESSURE_TEXT = {
-  none: 'Under budget.',
-  moderate: 'Near the budget. Quiet tabs sleep sooner.',
-  high: 'Over budget. Quiet tabs are frozen, and may be closed to free memory.',
-  critical: 'Well over budget. Freeing memory from the tabs used least.'
+  none: 'Within budget.',
+  moderate: 'Close to the budget, so quiet tabs go to sleep sooner.',
+  high: 'Over budget. Quiet tabs are paused, and some may go to sleep to make room.',
+  critical: 'Well over budget. The tabs you’ve used least are going to sleep.'
 };
 
 function render(state) {
@@ -133,10 +135,10 @@ function render(state) {
   // One word, because the tile is a third of a 360px panel and the label is
   // set in uppercase at 10.5px: "resident (over-counts)" did not fit and was
   // rendered as "RESIDENT (OVE…", which is a label that has to be hovered to be
-  // read. Both words are accurate on their own - a proportional figure is what
-  // the browser is resident in, a non-proportional one is the sum of each
-  // process's working set - and the tooltip carries the explanation either way.
-  el.totalLabel.textContent = proportional ? 'Resident' : 'Summed';
+  // read. So a word or two: "In use" for a proportional figure, which is the
+  // memory the browser really holds, and "Roughly" for summed working set,
+  // which runs high - and the tooltip carries the explanation either way.
+  el.totalLabel.textContent = proportional ? 'In use' : 'Roughly';
   el.totalLabel.classList.toggle('inexact', !proportional);
 
   // Private working set has no sharing to argue about, so printing it beside
@@ -240,7 +242,7 @@ function render(state) {
   const n = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
   let line =
     `${n(state.processCount, 'process', 'processes')}, ${n(state.rendererCount, 'for pages', 'for pages')} · ` +
-    `${n(s.freezes, 'tab frozen', 'tabs frozen')} · ${s.discards} discarded · about ${s.reclaimedMB} MB freed`;
+    `${n(s.freezes, 'tab paused', 'tabs paused')} · ${n(s.discards, 'put to sleep', 'put to sleep')} · about ${s.reclaimedMB} MB freed`;
   // Only shown once the heap limit rule has actually acted, so the line stays
   // quiet in the default configuration where the rule is off.
   if (s.heapCollections) {
@@ -350,7 +352,8 @@ function createRow(id) {
 
   const action = document.createElement('button');
   action.className = 'row-action';
-  action.textContent = 'Discard';
+  action.textContent = 'Sleep';
+  action.title = 'Put this tab to sleep now. It reloads when you go back to it.';
   action.addEventListener('click', () => api.send('discard-tab', { id }));
 
   root.addEventListener('click', (event) => {

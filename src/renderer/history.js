@@ -53,7 +53,8 @@ function dayLabel(ts) {
 }
 
 function timeLabel(ts) {
-  return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  // "2:35 PM", not "02:35 PM": a clock with a leading zero is a log file's.
+  return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 /* ------------------------------------------------------------------ */

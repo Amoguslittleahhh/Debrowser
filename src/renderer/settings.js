@@ -139,7 +139,7 @@ const SECTIONS = {
     {
       key: 'windowOpacity',
       label: 'Tab bar translucency',
-      hint: 'Needs a window material behind it.',
+      hint: 'Shows only with a window material, set just below.',
       unavailable: () => (api.platform === 'linux' ? 'Needs Windows or macOS: Linux has no window material to show through.' : ''),
       type: 'range',
       // Shown as translucency, which is what the row is called, not as the
@@ -434,7 +434,7 @@ const SECTIONS = {
     {
       key: 'memoryBudgetMB',
       label: 'Memory budget',
-      hint: 'Empty sizes it to this computer.',
+      hint: 'Leave it empty and Debrowser picks one to suit this computer.',
       type: 'number',
       placeholder: 'Automatic',
       min: 256,
@@ -443,8 +443,8 @@ const SECTIONS = {
     },
     {
       key: 'maxLiveTabs',
-      label: 'Tabs holding a renderer',
-      hint: 'Tabs past this stay listed but free their memory. 0 removes the limit.',
+      label: 'Tabs kept awake',
+      hint: 'Beyond this many, the ones you used longest ago go to sleep. They stay in the tab strip. 0 means no limit.',
       type: 'number',
       placeholder: 'Automatic',
       min: 0,
@@ -456,7 +456,7 @@ const SECTIONS = {
     {
       key: 'downloadConnections',
       label: 'Connections per download',
-      hint: 'Parts downloaded at once.',
+      hint: 'How many pieces of a file come down at once. More can be faster for big files.',
       type: 'number',
       min: 1,
       max: 16
@@ -469,7 +469,7 @@ const SECTIONS = {
     {
       key: 'downloadDir',
       label: 'Save files to',
-      hint: 'Empty uses your Downloads folder.',
+      hint: 'Leave it empty for your Downloads folder.',
       type: 'text',
       placeholder: 'Your Downloads folder'
     }
@@ -519,7 +519,7 @@ const SECTIONS = {
     {
       key: 'incognitoKeepTorState',
       label: 'Remember Tor between sessions',
-      hint: 'Connects in seconds by keeping the same entry guard. Off leaves no trace of Tor here.',
+      hint: 'Connects in seconds next time by remembering the relay it went in through. Off leaves no trace of Tor on this computer.',
       type: 'checkbox'
     },
     {
@@ -542,7 +542,7 @@ const SECTIONS = {
     {
       key: 'incognitoIdleWipeMinutes',
       label: 'Close private windows when idle',
-      hint: 'Erases everything after this many idle minutes. 0 never closes them.',
+      hint: 'After this many minutes unused, the window closes and everything in it is erased. 0 keeps it open.',
       type: 'number',
       min: 0,
       max: 240,
