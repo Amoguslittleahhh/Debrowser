@@ -24,6 +24,7 @@
  */
 
 const crypto = require('crypto');
+const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -79,8 +80,9 @@ function command(torExtra = [], extraArgs = []) {
  * @param {string[]} torExtra - bridge lines for the launcher's torrc
  * @param {{keepTorState?: boolean, userData?: string, warm?: boolean, onExit?: Function}} [state]
  */
-function launchIncognito(log = () => {}, torExtra = [], state = {}) {
-  const env = { ...process.env };
+/** The private browser's environment: this one's, less what must not cross. */
+function childEnv(from = process.env) {
+  const env = { ...from };
   // Never inherited: it turns the binary into a plain Node interpreter.
   delete env.ELECTRON_RUN_AS_NODE;
   // Only the launcher may say what it did; a stale value from the normal
@@ -90,6 +92,17 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
   delete env.DEBROWSER_TOR_PID;
   delete env.DEBROWSER_TOR_SEED;
   delete env.FONTCONFIG_FILE;
+  // Set by Electron in this process for its own window, and fatal inherited:
+  // a private browser started with it had its zygote - the process every page
+  // is forked from - exit before saying hello, and Chromium ended there
+  // (SIGTRAP, 100ms in). Measured on Linux, inside the kill switch's namespace
+  // and outside it alike; it was every private window, from every menu.
+  delete env.CHROME_DESKTOP;
+  return env;
+}
+
+function launchIncognito(log = () => {}, torExtra = [], state = {}) {
+  const env = childEnv();
 
   try {
     // Fonts, on Linux: the private browser's font configuration has to be in
@@ -111,14 +124,26 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
       if (require('./torstate').restore(state.userData, seed, log) > 0) env.DEBROWSER_TOR_SEED = seed;
       else fs.rmSync(seed, { recursive: true, force: true });
     }
-    const child = spawn(program, args, { detached: true, stdio: 'ignore', env });
+    // What it says as it starts goes to a file of this user's alone, read only
+    // if it fails - for the one line that says why - and then deleted. Before,
+    // it went nowhere, and a private window that died left nothing to go on.
+    const errFile = path.join(os.tmpdir(), `debrowser-private-${crypto.randomBytes(6).toString('hex')}.log`);
+    let errFd = 'ignore';
+    try { errFd = fs.openSync(errFile, 'w', 0o600); } catch { errFd = 'ignore'; }
+    const child = spawn(program, args, { detached: true, stdio: ['ignore', 'ignore', errFd], env });
+    if (typeof errFd === 'number') fs.closeSync(errFd);
     child.on('error', (err) => log('incognito', `could not start: ${err.message}`));
     if (state.onExit) child.on('exit', state.onExit);
-    // A private browser that ends with an error never showed anything - its
-    // output goes nowhere - so the one that asked for it has to say so.
-    // With how long it ran, which is what says whether it ever had a window.
+    // A private browser that ends with an error never showed anything, so the
+    // one that asked for it has to say so - with how long it ran, which says
+    // whether it ever had a window, and why, where it said. Killed by a signal
+    // counts: a crash is exactly that, and was the case that said nothing.
     const started = Date.now();
-    if (state.onFail) child.on('exit', (code) => { if (code) state.onFail(code, Date.now() - started); });
+    child.on('exit', (code, signal) => {
+      const why = failureReason(errFile);
+      fs.rm(errFile, { force: true }, () => {});
+      if ((code || signal) && state.onFail) state.onFail(code || signal, Date.now() - started, why);
+    });
     child.unref();
     return true;
   } catch (err) {
@@ -127,4 +152,19 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
   }
 }
 
-module.exports = { launchIncognito, command };
+/**
+ * The line that says why a private browser stopped, from what it wrote as it
+ * did: Chromium's FATAL, a check that failed, a library that would not load -
+ * at most two lines, trimmed, and nothing else of what it wrote.
+ */
+function failureReason(file) {
+  let text = '';
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return ''; }
+  // Match before stripping: Chromium puts the severity inside the bracket.
+  const lines = text.split('\n')
+    .filter((l) => /FATAL|Check failed|sandbox|error while loading|cannot open|Segmentation|Trace\/breakpoint|netns-launch:/i.test(l))
+    .map((l) => l.replace(/^\[[^\]]*\]\s*/, '').trim());
+  return lines.slice(-2).map((l) => l.slice(0, 220)).join('\n');
+}
+
+module.exports = { launchIncognito, command, failureReason, childEnv };

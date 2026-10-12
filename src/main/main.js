@@ -2743,16 +2743,16 @@ function startIncognito({ prefs, log, warm = false }) {
     // window in use with its own explanation (exit 70), and a private window
     // that ends later with an error had a window - saying it "couldn't open"
     // then would be false, and would bury the real reason under it.
-    onFail: warm ? null : (code, ranMs) => {
-      log('incognito', `private window exited with code ${code} after ${ranMs} ms`);
+    onFail: warm ? null : (code, ranMs, why = '') => {
+      log('incognito', `private window exited with ${code} after ${ranMs} ms${why ? `: ${why.replace(/\n/g, ' | ')}` : ''}`);
       if (quittingForGood || code === 70) return;
       const early = ranMs < PRIVATE_START_MS;
       ask(null, {
         buttons: ['OK'],
         title: 'Private window',
         message: early ? 'The private window couldn’t open.' : 'The private window closed unexpectedly.',
-        detail: early ? 'It stopped before its window appeared. Try again in a moment.'
-          : 'Nothing from it was kept. Open a new one with Ctrl+Shift+N.'
+        detail: (early ? 'It stopped before its window appeared. Try again in a moment.'
+          : 'Nothing from it was kept. Open a new one with Ctrl+Shift+N.') + (why ? `\n\n${why}` : '')
       }).catch(() => {});
     }
   });

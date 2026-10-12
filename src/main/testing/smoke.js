@@ -6288,6 +6288,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   await checkWindows();
 
+  // A private window starts from a clean environment: nothing that would
+  // break it (CHROME_DESKTOP, Electron's own, killed its zygote on Linux) or
+  // claim a kill switch it does not have; and when it fails, the line that
+  // says why is found in what it wrote, and nothing else of it.
+  {
+    const { childEnv, failureReason } = require('../incognito/launch');
+    const env = childEnv({ PATH: '/usr/bin', CHROME_DESKTOP: 'debrowser.desktop', ELECTRON_RUN_AS_NODE: '1', DEBROWSER_KILL_SWITCH: 'namespace', HOME: '/home/x' });
+    const errFile = path.join(require('os').tmpdir(), `debrowser-private-test-${process.pid}.log`);
+    fs.writeFileSync(errFile, 'https://secret.example/page visited\n[1:2:FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:237] Zygote process exited prematurely\n');
+    const why = failureReason(errFile);
+    fs.rmSync(errFile, { force: true });
+    check('a private window starts without what killed it on Linux, and its failure says why without what it was doing',
+      !('CHROME_DESKTOP' in env) && !('ELECTRON_RUN_AS_NODE' in env) && !('DEBROWSER_KILL_SWITCH' in env) && env.PATH === '/usr/bin' &&
+        /Zygote process exited prematurely/.test(why) && !/secret/.test(why),
+      `env ${Object.keys(env).join(',')}; reason ${JSON.stringify(why)}`);
+  }
+
   check('no page of the browser\'s own threw an uncaught error during the run',
     pageErrors.length === 0, pageErrors.length ? pageErrors.slice(0, 5).join(' | ') : 'none');
 
