@@ -277,16 +277,26 @@ package removes it.
 
 ### What software centres show
 
-`build/linux/debrowser.metainfo.xml` is the AppStream entry App Center, GNOME
-Software and Discover read: name, summary, licence, developer, screenshots and
-the release date, filled in per build by `build/linux/before-pack.js`. The icon
-is installed at every hicolor size from `build/linux/icons/`
-(`electron tools/make-icon.js --linux-only` redraws them). Check the entry with
-`appstreamcli validate --pedantic`.
+`build/linux/before-pack.js` writes Debrowser's AppStream entry for each build,
+twice from one description: as installed metainfo
+(`/usr/share/metainfo/dev.debrowser.app.metainfo.xml`, read by GNOME Software and
+Discover) and as a one-app catalogue (`/usr/share/swcatalog/yaml/debrowser.yml`).
+Ubuntu's App Center reads only catalogues, and its page for a catalogue app
+takes the publisher from the developer name, the licence from the project
+licence and "last updated" from the newest release - so once Debrowser is
+installed, App Center lists it under Manage with all three. The icon is
+installed at every hicolor size from `build/linux/icons/`
+(`electron tools/make-icon.js --linux-only` redraws them). Check the metainfo
+with `appstreamcli validate --pedantic`.
 
-An unsigned macOS build produced *on Linux* is doubly worth flagging: it has
-never been through `codesign` at all, so it is strictly for trying the app, not
-for distributing to anyone else.
+A downloaded `.deb` opened in App Center, before it is installed, still shows
+the package name (`debrowser` - Debian package names are lowercase only),
+"Unknown publisher", licence "unknown" and "last updated Unknown". That page is
+built from the file alone, and App Center fills those fields in with fixed
+values for every `.deb` (`deb/local_deb_model.dart` in App Center; PackageKit's
+apt backend reports every licence as "unknown"). No package contents or
+signature changes it. Only the Snap Store gives a downloaded app a named
+publisher there.
 
 ## Hibernation in a packaged build
 

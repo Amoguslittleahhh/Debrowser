@@ -363,6 +363,9 @@ linux:
     - x-scheme-handler/http
     - x-scheme-handler/https
   synopsis: A memory-adaptive web browser
+  # Shown as the .deb's maintainer; package.json's author name is lowercase.
+  maintainer: Amoguslittleahhh <amoguslittleahhh@users.noreply.github.com>
+  vendor: Amoguslittleahhh
   description: >
     A browser whose resource governor decides, every two seconds, how much
     memory and CPU each tab is allowed to hold - so a tab you are not looking
@@ -387,10 +390,12 @@ deb:
   afterInstall: build/linux/after-install.tpl
   afterRemove: build/linux/after-remove.tpl
   # Files outside /opt, written by build/linux/before-pack.js: the AppStream
-  # entry software centres read (name, licence, icon, developer, release date)
-  # and the key the apt source is checked against.
+  # entry software centres read (name, licence, icon, developer, release date),
+  # once as installed metainfo and once as a catalogue for Ubuntu's App
+  # Center, and the key the apt source is checked against.
   fpm:
     - build/linux/generated/debrowser.metainfo.xml=/usr/share/metainfo/dev.debrowser.app.metainfo.xml
+    - build/linux/generated/debrowser.yml=/usr/share/swcatalog/yaml/debrowser.yml
     - build/linux/generated/archive-keyring.asc=/usr/share/debrowser/archive-keyring.asc
   depends:
     - libgtk-3-0
