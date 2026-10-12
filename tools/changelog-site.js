@@ -7,7 +7,9 @@
  *   node tools/changelog-site.js [outDir]      (default: site/)
  *
  * An index of every released version, newest first, each with its date and a
- * line saying what it was about; a page per version; and an Atom feed. Dates
+ * line saying what it was about; a page per version; an Atom feed; and a
+ * download page that works out which file this computer wants
+ * (src/main/setup/downloads.json) and offers that one first. Dates
  * come from the version's git tag, so the workflow checks out with tags.
  * `## Unreleased` is not published - it has not happened yet.
  *
@@ -137,6 +139,11 @@ th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: lef
 .index { list-style: none; padding: 0; } .index li { border-top: 1px solid var(--line); padding: 14px 0; margin: 0; }
 .index a { font-weight: 600; text-decoration: none; }
 nav { margin-bottom: 24px; }
+.get { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0 8px; }
+.get a { display: block; background: var(--accent); color: var(--bg); text-decoration: none; padding: 12px 18px; border-radius: 10px; font-weight: 600; }
+.get a small { display: block; font-weight: 400; opacity: 0.85; }
+.files { list-style: none; padding: 0; } .files li { border-top: 1px solid var(--line); padding: 12px 0; margin: 0; }
+.files a { font-weight: 600; text-decoration: none; }
 `;
 
 const page = (title, body, { root = '', head = '' } = {}) => `<!doctype html>
@@ -155,7 +162,7 @@ function build(outDir, md) {
   const feedLink = '<link rel="alternate" type="application/atom+xml" title="Debrowser releases" href="feed.xml">';
   fs.writeFileSync(path.join(outDir, 'index.html'), page('Debrowser releases', `
 <h1>Debrowser releases</h1>
-<p class="meta">Every version, newest first · <a href="feed.xml">Atom feed</a> · <a href="${REPO}/releases">Downloads</a></p>
+<p class="meta">Every version, newest first · <a href="feed.xml">Atom feed</a> · <a href="download.html">Download</a></p>
 <ul class="index">
 ${list.map((v) => `<li><a href="v/${esc(v.version)}.html">${esc(v.version)}</a> <span class="meta">${fmtDate(v.date)}</span><div class="summary">${inline(v.summary)}</div></li>`).join('\n')}
 </ul>`, { head: feedLink }));
@@ -167,6 +174,8 @@ ${list.map((v) => `<li><a href="v/${esc(v.version)}.html">${esc(v.version)}</a> 
 <p class="meta">${fmtDate(v.date)}${v.date ? ' · ' : ''}<a href="${REPO}/releases/tag/v${esc(v.version)}">Release and downloads</a></p>
 ${render(v.body)}`, { root: '../' }));
   }
+
+  writeDownloadPage(outDir, list[0]);
 
   const updated = list.find((v) => v.date)?.date || new Date(0).toISOString();
   fs.writeFileSync(path.join(outDir, 'feed.xml'), `<?xml version="1.0" encoding="utf-8"?>
@@ -186,6 +195,82 @@ ${list.map((v) => `<entry>
 </feed>
 `);
   return list;
+}
+
+/**
+ * The download page. Every file is listed, so it works without JavaScript;
+ * with it, the one this computer wants is offered first: Windows, a Mac's
+ * chip (asked of the browser where it says, else read off the graphics
+ * renderer, else both are offered), and a Linux distribution where the
+ * browser names it (Firefox does: "X11; Ubuntu; Linux"), else all three.
+ */
+function writeDownloadPage(outDir, newest) {
+  const listing = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'setup', 'downloads.json'), 'utf8'));
+  const { latest } = listing;
+  // Only files the newest release has (RELEASE_ASSETS, set by pages.yml from
+  // GitHub), so a page built before the first release with these names does
+  // not link to files that are not there yet. Unset, as when run by hand: all.
+  const assets = process.env.RELEASE_ASSETS ? new Set(process.env.RELEASE_ASSETS.split(/[\s,]+/)) : null;
+  const files = listing.files.filter((f) => !assets || assets.has(f.file));
+  const link = (f) => `${latest}${f.file}`;
+  fs.writeFileSync(path.join(outDir, 'download.html'), page('Download Debrowser', `
+<nav><a href="index.html">All releases</a></nav>
+<h1>Download Debrowser</h1>
+<p class="meta">${newest ? `Version ${esc(newest.version)} · ` : ''}Free and open source</p>
+<div class="get" id="get" hidden></div>
+<p class="meta" id="hint" hidden></p>
+${files.length ? '' : `<p>Downloads for every system are on <a href="${REPO}/releases/latest">the newest release</a>.</p>`}
+<h2${files.length ? '' : ' hidden'}>Every system</h2>
+<ul class="files">
+${files.map((f) => `<li><a href="${esc(link(f))}">${esc(f.label)}</a> <span class="meta">${esc(f.file)}</span><div class="summary">${esc(f.note)}</div></li>`).join('\n')}
+</ul>
+<p class="meta">Checksums and earlier versions are on <a href="${REPO}/releases">the releases page</a>.</p>
+<script>
+(async () => {
+  const files = ${JSON.stringify(files.map((f) => ({ id: f.id, label: f.label, note: f.note, url: link(f) })))};
+  const ua = navigator.userAgent;
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+  let ids = [];
+  let hint = '';
+  if (/Win/i.test(platform) || /Windows NT/.test(ua)) {
+    ids = ['windows'];
+  } else if ((/Mac/i.test(platform) || /Macintosh/.test(ua)) && !(navigator.maxTouchPoints > 1)) {
+    let arch = '';
+    try {
+      const hi = await navigator.userAgentData.getHighEntropyValues(['architecture']);
+      arch = hi.architecture === 'arm' ? 'arm64' : hi.architecture === 'x86' ? 'x64' : '';
+    } catch {}
+    if (!arch) {
+      try {
+        const gl = document.createElement('canvas').getContext('webgl');
+        const info = gl.getExtension('WEBGL_debug_renderer_info');
+        const renderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : '';
+        arch = /Apple M\\d/.test(renderer) ? 'arm64' : /Intel|AMD|Radeon/.test(renderer) ? 'x64' : '';
+      } catch {}
+    }
+    ids = arch ? ['mac-' + arch] : ['mac-arm64', 'mac-x64'];
+    if (!arch) hint = 'Not sure which? Apple menu → About This Mac: "Chip" means Apple silicon, "Processor" means Intel.';
+  } else if (/Linux|X11/.test(ua) && !/Android/.test(ua)) {
+    if (/Ubuntu|Debian|Mint/i.test(ua)) ids = ['deb'];
+    else if (/Fedora|openSUSE|SUSE|Red Hat|CentOS|Rocky|Alma/i.test(ua)) ids = ['rpm'];
+    else ids = ['deb', 'rpm', 'appimage'];
+  }
+  const picked = ids.map((id) => files.find((f) => f.id === id)).filter(Boolean);
+  if (!picked.length) return;
+  const get = document.getElementById('get');
+  for (const f of picked) {
+    const a = document.createElement('a');
+    a.href = f.url;
+    a.textContent = 'Download for ' + f.label;
+    const small = document.createElement('small');
+    small.textContent = f.note;
+    a.append(small);
+    get.append(a);
+  }
+  get.hidden = false;
+  if (hint) { const h = document.getElementById('hint'); h.textContent = hint; h.hidden = false; }
+})();
+</script>`));
 }
 
 if (require.main === module) {

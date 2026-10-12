@@ -39,11 +39,13 @@ source, on GitHub's runners, and attached to each release.
 
 | | Download | Then |
 |---|---|---|
-| **Windows** | `Debrowser-<version>-win-x64.exe` | Run it: it installs for you alone, with no questions, and opens Debrowser. SmartScreen or Smart App Control may stop it once — see the note above. |
-| **Windows** (no install) | `...-win-x64-portable.exe` | Run it from anywhere. Installs nothing. |
-| **macOS** | `Debrowser-<version>-mac-arm64.dmg` (or `-x64` on Intel) | Open it and drag Debrowser into Applications. The first launch needs Open Anyway — see below. |
-| **Linux** | `Debrowser-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
-| **Debian/Ubuntu** | `Debrowser-<version>-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
+| **Windows** | `Debrowser-Windows-Setup.exe` | Run it: it installs for you alone, with no questions, and opens Debrowser. SmartScreen or Smart App Control may stop it once — see the note above. |
+| **macOS** | `Debrowser-macOS-arm64.dmg` (Apple silicon) or `Debrowser-macOS-x64.dmg` (Intel) | Open it and drag Debrowser into Applications. The first launch needs Open Anyway — see below. |
+| **Ubuntu, Debian, Mint** | `Debrowser-Linux.deb` | Open it to install it in your software centre, or `sudo apt install ./Debrowser-Linux.deb` |
+| **Fedora, RHEL, openSUSE** | `Debrowser-Linux.rpm` | Open it to install it in your software centre, or `sudo dnf install ./Debrowser-Linux.rpm` (`sudo zypper install` on openSUSE) |
+| **Any other Linux** | `Debrowser-Linux.AppImage` | `chmod +x` and run. It offers to add itself to your apps - or, on the systems above once their repositories are signed, to install itself as their package. |
+
+[The download page](https://amoguslittleahhh.github.io/Debrowser/download.html) picks the right one for the computer it is opened on. The release's other files are for updates and package managers.
 
 **Windows builds are signed through the SignPath Foundation** - free code
 signing provided by [SignPath.io](https://signpath.io), certificate by
@@ -66,7 +68,7 @@ stop the SmartScreen warning on its own — only EV or Azure Trusted Signing
 clear it from the first release.
 
 **Hibernation needs one more step on Linux**, and only on the `.deb` or
-`.tar.gz`:
+`.rpm`:
 
 ```bash
 sudo setcap cap_sys_nice+ep /opt/Debrowser/resources/tools/mem-trim
@@ -87,7 +89,7 @@ ad-blocking engine and the filter lists - keep their own licences.
 Free code signing provided by [SignPath.io](https://signpath.io), certificate
 by [SignPath Foundation](https://signpath.org).
 
-- **What is signed:** only the Windows installers and the portable build that
+- **What is signed:** only the Windows installer that
   `.github/workflows/release.yml` builds from this repository's source, on
   GitHub's own runners. Nothing built elsewhere, and nothing from another
   project, is signed with this certificate.
@@ -224,7 +226,7 @@ you choose another engine for them.
   have nowhere to go. Both come with the installers: the Windows installer
   adds the firewall rule (after one administrator prompt), and on Ubuntu the
   `.deb` adds the AppArmor profile that lets the namespace be made. The
-  portable Windows build, the AppImage and the `.tar.gz` do without, as does
+  AppImage does without, as does
   macOS, which has no such control without root. The private window says
   which applies; where the system does not keep it off the network, a
   tripwire that watches every socket and closes the window is what it has.
@@ -861,7 +863,7 @@ tried, measured and removed — live on the `claude/research-build` branch.
   releases. macOS is not a missing feature but a signing prerequisite:
   Squirrel.Mac validates that an update is signed by the same identity as the
   running app and refuses when there is none, and this build is unsigned. The
-  `.deb`, `.tar.gz` and Windows `portable` builds are not updatable formats.
+  `.deb` and `.rpm` update through their repositories, not by themselves.
   Settings, the browsing session and saved data live in `userData`, which an
   installer does not touch.
 - **An Intune-shaped Windows installer exists and is experimental.** It is

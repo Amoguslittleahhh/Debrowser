@@ -9,8 +9,8 @@ than the config.
 
 ```bash
 npm ci
-npm run dist:linux     # AppImage + .deb + .tar.gz  (builds the trim helper first)
-npm run dist:win       # NSIS installer + portable .exe
+npm run dist:linux     # AppImage + .deb + .rpm  (builds the trim helper first; .rpm needs rpmbuild)
+npm run dist:win       # NSIS installer
 npm run dist:mac       # .dmg + .zip  — macOS only, see below
 npm run dist           # whatever the host can do
 npm run pack           # unpacked tree only, for a quick look
@@ -22,13 +22,19 @@ Output lands in `dist/`.
 
 | Platform | Artifact | Notes |
 |---|---|---|
-| Windows | `Debrowser-1.0.0-win-x64.exe` | NSIS installer, per-user (no UAC prompt) |
-| Windows | `Debrowser-1.0.0-win-x64-portable.exe` | Single file, runs from anywhere, installs nothing |
-| macOS | `Debrowser-1.0.0-mac-{x64,arm64}.dmg` | Needs a macOS host to build |
-| macOS | `Debrowser-1.0.0-mac-{x64,arm64}.zip` | Unzip, drag to Applications |
-| Linux | `Debrowser-1.0.0-linux-x86_64.AppImage` | `chmod +x`, run. No install. |
-| Linux | `Debrowser-1.0.0-linux-amd64.deb` | Debian/Ubuntu. Installs to `/opt/Debrowser`. |
-| Linux | `Debrowser-1.0.0-linux-x64.tar.gz` | Extract and run |
+| Windows | `Debrowser-Windows-Setup.exe` | NSIS installer, per-user (no UAC prompt) |
+| macOS | `Debrowser-macOS-{x64,arm64}.dmg` | Needs a macOS host to build |
+| macOS | `Debrowser-macOS-{x64,arm64}.zip` | What updates install from; "arm64" in the name is how the updater tells them apart |
+| Linux | `Debrowser-Linux.AppImage` | `chmod +x`, run. Offers to add itself to the apps menu, or to install the package below for the system it is on |
+| Linux | `Debrowser-Linux.deb` | Debian, Ubuntu, Mint. Installs to `/opt/Debrowser` |
+| Linux | `Debrowser-Linux.rpm` | Fedora, RHEL, openSUSE. Installs to `/opt/Debrowser` |
+
+Names carry the system, not the version, so a release lists one obvious file
+per system and `releases/latest/download/<name>` never goes stale; the list
+lives in `src/main/setup/downloads.json`, which the release notes' download
+table and the download page (`tools/changelog-site.js`) are built from. The
+other files on a release are machinery: `latest*.yml` and the `.blockmap`s for
+updates, `InRelease` and `Packages.gz` for apt, `SHA256SUMS.txt` and the SBOM.
 
 ## Cross-building, and where it stops
 
@@ -290,8 +296,12 @@ Removing the repository file (`/etc/apt/sources.list.d/debrowser.sources`,
 those updates off for good on that machine; installing again does not add it
 back. Uninstalling the package removes it.
 
-Arch and other distributions use the AppImage or the `.tar.gz`; the AppImage
-updates itself.
+Arch and other distributions use the AppImage, which updates itself. On the
+systems above, once the repositories are signed, the AppImage offers to install
+their package instead (`src/main/setup/linux-system.js`): it downloads this
+version's `.deb` or `.rpm`, checks it against the release's `latest-linux.yml`,
+installs it through pkexec and the package manager, and starts again from
+`/opt/Debrowser`.
 
 ### What software centres show
 
@@ -333,7 +343,7 @@ with a build instruction that does not apply to an installed app.
 | Format | Hibernation | Why |
 |---|---|---|
 | `.deb` | yes, after one command | The helper lands at a real path that `setcap` can be applied to |
-| `.tar.gz` | yes, after one command | Same |
+| `.rpm` | yes, after one command | Same |
 | AppImage | **no** | The helper lives inside a read-only mount; a file capability cannot be set on it |
 
 For the `.deb`:
@@ -478,7 +488,7 @@ per-platform `artifacts` globs listed only the installers themselves.
 | Windows NSIS | yes, differential | blockmap beside the installer |
 | Linux AppImage | yes, differential | blockmap embedded in the binary |
 | macOS | **no** | Squirrel.Mac validates that the update is signed by the same identity as the running app, and refuses when there is none. This build is unsigned. |
-| Windows `portable`, `.deb`, `.tar.gz` | no | not updatable formats; the user or the package manager owns those files |
+| `.deb`, `.rpm` | through the repository | the package manager owns those files; the apt and dnf/zypper repositories carry the updates |
 
 The first release carrying blockmaps cannot itself be delivered as a delta —
 there is no previous blockmap to diff against. Deltas begin with the release

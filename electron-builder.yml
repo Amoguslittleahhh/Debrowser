@@ -112,10 +112,16 @@ protocols:
 ## Windows
 ## ---------------------------------------------------------------------------
 ##
-## Two artifacts, because they answer different questions. The NSIS installer is
-## what most people want; `portable` is a single .exe that runs from a folder or
-## a USB stick with nothing installed, which also happens to be the easiest way
-## to try a browser you do not yet trust.
+## One artifact: the NSIS installer, installing for the current user with no
+## admin prompt. There was also a portable .exe; it went, because a second
+## Windows file beside the installer was one more thing to choose between on
+## the download page, and the installer already asks nothing and installs in
+## seconds.
+##
+## File names carry the system and not the version - Debrowser-Windows-Setup.exe
+## - so a release lists one obvious file per system, and
+## releases/latest/download/<name> is a link that never goes stale. The
+## version is in the release, the tag and the file's properties.
 ##
 ## Unsigned unless a certificate is supplied through the environment, and the
 ## SmartScreen warning on an unsigned build is correct - nothing vouches for it.
@@ -127,9 +133,7 @@ win:
   target:
     - target: nsis
       arch: [x64]
-    - target: portable
-      arch: [x64]
-  artifactName: ${productName}-${version}-win-${arch}.${ext}
+  artifactName: ${productName}-Windows-Setup.${ext}
 
   ## The measurement helper, and only on the platforms that need one.
   ##
@@ -225,9 +229,6 @@ nsis:
   # rule. See build/installer.nsh.
   include: build/installer.nsh
 
-portable:
-  artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
-
 ## ---------------------------------------------------------------------------
 ## macOS
 ## ---------------------------------------------------------------------------
@@ -253,7 +254,9 @@ mac:
     - target: zip
       arch: [x64, arm64]
   category: public.app-category.productivity
-  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  # arm64 or x64 in the name: electron-updater picks a Mac's update by finding
+  # "arm64" in it. The .zip is what updates install from; people download the .dmg.
+  artifactName: ${productName}-macOS-${arch}.${ext}
   ## Ad-hoc; see above. disable-library-validation in the entitlements is what
   ## lets the hardened runtime load Electron's frameworks under it.
   identity: '-'
@@ -286,7 +289,9 @@ mac:
 ## the one instruction there is. build/dmg-background.png (and @2x) is made by
 ## tools/dmg-background.py from the Ledger palette.
 dmg:
-  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  artifactName: ${productName}-macOS-${arch}.${ext}
+  # No .dmg.blockmap: updates come from the .zip, so it was only clutter.
+  writeUpdateInfo: false
   background: build/dmg-background.png
   window:
     width: 600
@@ -330,6 +335,12 @@ linux:
     # "New private window" action (src/main/private-icon.js).
     - from: build/icon-private.png
       to: icon-private.png
+    # The key the Linux repositories are signed with (empty without one,
+    # build/linux/before-pack.js). The AppImage offers to install itself as a
+    # system package only when it is there, since only then does a package
+    # get updates (src/main/setup/linux-system.js).
+    - from: build/linux/generated/archive-keyring.asc
+      to: archive-keyring.asc
     - from: native/helpers
       to: tools
       filter:
@@ -352,8 +363,6 @@ linux:
     - target: deb
       arch: [x64]
     - target: rpm
-      arch: [x64]
-    - target: tar.gz
       arch: [x64]
   # Every size the hicolor theme lists, drawn by tools/make-icon.js; from one
   # 1024 px file only that size was installed, and software centres found none.
@@ -381,7 +390,10 @@ linux:
       Name: Debrowser
       Categories: Network;WebBrowser;
       MimeType: text/html;x-scheme-handler/http;x-scheme-handler/https;
-  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  # One per format, named for the system: the AppImage is the one to download
+  # (it runs anywhere, and offers to install the .deb or .rpm where those fit -
+  # src/main/setup/install.js); the packages are what the repositories serve.
+  artifactName: ${productName}-Linux.${ext}
 
 deb:
   # The default profile plus one entry for the private-window launcher, which

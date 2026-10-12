@@ -100,7 +100,6 @@ jobs:
               dist/*.AppImage
               dist/*.deb
               dist/*.rpm
-              dist/*.tar.gz
               dist/latest-linux.yml
 
     runs-on: ${{ matrix.os }}
@@ -512,8 +511,8 @@ jobs:
       #
       #   - The .rpm is signed itself: dnf and zypper check package signatures.
       #     Its size and checksum in latest-linux.yml are then brought up to date.
-      #   - The .deb gets a signed apt index (InRelease, Release, Packages),
-      #     attached to the release. Its install script points apt at
+      #   - The .deb gets a signed apt index - InRelease and Packages.gz, the
+      #     two files apt needs and no more - attached to the release. Its install script points apt at
       #     releases/latest/download/, which GitHub redirects to the newest
       #     stable release's files, so the repository is always that release.
       #     The rpm index lives on GitHub Pages instead (pages.yml): dnf wants a
@@ -539,7 +538,6 @@ jobs:
           fi
           # Checked as installs will check: against the public key alone.
           gpg --batch --export "$signing" > "$GNUPGHOME/check.gpg"
-          cp build/linux/archive-keyring.asc artifacts/debrowser-archive-keyring.asc
           cd artifacts
 
           sudo apt-get install -y --no-install-recommends rpm >/dev/null
@@ -547,25 +545,27 @@ jobs:
             rpmsign --define "_gpg_name $signing" --addsign "$rpm"
             db=$(mktemp -d)
             rpm --dbpath "$db" --initdb
-            rpm --dbpath "$db" --import debrowser-archive-keyring.asc
+            rpm --dbpath "$db" --import ../build/linux/archive-keyring.asc
             rpm --dbpath "$db" -K "$rpm" | grep -q 'digests signatures OK'
             python3 ../.github/scripts/update-manifest.py latest-linux.yml "$rpm"
           done
 
           ls *.deb >/dev/null
           # Filenames without "./": apt joins them to the address as written.
+          # Packages is indexed but not uploaded: apt fetches Packages.gz and
+          # checks what it unpacks against Packages' own hash, so that hash has
+          # to be listed. Release is written outside, or it indexes itself.
           apt-ftparchive packages . | sed 's|^Filename: \./|Filename: |' > Packages
           gzip -9kn Packages
           apt-ftparchive \
             -o APT::FTPArchive::Release::Origin=Debrowser \
             -o APT::FTPArchive::Release::Label=Debrowser \
             -o APT::FTPArchive::Release::Description="Debrowser releases" \
-            release . > Release
-          gpg --batch --yes --local-user "$signing" --clearsign -o InRelease Release
-          gpg --batch --yes --local-user "$signing" -abs -o Release.gpg Release
+            release . > "$GNUPGHOME/Release"
+          gpg --batch --yes --local-user "$signing" --clearsign -o InRelease "$GNUPGHOME/Release"
+          rm Packages
           gpgv --keyring "$GNUPGHOME/check.gpg" InRelease
-          gpgv --keyring "$GNUPGHOME/check.gpg" Release.gpg Release
-          cat Packages
+          cat InRelease
           rm -rf "$GNUPGHOME"
 
       # What the release is made of, in a standard form (CycloneDX) that

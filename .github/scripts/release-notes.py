@@ -16,7 +16,10 @@ Around the version's own notes, when the workflow provides them (environment):
 
   header   one line, as Safari and Brave print theirs - the version, the
            commit it was built from, the date, and the Chromium it runs on
-           (COMMIT, CHROMIUM) - so "which engine is this" is never a question
+           (COMMIT, CHROMIUM) - so "which engine is this" is never a question;
+           then which file to download for each system
+           (src/main/setup/downloads.json), since a release carries more
+           files than the few anyone downloads
   footer   where it came from: the build that made the files (GITHUB_RUN_URL),
            what changed since the last release (COMPARE_URL), and the SHA-256
            of every file attached (CHECKSUMS, a `sha256sum` listing) - then
@@ -27,11 +30,13 @@ prints just the notes and the credit, as it always did.
 """
 
 import datetime
+import json
 import os
 import re
 import sys
 
 CHANGELOG = 'CHANGELOG.md'
+DOWNLOADS = os.path.join('src', 'main', 'setup', 'downloads.json')
 
 # Credit both, side by side. A release's `author` is whoever's token created it,
 # which is always github-actions[bot] because the workflow publishes with the
@@ -81,6 +86,27 @@ def header(version):
     return ' · '.join(parts) + '\n\n'
 
 
+def downloads(version):
+    """The file for each system, linked for this version, and what the rest are."""
+    try:
+        listing = json.load(open(DOWNLOADS, encoding='utf-8'))
+    except (OSError, ValueError):
+        return ''
+    # Only files this release has, by the checksum listing of what is
+    # attached: notes rebuilt for a release from before these names would
+    # otherwise link to files it never had.
+    sums = os.environ.get('CHECKSUMS', '').strip()
+    if not sums or not os.path.exists(sums):
+        return ''
+    attached = {re.split(r'\s+\*?', l.strip(), 1)[-1] for l in open(sums, encoding='utf-8') if l.strip()}
+    base = listing['latest'].replace('/latest/download/', f'/download/v{version}/')
+    rows = [f'| {f["label"]} | [{f["file"]}]({base}{f["file"]}) |' for f in listing['files'] if f['file'] in attached]
+    if not rows:
+        return ''
+    return ('| Download for | File |\n|---|---|\n' + '\n'.join(rows) +
+            '\n\nThe other files below are for updates and package managers.\n\n')
+
+
 def provenance():
     """The build, the comparison, and the checksums, for whoever wants to verify."""
     lines = []
@@ -111,6 +137,8 @@ def main():
         # packaging mistake worth failing on rather than shipping.
         sys.exit(f'{CHANGELOG}: notes for {version or "the newest version"} are empty')
     top = header(version) if os.environ.get('COMMIT') or os.environ.get('CHROMIUM') else ''
+    if top and version:
+        top += downloads(version)
     sys.stdout.write(top + body + provenance() + FOOTER)
 
 

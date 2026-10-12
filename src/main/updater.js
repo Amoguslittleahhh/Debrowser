@@ -147,8 +147,8 @@ class Updater {
     }
 
     if (process.platform === 'linux' && !process.env.APPIMAGE) {
-      // .deb and .tar.gz have no in-place update path - the package manager or
-      // the user owns those files, not us.
+      // The .deb and .rpm have no in-place update path - the package manager
+      // owns those files, not us - and neither has a loose folder.
       return { available: false, reason: 'in-app updates work from the AppImage; use your package manager' };
     }
     return { available: true, reason: null };

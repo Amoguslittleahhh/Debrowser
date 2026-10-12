@@ -23,17 +23,19 @@ Chromium (through Electron), so real websites work.
 
 ## Download
 
-**[Get the latest release](https://github.com/Amoguslittleahhh/Debrowser/releases/latest)**
+**[Download Debrowser](https://amoguslittleahhh.github.io/Debrowser/download.html)** - the page works out which file your computer needs.
+
+Or pick it yourself from [the latest release](https://github.com/Amoguslittleahhh/Debrowser/releases/latest):
 
 | | Download | Then |
 |---|---|---|
-| **Windows** | `Debrowser-<version>-win-x64.exe` | Run it. It installs for you alone and opens Debrowser. |
-| **macOS** | `Debrowser-<version>-mac-arm64.dmg` (`-x64` on Intel) | Drag Debrowser into Applications. The first launch needs System Settings → Privacy & Security → **Open Anyway**. |
-| **Linux** | `Debrowser-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
-| **Debian/Ubuntu** | `Debrowser-<version>-linux-amd64.deb` | `sudo apt install ./Debrowser-*.deb` |
-| **Fedora/openSUSE** | `Debrowser-<version>-linux-x86_64.rpm` | `sudo dnf install ./Debrowser-*.rpm` (`sudo zypper install ./Debrowser-*.rpm` on openSUSE) |
+| **Windows** | `Debrowser-Windows-Setup.exe` | Run it. It installs for you alone and opens Debrowser. |
+| **macOS** | `Debrowser-macOS-arm64.dmg` (Apple silicon) or `Debrowser-macOS-x64.dmg` (Intel) | Drag Debrowser into Applications. The first launch needs System Settings → Privacy & Security → **Open Anyway**. |
+| **Ubuntu, Debian, Mint** | `Debrowser-Linux.deb` | Open it to install it in your software centre, or `sudo apt install ./Debrowser-Linux.deb` |
+| **Fedora, RHEL, openSUSE** | `Debrowser-Linux.rpm` | Open it to install it in your software centre, or `sudo dnf install ./Debrowser-Linux.rpm` (`sudo zypper install` on openSUSE) |
+| **Any other Linux** | `Debrowser-Linux.AppImage` | `chmod +x` and run. It offers to add itself to your apps. |
 
-A portable Windows build and a `.tar.gz` are on each release too.
+The release's other files are for updates and package managers.
 
 ## Code signing policy
 
@@ -42,7 +44,7 @@ by [SignPath Foundation](https://signpath.org), once signing is switched on;
 until then the Windows builds are unsigned and the macOS builds are not
 notarized, which is what the warnings above are about.
 
-- **What is signed:** only the Windows installers and portable build that
+- **What is signed:** only the Windows installer that
   `.github/workflows/release.yml` builds from this repository on GitHub's runners.
 - **Committers and reviewers:** [Amoguslittleahhh](https://github.com/amoguslittleahhh)
   (owner). Changes from anyone else arrive as reviewed pull requests.

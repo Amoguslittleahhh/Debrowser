@@ -10,6 +10,10 @@
 - **Private windows try other bridges when Snowflake gets nowhere.** Snowflake, the default way in, doesn't get through on networks that block WebRTC. After 45 seconds with no progress, the private window now adds the other built-in bridges (obfs4 and meek) without restarting Tor, and the connection page says "Trying other bridges". A transport you chose yourself, or your own bridges, are never swapped.
 - **Linux: a package for Fedora, RHEL and openSUSE.** Each release now has a .rpm beside the .deb, with the same icon and software-centre details (name, description, publisher, MIT licence, screenshots and release date) for GNOME Software and KDE Discover. Debrowser's own Uninstall removes it the way it removes the .deb.
 
+### Improved
+
+- **One download per system, named for it, and a page that picks it for you.** A release now offers `Debrowser-Windows-Setup.exe`, `Debrowser-macOS-arm64.dmg` (Apple silicon) or `Debrowser-macOS-x64.dmg` (Intel), and `Debrowser-Linux.deb`, `.rpm` or `.AppImage`, and its notes open with a table of which to take. The new download page on the project's site works out which your computer needs and offers that one first. The portable Windows build and the Linux .tar.gz are gone: use the installer, which asks nothing and installs for you alone, or the AppImage.
+
 ### Fixed
 
 - **Linux: App Center shows Debrowser with its icon, publisher, licence and date.** Ubuntu's App Center showed a grey placeholder and "unknown" for everything, and didn't list Debrowser among installed apps. Once installed, Debrowser now appears in App Center under Manage as Debrowser, with its icon, Amoguslittleahhh as publisher, the MIT licence, screenshots and the release date. A downloaded .deb opened in App Center before installing still shows "Unknown publisher", because App Center shows that for every package from outside its store, Chrome's included.

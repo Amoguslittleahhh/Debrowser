@@ -77,7 +77,9 @@ the user sees, then plain sentences. An item for one system starts with
 Do not write a header or footer by hand. `release-notes.py` adds both from the
 environment the release workflow sets:
 
-- the header: version, short commit, date and Chromium version, one line;
+- the header: version, short commit, date and Chromium version, one line,
+  then a table of the file to download for each system
+  (`src/main/setup/downloads.json`), listing only files the release has;
 - the footer: the workflow run and compare links, the SHA-256 of each file
   (also uploaded as `SHA256SUMS.txt`), and the credit line above.
 

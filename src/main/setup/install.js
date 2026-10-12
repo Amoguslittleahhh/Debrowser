@@ -8,11 +8,16 @@
  *           or Downloads - and from a disk image it cannot update itself and
  *           is gone when the image is ejected. Offered: Move to Applications,
  *           which moves it and starts it again from there.
- *   Linux   The AppImage and the .tar.gz are programs in a file or a folder,
- *           not in the apps menu. Offered: Add to your apps - the AppImage
- *           moved to ~/Applications, and for both a menu entry with the icon,
- *           which also carries an Uninstall action. Nothing restarts. The .deb is installed by
- *           the package manager and is left to it.
+ *   Linux   The AppImage, or an unpacked folder, is a program in a file or a
+ *           folder, not in the apps menu. Offered: Add to your apps - the
+ *           AppImage moved to ~/Applications, and for both a menu entry with
+ *           the icon, which also carries an Uninstall action. Nothing
+ *           restarts. Where the system has a package Debrowser builds - apt,
+ *           dnf, zypper - and the repositories are signed, the AppImage
+ *           offers that first instead: installed as a system package, it is
+ *           in the software centre and updates with the system
+ *           (linux-system.js), and Debrowser starts again from there. The
+ *           .deb and .rpm are installed by the package manager and left to it.
  *
  * Asked in the setup window (setup-window.js), a few seconds after the browser
  * opens, once per version: Not now is remembered until the next update. It is
@@ -264,6 +269,20 @@ function offerFor() {
     };
   }
   const kind = linuxKind();
+  const system = kind === 'appimage' && !integrated() && systemPackage();
+  if (system) {
+    return {
+      title: `Install Debrowser for ${system.name}?`,
+      lead: `Debrowser installs as a ${system.name} package: it appears in your software centre and apps menu, and its updates arrive with the rest of your system's. It downloads the package (about 100 MB), and your system asks for your password.`,
+      check: {
+        label: 'Just add this file to my apps instead',
+        detail: 'It moves to the Applications folder in your home folder and updates itself. No password is needed.'
+      },
+      cancel: 'Not now',
+      confirm: 'Install',
+      busy: 'Installing…'
+    };
+  }
   if (kind === 'appimage' && !integrated()) {
     return {
       title: 'Add Debrowser to your apps?',
@@ -287,8 +306,46 @@ function offerFor() {
   return null;
 }
 
-/** Do it. Resolves when done; on macOS the app then starts again from Applications. */
-async function install({ log }) {
+/** The system's package manager, when the AppImage should offer installing through it. */
+function systemPackage() {
+  const linux = require('./linux-system');
+  return linux.hasRepositoryKey() ? linux.packageSystem() : null;
+}
+
+/**
+ * Install this version as a system package, then start the installed copy and
+ * quit this one. The AppImage goes to the Trash and its own menu entry, if it
+ * left one, goes too: an entry in the home folder would hide the system's.
+ */
+async function installSystemPackage({ log, system }) {
+  const linux = require('./linux-system');
+  const { net, shell } = require('electron');
+  const { execFile } = require('child_process');
+  const run = (file, args) => new Promise((resolve) => {
+    execFile(file, args, (err, stdout, stderr) => resolve({
+      code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, stderr: String(stderr || '')
+    }));
+  });
+  await linux.installPackage({ system, version: app.getVersion(), fetch: (u) => net.fetch(u), run, log });
+  log('install', `installed as a ${system.family} package`);
+  const file = appImage();
+  removeEntry();
+  if (file) await shell.trashItem(file).catch(() => {});
+  // relaunch() starts the new process with this one's environment.
+  const env = linux.packagedEnv();
+  for (const k of Object.keys(process.env)) if (!(k in env)) delete process.env[k];
+  Object.assign(process.env, env);
+  app.relaunch({ execPath: linux.INSTALLED, args: [] });
+  app.quit();
+}
+
+/**
+ * Do it. Resolves when done; on macOS the app then starts again from
+ * Applications, and on Linux from the package when one was installed.
+ * `checked` is the window's checkbox: for the AppImage offered a package,
+ * "just add this file to my apps instead".
+ */
+async function install({ log, checked = false }) {
   if (process.platform === 'darwin') {
     // A copy already in Applications and not running is replaced; one that is
     // running cannot be, and the move fails rather than closing it.
@@ -298,6 +355,11 @@ async function install({ log }) {
     return;
   }
   const kind = linuxKind();
+  const system = kind === 'appimage' && !checked && !integrated() && systemPackage();
+  if (system) {
+    await installSystemPackage({ log, system });
+    return;
+  }
   if (kind === 'appimage') {
     const from = appImage();
     const to = APPIMAGE_HOME();
@@ -340,8 +402,8 @@ function offer({ prefs, log, force = false, owner = null }) {
     spec,
     prefs: prefs.all(),
     owner,
-    onConfirm: async () => {
-      await install({ log });
+    onConfirm: async (checked) => {
+      await install({ log, checked });
       // Linux needs no restart: done, and the window has said all it needs
       // to. macOS has quit by now, to start again from Applications.
       if (!win.isDestroyed()) win.close();

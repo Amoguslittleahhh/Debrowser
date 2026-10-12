@@ -6288,6 +6288,63 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   await checkWindows();
 
+  // The AppImage tells which Linux it is on from os-release, and installs that
+  // system's package only once it matches this release's manifest - through
+  // the package manager it found, and never on a system it does not know.
+  {
+    const linux = require('../setup/linux-system');
+    const yes = () => true;
+    const sys = (release, opts = {}) => linux.packageSystem({ release, exists: yes, arch: 'x64', ...opts });
+    const found = {
+      ubuntu: sys({ ID: 'ubuntu', ID_LIKE: 'debian', NAME: 'Ubuntu' }),
+      mint: sys({ ID: 'linuxmint', ID_LIKE: 'ubuntu debian', NAME: 'Linux Mint' }),
+      fedora: sys({ ID: 'fedora', NAME: 'Fedora Linux' }),
+      rocky: sys({ ID: 'rocky', ID_LIKE: 'rhel centos fedora', NAME: 'Rocky Linux' }),
+      tumbleweed: sys({ ID: 'opensuse-tumbleweed', ID_LIKE: 'opensuse suse', NAME: 'openSUSE Tumbleweed' }),
+      arch: sys({ ID: 'arch', NAME: 'Arch Linux' }),
+      noPkexec: sys({ ID: 'ubuntu', NAME: 'Ubuntu' }, { exists: (f) => f !== '/usr/bin/pkexec' }),
+      arm: sys({ ID: 'ubuntu', NAME: 'Ubuntu' }, { arch: 'arm64' })
+    };
+    const tools = Object.fromEntries(Object.entries(found).map(([k, v]) => [k, v ? `${v.tool}/${v.family}` : null]));
+    const manifest = 'version: 2.4.0\nfiles:\n  - url: Debrowser-Linux.AppImage\n    sha512: AAA\n    size: 1\n  - url: Debrowser-Linux.deb\n    sha512: DEB==\n    size: 2\npath: Debrowser-Linux.AppImage\nsha512: AAA\n';
+    const env = linux.packagedEnv({ APPIMAGE: '/home/u/D.AppImage', APPDIR: '/tmp/.mount_x', PATH: '/tmp/.mount_x/usr/bin:/usr/bin', HOME: '/home/u' });
+
+    // A download is kept only when it is the file the manifest describes.
+    const body = Buffer.from('a package');
+    const good = require('crypto').createHash('sha512').update(body).digest('base64');
+    const served = (text) => async () => new Response(text);
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-pkg-test-'));
+    const kept = await linux.download('x', path.join(dir, 'a'), good, served(body)).then(() => fs.existsSync(path.join(dir, 'a')), () => false);
+    const refused = await linux.download('x', path.join(dir, 'b'), 'wrong', served(body)).then(() => 'kept', (e) => (fs.existsSync(path.join(dir, 'b')) ? 'left behind' : e.message));
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    // The whole install, with the package manager standing in: it is handed
+    // the checked file, and a refused password is said as such.
+    const calls = [];
+    const fakeFetch = async (u) => new Response(u.endsWith('latest-linux.yml')
+      ? manifest.replace('DEB==', good) : body);
+    const runner = (code, stderr = '') => async (file, args) => { calls.push([file, ...args]); return { code, stderr }; };
+    const system = { tool: 'apt', family: 'deb', name: 'Ubuntu' };
+    const outcome = async (code, stderr) => linux.installPackage({ system, version: '2.4.0', fetch: fakeFetch, run: runner(code, stderr) })
+      .then(() => 'installed', (e) => e.message);
+    const declined = await outcome(126);
+    const ranWithoutInstalling = await outcome(0);
+    const call = calls[0] || [];
+    check('the AppImage knows which Linux it is on, and installs that system\'s package only as this release lists it',
+      tools.ubuntu === 'apt/deb' && tools.mint === 'apt/deb' && tools.fedora === 'dnf/rpm' && tools.rocky === 'dnf/rpm' &&
+        tools.tumbleweed === 'zypper/rpm' && tools.arch === null && tools.noPkexec === null && tools.arm === null &&
+        found.ubuntu.name === 'Ubuntu' &&
+        linux.expectedDigest(manifest, 'Debrowser-Linux.deb') === 'DEB==' && linux.expectedDigest(manifest, 'Debrowser-Linux.rpm') === null &&
+        linux.releaseUrl('2.4.0', 'latest-linux.yml') === 'https://github.com/Amoguslittleahhh/Debrowser/releases/download/v2.4.0/latest-linux.yml' &&
+        linux.installCommand('zypper', '/t/p.rpm').join(' ') === '/usr/bin/zypper --non-interactive --no-gpg-checks install /t/p.rpm' &&
+        !('APPIMAGE' in env) && !('APPDIR' in env) && env.PATH === '/usr/bin' && env.HOME === '/home/u' &&
+        kept === true && /did not match/.test(refused) &&
+        /password was not given/.test(declined) && /not where the package puts it/.test(ranWithoutInstalling) &&
+        call[0] === '/usr/bin/pkexec' && call[1] === '/usr/bin/apt-get' && /Debrowser-Linux\.deb$/.test(call[call.length - 1]) &&
+        !fs.existsSync(path.dirname(call[call.length - 1] || '/nonexistent/x')),
+      `${JSON.stringify(tools)}; download kept ${kept}, wrong one: ${refused}; declined: ${declined}; ran: ${call.join(' ')}`);
+  }
+
   // When Snowflake gets nowhere, Tor is moved to every built-in bridge in one
   // command, each named by its own transport (the "meek" list is meek_lite);
   // a chosen transport, or the user's own bridges, stay as they are.
