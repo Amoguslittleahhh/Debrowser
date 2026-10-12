@@ -205,8 +205,22 @@ function headersFor({ url, requestHeaders }) {
   return { requestHeaders: headers };
 }
 
+/**
+ * Called with (session, details) for each top-level request about to leave;
+ * the request waits for what it returns. Set by circuits.js, which moves a tab
+ * to another circuit when it goes to another site.
+ */
+let beforeTopLevel = null;
+
 function install(ses) {
-  ses.webRequest.onBeforeRequest((details, callback) => callback(judge(details)));
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    const verdict = judge(details);
+    if (!beforeTopLevel || details.resourceType !== 'mainFrame' || verdict.cancel || verdict.redirectURL) {
+      callback(verdict);
+      return;
+    }
+    Promise.resolve().then(() => beforeTopLevel(ses, details)).catch(() => {}).then(() => callback(verdict));
+  });
   ses.webRequest.onBeforeSendHeaders((details, callback) => callback(headersFor(details)));
   ses.webRequest.onHeadersReceived((details, callback) => {
     if (details.resourceType === 'mainFrame') {
@@ -222,6 +236,7 @@ function install(ses) {
 module.exports = {
   isLocalHost, judge, upgradeFailed, allowHttp, install, onionFrom, looksBlocked, BLOCK_STATUSES, isOnion,
   siteOf, headersFor,
+  onTopLevel: (fn) => { beforeTopLevel = fn; },
   onionFor: (wcId) => offered.get(wcId) || null,
   statusFor: (wcId) => statuses.get(wcId) ?? null,
   /** A tab's renderer is gone; what was recorded for it goes too. */

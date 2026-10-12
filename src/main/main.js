@@ -509,6 +509,7 @@ if (STREAMVIEW_TEST) {
         mode: earlyPrefs.get('incognitoBridges'),
         custom: earlyPrefs.get('incognitoBridgeLines')
       }, torBundleDir());
+      tor.fallback = () => bridges.fallbackCommand({ mode: earlyPrefs.get('incognitoBridges') }, torBundleDir());
       // After ready rather than now, because unsealing Tor's kept state needs
       // the OS keystore, which on Linux is not reachable earlier. A Tor the
       // launcher started had its state put in place before it ran.

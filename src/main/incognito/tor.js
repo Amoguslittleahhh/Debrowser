@@ -134,6 +134,13 @@ class Tor {
     this.stopping = false;
     /** Whether this Tor ever finished connecting: only then is its state worth keeping. */
     this.everReady = false;
+    /**
+     * Set by the owner: `() => ({ command, lines })` for the bridges to move to
+     * when the first ones make no progress (bridges.fallbackCommand), or null
+     * when there is nothing to move to. Tried once per start.
+     */
+    this.fallback = null;
+    this.fellBack = null;
   }
 
   /** `{available, reason}` - whether there is a Tor to start at all. */
@@ -212,6 +219,7 @@ class Tor {
     }
     if (this.child) return true;
     this.stopping = false;
+    this.fellBack = null;
 
     fs.mkdirSync(path.join(this.dir, 'data'), { recursive: true, mode: 0o700 });
     const torrc = path.join(this.dir, 'torrc');
@@ -295,7 +303,10 @@ class Tor {
       // Kept for the bootstrap page: "stuck at 10%" means nothing to anyone,
       // and Tor's own last complaint usually names the reason.
       const message = text.replace(/^.*\[(warn|err)\]\s*/, '');
-      if (!/running Tor as root|GeoIP/i.test(message)) this.status.warning = message;
+      // A transport program that ended cleanly was replaced (fallBack), not lost.
+      if (!/running Tor as root|GeoIP|died in state Completed|terminated with status code 0/i.test(message)) {
+        this.status.warning = message;
+      }
       // Once: Tor logs a taken port several times, and each report moved the
       // port and restarted Tor again, using up every move on one collision.
       if (/Could not bind to/.test(message) && this.status.state !== 'failed') {
@@ -307,6 +318,7 @@ class Tor {
 
   /** The Bridge lines this Tor was configured with, read back from its torrc. */
   bridgeLines() {
+    if (this.fellBack) return this.fellBack;
     try {
       return fs.readFileSync(path.join(this.dir, 'torrc'), 'utf8').split('\n').filter((l) => l.startsWith('Bridge '));
     } catch {
@@ -346,6 +358,7 @@ class Tor {
       // A Tor the Linux launcher started is ours to watch too, though not our
       // child: without it the "no progress" warning, and its Retry, never came.
       if (this.status.state === 'ready' || (!this.child && !this.attached)) return;
+      if (this.fallBack()) return;
       this.set({
         warning: this.status.warning ||
           `No progress for ${Math.round(STALL_MS / 1000)} seconds at ${this.status.progress}% – ` +
@@ -353,6 +366,28 @@ class Tor {
       });
     }, STALL_MS);
     if (typeof this.stallTimer.unref === 'function') this.stallTimer.unref();
+  }
+
+  /**
+   * The bridges in use made no progress: move to the fallback ones, once,
+   * without restarting Tor - what it has fetched so far is kept. Snowflake
+   * stalls where WebRTC is blocked, and nothing about that fixes itself.
+   * Returns whether it moved.
+   */
+  fallBack() {
+    if (this.fellBack || !this.fallback) return false;
+    const next = this.fallback();
+    if (!next || !next.command) return false;
+    this.fellBack = next.lines.filter((l) => l.startsWith('Bridge '));
+    this.log('tor', `no progress at ${this.status.progress}%; trying the other built-in bridges`);
+    this.set({ summary: 'Trying other bridges', warning: null, transport: this.plannedTransport() });
+    this.control([next.command]).then(([reply]) => {
+      if (!reply.some((l) => l.startsWith('250'))) throw new Error(reply.join(' '));
+    }).catch((err) => {
+      this.log('tor', `could not switch bridges: ${err.message}`);
+    });
+    this.armStall();
+    return true;
   }
 
   /* ---------------------------------------------------------------- */

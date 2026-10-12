@@ -75,7 +75,7 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   // way the user does - through the policy's own switch, not a test backdoor.
   // `up.test` is left out on purpose: it is the one that must be upgraded.
   const policy = require('../incognito/policy');
-  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'fp2', 'fpx', 'up2', 'ref', 'img.ref', 'other', 'cam1', 'cam2', 'cam3', 'decoy']) policy.allowHttp(url(host, ''));
+  for (const host of ['t1', 't2', 'rtc', 'lan', 'link', 'nc', 'ch', 'chx', 'fp', 'fp2', 'fpx', 'up2', 'ref', 'img.ref', 'other', 'cam1', 'cam2', 'cam3', 'decoy', 'hop', 'hop2']) policy.allowHttp(url(host, ''));
   const loaded = [];
   const byHost = {};
   for (const host of ['t1', 't2']) {
@@ -93,6 +93,11 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   await waitFor(() => linked.isLive && !linked.loading && /idle/.test(linked.url), 15_000);
   if (circuits) circuits.newCircuit(byHost.t1.session);
   await byHost.t1.wc.loadURL(url('nc', 'idle.html')).catch(() => {});
+  // Per site: t2, alone in its partition, goes to another site and so to
+  // another circuit; the linked page, which shares t1's partition with t1
+  // still open, goes to another site and keeps theirs.
+  await byHost.t2.wc.loadURL(url('hop', 'idle.html')).catch(() => {});
+  await linked.wc.loadURL(url('hop2', 'idle.html')).catch(() => {});
   step('circuits', {
     separateSessions: byHost.t1.session !== byHost.t2.session,
     linkShares: linked.session === byHost.t1.session

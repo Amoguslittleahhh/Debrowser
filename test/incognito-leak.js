@@ -459,6 +459,11 @@ async function main() {
     `link on port ${link}, its opener on ${t1}`);
   check('"new circuit" moves the tab to another circuit', moved != null && moved !== t1,
     `before ${t1}, after ${moved}`);
+  const [hop, hop2] = ['hop', 'hop2'].map(slotOf);
+  check('a tab that goes to another site goes over another circuit', hop != null && hop !== t2 && hop !== t1,
+    `t2.test on port ${t2}, then hop.test on ${hop}`);
+  check('a page sharing its partition with an open tab keeps their circuit on another site', hop2 != null && hop2 === moved,
+    `its opener on ${moved}, it on ${hop2}`);
   // Every request for icon.test - its page and its icon - on one circuit, that
   // tab's, and none on slot 1, the shared icon circuit this replaced.
   const iconSlots = [...new Set(arrivals.filter((a) => a.name.startsWith('icon.test:')).map((a) => a.slot))];

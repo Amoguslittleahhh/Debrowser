@@ -6288,6 +6288,29 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   await checkWindows();
 
+  // When Snowflake gets nowhere, Tor is moved to every built-in bridge in one
+  // command, each named by its own transport (the "meek" list is meek_lite);
+  // a chosen transport, or the user's own bridges, stay as they are.
+  {
+    const bridges = require('../incognito/bridges');
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'debrowser-pt-'));
+    fs.mkdirSync(path.join(dir, 'pluggable_transports'));
+    fs.writeFileSync(path.join(dir, 'pluggable_transports', 'pt_config.json'), JSON.stringify({ bridges: {
+      snowflake: ['snowflake 192.0.2.3:80 AAAA url=https://x.example/ ice=stun:a "q"'],
+      obfs4: ['obfs4 192.0.2.4:443 BBBB cert=c iat-mode=0'],
+      meek: ['meek_lite 192.0.2.20:80 url=https://m.example front=f.example']
+    } }));
+    const auto = bridges.fallbackCommand({ mode: 'auto' }, dir);
+    const kept = ['obfs4', 'custom', 'none'].map((mode) => bridges.fallbackCommand({ mode }, dir));
+    fs.rmSync(dir, { recursive: true, force: true });
+    const command = auto ? auto.command : '';
+    check('a stalled Snowflake moves to every built-in bridge, and a chosen transport is left alone',
+      /^SETCONF UseBridges="1" ClientTransportPlugin="snowflake,obfs4,meek_lite exec /.test(command) &&
+        (command.match(/ Bridge="/g) || []).length === 3 && command.includes('\\"q\\"') && !/[\r\n]/.test(command) &&
+        kept.every((k) => k === null),
+      command.slice(0, 160));
+  }
+
   // A private window starts from a clean environment: nothing that would
   // break it (CHROME_DESKTOP, Electron's own, killed its zygote on Linux) or
   // claim a kill switch it does not have; and when it fails, the line that

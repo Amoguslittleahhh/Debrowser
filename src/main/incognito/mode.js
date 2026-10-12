@@ -443,10 +443,15 @@ function switches(ctx) {
  * still be a request to Google that no page asked for, sent from every
  * incognito session, which is a fingerprint in itself.
  */
-function configureSession(ses, ctx, slot = creating ?? slots.get(ses) ?? 0) {
+/** Bind a session to a slot of the pool; resolves once new connections use it. */
+function setSlot(ses, ctx, slot) {
   slots.set(ses, slot);
   const port = ctx.poolPorts ? ctx.poolPorts[slot] : ctx.proxyPort;
-  ses.setProxy({ proxyRules: `socks5://127.0.0.1:${port}`, proxyBypassRules: BYPASS_RULES }).catch(() => {});
+  return ses.setProxy({ proxyRules: `socks5://127.0.0.1:${port}`, proxyBypassRules: BYPASS_RULES }).catch(() => {});
+}
+
+function configureSession(ses, ctx, slot = creating ?? slots.get(ses) ?? 0) {
+  setSlot(ses, ctx, slot);
   // `setSpellCheckerEnabled(false)` alone does not stop it - measured, the
   // download still went out. An empty language list does: there is then no
   // dictionary to fetch. Both, so the spellchecker is off as well as starved.
@@ -461,5 +466,5 @@ function configureSession(ses, ctx, slot = creating ?? slots.get(ses) ?? 0) {
 module.exports = {
   INCOGNITO, JS_LEVELS, DEFAULT_JS_LEVEL, RESOLVER_RULES, BYPASS_RULES,
   profileRoot, isPrivateDir, ensureRoot, sweep, wipe, startReaper, prepare, switches, configureSession,
-  movePort, pickPort, killSwitch, POOL_SIZE, sessionWithSlot, slotOf: (ses) => slots.get(ses)
+  movePort, pickPort, killSwitch, POOL_SIZE, sessionWithSlot, setSlot, slotOf: (ses) => slots.get(ses)
 };

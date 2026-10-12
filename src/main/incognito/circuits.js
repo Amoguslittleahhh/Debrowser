@@ -10,12 +10,18 @@
  * tab opens share its partition and its circuit, so signing in and then
  * opening a link in a new tab keeps you signed in.
  *
- * The limit, said plainly: a tab that navigates from one site to another keeps
- * its circuit. Tor Browser gives each *site* a circuit; this gives each *tab*
- * one, and Chromium partitions storage by top-level site within the tab.
+ * A tab that goes to another site goes over another circuit too, as Tor
+ * Browser gives each site its own: the exit that carried one site never sees
+ * the next. The request for the new site waits until the tab is on its new
+ * circuit, so nothing of it leaves on the old one.
+ *
+ * The limit, said plainly: while a tab has pages open that it opened - a
+ * sign-in popup, say - they share one partition and so one circuit, and the
+ * tab keeps it whatever site it goes to. Moving them would cut the other
+ * page's connections mid-use, and they share cookies anyway.
  */
 
-const { session } = require('electron');
+const { session, webContents } = require('electron');
 const mode = require('./mode');
 const policy = require('./policy');
 
@@ -42,6 +48,37 @@ class Circuits {
     /** Tabs whose page was still refused after every retry. */
     this.gaveUp = new Set();
     this.watched = new WeakSet();
+    /** Per partition: the site its circuit has carried. */
+    this.siteOn = new WeakMap();
+    policy.onTopLevel((ses, details) => this.forSite(ses, details.url));
+  }
+
+  /** The site a top-level address belongs to, for circuits; null for non-network ones. */
+  static siteKey(url) {
+    let parsed;
+    try { parsed = new URL(url); } catch { return null; }
+    if (!/^(https?|wss?):$/.test(parsed.protocol)) return null;
+    return policy.isOnion(url) ? parsed.hostname : policy.siteOf(parsed.hostname);
+  }
+
+  /**
+   * A top-level request is about to leave a partition. If it is for another
+   * site than the partition's circuit has carried, and nothing else is open
+   * in the partition, the partition moves to a fresh circuit first.
+   * Resolves to whether it moved.
+   */
+  async forSite(ses, url) {
+    const site = Circuits.siteKey(url);
+    if (!site) return false;
+    const before = this.siteOn.get(ses);
+    this.siteOn.set(ses, site);
+    if (!before || before === site) return false;
+    const open = webContents.getAllWebContents()
+      .filter((wc) => !wc.isDestroyed() && wc.session === ses && wc.getType() !== 'remote');
+    if (open.length > 1) return false;
+    await mode.setSlot(ses, this.ctx, this.nextSlot());
+    try { ses.closeAllConnections(); } catch { /* older Electron */ }
+    return true;
   }
 
   /** The slot handed out longest ago, or never. */

@@ -76,7 +76,16 @@ function parseCustom(text) {
  * through whichever bridge answered first and waited on it. obfs4 stays as a
  * choice for networks that block Snowflake.
  */
-const BUILT_IN = { auto: ['snowflake'], snowflake: ['snowflake'], obfs4: ['obfs4'] };
+const BUILT_IN = { auto: ['snowflake'], snowflake: ['snowflake'], obfs4: ['obfs4'], fallback: ['snowflake', 'obfs4', 'meek'] };
+
+/**
+ * What `auto` moves on to when Snowflake has made no progress (tor.js): every
+ * built-in bridge the bundle carries, Snowflake still among them. obfs4 gets
+ * through where WebRTC is blocked, and meek - slow, but HTTPS to a CDN - where
+ * nearly everything else is. Only `auto` falls back: a chosen transport, or the
+ * user's own bridges, are never swapped for others.
+ */
+const FALLS_BACK = new Set(['auto']);
 
 /**
  * The torrc lines for a bridge mode.
@@ -91,7 +100,9 @@ function torrcLines({ mode = 'auto', custom = '' } = {}, bundle) {
   const bridges = mode === 'custom'
     ? parseCustom(custom).good
     : (BUILT_IN[mode] || BUILT_IN.auto)
-      .flatMap((t) => ((config && config.bridges && config.bridges[t]) || []).map((line) => ({ transport: t, line })));
+      // The transport is the line's own first word: the "meek" list holds
+      // meek_lite lines, and Tor matches the plugin by that name.
+      .flatMap((t) => ((config && config.bridges && config.bridges[t]) || []).map((line) => ({ transport: line.split(/\s+/)[0], line })));
   // Bridges asked for and none usable - every custom line mistyped, or the
   // built-in list missing from the bundle - is a refusal to connect, never a
   // quiet fall back to plain Tor. Someone who chose bridges chose them so the
@@ -110,6 +121,24 @@ function torrcLines({ mode = 'auto', custom = '' } = {}, bundle) {
   ];
 }
 
+/**
+ * `{ command, lines }`: the control-port command that switches a running Tor
+ * to the fallback bridges and the torrc lines it amounts to; or null when the mode does not fall back or there is nothing to fall back to.
+ * SETCONF takes a list option as the key repeated, so every Bridge goes in one
+ * command and replaces the old list at once.
+ */
+function fallbackCommand({ mode = 'auto' } = {}, bundle) {
+  if (!FALLS_BACK.has(mode)) return null;
+  const lines = torrcLines({ mode: 'fallback' }, bundle);
+  if (!lines.some((l) => l.startsWith('Bridge '))) return null;
+  const quote = (v) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const command = `SETCONF ${lines.map((l) => {
+    const space = l.indexOf(' ');
+    return `${l.slice(0, space)}=${quote(l.slice(space + 1))}`;
+  }).join(' ')}`;
+  return { command, lines };
+}
+
 /** Which transport a bridge fingerprint belongs to, for saying what connected. */
 function transportFor(fingerprint, lines) {
   const fp = String(fingerprint || '').replace(/^\$/, '').split(/[~=]/)[0].toUpperCase();
@@ -121,4 +150,4 @@ function transportFor(fingerprint, lines) {
   return null;
 }
 
-module.exports = { TRANSPORTS, ptConfig, parseLine, parseCustom, torrcLines, transportFor };
+module.exports = { TRANSPORTS, ptConfig, parseLine, parseCustom, torrcLines, fallbackCommand, transportFor };
