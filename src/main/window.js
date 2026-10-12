@@ -539,12 +539,36 @@ class BrowserShell {
   /** Show the window, maximised the first time if that is how it was left. */
   reveal() {
     if (this.window.isDestroyed() || this.held) return;
-    if (this.startMaximized) {
-      this.startMaximized = false;
-      this.window.maximize();
-    }
+    // Linux: shown first, then maximised. A Wayland desktop sizes a window
+    // only once it is on screen, so one maximised before that was either never
+    // shown at all (Weston) or shown maximised around views still laid out for
+    // its old size (GNOME) - a band of nothing down the right.
+    const maximize = this.startMaximized;
+    this.startMaximized = false;
+    if (maximize && process.platform !== 'linux') this.window.maximize();
     this.window.show();
+    if (maximize && process.platform === 'linux') this.window.maximize();
     setImmediate(() => this.reapplyMaterial());
+    if (process.platform === 'linux') this.settleLayout();
+  }
+
+  /**
+   * Lay out again as the desktop settles the window's size. On Linux the size
+   * a window opens at is the window manager's to decide, and the news of it can
+   * come after the window is shown without a resize event to say so - so the
+   * views are fitted to what the window really is a few times over its first
+   * second, at nothing like the cost of a frame.
+   */
+  settleLayout() {
+    let last = '';
+    for (const ms of [50, 200, 500, 1000]) {
+      setTimeout(() => {
+        if (this.window.isDestroyed()) return;
+        const { width, height } = this.window.getContentBounds();
+        const size = `${width}x${height}`;
+        if (size !== last) { last = size; this.layout(); }
+      }, ms).unref?.();
+    }
   }
 
   /** Show a window that was being held back. */
