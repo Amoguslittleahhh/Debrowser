@@ -197,15 +197,16 @@ function plan() {
     };
   }
   const kind = install.linuxKind();
-  if (kind === 'deb' || kind === 'rpm') {
+  if (kind === 'deb' || kind === 'rpm' || kind === 'pacman') {
     // dpkg and rpm rather than apt, dnf or zypper: nothing depends on this
     // package, so there is nothing to resolve, and no lock to wait on. A .deb
     // is purged, so its AppArmor profile in /etc goes too: nothing of it is
     // left behind.
-    const [command, manual] = kind === 'deb'
-      ? [['/usr/bin/dpkg', '--purge', 'debrowser'], 'sudo apt remove debrowser']
-      : [['/usr/bin/rpm', '-e', 'debrowser'], 'sudo dnf remove debrowser (sudo zypper remove debrowser on openSUSE)'];
-    const tool = kind === 'deb' ? 'dpkg' : 'rpm';
+    const [command, manual, tool] = {
+      deb: [['/usr/bin/dpkg', '--purge', 'debrowser'], 'sudo apt remove debrowser', 'dpkg'],
+      rpm: [['/usr/bin/rpm', '-e', 'debrowser'], 'sudo dnf remove debrowser (sudo zypper remove debrowser on openSUSE)', 'rpm'],
+      pacman: [['/usr/bin/pacman', '-R', '--noconfirm', 'debrowser-bin'], 'sudo pacman -R debrowser-bin', 'pacman']
+    }[kind];
     return {
       does: 'be removed from this computer',
       note: 'Your system will ask for your password.',
@@ -215,7 +216,7 @@ function plan() {
         const instead = `Remove Debrowser with your software manager, or with: ${manual}`;
         // pkexec: 126 is a dismissed prompt. 127 is either a refusal - a wrong
         // password, or an account that may not - or no prompt to show at all,
-        // and only its message tells them apart. Anything else is dpkg's or rpm's.
+        // and only its message tells them apart. Anything else is the package manager's.
         if (code === 126) throw new Error('The password was not given, so nothing was removed.');
         if (code === 127 && /not authori[sz]ed/i.test(stderr)) {
           throw new Error('The password was not accepted, or this account may not remove programs, so nothing was removed.');

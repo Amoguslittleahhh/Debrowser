@@ -9,7 +9,7 @@ name: Release archive
 on:
   push:
     branches: [claude/master-build]
-    paths: [CHANGELOG.md, tools/changelog-site.js, .github/workflows/pages.yml, build/linux/archive-keyring.asc]
+    paths: [CHANGELOG.md, tools/changelog-site.js, tools/install.sh, tools/pkgbuild.js, .github/workflows/pages.yml, build/linux/archive-keyring.asc]
   release:
     types: [published]
   workflow_dispatch:
@@ -47,6 +47,25 @@ jobs:
           if [ -s build/linux/archive-keyring.asc ]; then
             cp build/linux/archive-keyring.asc site/debrowser-archive-keyring.asc
           fi
+      # The terminal installer, at a fixed address (tools/install.sh):
+      #   curl -fsSL https://amoguslittleahhh.github.io/Debrowser/install.sh | sh
+      # And the Arch package recipe for the newest release, which it builds on
+      # Arch (tools/pkgbuild.js) and which is what goes to the AUR - made from
+      # the release's .deb and its SHA-256, so it needs no key.
+      - name: The installer and the Arch package recipe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp tools/install.sh site/install.sh
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || true)
+          work=$(mktemp -d)
+          if [ -n "$tag" ] && gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern 'Debrowser-Linux.deb' -D "$work" 2>/dev/null; then
+            node tools/pkgbuild.js --version "${tag#v}" --sha256 "$(sha256sum "$work/Debrowser-Linux.deb" | cut -d' ' -f1)" --out site/arch
+          else
+            echo "::notice::${tag:-The newest release} has no Debrowser-Linux.deb, so no Arch package recipe yet."
+          fi
+          rm -rf "$work"
+
       # The dnf and zypper repository: a signed index (repodata/) of the newest
       # stable release's .rpm, whose entries point at that release's download,
       # so only a few kilobytes live here. The .rpm's install script adds it

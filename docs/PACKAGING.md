@@ -296,7 +296,27 @@ Removing the repository file (`/etc/apt/sources.list.d/debrowser.sources`,
 those updates off for good on that machine; installing again does not add it
 back. Uninstalling the package removes it.
 
-Arch and other distributions use the AppImage, which updates itself. On the
+Arch, Manjaro and EndeavourOS get a pacman package, `debrowser-bin`, built from
+the release's `.deb` (`tools/pkgbuild.js` writes the PKGBUILD and `.SRCINFO`;
+`pages.yml` publishes them for the newest release at `/arch/`). It is not in the
+AUR until someone with an AUR account pushes those two files to
+`ssh://aur@aur.archlinux.org/debrowser-bin.git`; after that, `yay -S
+debrowser-bin` installs and updates it. Other distributions use the AppImage,
+which updates itself.
+
+### Installing from a terminal
+
+`tools/install.sh`, published at the site's `/install.sh`:
+
+```sh
+curl -fsSL https://amoguslittleahhh.github.io/Debrowser/install.sh | sh
+```
+
+It reads `/etc/os-release` and installs the `.deb` with apt, the `.rpm` with dnf
+or zypper, builds and installs the Arch package with makepkg, or puts the
+AppImage in `~/Applications` - checking each download against the SHA-512 in
+the release's `latest-linux.yml` first. POSIX `sh`, so it runs under dash; kept
+clean with `shellcheck -s sh`. Run again, it updates. On the
 systems above, once the repositories are signed, the AppImage offers to install
 their package instead (`src/main/setup/linux-system.js`): it downloads this
 version's `.deb` or `.rpm`, checks it against the release's `latest-linux.yml`,

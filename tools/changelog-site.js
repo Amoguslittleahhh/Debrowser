@@ -224,6 +224,9 @@ ${files.length ? '' : `<p>Downloads for every system are on <a href="${REPO}/rel
 <ul class="files">
 ${files.map((f) => `<li><a href="${esc(link(f))}">${esc(f.label)}</a> <span class="meta">${esc(f.file)}</span><div class="summary">${esc(f.note)}</div></li>`).join('\n')}
 </ul>
+<h2>Linux, from a terminal</h2>
+<p>On Ubuntu, Debian, Fedora, openSUSE, Arch and the rest, this installs the right package for your system, checked against the release first. Run it again to update.</p>
+<pre><code>curl -fsSL https://amoguslittleahhh.github.io/Debrowser/install.sh | sh</code></pre>
 <p class="meta">Checksums and earlier versions are on <a href="${REPO}/releases">the releases page</a>.</p>
 <script>
 (async () => {

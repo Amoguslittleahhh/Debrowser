@@ -67,7 +67,16 @@ function inRpmDatabase() {
   return rpmInstalled;
 }
 
-/** How this copy is installed: 'appimage', 'deb', 'rpm', 'folder', or null when unpackaged or not Linux. */
+/** Whether pacman has Arch's package of it, debrowser-bin (tools/pkgbuild.js). */
+function inPacmanDatabase() {
+  try {
+    return fs.readdirSync('/var/lib/pacman/local').some((name) => name.startsWith('debrowser-bin-'));
+  } catch {
+    return false;
+  }
+}
+
+/** How this copy is installed: 'appimage', 'deb', 'rpm', 'pacman', 'folder', or null when unpackaged or not Linux. */
 function linuxKind() {
   if (process.platform !== 'linux' || !app.isPackaged) return null;
   if (appImage()) return 'appimage';
@@ -75,6 +84,7 @@ function linuxKind() {
     if (fs.existsSync('/var/lib/dpkg/info/debrowser.list')) return 'deb';
     // Before asking rpm: only a package puts this file there.
     if (fs.existsSync('/usr/share/metainfo/dev.debrowser.app.metainfo.xml') && inRpmDatabase()) return 'rpm';
+    if (inPacmanDatabase()) return 'pacman';
   }
   return 'folder';
 }

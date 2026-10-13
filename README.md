@@ -35,6 +35,14 @@ Or pick it yourself from [the latest release](https://github.com/Amoguslittleahh
 | **Fedora, RHEL, openSUSE** | `Debrowser-Linux.rpm` | Open it to install it in your software centre, or `sudo dnf install ./Debrowser-Linux.rpm` (`sudo zypper install` on openSUSE) |
 | **Any other Linux** | `Debrowser-Linux.AppImage` | `chmod +x` and run. It offers to add itself to your apps. |
 
+**On Linux, from a terminal** - Ubuntu, Debian, Mint, Fedora, openSUSE, Arch, Manjaro and the rest:
+
+```sh
+curl -fsSL https://amoguslittleahhh.github.io/Debrowser/install.sh | sh
+```
+
+It installs the right package for your system (on Arch, a `debrowser-bin` package built with makepkg), checks it against the release first, and updates it when run again.
+
 The release's other files are for updates and package managers.
 
 ## Code signing policy
