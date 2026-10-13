@@ -75,14 +75,16 @@ h1 {
  */
 .rail {
   flex: none;
-  width: 206px;
+  width: 232px;   /* "Passwords and payment" on one line beside its icon */
   overflow-y: auto;
   padding: var(--s5) var(--s3) var(--s6) var(--s5);
   border-right: 1px solid var(--border);
 }
 
 .rail-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   padding: 7px 10px;
   margin-bottom: 1px;
@@ -91,11 +93,23 @@ h1 {
   background: none;
   color: var(--text-dim);
   font: inherit;
-  font-size: var(--fs-small);
+  font-size: var(--fs-body);
   text-align: left;
   cursor: default;
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
+.rail-item svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+}
+.rail-item.current svg { color: var(--accent); opacity: 1; }
 
 .rail-item:hover { background: var(--wash-soft); color: var(--text); }
 .rail-item:active { background: var(--wash); }

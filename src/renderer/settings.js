@@ -1742,6 +1742,39 @@ const railButtons = new Map();
  */
 let sections = [];
 
+/**
+ * A glyph for each section, so the rail can be read at a glance rather than
+ * word by word. Drawn on the menus' 16px grid with their stroke (sheet-menu.js,
+ * MENU_ICONS), and the same drawing where both have one.
+ */
+const SECTION_ICONS = {
+  appearance: ['M8 2.5a5.5 5.5 0 1 0 0 11c.9 0 1.2-.6 1-1.3-.3-.9.3-1.7 1.2-1.7h1.3a2 2 0 0 0 2-2A5.8 5.8 0 0 0 8 2.5z',
+    'M5.2 7.2h.01', 'M7.5 5h.01', 'M10.4 6h.01'],
+  browsing: ['M7 3.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6z', 'M9.8 9.8l3 3'],
+  tabs: ['M2.5 6.5h11v7h-11z', 'M2.5 6.5v-3h4.5l1 3'],
+  spaces: ['M2.5 2.5h4.5v4.5H2.5z', 'M9 2.5h4.5v4.5H9z', 'M2.5 9h4.5v4.5H2.5z', 'M9 9h4.5v4.5H9z'],
+  memory: ['M2.5 11.5a5.5 5.5 0 1 1 11 0', 'M8 11.5L10.6 7'],
+  downloads: ['M8 2.5v7', 'M5 7l3 3 3-3', 'M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5'],
+  bookmarks: ['M8 2.6l1.7 3.45 3.8.55-2.75 2.68.65 3.79L8 11.28l-3.4 1.79.65-3.79L2.5 6.6l3.8-.55z'],
+  credentials: ['M5 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z', 'M7.5 8h6', 'M11 8v2', 'M13.5 8v2.5'],
+  private: ['M8 2.5l4.5 1.8v3.4c0 2.8-1.9 4.8-4.5 5.8-2.6-1-4.5-3-4.5-5.8V4.3z'],
+  advanced: ['M3 4.5h10', 'M3 8h10', 'M3 11.5h10', 'M10 3v3', 'M6 6.5v3', 'M11 10v3'],
+  labs: ['M6.5 2.5h3', 'M7 2.5v4L3.2 12.4a.8.8 0 0 0 .7 1.1h8.2a.8.8 0 0 0 .7-1.1L9 6.5v-4', 'M4.8 10h6.4'],
+  updates: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2']
+};
+
+function sectionIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of SECTION_ICONS[name] || []) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 function buildRail() {
   const rail = document.getElementById('rail');
   if (!rail) return;
@@ -1754,7 +1787,9 @@ function buildRail() {
     const button = document.createElement('button');
     button.className = 'rail-item';
     button.type = 'button';
-    button.textContent = heading ? heading.textContent : name;
+    const label = document.createElement('span');
+    label.textContent = heading ? heading.textContent : name;
+    button.append(sectionIcon(name), label);
     button.addEventListener('click', () => {
       setDrawer(false);
       // A section at a time, unless a search is showing every match: then the

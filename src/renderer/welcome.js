@@ -11,7 +11,9 @@
 
 const api = window.debrowser;
 
-const STEPS = ['hello', 'import', 'look', 'browsing', 'default', 'tour', 'done'];
+// Five: the default-browser button joined "How you browse", and the tips the
+// last step, which until then said one line and showed an empty card.
+const STEPS = ['hello', 'import', 'look', 'browsing', 'done'];
 const NEXT_LABEL = { hello: 'Get started', done: 'Start browsing' };
 
 // Settings' accent choices (settings.js, ACCENTS), in its order.
@@ -27,6 +29,10 @@ const ACCENTS = [
 let step = 0;
 let prefs = null;
 let engines = [];
+/** What the import step brought over, for the last step to say. */
+let imported = null;
+/** Whether Debrowser is the default browser, as last asked. */
+let isDefault = null;
 
 const $ = (id) => document.getElementById(id);
 const save = (key, value) => api.send('set-pref', { key, value });
@@ -38,11 +44,23 @@ const save = (key, value) => api.send('set-pref', { key, value });
 const progress = $('progress');
 progress.replaceChildren(...STEPS.map(() => document.createElement('span')));
 
+const card = document.querySelector('.card');
+let shown = false;
+const calm = matchMedia('(prefers-reduced-motion: reduce)');
+
 function show(index) {
   step = Math.max(0, Math.min(STEPS.length - 1, index));
   const name = STEPS[step];
+  // The card is as tall as its step, and slides between heights rather than
+  // jumping: one height for every step left the short ones mostly empty.
+  const from = card.getBoundingClientRect().height;
   for (const section of document.querySelectorAll('section[data-step]')) {
     section.hidden = section.dataset.step !== name;
+  }
+  if (name === 'done') {
+    renderRecap();
+    // Opened straight at the last step, the default has not been asked yet.
+    if (isDefault === null) refreshDefault().then(renderRecap, () => {});
   }
   [...progress.children].forEach((bar, i) => {
     bar.className = i < step ? 'done' : i === step ? 'now' : '';
@@ -52,7 +70,15 @@ function show(index) {
   $('skip').hidden = name === 'done';
   $('next').textContent = NEXT_LABEL[name] || 'Next';
   if (name === 'import') findProfiles();
-  if (name === 'default') refreshDefault();
+  if (name === 'browsing') refreshDefault();
+  const to = card.getBoundingClientRect().height;
+  // Not on the first showing: there is nothing to slide from, only the
+  // hello step's height, which is not where the page ever was.
+  if (shown && from && Math.abs(from - to) > 1 && !calm.matches) {
+    card.animate([{ height: `${from}px` }, { height: `${to}px` }],
+      { duration: 240, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+  }
+  shown = true;
   $('next').focus({ preventScroll: true });
 }
 
@@ -131,6 +157,7 @@ api.onState((state) => {
   prefs = state.prefs;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   render();
+  if (STEPS[step] === 'done') renderRecap();
 });
 
 /* ---------------------------------------------------------------- */
@@ -148,7 +175,7 @@ async function findProfiles() {
   if (!profiles.length) {
     host.replaceChildren(Object.assign(document.createElement('p'), {
       className: 'fine',
-      textContent: 'No other browsers found on this computer. If you have a bookmarks file exported from one, choose it below.'
+      textContent: 'No other browsers here to bring anything over from. If you’ve exported bookmarks from one as a file, you can choose it below.'
     }));
     return;
   }
@@ -168,6 +195,7 @@ async function findProfiles() {
         hint.textContent = 'Imported';
         const pages = r.pages ? ` and ${r.pages.toLocaleString()} page${r.pages === 1 ? '' : 's'} of history` : '';
         note(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'}${pages} from ${r.browser}.`, 'ok');
+        imported = `${r.added} bookmark${r.added === 1 ? '' : 's'}${pages} from ${r.browser}`;
       } else {
         b.disabled = false;
         hint.textContent = 'Import';
@@ -181,7 +209,10 @@ async function findProfiles() {
 $('import-file').addEventListener('click', async () => {
   const r = await api.request('import-bookmark-file');
   if (!r || r.cancelled) return;
-  if (r.ok) note(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'} from ${r.browser}.`, 'ok');
+  if (r.ok) {
+    note(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'} from ${r.browser}.`, 'ok');
+    imported = `${r.added} bookmark${r.added === 1 ? '' : 's'} from ${r.browser}`;
+  }
   else note(`Couldn’t import: ${r.reason}.`, 'bad');
 });
 
@@ -196,24 +227,61 @@ function note(text, kind) {
 /* ---------------------------------------------------------------- */
 
 const HOW = {
-  win32: 'Windows opens its Default apps settings. Choose Debrowser there as your web browser.',
-  darwin: 'macOS asks you to confirm. Choose "Use Debrowser".',
-  linux: 'Set through your desktop\'s default applications.'
+  win32: 'Windows opens its Default apps settings: choose Debrowser there as your web browser.',
+  darwin: 'Your Mac asks you to confirm: choose “Use Debrowser”.',
+  linux: 'Makes Debrowser your default browser.'
 };
 
 async function refreshDefault() {
   const res = await api.request('default-browser-status');
-  const isDefault = Boolean(res && res.isDefault);
+  isDefault = Boolean(res && res.isDefault);
   const state = $('default-state');
   state.textContent = isDefault ? 'Debrowser is your default browser.' : '';
   state.className = `note ${isDefault ? 'ok' : ''}`;
   $('make-default').hidden = isDefault;
-  $('default-how').textContent = isDefault ? '' : (HOW[res && res.platform] || '');
+  $('default-how').textContent = isDefault ? 'Links from other apps open here.' : (HOW[res && res.platform] || HOW.linux);
 }
 
 $('make-default').addEventListener('click', () => api.send('make-default'));
 // Coming back from the system's settings is when the answer may have changed.
-window.addEventListener('focus', () => { if (STEPS[step] === 'default') refreshDefault(); });
+window.addEventListener('focus', () => { if (STEPS[step] === 'browsing') refreshDefault(); });
+
+/* ---------------------------------------------------------------- */
+/* What was chosen                                                   */
+/* ---------------------------------------------------------------- */
+
+const DESIGNS = { ledger: 'Ledger', paper: 'Paper', grid: 'Grid', legacy: 'Legacy' };
+const THEMES = { system: 'light or dark with your system', light: 'light', dark: 'dark' };
+
+/** The last step reads back what the browser now has - not what was clicked. */
+function renderRecap() {
+  if (!prefs) return;
+  const rows = [];
+  const row = (term, text, swatch) => {
+    const dt = document.createElement('dt');
+    dt.textContent = term;
+    const dd = document.createElement('dd');
+    if (swatch) {
+      const dot = document.createElement('i');
+      dot.className = 'recap-swatch';
+      dot.style.background = swatch;
+      dd.append(dot);
+    }
+    dd.append(text);
+    rows.push(dt, dd);
+  };
+  const accent = ACCENTS.find((a) => a.value.toLowerCase() === String(prefs.accent).toLowerCase());
+  row('Look', `${DESIGNS[prefs.design] || 'Ledger'}, ${THEMES[prefs.theme] || prefs.theme}${accent ? `, ${accent.name} accent` : ''}`,
+    accent ? accent.value : null);
+  row('Tabs', prefs.tabBarPosition === 'left' ? 'Down the side'
+    : `Across the top${prefs.showBookmarksBar ? ', with the bookmarks bar' : ''}`);
+  const engine = engines.find((e) => e.id === prefs.searchEngine);
+  if (engine) row('Search', engine.name);
+  row('When you start', prefs.restoreTabs ? 'Your tabs from last time' : 'A fresh tab');
+  if (imported) row('Brought over', imported);
+  if (isDefault !== null) row('Default browser', isDefault ? 'Debrowser' : 'Not changed');
+  $('recap').replaceChildren(...rows);
+}
 
 // A step named in the address (debrowser://welcome#look) opens at that step.
 show(Math.max(0, STEPS.indexOf(decodeURIComponent(location.hash.slice(1)))));

@@ -874,17 +874,17 @@ tried, measured and removed — live on the `claude/research-build` branch.
   `build/intune/README.md`. A machine-wide install turns its own updater off,
   since it cannot write to its install directory and update scheduling belongs
   to whoever deployed it.
-- **The interface is set in Aptos, then Calibri, then whatever the system has.**
-  Neither can be bundled — both are Microsoft's and not redistributable — so the
-  stack degrades, and it names Carlito before the system default: Carlito is
-  metric-compatible with Calibri, is under the Open Font License, and on Linux is
-  one `apt install fonts-crosextra-carlito` away. With it the layout is identical
-  to the pixel; without it you get your own platform's UI face and nothing looks
-  broken. Two measured consequences are built into the rest of the styling:
-  Calibri's x-height is about 10% shorter than the faces desktop UI usually
-  assumes, so the base size is 14px rather than 13, and it ships exactly two
-  weights, so emphasis here is carried by colour and size rather than by a
-  semibold that does not exist.
+- **The interface is set in Atkinson Hyperlegible Next**, in the Ledger and
+  Paper designs on Windows and Linux. The Braille Institute drew it so that
+  letters easily mistaken for each other - I, l and 1; O and 0 - never are,
+  including at small sizes and for people who see less well. It is bundled
+  (`src/renderer/fonts/`, Latin only, 110 KB, SIL Open Font License), so the
+  browser looks the same on every system; before, the stack began with Aptos and
+  Calibri, which are Microsoft's and cannot be shipped, and Linux got whatever
+  stood in for them. A Mac keeps San Francisco, and Grid and Legacy keep their
+  own faces. Secondary text is at least 7:1 against its background (WCAG AAA)
+  and nothing is set below 12px. The new tab page keeps its original face and
+  colours, as its layout is frozen.
 - **No extensions yet.** Chrome extension support is intended and not built.
   Anything not in Settings is not a setting yet, which is deliberate: a control
   that does nothing is worse than a short page.

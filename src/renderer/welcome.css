@@ -16,7 +16,11 @@ body {
   display: flex;
   flex-direction: column;
   width: min(560px, 100%);
-  min-height: min(640px, calc(100vh - 48px));   /* one height for every step, so the card does not jump between them */
+  /* As tall as the step it shows; welcome.js slides it between heights, so it
+     never jumps. One fixed height for every step left the short ones mostly
+     empty. Clipped while it slides, so a taller step does not spill out. */
+  max-height: calc(100vh - 48px);
+  overflow: hidden auto;
   padding: 28px 32px 22px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -215,10 +219,41 @@ footer { display: flex; align-items: center; gap: 8px; margin-top: 22px; }
 }
 .primary { border: 1px solid var(--accent); background: var(--accent-fill); color: #fff; }
 .primary:hover { filter: brightness(1.08); }
-.primary.wide { width: 100%; padding: 10px; margin-top: 4px; }
 .secondary { border: 1px solid var(--border); background: transparent; }
 .secondary:hover { background: var(--bg); }
 .link { padding: 4px 2px; border: 0; background: none; color: var(--text-dim); text-decoration: underline; text-underline-offset: 3px; font-size: 13px; }
 .link:hover { color: var(--text); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
+
+/* "Open links from other apps here", with the other choices on its step. */
+.default-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.default-text { flex: 1; display: grid; gap: 2px; font-size: var(--fs-body); }
+.default-text strong { font-weight: 600; }
+.default-text small { color: var(--text-dim); font-size: var(--fs-small); line-height: 1.45; }
+
+/* The last step's read-back of what was chosen. */
+.recap {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 9px 20px;
+  margin: 0 0 24px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: var(--fs-body);
+}
+.recap dt { color: var(--text-dim); }
+.recap dd { margin: 0; display: flex; align-items: center; gap: 8px; }
+.recap-swatch { flex: none; width: 12px; height: 12px; border-radius: 50%; }
+h2.label { margin: 0 0 12px; }
+

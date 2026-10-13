@@ -10,7 +10,7 @@
 </head>
 <body>
   <!--
-    The first-run tour: one page, seven steps, each shown alone. Every choice
+    The first-run tour: one page, five steps, each shown alone. Every choice
     is saved the moment it is made, through the same set-pref the Settings page
     uses, so the browser around this page changes as you click - the preview is
     the browser itself. Skipping at any step keeps what was already chosen.
@@ -27,7 +27,7 @@
         </svg>
       </div>
       <h1>Welcome to Debrowser</h1>
-      <p class="lead">A browser that keeps out of the way of your computer. A few quick choices, and it's yours.</p>
+      <p class="lead">A browser that keeps out of the way of your computer. A few quick choices, and it’s yours.</p>
       <!-- The three things it does differently, before anything is asked. -->
       <ul class="points">
         <li>
@@ -43,7 +43,7 @@
           <span><strong>Spaces keep work and home apart,</strong> each with its own tabs, and its own sign-ins if you want.</span>
         </li>
       </ul>
-      <p class="fine">About a minute. You can skip any step, and change all of it later in Settings.</p>
+      <p class="fine">About a minute. Skip anything you like – it can all be changed later in Settings.</p>
     </section>
 
     <section data-step="import" hidden>
@@ -100,37 +100,37 @@
         <span>Show the memory meter<small>How much memory your tabs are using, in the toolbar.</small></span></label>
       <label class="toggle"><input type="checkbox" data-pref="autoUpdate">
         <span>Install updates automatically<small>Only what changed is downloaded.</small></span></label>
-    </section>
-
-    <section data-step="default" hidden>
-      <h1>Make Debrowser your default</h1>
-      <p class="lead">So links from other apps open here.</p>
+      <!-- Its own step once; it is one button, so it sits with the other choices. -->
+      <div class="default-row">
+        <span class="default-text">
+          <strong>Open links from other apps here</strong>
+          <small id="default-how">Makes Debrowser your default browser.</small>
+        </span>
+        <button class="secondary" id="make-default" type="button">Make default</button>
+      </div>
       <p class="note" id="default-state" role="status"></p>
-      <button class="primary wide" id="make-default" type="button">Make Debrowser the default</button>
-      <p class="fine" id="default-how"></p>
     </section>
 
-    <section data-step="tour" hidden>
-      <h1>A few things that are different</h1>
+    <section data-step="done" hidden>
+      <h1>You’re all set</h1>
+      <p class="lead">Here’s how Debrowser is set up for you. All of it can be changed in Settings, and this tour is there too.</p>
+      <!-- What was chosen, read back from the browser's own state. -->
+      <dl class="recap" id="recap"></dl>
+      <h2 class="label">Worth knowing</h2>
       <ul class="tour">
         <li>
-          <strong>Tabs you aren't using go to sleep</strong>
+          <strong>Tabs you aren’t using go to sleep</strong>
           <span>Debrowser keeps memory for the tabs in front of you. The meter in the toolbar opens the task manager.</span>
         </li>
         <li>
           <strong>Private windows go through Tor</strong>
-          <span><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>N</kbd> opens one. Nothing from it is kept, and sites don't see where you are.</span>
+          <span><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>N</kbd> opens one. Nothing from it is kept, and sites don’t see where you are.</span>
         </li>
         <li>
           <strong>Everything is a keystroke away</strong>
           <span><kbd>Ctrl</kbd> <kbd>L</kbd> for the address bar, <kbd>Ctrl</kbd> <kbd>T</kbd> for a new tab, <kbd>Ctrl</kbd> <kbd>/</kbd> for all of them.</span>
         </li>
       </ul>
-    </section>
-
-    <section data-step="done" hidden>
-      <h1>You're all set</h1>
-      <p class="lead">Everything you chose can be changed in Settings, and this tour is there too.</p>
     </section>
 
     <footer>

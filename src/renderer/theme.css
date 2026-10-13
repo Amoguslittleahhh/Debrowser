@@ -59,8 +59,8 @@
    * needs, named for their job rather than for their size, so a change is made
    * once.
    */
-  --fs-micro: 11px;     /* stat labels, the one-line footer; 11px is the floor for text anywhere */
-  --fs-small: 12px;     /* hints, shortcuts, secondary lines */
+  --fs-micro: 12px;     /* stat labels, the one-line footer; 12px is the floor for text anywhere */
+  --fs-small: 13px;     /* hints, shortcuts, secondary lines */
   --fs-body: 14px;      /* everything the user reads */
   --fs-lead: 16px;      /* a figure worth reading first */
   --fs-title: 19px;     /* a page's own name */
@@ -140,7 +140,7 @@
      read as a table. */
   --border-soft: #24241f;
   --text: #eae7e0;
-  --text-dim: #9b978e;
+  --text-dim: #b2afa8;
 
   /*
    * One accent, and it has to work on both palettes.
@@ -247,7 +247,7 @@
     --border: #dcd7cc;
     --border-soft: #e9e5db;
     --text: #201f1c;
-    --text-dim: #6b6559;
+    --text-dim: #555147;
     --chip-fg-s: 34%;
     --chip-fg-l: 32%;
     --chip-bg-s: 30%;
@@ -267,7 +267,7 @@ body[data-theme="light"] {
   --border: #dcd7cc;
   --border-soft: #e9e5db;
   --text: #201f1c;
-  --text-dim: #6b6559;
+  --text-dim: #555147;
   --chip-fg-s: 34%;
   --chip-fg-l: 32%;
   --chip-bg-s: 30%;
@@ -282,7 +282,7 @@ body[data-theme="dark"] {
   --border: #33332e;
   --border-soft: #24241f;
   --text: #eae7e0;
-  --text-dim: #9b978e;
+  --text-dim: #b2afa8;
   --chip-fg-s: 34%;
   --chip-fg-l: 70%;
   --chip-bg-s: 22%;
@@ -327,12 +327,64 @@ body[data-platform="darwin"] {
   --ls-title: -0.015em;
 }
 
+/*
+ * The face for reading: Atkinson Hyperlegible Next, by the Braille Institute,
+ * drawn so that letters which are easily confused - I, l and 1; O and 0; rn and
+ * m - never are, at small sizes and for people who see less well. Bundled
+ * (fonts/, SIL Open Font License, OFL.txt) because the stack it replaces was a
+ * different face on every system - Aptos, Calibri, or on Linux whatever stood
+ * in for Calibri - and so a different-looking browser on each. Only the Latin
+ * subsets, 110 KB, read from disk; other scripts fall through to the system's.
+ *
+ * Ledger and Paper only: Grid's grotesque and Legacy's look are what those
+ * designs are. And not on a Mac, which keeps San Francisco (above) - the face
+ * every Mac app is set in.
+ */
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: italic;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-ext-wght-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: italic;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-wght-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+body[data-design="ledger"]:not([data-platform="darwin"]),
+body[data-design="paper"]:not([data-platform="darwin"]) {
+  --font-ui: "Atkinson Hyperlegible Next", Aptos, Calibri, Carlito, "Segoe UI Variable Text", "Segoe UI",
+             system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
+}
+
 /* Ledger: sage and pine by light, near-black green by dark. Soft corners. */
 body[data-design="ledger"] {
   color-scheme: dark;
   --bg: #131514; --bg-raised: #1a1c1b; --bg-input: #212422;
   --border: #2e322f; --border-soft: #222523;
-  --text: #e6e8e4; --text-dim: #8e948f;
+  --text: #e6e8e4; --text-dim: #aaafab;
   --radius-sm: 6px; --radius: 8px; --radius-lg: 16px;
 }
 @media (prefers-color-scheme: light) {
@@ -340,14 +392,14 @@ body[data-design="ledger"] {
     color-scheme: light;
     --bg: #e4e8e1; --bg-raised: #f7f8f5; --bg-input: #ffffff;
     --border: #cdd3cb; --border-soft: #e1e5df;
-    --text: #1c2320; --text-dim: #5f6a64;
+    --text: #1c2320; --text-dim: #454d49;
   }
 }
 body[data-design="ledger"][data-theme="light"] {
   color-scheme: light;
   --bg: #e4e8e1; --bg-raised: #f7f8f5; --bg-input: #ffffff;
   --border: #cdd3cb; --border-soft: #e1e5df;
-  --text: #1c2320; --text-dim: #5f6a64;
+  --text: #1c2320; --text-dim: #454d49;
 }
 
 /* Paper: warm paper by light, warm ink by dark. Barely rounded. */
@@ -355,7 +407,7 @@ body[data-design="paper"] {
   color-scheme: dark;
   --bg: #1b1916; --bg-raised: #22201c; --bg-input: #2a2722;
   --border: #3a3630; --border-soft: #2e2b26;
-  --text: #ede7da; --text-dim: #a39b8e;
+  --text: #ede7da; --text-dim: #b8b1a7;
   --radius-sm: 3px; --radius: 4px; --radius-lg: 10px;
 }
 @media (prefers-color-scheme: light) {
@@ -363,14 +415,14 @@ body[data-design="paper"] {
     color-scheme: light;
     --bg: #f4f1ea; --bg-raised: #fbfaf6; --bg-input: #ffffff;
     --border: #d9d3c7; --border-soft: #e6e1d6;
-    --text: #1e1c19; --text-dim: #6e685e;
+    --text: #1e1c19; --text-dim: #555149;
   }
 }
 body[data-design="paper"][data-theme="light"] {
   color-scheme: light;
   --bg: #f4f1ea; --bg-raised: #fbfaf6; --bg-input: #ffffff;
   --border: #d9d3c7; --border-soft: #e6e1d6;
-  --text: #1e1c19; --text-dim: #6e685e;
+  --text: #1e1c19; --text-dim: #555149;
 }
 
 /* Grid: black and white, square, a neo-grotesque face. */
@@ -379,7 +431,7 @@ body[data-design="grid"] {
   --font-ui: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", "Nimbus Sans", sans-serif;
   --bg: #0a0a0a; --bg-raised: #111111; --bg-input: #1a1a1a;
   --border: #3a3a3a; --border-soft: #1f1f1f;
-  --text: #f2f2f2; --text-dim: #8c8c8c;
+  --text: #f2f2f2; --text-dim: #a5a5a5;
   --radius-sm: 0px; --radius: 0px; --radius-lg: 0px; --radius-pill: 0px;
 }
 @media (prefers-color-scheme: light) {
@@ -387,14 +439,14 @@ body[data-design="grid"] {
     color-scheme: light;
     --bg: #ffffff; --bg-raised: #ffffff; --bg-input: #f2f2f2;
     --border: #cfcfcf; --border-soft: #ececec;
-    --text: #0f0f0f; --text-dim: #595959;
+    --text: #0f0f0f; --text-dim: #515151;
   }
 }
 body[data-design="grid"][data-theme="light"] {
   color-scheme: light;
   --bg: #ffffff; --bg-raised: #ffffff; --bg-input: #f2f2f2;
   --border: #cfcfcf; --border-soft: #ececec;
-  --text: #0f0f0f; --text-dim: #595959;
+  --text: #0f0f0f; --text-dim: #515151;
 }
 
 /*
@@ -844,4 +896,42 @@ select {
     forced-color-adjust: none;
   }
   ::selection { background: Highlight; color: HighlightText; }
+}
+
+/*
+ * The new tab page keeps its look (CLAUDE.md: its layout is frozen). It loads
+ * this file, so the readability changes above - secondary text raised to 7:1,
+ * the 12px floor, the bundled face - would reach it too. #wordmark is on that
+ * page alone; each rule here is one above with the page's old value, so the
+ * cascade between designs and themes is the same as it was.
+ */
+:root:has(#wordmark) {
+  --fs-micro: 11px;
+  --fs-small: 12px;
+}
+:root:has(#wordmark) { --text-dim: #9b978e; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark):not([data-theme="dark"]) { --text-dim: #6b6559; }
+}
+body:has(#wordmark)[data-theme="light"] { --text-dim: #6b6559; }
+body:has(#wordmark)[data-theme="dark"] { --text-dim: #9b978e; }
+body:has(#wordmark)[data-design="ledger"] { --text-dim: #8e948f; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark)[data-design="ledger"]:not([data-theme="dark"]) { --text-dim: #5f6a64; }
+}
+body:has(#wordmark)[data-design="ledger"][data-theme="light"] { --text-dim: #5f6a64; }
+body:has(#wordmark)[data-design="paper"] { --text-dim: #a39b8e; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark)[data-design="paper"]:not([data-theme="dark"]) { --text-dim: #6e685e; }
+}
+body:has(#wordmark)[data-design="paper"][data-theme="light"] { --text-dim: #6e685e; }
+body:has(#wordmark)[data-design="grid"] { --text-dim: #8c8c8c; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark)[data-design="grid"]:not([data-theme="dark"]) { --text-dim: #595959; }
+}
+body:has(#wordmark)[data-design="grid"][data-theme="light"] { --text-dim: #595959; }
+body:has(#wordmark)[data-design="ledger"]:not([data-platform="darwin"]),
+body:has(#wordmark)[data-design="paper"]:not([data-platform="darwin"]) {
+  --font-ui: Aptos, Calibri, Carlito, "Segoe UI Variable Text", "Segoe UI",
+             system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
 }
