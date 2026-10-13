@@ -7,6 +7,9 @@ const boot = { main: Math.round(process.uptime() * 1000) };
 global.debrowserBoot = boot;
 const bootMark = (name) => { if (!(name in boot)) boot[name] = Math.round(process.uptime() * 1000); };
 
+// `debrowser --terminal`: the browser in a terminal, and none of what follows.
+if (require('../terminal/launch').launch()) return;
+
 /**
  * Debrowser entry point.
  *

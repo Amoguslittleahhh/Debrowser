@@ -207,6 +207,44 @@ task manager. Two give way to the page: in a web app that uses `Ctrl+S` or
 also where the menus get the keys they print, so a label can't disagree with
 its key.
 
+### In a terminal
+
+On Linux, `debrowser --terminal` opens Debrowser inside the terminal you are
+in - over SSH, on the console after Ctrl+Alt+F3, on a server with no desktop at
+all. Give it an address or a search to start there:
+
+```sh
+debrowser --terminal example.com
+```
+
+Pages are drawn as well as a terminal can draw them. The picture - layout,
+colours, buttons, images - is in coloured half blocks, two to a character, and
+the words are laid over it as real characters, so they read sharply and can be
+copied (with Shift held as you drag, in most terminals). Every page is shown in the terminal's own
+kind of type, one character to a cell, so it is narrower and plainer than on a
+screen; images are rough. It is the same engine as the desktop browser
+underneath, so sites work as they do there, scripts and sign-ins included.
+
+| | Keys |
+|---|---|
+| Address or search | `Ctrl+L`, then `Enter` (`Esc` to leave it) |
+| Back · forward · reload | `Alt+←` · `Alt+→` · `Ctrl+R`, or the arrows in the top row |
+| Follow a link, use a field | click it, or `Tab` to it and `Enter` |
+| Scroll | the wheel, the arrows, `Page Up` · `Page Down` |
+| Quit | `Ctrl+Q` |
+
+The mouse needs a terminal that reports it, which nearly all do; the Linux
+console needs `gpm` running for one. Colour follows the terminal: millions of
+colours where it says it has them (`COLORTERM=truecolor`), 256 otherwise, and
+16 on the Linux console, where the background has only eight, so words on a
+white page sit on grey. `DEBROWSER_TERMINAL_COLORS=truecolor`, `256` or `16`
+overrides it. Downloads go to your Downloads folder, and a link that would
+open a window opens in place. It keeps its own profile (`Debrowser/Terminal`
+in the config folder), so it runs beside the desktop browser without either
+seeing the other's history or sign-ins, and writes the engine's own messages to
+`terminal.log` there rather than over the page. As root, add `--no-sandbox`,
+as the desktop browser needs too.
+
 ---
 
 ## Private windows
@@ -732,6 +770,7 @@ src/main/
 src/preload/    activity probe (pages) and the chrome bridge
 src/renderer/   the browser UI, written from scratch
   theme.css     the design system: type, colour, space, elevation, motion
+src/terminal/   `debrowser --terminal`: pages as character cells, keys and mouse back
 test/pages/     benchmark and test fixtures
 bench/          memory benchmark harness
 ```

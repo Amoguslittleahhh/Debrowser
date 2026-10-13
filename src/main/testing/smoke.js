@@ -6385,6 +6385,43 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `env ${Object.keys(env).join(',')}; reason ${JSON.stringify(why)}`);
   }
 
+  // In a terminal, a page is cells: the picture in half blocks, the words laid
+  // over it in the colour most of their cell is, and only what changed sent
+  // again; what the terminal sends back becomes keys, text and clicks.
+  {
+    const render = require('../../terminal/render');
+    const { parse } = require('../../terminal/input');
+    const { addressFor, monoCss } = require('../../terminal');
+    // 16 x 32 pixels, BGRA: red over blue on the left, all white on the right.
+    const bmp = Buffer.alloc(16 * 32 * 4);
+    for (let y = 0; y < 32; y++) {
+      for (let x = 0; x < 16; x++) {
+        const i = (y * 16 + x) * 4;
+        const [r, g, b] = x >= 8 ? [255, 255, 255] : y % 16 < 8 ? [200, 0, 0] : [0, 0, 200];
+        bmp[i] = b; bmp[i + 1] = g; bmp[i + 2] = r; bmp[i + 3] = 255;
+      }
+    }
+    const cells = render.cells(bmp, 16, 32, 2, 2, [[12, 20, 'A', [255, 255, 255]], [13, 21, 'B', [0, 0, 0]], [99, 99, 'Z', [0, 0, 0]]]);
+    const first = render.encode(cells, null, 2, 2, 'truecolor', 2);
+    const again = render.encode(cells, cells, 2, 2, 'truecolor', 2);
+    const console16 = render.encode(cells, null, 2, 2, '16', 1);
+    const events = parse('ab\x1b[<0;6;3M\x1b[<0;6;3m\x1b[<65;1;1M\x1b\x1b[D\x1b[1;5C\x0c\x7f\x1b[5~\x1b[');
+    const kinds = events.events.map((e) => (e.type === 'key' ? `${e.ctrl ? 'C-' : ''}${e.alt ? 'M-' : ''}${e.key}` : e.type === 'text' ? e.text : `${e.action}:${e.button}@${e.col},${e.row}`));
+    check('a page in a terminal is half blocks with its words on top, sent only where it changed, and the terminal\'s keys and clicks are read back',
+      cells[0].ch === '▀' && cells[0].fg.join() === '200,0,0' && cells[0].bg.join() === '0,0,200' &&
+        cells[3].ch === 'A' && cells[3].bg.join() === '255,255,255' && cells[3].fg.join() === '0,0,0' &&
+        first.startsWith('\x1b[2;1H\x1b[38;2;200;0;0;48;2;0;0;200m▀') && first.endsWith('\x1b[0m') && again === '' &&
+        console16.includes('█') &&
+        render.colorMode({ COLORTERM: 'truecolor' }) === 'truecolor' && render.colorMode({ TERM: 'linux' }) === '16' &&
+        render.colorMode({ TERM: 'xterm-256color' }) === '256' && render.colorMode({ TERM: 'linux', DEBROWSER_TERMINAL_COLORS: '256' }) === '256' &&
+        render.to256([255, 0, 0]) === 196 && render.to256([128, 128, 128]) === 244 &&
+        kinds.join(' ') === 'ab down:left@6,3 up:left@6,3 wheel:down@1,1 M-Left C-Right C-l Backspace PageUp' && events.rest === '\x1b[' &&
+        addressFor('example.com/a') === 'https://example.com/a' && addressFor('http://x.test') === 'http://x.test' &&
+        addressFor('localhost:8080') === 'https://localhost:8080' && addressFor('two words') === 'https://duckduckgo.com/?q=two%20words' &&
+        addressFor('  ') === null && /font-size: 13\.333px !important/.test(monoCss(0.6)),
+      `cells ${JSON.stringify(cells.map((c) => c.ch))}; keys ${kinds.join(' ')}; rest ${JSON.stringify(events.rest)}`);
+  }
+
   check('no page of the browser\'s own threw an uncaught error during the run',
     pageErrors.length === 0, pageErrors.length ? pageErrors.slice(0, 5).join(' | ') : 'none');
 
