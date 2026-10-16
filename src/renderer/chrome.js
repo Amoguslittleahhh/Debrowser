@@ -1101,7 +1101,10 @@ function updateGroup(node, tab, group, first) {
   node.group.hidden = !label;
   // The tab that shows its group's name is called by it too: folded, the name
   // is all of it there is to see.
-  node.root.setAttribute('aria-labelledby', label ? `${node.group.id} ${node.title.id}` : node.title.id);
+  // Written only when it changes: this runs on every redraw of the strip, and
+  // each write is a change to the page that the accessibility tree follows.
+  const labelledBy = label ? `${node.group.id} ${node.title.id}` : node.title.id;
+  if (node.root.getAttribute('aria-labelledby') !== labelledBy) node.root.setAttribute('aria-labelledby', labelledBy);
   node.group.title = group ? (group.collapsed ? 'Unfold group' : 'Fold group') : '';
   node.group.classList.toggle('folded', Boolean(group && group.collapsed));
   node.root.classList.toggle('grouped', Boolean(group));
