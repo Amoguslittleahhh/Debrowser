@@ -166,8 +166,17 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const tornOut = windowOps.count() === before + 1 && torn !== first && torn.tabs.all().length === 1 && !first.tabs.all().includes(moving);
     // Let go over another window: into it, and the window it leaves, now
     // empty, closes.
+    // On a part of it no other window is over: on a CI runner's one small
+    // screen the windows overlap, and its corner can be under the first
+    // window, which would rightly take the tab instead. Chosen by asking the
+    // drop's own lookup which window is on top there.
     const b = second.shell.window.getBounds();
-    runCommand('tear-tab', { id: moving.id, screenX: b.x + b.width - 20, screenY: b.y + b.height - 20, offsetX: 0, offsetY: 0 });
+    const inset = 20;
+    const spots = [[b.x + b.width - inset, b.y + b.height - inset], [b.x + inset, b.y + b.height - inset],
+      [b.x + b.width - inset, b.y + inset], [b.x + inset, b.y + inset], [b.x + b.width / 2, b.y + b.height / 2]]
+      .map(([x, y]) => [Math.round(x), Math.round(y)]);
+    const [dropX, dropY] = spots.find(([x, y]) => windowOps.at({ x, y }, torn) === second) || spots[0];
+    runCommand('tear-tab', { id: moving.id, screenX: dropX, screenY: dropY, offsetX: 0, offsetY: 0 });
     await waitFor(() => windowOps.count() === before && second.tabs.activeTab() === moving, { timeoutMs: 5000 });
     const joined = second.tabs.all().includes(moving) && torn.shell.window.isDestroyed();
     // And where it was let go: out once more, then dropped on that window's
@@ -6342,7 +6351,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         /password was not given/.test(declined) && /not where the package puts it/.test(ranWithoutInstalling) &&
         call[0] === '/usr/bin/pkexec' && call[1] === '/usr/bin/apt-get' && /Debrowser-Linux\.deb$/.test(call[call.length - 1]) &&
         !fs.existsSync(path.dirname(call[call.length - 1] || '/nonexistent/x')),
-      `${JSON.stringify(tools)}; download kept ${kept}, wrong one: ${refused}; declined: ${declined}; ran: ${call.join(' ')}`);
+      `${JSON.stringify(tools)}; download kept ${kept}, wrong one: ${refused}; declined: ${declined}; ran without installing: ${ranWithoutInstalling}; ran: ${call.join(' ')}`);
   }
 
   // When Snowflake gets nowhere, Tor is moved to every built-in bridge in one

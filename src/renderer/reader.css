@@ -58,3 +58,5 @@ h1 { margin: 0 0 var(--s3); font-size: 1.9em; line-height: 1.2; letter-spacing: 
 .content .speaking { background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 3px; }
 .empty { text-align: center; color: var(--text-dim); margin-top: 20vh; }
 [hidden] { display: none !important; }
+
+#smaller::before, #larger::before { content: attr(data-glyph); }

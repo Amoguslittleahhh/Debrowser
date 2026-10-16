@@ -893,6 +893,7 @@ function createTabElement(id) {
   // the strip's order and a drag's index stay a list of tabs.
   const group = document.createElement('span');
   group.className = 'tab-group';
+  group.id = `tab-group-${id}`;
   group.type = 'button';
   group.hidden = true;
   const groupId = () => tabEls.get(id)?.state.groupId;
@@ -919,10 +920,14 @@ function createTabElement(id) {
   // it - close, mute, the group label - is for the pointer, with Delete and the
   // tab's menu as the keyboard's way to the same things.
   // Plain elements rather than buttons: a control nested in a tab is two
-  // controls in one to a screen reader, which ARIA does not allow.
-  for (const inner of [group, audio, close]) inner.setAttribute('aria-hidden', 'true');
+  // controls in one to a screen reader, which ARIA does not allow. The group
+  // label is not hidden as the other two are: on its group's first tab it is
+  // part of the tab's name (updateGroup), as it is part of what the tab shows.
+  for (const inner of [audio, close]) inner.setAttribute('aria-hidden', 'true');
 
-  root.append(group, tier, icon, title, audio, close, bar);
+  // The space keeps the group's name and the title two words where they are
+  // read together (the name above); in the tab's flex row it takes no room.
+  root.append(group, ' ', tier, icon, title, audio, close, bar);
 
   root.addEventListener('mousedown', (event) => {
     if (event.button === 1) { freezeTabWidths(); api.send('close-tab', { id }); return; }
@@ -1094,6 +1099,9 @@ function updateGroup(node, tab, group, first) {
     node.group.dataset.name = label;
   }
   node.group.hidden = !label;
+  // The tab that shows its group's name is called by it too: folded, the name
+  // is all of it there is to see.
+  node.root.setAttribute('aria-labelledby', label ? `${node.group.id} ${node.title.id}` : node.title.id);
   node.group.title = group ? (group.collapsed ? 'Unfold group' : 'Fold group') : '';
   node.group.classList.toggle('folded', Boolean(group && group.collapsed));
   node.root.classList.toggle('grouped', Boolean(group));
@@ -1450,8 +1458,13 @@ function updateTabElement(node, tab) {
   // and rewriting them on every navigation would be work for no visible change.
   if (prev.host !== site) {
     node.chip.classList.remove('own');
+    // The letter is drawn by the stylesheet from data-letter, not written as
+    // text: screen readers skip the chip either way, but a checker - and some
+    // voice control - counts any text a tab shows as part of what it is
+    // called, and the tab is called by its title alone.
+    node.chip.textContent = '';
+    node.chip.dataset.letter = site === 'debrowser' ? '' : (site.replace(/^[^a-z0-9]+/i, '')[0] || '?');
     if (site === 'debrowser') ownMark(node.chip);
-    else node.chip.textContent = (site.replace(/^[^a-z0-9]+/i, '')[0] || '?');
     node.chip.style.setProperty('--hue', String(siteHue(site)));
     prev.host = site;
   }

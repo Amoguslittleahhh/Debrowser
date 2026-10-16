@@ -100,7 +100,9 @@ async function download(url, dest, digest, fetch) {
       if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
     }
   } finally {
-    await new Promise((r) => out.end(r));
+    // Closed, not just finished: the file is still open between the two, and
+    // removing it then - as a refusal below does - fails on Windows.
+    await new Promise((r) => { out.once('close', r); out.end(); });
   }
   if (hash.digest('base64') !== digest) {
     fs.rmSync(dest, { force: true });

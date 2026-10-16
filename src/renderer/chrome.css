@@ -379,6 +379,7 @@ body[data-tabs="compact"] .tab {
  * the tile behind one puts every logo in the browser on a coloured square with
  * a letter showing through it.
  */
+.tab-chip:not(.own)::before { content: attr(data-letter); }
 .tab-icon.has-icon .tab-chip { display: none; }
 
 .tab[data-loading="on"] .tab-chip,
