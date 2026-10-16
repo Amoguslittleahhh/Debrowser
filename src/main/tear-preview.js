@@ -10,11 +10,15 @@
  * wherever the pointer does. It never takes the focus, never appears in the
  * taskbar, and is built once and kept hidden between drags.
  *
- * Its page is fixed markup with no script of the page's and no bridge; the
- * title and the picture are handed to it as data, never written into markup.
+ * One image in a native view, not a page: the strip draws the title bar on a
+ * canvas, in the interface's own face and colours (`titleCard` in chrome.js),
+ * and it is put over the page's picture here. It was a page of its own, which
+ * meant a renderer process held for good after the first drag - 76 MB, measured
+ * - and a window shown before that page had painted, so the first drag of a
+ * session began with a blank white box where the picture should have been.
  */
 
-const { BaseWindow, WebContentsView, nativeImage } = require('electron');
+const { BaseWindow, ImageView, nativeImage } = require('electron');
 
 const WIDTH = 260;
 const TITLE_HEIGHT = 34;
@@ -22,52 +26,30 @@ const PICTURE_HEIGHT = 150;
 /** Below and right of the pointer, so the drop lands on what is under it, not on this. */
 const OFFSET = 14;
 
-const PAGE = `<!doctype html><meta charset="utf-8"><style>
-  :root { color-scheme: light dark; --bg: #f6f7f5; --fg: #1f2421; --line: #d9ddd8; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #24272a; --fg: #e9ecea; --line: #3a3f43; } }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg);
-    font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; }
-  body { border: 1px solid var(--line); box-sizing: border-box; }
-  .title { height: ${TITLE_HEIGHT}px; box-sizing: border-box; padding: 0 12px; display: flex; align-items: center;
-    border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .title span { overflow: hidden; text-overflow: ellipsis; }
-  img { display: block; width: 100%; height: ${PICTURE_HEIGHT}px; object-fit: cover; object-position: top; }
-  img[hidden] { display: none; }
-</style><div class="title"><span id="t"></span></div><img id="p" alt="" hidden>
-<script>
-  window.render = (d) => {
-    document.getElementById('t').textContent = d.title;
-    const p = document.getElementById('p');
-    if (d.picture) { p.src = d.picture; p.hidden = false; } else { p.hidden = true; p.removeAttribute('src'); }
-  };
-</script>`;
-
 class TearPreview {
   constructor() {
     this.window = null;
     this.view = null;
-    this.ready = null;
     this.tabId = null;
   }
 
-  /** Show it for `tab` (if not already) at a point on the screen. */
-  async show(tab, point) {
+  /**
+   * Show it for `tab` (if not already) at a point on the screen. `card` is the
+   * title bar as the strip drew it, a PNG data URL `scale` times the size in
+   * pixels; it comes with the first point of a drag.
+   */
+  async show(tab, point, { card = null, scale = 1 } = {}) {
     if (!this.window || this.window.isDestroyed()) this.build();
     if (this.tabId !== tab.id) {
       this.tabId = tab.id;
-      const image = await picture(tab);
-      await this.ready;
+      const shot = await picture(tab);
       // Moved on, or let go, while the picture was taken.
       if (this.tabId !== tab.id || !this.window || this.window.isDestroyed()) return;
-      const hasPicture = Boolean(image && !image.isEmpty());
-      const height = TITLE_HEIGHT + (hasPicture ? PICTURE_HEIGHT : 0);
-      this.window.setBounds({ x: Math.round(point.x + OFFSET), y: Math.round(point.y + OFFSET), width: WIDTH, height });
-      this.view.setBounds({ x: 0, y: 0, width: WIDTH, height });
-      const data = {
-        title: String(tab.title || tab.url || 'New tab').slice(0, 200),
-        picture: hasPicture ? image.resize({ width: WIDTH * 2, quality: 'good' }).toDataURL() : null
-      };
-      await this.view.webContents.executeJavaScript(`window.render(${JSON.stringify(data)})`).catch(() => {});
+      const image = compose(card, shot, scale);
+      const { width, height } = image.getSize();
+      this.view.setImage(image);
+      this.view.setBounds({ x: 0, y: 0, width, height });
+      this.window.setBounds({ x: Math.round(point.x + OFFSET), y: Math.round(point.y + OFFSET), width, height });
     }
     this.move(point);
     if (this.tabId === tab.id && !this.window.isVisible()) this.window.showInactive();
@@ -94,27 +76,67 @@ class TearPreview {
       focusable: false,
       skipTaskbar: true,
       alwaysOnTop: true,
-      hasShadow: true
+      hasShadow: true,
+      // What shows for the moment before the image is drawn: dark, as most of
+      // the browser is, rather than the system's white.
+      backgroundColor: '#24272a'
     });
     // Seen through a little where the system can (Windows and macOS).
     try { this.window.setOpacity(0.92); } catch { /* not on this system */ }
     // Never in the way of the pointer, where the system allows it.
     try { this.window.setIgnoreMouseEvents(true); } catch { /* not on this system */ }
-    this.view = new WebContentsView({
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: true }
-    });
+    this.view = new ImageView();
     this.window.contentView.addChildView(this.view);
-    this.view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    this.view.webContents.on('will-navigate', (event) => event.preventDefault());
-    this.ready = this.view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(PAGE)}`).catch(() => {});
   }
 
   destroy() {
-    if (this.view && !this.view.webContents.isDestroyed()) this.view.webContents.close();
     if (this.window && !this.window.isDestroyed()) this.window.destroy();
     this.window = null;
     this.view = null;
   }
+}
+
+/**
+ * The title bar over the page's picture, as one image: `scale` device pixels
+ * to the point, so it is sharp on a high-density screen. Without a title bar
+ * from the strip, a plain one in the dark theme's colour stands in.
+ */
+function compose(card, shot, scale) {
+  const s = Math.max(1, Math.min(4, Number(scale) || 1));
+  const w = Math.round(WIDTH * s);
+  const th = Math.round(TITLE_HEIGHT * s);
+  let title = card ? nativeImage.createFromDataURL(String(card)) : null;
+  if (!title || title.isEmpty()) title = solid(w, th, [0x2a, 0x27, 0x24, 0xff]);
+  const tsize = title.getSize();
+  if (tsize.width !== w || tsize.height !== th) title = title.resize({ width: w, height: th, quality: 'good' });
+  const top = title.toBitmap();
+  // The title bar's own background and edge, in the bitmap's own byte order.
+  const bg = top.subarray(((th >> 1) * w + (w >> 1)) * 4, ((th >> 1) * w + (w >> 1)) * 4 + 4);
+  const edge = top.subarray(0, 4);
+
+  const parts = [top];
+  if (shot && !shot.isEmpty()) {
+    const ph = Math.round(PICTURE_HEIGHT * s);
+    // Width to the card's, then the top of it: object-fit: cover, from the top.
+    const fitted = shot.resize({ width: w, quality: 'good' });
+    const fh = Math.min(ph, fitted.getSize().height);
+    const body = Buffer.alloc(w * ph * 4);
+    fitted.crop({ x: 0, y: 0, width: w, height: fh }).toBitmap().copy(body, 0, 0, w * fh * 4);
+    for (let i = w * fh * 4; i < body.length; i += 4) bg.copy(body, i);
+    // The card's edge down both sides and along the bottom.
+    for (let y = 0; y < ph; y++) { edge.copy(body, y * w * 4); edge.copy(body, (y * w + w - 1) * 4); }
+    for (let x = 0; x < w; x++) edge.copy(body, ((ph - 1) * w + x) * 4);
+    parts.push(body);
+  }
+  const bitmap = Buffer.concat(parts);
+  return nativeImage.createFromBitmap(bitmap, { width: w, height: bitmap.length / (w * 4), scaleFactor: s });
+}
+
+/** A plain image: `bgra` is one pixel, in the order bitmaps here are kept in. */
+function solid(width, height, bgra) {
+  const buf = Buffer.alloc(width * height * 4);
+  for (let i = 0; i < buf.length; i += 4) buf.set(bgra, i);
+  return nativeImage.createFromBitmap(buf, { width, height });
 }
 
 /**
@@ -131,4 +153,4 @@ async function picture(tab) {
   return null;
 }
 
-module.exports = { TearPreview };
+module.exports = { TearPreview, compose, WIDTH, TITLE_HEIGHT, PICTURE_HEIGHT };

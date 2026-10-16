@@ -2991,7 +2991,13 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         // would stand wherever the desktop chose, away from the drag.
         if (!windowOps || WAYLAND) break;
         if (!tab || payload?.hide || !Number.isFinite(point.x) || !Number.isFinite(point.y)) windowOps.preview.hide();
-        else windowOps.preview.show(tab, point).catch((err) => log(`tear preview: ${err.message}`));
+        else {
+          // The title bar the strip drew, once per drag: a PNG and nothing else.
+          const card = typeof payload?.card === 'string' && payload.card.length < 2_000_000 &&
+            payload.card.startsWith('data:image/png;base64,') ? payload.card : null;
+          windowOps.preview.show(tab, point, { card, scale: Number(payload?.scale) || 1 })
+            .catch((err) => log(`tear preview: ${err.message}`));
+        }
         break;
       }
 
@@ -4757,6 +4763,13 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         break;
       case 'sidebar-typing':
         shell.sidebarTyping = Boolean(payload?.typing);
+        shell.releaseSidebar();
+        break;
+      // A tab being dragged out of it: leaving the strip is what that drag
+      // does, and closing the panel under it cut the drag's pointer off - the
+      // picture following it stopped where the panel went.
+      case 'sidebar-dragging':
+        shell.sidebarDragging = Boolean(payload?.dragging);
         shell.releaseSidebar();
         break;
 

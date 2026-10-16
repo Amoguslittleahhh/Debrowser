@@ -198,6 +198,7 @@ const COMMANDS = new Set([
   'sidebar-hover',
   'sidebar-slid',
   'sidebar-typing',
+  'sidebar-dragging',
   'chrome-size',
   'bookmarks-overflow',
   'toggle-sidebar-pin',

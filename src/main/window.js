@@ -2926,7 +2926,7 @@ class BrowserShell {
 
   /** Whether something the strip started should keep it out. */
   sidebarHeld() {
-    return this.sidebarTyping === true || Boolean(this.sheetView) || this.suggestOpen === true;
+    return this.sidebarTyping === true || this.sidebarDragging === true || Boolean(this.sheetView) || this.suggestOpen === true;
   }
 
   /** What held the strip out has ended: let it go if the pointer is elsewhere. */

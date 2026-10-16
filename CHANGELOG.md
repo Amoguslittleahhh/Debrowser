@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Dragging a tab out of the side panel follows the pointer all the way.** With the tabs down the side in the panel that slides away, the panel used to close as soon as a dragged tab left it, and the picture of the tab stopped where the panel went while the pointer carried on. The panel now stays out until the tab is let go. The picture also no longer starts as a blank white box, and it costs no memory of its own: it used to keep a hidden page of about 75 MB around after the first drag.
+
 ## 2.4.0
 
 Debrowser 2.4.0 adds several windows with tabs you can drag out into their own, a friendlier first run in a typeface made to be easy to read, and, on Linux, a package for Fedora and openSUSE, an installer for any distribution from the terminal and Debrowser inside the terminal itself, with tabs and find; private windows give each site its own Tor circuit and try other bridges when Snowflake is blocked, and run on Tor 15.0.25.

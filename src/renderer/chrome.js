@@ -1230,6 +1230,9 @@ function beginTabDrag() {
   try { d.root.setPointerCapture(d.pointer); } catch { /* the pointer is already gone */ }
   d.root.classList.add('dragging');
   document.body.classList.add('tab-dragging');
+  // Down the side, the panel stays out until the drag ends, wherever the
+  // pointer goes meanwhile.
+  api.send('sidebar-dragging', { dragging: true });
   return true;
 }
 
@@ -1264,6 +1267,7 @@ function endTabDrag(cancelled) {
   const d = tabDrag;
   tabDrag = null;
   if (!d || !d.active) return;
+  api.send('sidebar-dragging', { dragging: false });
   if (d.torn) {
     d.root.classList.remove('torn');
     document.body.classList.remove('tab-tearing');
@@ -1306,6 +1310,8 @@ function endTabDrag(cancelled) {
  * the pointer (the browser draws it: this view ends at its own edge).
  */
 function setTorn(d, torn, event) {
+  let card = null;
+  if (torn && !d.torn) card = titleCard(d);
   if (d.torn !== torn) {
     d.torn = torn;
     d.root.classList.toggle('torn', torn);
@@ -1316,7 +1322,50 @@ function setTorn(d, torn, event) {
       d.to = d.from;
     }
   }
-  api.send('tear-preview', torn ? { id: d.id, screenX: event.screenX, screenY: event.screenY } : { hide: true });
+  api.send('tear-preview', torn
+    ? { id: d.id, screenX: event.screenX, screenY: event.screenY, ...(card ? { card, scale: window.devicePixelRatio } : {}) }
+    : { hide: true });
+}
+
+/**
+ * The top of the picture that follows a tab out of the strip: its title, in
+ * this window's face and colours, drawn here because this is where both are
+ * (the browser puts it over the page's picture: tear-preview.js). Sizes are
+ * the preview's own, in points.
+ */
+function titleCard(d) {
+  try {
+    const W = 260;
+    const H = 34;
+    const scale = window.devicePixelRatio || 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(W * scale);
+    canvas.height = Math.round(H * scale);
+    const g = canvas.getContext('2d');
+    g.scale(scale, scale);
+    const css = getComputedStyle(document.body);
+    const value = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+    g.fillStyle = value('--bg-raised', '#24272a');
+    g.fillRect(0, 0, W, H);
+    // The card's edge: round three sides here, the picture's three below.
+    g.strokeStyle = value('--border', '#3a3f43');
+    g.lineWidth = 1;
+    g.strokeRect(0.5, 0.5, W - 1, H);
+    g.fillStyle = value('--text', '#e9ecea');
+    g.font = `13px ${value('--font-ui', 'system-ui, sans-serif')}`;
+    g.textBaseline = 'middle';
+    const title = d.root.querySelector('.tab-title')?.textContent || 'New tab';
+    let text = title;
+    const room = W - 24;
+    if (g.measureText(text).width > room) {
+      while (text.length > 1 && g.measureText(`${text}…`).width > room) text = text.slice(0, -1);
+      text = `${text.trimEnd()}…`;
+    }
+    g.fillText(text, 12, H / 2 + 0.5);
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  }
 }
 
 /**

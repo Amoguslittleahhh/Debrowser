@@ -220,6 +220,31 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       opened && ownStrip && moved && tornOut && joined && landed && remembered && closedOne && cameBack && windowOps.current() === first,
       `opened ${opened}, own strip ${ownStrip}, moved ${moved}, torn out ${tornOut}, joined ${joined}, landed where let go ${landed}, remembered ${remembered}, ` +
       `closed one ${closedOne}, came back ${cameBack}, windows now ${windowOps.count()}`);
+
+    // The picture that follows a tab out of the strip: one image in a native
+    // view - the strip's title bar over the page - shown with no page process
+    // of its own, and the side panel kept out for as long as the drag goes on.
+    const dragged = first.tabs.activeTab();
+    const titleBar = (() => {
+      const w = 260; const h = 34; const buf = Buffer.alloc(w * h * 4, 0x40);
+      return require('electron').nativeImage.createFromBitmap(buf, { width: w, height: h }).toDataURL();
+    })();
+    runCommand('tear-preview', { id: dragged.id, screenX: 200, screenY: 200, card: titleBar, scale: 1 });
+    await waitFor(() => windowOps.preview.window?.isVisible(), { timeoutMs: 5000 });
+    const shownPreview = Boolean(windowOps.preview.window?.isVisible());
+    const previewBounds = shownPreview ? windowOps.preview.window.getBounds() : null;
+    runCommand('tear-preview', { id: dragged.id, screenX: 400, screenY: 260 });
+    const followed = previewBounds && windowOps.preview.window.getBounds().x === 414;
+    const noNewProcess = windowOps.preview.view instanceof require('electron').ImageView && !windowOps.preview.view.webContents;
+    runCommand('tear-preview', { hide: true });
+    const hiddenAgain = !windowOps.preview.window.isVisible();
+    first.shell.sidebarDragging = true;
+    const heldWhileDragging = first.shell.sidebarHeld();
+    first.shell.sidebarDragging = false;
+    check('a tab dragged out of the strip is followed by one image, with no page process of its own, and the side panel stays out under the drag',
+      shownPreview && previewBounds.width === 260 && previewBounds.height >= 34 && followed && noNewProcess && hiddenAgain && heldWhileDragging,
+      `shown ${shownPreview} ${JSON.stringify(previewBounds)}, followed ${followed}, an image and no page ${noNewProcess}, ` +
+      `hidden again ${hiddenAgain}, panel held ${heldWhileDragging}`);
   }
 
   // One part of the suite on its own, while working on it:
