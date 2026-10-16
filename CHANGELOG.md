@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.4.0
+
+Debrowser 2.4.0 adds several windows with tabs you can drag out into their own, a friendlier first run in a typeface made to be easy to read, and, on Linux, a package for Fedora and openSUSE, an installer for any distribution from the terminal and Debrowser inside the terminal itself, with tabs and find; private windows give each site its own Tor circuit and try other bridges when Snowflake is blocked, and run on Tor 15.0.25.
 
 ### New
 
