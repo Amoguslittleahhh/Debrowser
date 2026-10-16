@@ -2407,3 +2407,30 @@ body[data-layout="left"] .tab.grouped .tab-group-bar { left: 0; right: auto; top
   .tier[data-tier="discarded"] { background: Canvas; box-shadow: none; border: 1px solid CanvasText; }
   .tab-group { border: 1px solid CanvasText; }
 }
+
+/*
+ * Several windows open: each wears its colour (main.js, windowName) as a band
+ * across its top edge, the same colour as the swatch beside its name when a
+ * tab is sent to it from the tab menu. One window alone looks as it always
+ * has. Over everything, and never in the pointer's way.
+ */
+body[data-role="main"][data-windows="several"]::after {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--window);
+  z-index: 1000;
+  pointer-events: none;
+}
+/* Down the side, the tab count says which window this is too. */
+body[data-windows="several"] .strip-count::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--window);
+  vertical-align: 0;
+}

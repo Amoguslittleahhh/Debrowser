@@ -1381,7 +1381,12 @@ function pulledOut(d, event) {
     : event.clientY > box.bottom + TEAR_DISTANCE || event.clientY < box.top - TEAR_DISTANCE;
 }
 
-el.tabs.addEventListener('pointermove', (event) => {
+// On the whole view, not the strip: a quick pull down out of it is past the
+// strip's edge by its first move - the strip is 40 pixels tall and a flick
+// covers that between two of them - and the strip, listening for its own
+// moves, never heard the one that should have begun the drag; the tab just
+// stayed where it was. The pointer is the view's while the button is down.
+document.addEventListener('pointermove', (event) => {
   const d = tabDrag;
   if (!d || event.pointerId !== d.pointer) return;
   const delta = (d.vertical ? event.clientY : event.clientX) - d.start;
@@ -1428,6 +1433,19 @@ window.debrowserDropBefore = (x, y) => {
     if (at < (vertical ? box.top + box.bottom : box.left + box.right) / 2) return Number(node.dataset.id);
   }
   return null;
+};
+
+/**
+ * Whether (x, y) in this view is on the tab strip - the tabs, the gap around
+ * them, the new tab button - where a tab from another window let go joins
+ * this one's. Anywhere else it gets a window of its own. Asked by the browser
+ * (window.js, overStrip).
+ */
+window.debrowserOverStrip = (x, y) => {
+  const box = document.getElementById('tabstrip').getBoundingClientRect();
+  const slack = 8;
+  return box.width > 0 && box.height > 0 &&
+    x >= box.left - slack && x <= box.right + slack && y >= box.top - slack && y <= box.bottom + slack;
 };
 
 /**
@@ -2335,6 +2353,13 @@ api.onState((state) => {
   const pair = state.split ? [state.split.left, state.split.right] : [];
   for (const [id, node] of tabEls) node.root.classList.toggle('in-split', pair.includes(id));
   el.stripCount.textContent = `${state.tabs.length} tab${state.tabs.length === 1 ? '' : 's'}`;
+  // With more than one window open, each wears its colour (main.js, windowName).
+  const several = state.windowCount > 1 && typeof state.windowColor === 'string';
+  document.body.dataset.windows = several ? 'several' : 'one';
+  if (several) {
+    document.body.style.setProperty('--window', state.windowColor);
+    document.body.dataset.windowName = state.windowName || '';
+  }
   // Bookmarks changed somewhere else - Settings, an import - so the star's
   // cached answer for this page is no longer one.
   if (state.bookmarksRevision !== starRevision) {

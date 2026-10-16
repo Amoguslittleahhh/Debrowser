@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+### Improved
+
+- **As many windows as you like, each with its own colour.** A tab dragged out of the strip and let go anywhere but on another window's tabs now gets a window of its own. Before, letting go anywhere over another Debrowser window put the tab into it, and since windows open nearly as big as the screen, almost every drop after the first landed in one of the first two. With several windows open, each now has a colour – Teal, Green, Copper, Gold, Violet, Blue or Rose – shown as a band along its top edge, and a tab's menu lists every other window by its colour, where it used to offer only "the other window". A window keeps its colour when Debrowser reopens it.
+
 ### Fixed
 
+- **A tab pulled quickly out of the strip comes out.** A quick pull straight down was past the strip before the browser noticed a drag had begun, and the tab stayed where it was. It now comes out however fast it is pulled.
 - **Dragging a tab out of the side panel follows the pointer all the way.** With the tabs down the side in the panel that slides away, the panel used to close as soon as a dragged tab left it, and the picture of the tab stopped where the panel went while the pointer carried on. The panel now stays out until the tab is let go. The picture also no longer starts as a blank white box, and it costs no memory of its own: it used to keep a hidden page of about 75 MB around after the first drag.
 
 ## 2.4.0

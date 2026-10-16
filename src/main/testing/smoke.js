@@ -164,19 +164,18 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const torn = windowOps.of(moving);
     await waitFor(() => torn && torn.tabs.activeTab() === moving && moving.visible, { timeoutMs: 5000 });
     const tornOut = windowOps.count() === before + 1 && torn !== first && torn.tabs.all().length === 1 && !first.tabs.all().includes(moving);
-    // Let go over another window: into it, and the window it leaves, now
-    // empty, closes.
-    // On a part of it no other window is over: on a CI runner's one small
-    // screen the windows overlap, and its corner can be under the first
-    // window, which would rightly take the tab instead. Chosen by asking the
-    // drop's own lookup which window is on top there.
-    const b = second.shell.window.getBounds();
-    const inset = 20;
-    const spots = [[b.x + b.width - inset, b.y + b.height - inset], [b.x + inset, b.y + b.height - inset],
-      [b.x + b.width - inset, b.y + inset], [b.x + inset, b.y + inset], [b.x + b.width / 2, b.y + b.height / 2]]
-      .map(([x, y]) => [Math.round(x), Math.round(y)]);
-    const [dropX, dropY] = spots.find(([x, y]) => windowOps.at({ x, y }, torn) === second) || spots[0];
-    runCommand('tear-tab', { id: moving.id, screenX: dropX, screenY: dropY, offsetX: 0, offsetY: 0 });
+    // Let go on another window's tabs: into it, and the window it leaves, now
+    // empty, closes. On the end of its strip, past the last tab.
+    const stripEnd = await second.shell.chromeView.webContents.executeJavaScript(`(() => {
+      const r = document.getElementById('tabstrip').getBoundingClientRect();
+      return { x: Math.round(r.right - 30), y: Math.round(r.top + r.height / 2) }; })()`).catch(() => null);
+    const secondContent = second.shell.window.getContentBounds();
+    // In front, as it would be with the pointer over it: where windows
+    // overlap, the one last in front is the one a drop lands on (windowAt).
+    second.frontAt = Date.now();
+    if (stripEnd) {
+      runCommand('tear-tab', { id: moving.id, screenX: secondContent.x + stripEnd.x, screenY: secondContent.y + stripEnd.y, offsetX: 0, offsetY: 0 });
+    }
     await waitFor(() => windowOps.count() === before && second.tabs.activeTab() === moving, { timeoutMs: 5000 });
     const joined = second.tabs.all().includes(moving) && torn.shell.window.isDestroyed();
     // And where it was let go: out once more, then dropped on that window's
@@ -187,6 +186,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const r = document.querySelector('#tabs > [data-id]').getBoundingClientRect();
       return { x: r.left + 6, y: r.top + r.height / 2 }; })()`).catch(() => null);
     const content = second.shell.window.getContentBounds();
+    second.frontAt = Date.now();
     if (firstTab) runCommand('tear-tab', { id: moving.id, screenX: content.x + firstTab.x, screenY: content.y + firstTab.y, offsetX: 0, offsetY: 0 });
     await waitFor(() => windowOps.count() === before && second.tabs.all()[0] === moving, { timeoutMs: 5000 });
     const landed = second.tabs.all()[0] === moving && second.tabs.activeTab() === moving;
@@ -237,7 +237,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const followed = previewBounds && windowOps.preview.window.getBounds().x === 414;
     const noNewProcess = windowOps.preview.view instanceof require('electron').ImageView && !windowOps.preview.view.webContents;
     runCommand('tear-preview', { hide: true });
-    const hiddenAgain = !windowOps.preview.window.isVisible();
+    const hiddenAgain = !windowOps.preview.window || !windowOps.preview.window.isVisible();
     first.shell.sidebarDragging = true;
     const heldWhileDragging = first.shell.sidebarHeld();
     first.shell.sidebarDragging = false;
@@ -245,6 +245,62 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       shownPreview && previewBounds.width === 260 && previewBounds.height >= 34 && followed && noNewProcess && hiddenAgain && heldWhileDragging,
       `shown ${shownPreview} ${JSON.stringify(previewBounds)}, followed ${followed}, an image and no page ${noNewProcess}, ` +
       `hidden again ${hiddenAgain}, panel held ${heldWhileDragging}`);
+
+    // As many windows as are wanted: three tabs pulled out one after another,
+    // each let go over a window's page rather than its tabs, make three more
+    // windows - not one shared by all three. Each wears its own colour, and the
+    // tab menu offers every other window by its colour's name.
+    const startWindows = windowOps.count();
+    const pulled = [1, 2, 3].map(() => first.tabs.create({ url: pageUrl('idle.html'), activate: false }));
+    for (const t of pulled) {
+      const page = first.shell.window.getContentBounds();
+      // The middle of a window's page: over a Debrowser window, not its tabs.
+      runCommand('tear-tab', { id: t.id, screenX: Math.round(page.x + page.width / 2), screenY: Math.round(page.y + page.height / 2), offsetX: 0, offsetY: 0 });
+      await waitFor(() => windowOps.of(t) !== first, { timeoutMs: 5000 });
+    }
+    const madeWindows = windowOps.count() - startWindows;
+    const pulledWindows = pulled.map((t) => windowOps.of(t));
+    const colours = new Set([first, ...pulledWindows].map((w) => w && w.color));
+    const offered = windowOps.others(first.tabs.activeTab());
+    await sleep(300);
+    const band = await pulledWindows[0]?.shell.chromeView.webContents.executeJavaScript(
+      `[document.body.dataset.windows, getComputedStyle(document.body).getPropertyValue('--window').trim()]`).catch(() => null);
+    for (const w of pulledWindows) if (w && w !== first) w.shell.close();
+    await waitFor(() => windowOps.count() === startWindows, { timeoutMs: 5000 });
+    check('tabs pulled out over a page make a window each, as many as wanted, each its own colour, offered by name in the tab menu',
+      madeWindows === 3 && new Set(pulledWindows).size === 3 && colours.size === 4 && !colours.has(undefined) &&
+        offered.length === 3 && offered.every((w) => /^(Teal|Green|Copper|Gold|Violet|Blue|Rose)( \d+)?$/.test(w.name) && /^#[0-9a-f]{6}$/i.test(w.color)) &&
+        Array.isArray(band) && band[0] === 'several' && band[1] === pulledWindows[0].color,
+      `made ${madeWindows}, colours ${[...colours].join(' ')}, menu ${offered.map((w) => w.name).join(', ')}, band ${JSON.stringify(band)}`);
+
+    // A quick pull straight down: the first move after the press is already
+    // well below the strip. It must still begin the drag, and let go, make a
+    // window - the strip used to hear only moves over itself, and a flick out
+    // of it did nothing at all.
+    const flicked = first.tabs.create({ url: pageUrl('idle.html'), activate: false });
+    const chromeWc = first.shell.chromeView.webContents;
+    await sleep(300);
+    const spot = await chromeWc.executeJavaScript(`(() => {
+      const r = document.querySelector('#tabs > [data-id="${flicked.id}"]').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`).catch(() => null);
+    const windowsBeforeFlick = windowOps.count();
+    let flickBegan = false;
+    if (spot) {
+      chromeWc.sendInputEvent({ type: 'mouseDown', x: spot.x, y: spot.y, button: 'left', clickCount: 1 });
+      await sleep(50);
+      chromeWc.sendInputEvent({ type: 'mouseMove', x: spot.x + 40, y: spot.y + 300, modifiers: ['leftButtonDown'] });
+      await sleep(150);
+      flickBegan = await chromeWc.executeJavaScript('Boolean(tabDrag && tabDrag.active && tabDrag.torn)').catch(() => false);
+      chromeWc.sendInputEvent({ type: 'mouseUp', x: spot.x + 40, y: spot.y + 300, button: 'left', clickCount: 1 });
+    }
+    await waitFor(() => windowOps.count() === windowsBeforeFlick + 1, { timeoutMs: 5000 });
+    const flickWindow = windowOps.of(flicked);
+    const flickMade = windowOps.count() === windowsBeforeFlick + 1 && flickWindow !== first;
+    if (flickWindow && flickWindow !== first) flickWindow.shell.close();
+    else if (first.tabs.all().includes(flicked)) first.tabs.close(flicked.id);
+    await waitFor(() => windowOps.count() === windowsBeforeFlick, { timeoutMs: 5000 });
+    check('a tab pulled quickly straight out of the strip is dragged, and let go makes a window',
+      flickBegan && flickMade, `drag began ${flickBegan}, window made ${flickMade}, at ${JSON.stringify(spot)}`);
   }
 
   // One part of the suite on its own, while working on it:

@@ -2563,6 +2563,22 @@ class BrowserShell {
    * it goes before in this window's strip, or null for the end - asked of
    * the view drawing the strip, which alone knows where its tabs are.
    */
+  /** Whether a point on the screen is on this window's tabs: where a tab let go joins them. */
+  async overStrip(point) {
+    if (this.window.isDestroyed()) return false;
+    const content = this.window.getContentBounds();
+    const strip = this.stripView && this.stripView.getBounds().width > 0 ? this.stripView : this.chromeView;
+    const box = strip.getBounds();
+    const x = Math.round(point.x - content.x - box.x);
+    const y = Math.round(point.y - content.y - box.y);
+    if (x < 0 || y < 0 || x >= box.width || y >= box.height) return false;
+    try {
+      return await strip.webContents.executeJavaScript(`window.debrowserOverStrip(${x}, ${y})`) === true;
+    } catch {
+      return false;
+    }
+  }
+
   async dropBefore(point) {
     if (this.window.isDestroyed()) return null;
     const content = this.window.getContentBounds();

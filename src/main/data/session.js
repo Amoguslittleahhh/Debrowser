@@ -142,7 +142,8 @@ class Session {
       const at = Number(w?.activeIndex);
       return {
         activeIndex: Number.isInteger(at) && at >= 0 && at < kept.length ? at : null,
-        bounds: validBounds(w?.bounds)
+        bounds: validBounds(w?.bounds),
+        color: /^#[0-9a-f]{6}$/i.test(w?.color || '') ? w.color : null
       };
     });
     return {
@@ -186,7 +187,8 @@ class Session {
         ({ url, title, pinned, spaceId, groupId, lastActiveAt, ...(window ? { window } : {}) })),
       // The windows after the first, when there are any.
       ...(windows && windows.length > 1 ? {
-        windows: windows.slice(1).map((w) => ({ activeIndex: Math.max(0, indexOf(w.activeId)), bounds: validBounds(w.bounds) }))
+        windows: windows.slice(1).map((w) => ({ activeIndex: Math.max(0, indexOf(w.activeId)), bounds: validBounds(w.bounds),
+          ...(w.color ? { color: w.color } : {}) }))
       } : {}),
       // Tab groups (tab-groups.js): only those a saved tab is in.
       groups: TabGroups.current ? TabGroups.current.save(open) : []

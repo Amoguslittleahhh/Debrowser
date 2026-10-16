@@ -8,7 +8,7 @@
  * the drag went on. This is a small window of its own instead - the tab's
  * title over the page as it looked, at a fraction of its size - which goes
  * wherever the pointer does. It never takes the focus, never appears in the
- * taskbar, and is built once and kept hidden between drags.
+ * taskbar, and is made for each drag and closed at its end.
  *
  * One image in a native view, not a page: the strip draws the title bar on a
  * canvas, in the interface's own face and colours (`titleCard` in chrome.js),
@@ -60,9 +60,16 @@ class TearPreview {
     this.window.setPosition(Math.round(point.x + OFFSET), Math.round(point.y + OFFSET));
   }
 
+  /**
+   * Gone until the next drag, which makes it again. Hidden and shown again,
+   * it kept its place in the stack of windows, and the one a drag had just
+   * made, or any brought forward since, was over it the next time: "always on
+   * top" is only a request, which not every window manager grants. With no
+   * page in it, making it costs next to nothing.
+   */
   hide() {
     this.tabId = null;
-    if (this.window && !this.window.isDestroyed() && this.window.isVisible()) this.window.hide();
+    this.destroy();
   }
 
   build() {

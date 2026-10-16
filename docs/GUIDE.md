@@ -143,6 +143,14 @@ begins with a fresh tab unless you turn on "Reopen your tabs when you start"
 in Settings. A tab you haven't looked at in a while gives its memory back and
 reloads when you return to it, behind a picture of how you left it.
 
+**Windows.** Ctrl+N opens another, and a tab dragged out of the strip and let
+go anywhere but on another window's tabs becomes a window of its own - as many
+as you like. Let go on another window's tabs, it joins them where you dropped
+it. With more than one window open, each has a colour - Teal, Green, Copper,
+Gold, Violet, Blue, Rose - shown as a band along its top edge, and a tab's menu
+offers "Move to the Copper window" and so on for every other one, with the
+same colour beside it. A window keeps its colour when Debrowser reopens it.
+
 **Passwords.** Off until you set a passcode (Settings → Passwords and
 payment). Then the browser offers to remember sign-ins, fills a site's own
 when exactly one matches, and keeps them, with your cards, on

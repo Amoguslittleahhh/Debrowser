@@ -43,6 +43,9 @@ const { backupProfile } = require('./data/store-file');
 const { StartupGuard } = require('./startup-guard');
 const CrashReport = require('./crash-report');
 const { TabGroups } = require('./tab-groups');
+const { COLOURS: WINDOW_COLOURS } = require('./spaces');
+/** What each of the spaces' colours is called, as a window's name. */
+const WINDOW_COLOUR_NAMES = ['Teal', 'Green', 'Copper', 'Gold', 'Violet', 'Blue', 'Rose'];
 const { commandList } = require('./commands');
 const { Spaces, COLOURS } = require('./spaces');
 const { SiteStyles } = require('./site-styles');
@@ -624,9 +627,27 @@ function main() {
     try {
       if (!w.shell.window.isDestroyed()) bounds = { ...w.shell.window.getNormalBounds(), maximized: w.shell.window.isMaximized() };
     } catch { /* closing */ }
-    return { id: w.id, activeId: w.tabs.activeId, bounds };
+    return { id: w.id, activeId: w.tabs.activeId, bounds, color: w.color };
   });
   const shellInUse = following(() => shell);
+
+  /**
+   * Each window's colour, so that with several open you can tell which is
+   * which: a band across its top, and a swatch beside its name wherever a tab
+   * is sent to it. The spaces' colours, each named; the first not already
+   * taken, and round again past seven windows.
+   */
+  const windowColour = (c) => WINDOW_COLOURS.indexOf(c);
+  const freeWindowColour = () => {
+    const used = new Set(windows.map((w) => w.color));
+    return WINDOW_COLOURS.find((c) => !used.has(c)) || WINDOW_COLOURS[windows.length % WINDOW_COLOURS.length];
+  };
+  /** "the Teal window" - and "Teal 2" for the second of a colour, past seven windows. */
+  const windowName = (w) => {
+    const name = WINDOW_COLOUR_NAMES[windowColour(w.color)] || 'Other';
+    const same = windows.filter((o) => o.color === w.color);
+    return same.length > 1 ? `${name} ${same.indexOf(w) + 1}` : name;
+  };
 
   // macOS hands a link to the default browser as an event, not an argument,
   // and can do so before the first window exists: held until there are tabs.
@@ -822,7 +843,7 @@ function main() {
    */
   const stateFor = (w, state) => {
     const mine = new Set(w.tabs.all().map((t) => t.id));
-    const out = { ...withExtras(state, w.shell), windowCount: windows.length };
+    const out = { ...withExtras(state, w.shell), windowCount: windows.length, windowColor: w.color, windowName: windowName(w) };
     if (Array.isArray(state.tabs)) out.tabs = state.tabs.filter((t) => mine.has(t.id));
     const front = w.tabs.activeTab();
     if (out.spaces && front && front.spaceId) out.spaces = { ...out.spaces, activeId: front.spaceId };
@@ -1748,6 +1769,7 @@ function main() {
       made.window.on('focus', () => { win.frontAt = Date.now(); useWindow(win); });
       made.window.on('close', (event) => onWindowClose(win, event));
       made.window.on('closed', () => onWindowClosed(win));
+      if (!win.color) win.color = freeWindowColour();
       windows.push(win);
       return made;
     };
@@ -1989,6 +2011,10 @@ function main() {
       at: windowAt,
       of: winOf,
       count: () => windows.length,
+      /** The windows other than `tab`'s, the one last in front first: where it can be sent. */
+      others: (tab) => windows.filter((w) => w !== winOf(tab) && w.shell && !w.shell.window.isDestroyed())
+        .sort((a, b) => (b.frontAt || 0) - (a.frontAt || 0))
+        .map((w) => ({ id: w.id, name: windowName(w), color: w.color })),
       current: () => winById(tabs?.windowId),
       closed: closedWindows,
       preview: tearPreview,
@@ -2130,7 +2156,7 @@ function main() {
           const entries = saved.tabs.filter((entry) => entry.window === i + 1);
           if (!entries.length) return;
           const front = Math.max(0, entries.indexOf(saved.tabs[w.activeIndex]));
-          openWindow({ entries, activeIndex: front, bounds: w.bounds });
+          openWindow({ entries, activeIndex: front, bounds: w.bounds, color: w.color });
         });
         // The first window stays the one in use, and in front.
         useWindow(firstWindow);
@@ -2588,10 +2614,10 @@ function main() {
    * right of the window in use - or, for a tab dragged out, under the pointer
    * at `at`. Never from a private window, which is one window by design.
    */
-  function openWindow({ url = null, entries = null, activeIndex = 0, bounds = null, tab = null, at = null, show = true } = {}) {
+  function openWindow({ url = null, entries = null, activeIndex = 0, bounds = null, tab = null, at = null, show = true, color = null } = {}) {
     if (INCOGNITO || !makeTabs || !makeShell) return null;
     const id = ++windowSeq;
-    const win = { id, tabs: makeTabs(id), shell: null };
+    const win = { id, tabs: makeTabs(id), shell: null, color: WINDOW_COLOURS.includes(color) ? color : null };
     let place = bounds ? fitToDisplay(bounds) : null;
     const from = shell && !shell.window.isDestroyed() ? shell.window : null;
     if (!place && from) {
@@ -3009,24 +3035,29 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         const grab = { offsetX: Math.max(0, Math.round(Number(payload?.offsetX) || 0)), offsetY: Math.max(0, Math.round(Number(payload?.offsetY) || 0)) };
         const home = windowOps.of(tab);
         const into = windowOps.at(point, home);
-        // Into that window's strip where it was let go, between the tabs it
-        // was dropped between.
-        if (into) {
-          into.shell.dropBefore(point).then((beforeId) => {
-            const at = beforeId == null ? -1 : into.tabs.all().findIndex((t) => t.id === beforeId);
-            windowOps.moveTab(tab, into, { index: at === -1 ? null : at });
-          }).catch((err) => log(`tab drop failed: ${err.message}`));
-          break;
-        }
-        if (home.tabs.all().length < 2) {
-          const win = home.shell.window;
-          // Wayland moves windows itself; asking does nothing there.
-          if (WAYLAND) break;
-          if (win.isMaximized() || win.isFullScreen()) break;
-          win.setPosition(point.x - grab.offsetX, point.y - grab.offsetY);
-          break;
-        }
-        windowOps.open({ tab, at: { ...point, ...grab } });
+        // Anywhere but on another window's tabs: a window of its own, as many
+        // as are wanted. A drop anywhere over another window used to join it,
+        // and windows open nearly as big as the screen, so a third one could
+        // hardly be made: every drop landed on one of the first two.
+        const alone = () => {
+          if (home.tabs.all().length < 2) {
+            const win = home.shell.window;
+            // Wayland moves windows itself; asking does nothing there.
+            if (WAYLAND || win.isMaximized() || win.isFullScreen()) return;
+            win.setPosition(point.x - grab.offsetX, point.y - grab.offsetY);
+            return;
+          }
+          windowOps.open({ tab, at: { ...point, ...grab } });
+        };
+        if (!into) { alone(); break; }
+        // On its tabs: into that window's strip where it was let go, between
+        // the tabs it was dropped between.
+        into.shell.overStrip(point).then(async (over) => {
+          if (!over) { alone(); return; }
+          const beforeId = await into.shell.dropBefore(point);
+          const at = beforeId == null ? -1 : into.tabs.all().findIndex((t) => t.id === beforeId);
+          windowOps.moveTab(tab, into, { index: at === -1 ? null : at });
+        }).catch((err) => log(`tab drop failed: ${err.message}`));
         break;
       }
 
@@ -4677,8 +4708,9 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
             // Out of this window: into a new one, or into another already open.
             ...(windowOps && !INCOGNITO && (all.length > 1 || tabs.all().length > 1) ? [{ kind: 'separator' },
               { id: 'move-tab-to-new-window', label: 'Move to new window', icon: 'expand', payload: { id } },
-              ...(windowOps.count() > 1 ? [{ id: 'move-tab-to-window', label: 'Move to the other window', icon: 'forward',
-                payload: { id, windowId: otherWindowId(windowOps, tab) } }] : [])] : []),
+              // Every other window, the one last in front first, each by its colour.
+              ...windowOps.others(tab).map((w) => ({ id: 'move-tab-to-window', label: `Move to the ${w.name} window`,
+                swatch: w.color, payload: { id, windowId: w.id } }))] : []),
             ...(spaces && !INCOGNITO && spaces.list.length > 1 ? [{ kind: 'separator' },
               ...spaces.list.filter((sp) => sp.id !== tab.spaceId).map((sp) => ({
                 id: 'move-tab-to-space', label: `Move to ${sp.name}`, icon: 'forward', payload: { id, spaceId: sp.id }
@@ -5176,12 +5208,6 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
  * menu item and a page's request all meet the same wall. A command that is not
  * there cannot be abused, whatever the sender.
  */
-/** The window most recently in front other than `tab`'s: where "Move to the other window" sends it. */
-function otherWindowId(windowOps, tab) {
-  const others = windowOps.all.all().filter((t) => t.windowId !== tab.windowId);
-  const latest = others.sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0))[0];
-  return latest ? latest.windowId : null;
-}
 
 const INCOGNITO_REFUSED = new Set([
   'new-window', 'move-tab-to-new-window', 'move-tab-to-window', 'tear-tab', 'tear-preview',
