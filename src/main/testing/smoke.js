@@ -5674,7 +5674,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     let installError = '';
     try {
       for (const source of [path.join(fixtures, 'chrome-hello'), xpi, path.join(fixtures, 'firefox-mv3'),
-        path.join(fixtures, 'chrome-tools')]) {
+        path.join(fixtures, 'chrome-tools'), path.join(fixtures, 'chrome-panel')]) {
         const added = ext.install(source);
         installed.push(added);
         const [r] = await ext.loadEverywhere(added.id);
@@ -5732,6 +5732,40 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         alarmed && tabsSaid.includes('idle.html') && menu.length === 1 && menu[0].label === 'Say “hi”' && clicked,
       `requests ${JSON.stringify(blocked)}; tabs.onUpdated said ${tabsSaid || '(nothing)'}; alarm ${alarmed}; ` +
       `menu ${JSON.stringify(menu.map((m) => m.label))}; click ${clicked}`);
+
+    // Built like Claude - a module worker, no popup, a page policy that lists
+    // only its own servers: chosen from the puzzle menu, its worker hears the
+    // click and opens its side panel beside the page, for that tab; the
+    // panel's page drives the tab through the debugger and signs in unseen.
+    // Each of those reaches the browser through the bridge its policy used
+    // to refuse, from a worker that has the current layer.
+    const panelExt = installed.find((e) => e.name === 'Debrowser test: side panel');
+    tabs.activate(page.id);
+    await waitFor(() => tabs.activeTab() === page, { timeoutMs: 3000 });
+    const pageTitle = page.wc.getTitle();
+    const narrowBefore = shell.contentBounds().width;
+    if (panelExt) runCommand('click-extension', { id: panelExt.id });
+    const panelTitle = () => (shell.extPanel && !shell.extPanel.view.webContents.isDestroyed()
+      ? shell.extPanel.view.webContents.getTitle() : '');
+    await waitFor(() => panelTitle().startsWith('panel:{'), { timeoutMs: 20_000 });
+    let panelSaid = {};
+    try { panelSaid = JSON.parse(panelTitle().slice('panel:'.length)); } catch { /* not finished */ }
+    const panelShown = Boolean(shell.extPanel && shell.extPanelShown() && shell.extPanel.tabId === page.wc.id);
+    const pageNarrowed = narrowBefore - shell.contentBounds().width;
+    const layerCurrent = panelExt ? (() => {
+      try {
+        return fs.readFileSync(path.join(panelExt.dir, 'debrowser-layer.txt'), 'utf8').trim() ===
+          require('crypto').createHash('sha256').update(fs.readFileSync(path.join(__dirname, '..', 'extension-compat.js'))).digest('hex');
+      } catch { return false; }
+    })() : false;
+    if (panelExt) runCommand('close-extension-panel', { id: panelExt.id });
+    const panelClosed = !shell.extPanel && shell.contentBounds().width === narrowBefore;
+    check('Labs: an extension built like Claude opens its side panel from the puzzle menu, drives the tab through the debugger and signs in, past its own strict page policy',
+      panelShown && pageNarrowed === 400 && panelSaid.tabId === page.wc.id && panelSaid.title === pageTitle &&
+        typeof panelSaid.signedIn === 'string' && panelSaid.signedIn.startsWith(`${panelSaid.back}?code=fixture-code`) &&
+        layerCurrent && panelClosed,
+      `panel ${JSON.stringify(panelSaid)}; shown ${panelShown}, page narrowed by ${pageNarrowed}, layer current ${layerCurrent}, ` +
+      `closed ${panelClosed}; page title ${JSON.stringify(pageTitle)}`);
 
     for (const e of installed) ext.remove(e.id);
     page.wc.reload();

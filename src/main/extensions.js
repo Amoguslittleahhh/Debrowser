@@ -68,6 +68,8 @@ const contextSource = (tabId, token) => `globalThis.__debrowserActiveTab = ${Num
   `globalThis.__debrowserExt = ${JSON.stringify({ token: token || null })};\n`;
 /** Recorded beside each copy: where it came from, so the list can say so. */
 const META_FILE = 'debrowser-meta.json';
+/** Which compatibility layer an installed copy's service worker was last started with (`refresh`). */
+const LAYER_FILE = 'debrowser-layer.txt';
 /** State an extension builds up while running, carried over when it is updated. */
 const KEPT_FILES = ['debrowser-dnr.json', 'debrowser-alarms.json'];
 
@@ -165,8 +167,41 @@ function isFirefox(manifest) {
  *   backgroundHtml: string|null }} the manifest; the worker's source when one is
  *   needed; the page to host, and its source when Debrowser writes it
  */
+/**
+ * A page policy that lets the extension reach the browser's bridge
+ * (debrowser://ext-bridge). An extension that lists where its pages may
+ * connect - Claude allows its own servers and nothing else - had every call
+ * to Debrowser refused by its own policy: its button, menus, alarms, side
+ * panel and sign-in all silently did nothing. Only `connect-src` is widened,
+ * and only by the browser's own scheme.
+ */
+function allowBridge(policy) {
+  if (typeof policy !== 'string' || !policy.trim()) return policy;
+  const parts = policy.split(';').map((p) => p.trim()).filter(Boolean);
+  const at = parts.findIndex((p) => /^connect-src(\s|$)/i.test(p));
+  if (at >= 0) {
+    if (/(^|\s)debrowser:(\s|$)/i.test(parts[at])) return policy;
+    // 'none' stands alone; with a source beside it, it is dropped.
+    parts[at] = `${parts[at].replace(/\s'none'/i, '')} debrowser:`;
+  } else {
+    const fallback = parts.find((p) => /^default-src(\s|$)/i.test(p));
+    if (!fallback) return policy;
+    parts.push(`connect-src ${fallback.replace(/^default-src\s*/i, '').replace(/'none'/i, '').trim()} debrowser:`.replace(/\s+/g, ' '));
+  }
+  return `${parts.join('; ')};`;
+}
+
+/** The manifest's page policy, either shape (V3's object, V2's string), with the bridge allowed. */
+function allowBridgeIn(manifest) {
+  const csp = manifest.content_security_policy;
+  if (typeof csp === 'string') manifest.content_security_policy = allowBridge(csp);
+  else if (csp && typeof csp === 'object' && typeof csp.extension_pages === 'string') csp.extension_pages = allowBridge(csp.extension_pages);
+  return manifest;
+}
+
 function adaptManifest(manifest) {
   const out = JSON.parse(JSON.stringify(manifest));
+  allowBridgeIn(out);
   let worker = null;
   let background = null;
   let backgroundHtml = null;
@@ -319,6 +354,78 @@ class Extensions {
     this.subscriptions = new Map();
     // Alarms, kept by the browser so they can wake a sleeping worker.
     this.alarmTimers = new Map();
+    // Each extension's side panel, as it set it: { path, tabs: Map(tabId ->
+    // {path, enabled}), openOnClick }.
+    this.panels = new Map();
+    // Tabs an extension has the debugger on: `${extId}:${webContentsId}` -> detach().
+    this.debugging = new Map();
+  }
+
+  /** An extension's side panel settings, made on first use. */
+  panelFor(ext) {
+    if (!this.panels.has(ext.id)) this.panels.set(ext.id, { path: ext.sidePanel || null, tabs: new Map(), openOnClick: false });
+    return this.panels.get(ext.id);
+  }
+
+  /** The page an extension's side panel shows for a tab, or null if it has none there. */
+  panelPath(ext, tabId) {
+    const panel = this.panelFor(ext);
+    const own = Number.isInteger(tabId) ? panel.tabs.get(tabId) : null;
+    if (own && own.enabled === false) return null;
+    if (own && own.path) return own.path;
+    return panel.path;
+  }
+
+  /**
+   * The DevTools protocol on a tab, for an extension that declared it. Only
+   * the browser's tabs, and only websites and the extension's own pages - not
+   * Debrowser's own pages, which see passwords and settings.
+   */
+  debugTarget(ext, target) {
+    if (!ext.permissions || !ext.permissions.includes('debugger')) throw new Error('This extension did not ask to use the debugger');
+    const tabId = Number(target && target.tabId);
+    const wc = Number.isInteger(tabId) && this.hooks.tabContents ? this.hooks.tabContents(tabId) : null;
+    if (!wc || wc.isDestroyed()) throw new Error(`No tab with id: ${target && target.tabId}.`);
+    if (!/^(https?|file|chrome-extension):/i.test(wc.getURL()) && wc.getURL() !== 'about:blank') {
+      throw new Error('Cannot access contents of the page');
+    }
+    return wc;
+  }
+
+  debuggerAttach(ext, target, version) {
+    const wc = this.debugTarget(ext, target);
+    const key = `${ext.id}:${wc.id}`;
+    if (this.debugging.has(key)) throw new Error('Debugger is already attached to the tab with id: ' + wc.id);
+    if (wc.debugger.isAttached()) throw new Error('Another debugger is already attached to the tab with id: ' + wc.id);
+    wc.debugger.attach(String(version || '1.3'));
+    const tabId = wc.id;
+    const onMessage = (_e, method, params, sessionId) => {
+      this.dispatch(ext.id, 'debugger.onEvent', [{ tabId, ...(sessionId ? { sessionId } : {}) }, method, params]);
+    };
+    const onDetach = (_e, reason) => {
+      if (!this.debugging.has(key)) return;
+      this.debugging.delete(key);
+      wc.debugger.removeListener('message', onMessage);
+      if (this.hooks.debugging) this.hooks.debugging(ext, wc, false);
+      this.dispatch(ext.id, 'debugger.onDetach', [{ tabId }, reason === 'target closed' ? 'target_closed' : 'canceled_by_user']);
+    };
+    wc.debugger.on('message', onMessage);
+    wc.debugger.once('detach', onDetach);
+    const stop = () => {
+      if (!this.debugging.has(key)) return;
+      this.debugging.delete(key);
+      wc.debugger.removeListener('message', onMessage);
+      wc.debugger.removeListener('detach', onDetach);
+      try { if (!wc.isDestroyed() && wc.debugger.isAttached()) wc.debugger.detach(); } catch { /* gone */ }
+      if (this.hooks.debugging) this.hooks.debugging(ext, wc, false);
+    };
+    this.debugging.set(key, stop);
+    if (this.hooks.debugging) this.hooks.debugging(ext, wc, true);
+  }
+
+  /** Let go of every tab an extension is debugging: it was removed, or asked. */
+  debuggerDetachAll(extId) {
+    for (const [key, stop] of [...this.debugging]) if (key.startsWith(`${extId}:`)) stop();
   }
 
   /* -- The bridge: calls from an extension's own code (extension-compat.js). -- */
@@ -407,6 +514,75 @@ class Extensions {
       case 'dnr.updateStaticRules': rules().updateStaticRules(a); return undefined;
       case 'dnr.getDisabledRuleIds': return rules().getDisabledRuleIds(a);
       case 'dnr.getAvailableStaticRuleCount': return Math.max(0, 330000 - rules().size);
+      case 'sidePanel.setOptions': {
+        const panel = this.panelFor(ext);
+        const page = typeof a.path === 'string' ? a.path.replace(/^\/+/, '') : undefined;
+        if (Number.isInteger(a.tabId)) {
+          const had = panel.tabs.get(a.tabId) || {};
+          panel.tabs.set(a.tabId, { path: page ?? had.path ?? null, enabled: a.enabled ?? had.enabled ?? true });
+        } else {
+          if (page !== undefined) panel.path = page;
+          if (a.enabled === false) panel.path = null;
+        }
+        if (a.enabled === false && this.hooks.closeSidePanel) this.hooks.closeSidePanel(ext, Number.isInteger(a.tabId) ? a.tabId : null);
+        return undefined;
+      }
+      case 'sidePanel.getOptions': {
+        const tabId = Number.isInteger(a.tabId) ? a.tabId : undefined;
+        const p = this.panelPath(ext, tabId);
+        return { ...(tabId !== undefined ? { tabId } : {}), path: p || undefined, enabled: Boolean(p) };
+      }
+      case 'sidePanel.setPanelBehavior': this.panelFor(ext).openOnClick = a.openPanelOnActionClick === true; return undefined;
+      case 'sidePanel.getPanelBehavior': return { openPanelOnActionClick: this.panelFor(ext).openOnClick };
+      case 'sidePanel.open': {
+        const tabId = Number.isInteger(a.tabId) ? a.tabId : (this.hooks.activeTabId ? this.hooks.activeTabId() : null);
+        const page = this.panelPath(ext, tabId);
+        if (!page) throw new Error('No active side panel for tabId: ' + tabId);
+        if (!this.hooks.openSidePanel) throw new Error('side panels aren’t available here');
+        // Opened for one tab when its page was set for one tab; for all, otherwise.
+        const forTab = Number.isInteger(tabId) && this.panelFor(ext).tabs.has(tabId) ? tabId : null;
+        this.hooks.openSidePanel(ext, page, forTab);
+        return undefined;
+      }
+      case 'sidePanel.close':
+        if (this.hooks.closeSidePanel) this.hooks.closeSidePanel(ext, Number.isInteger(a.tabId) ? a.tabId : null);
+        return undefined;
+      case 'runtime.getContexts': {
+        const types = Array.isArray(a.contextTypes) ? a.contextTypes : null;
+        if (types && !types.includes('SIDE_PANEL')) return [];
+        const open = this.hooks.sidePanelsOf ? this.hooks.sidePanelsOf(ext) : [];
+        return open.map((o, i) => ({ contextType: 'SIDE_PANEL', contextId: `side-panel-${i}`, documentUrl: o.url,
+          documentOrigin: new URL(o.url).origin, frameId: 0, documentId: `side-panel-${i}`, incognito: false,
+          tabId: Number.isInteger(o.tabId) ? o.tabId : -1, windowId: 1 }));
+      }
+      case 'identity.launchWebAuthFlow': {
+        if (!this.hooks.webAuthFlow) throw new Error('sign-in isn’t available here');
+        if (!/^https?:\/\//i.test(String(a.url || ''))) throw new Error('Authorization page could not be loaded.');
+        return this.hooks.webAuthFlow(ext, { url: String(a.url), interactive: a.interactive === true,
+          timeout: Math.min(120000, Math.max(1000, Number(a.timeout) || 15000)) });
+      }
+      case 'debugger.attach': this.debuggerAttach(ext, a.target, a.version); return undefined;
+      case 'debugger.detach': {
+        const wc = this.debugTarget(ext, a.target);
+        const stop = this.debugging.get(`${ext.id}:${wc.id}`);
+        if (!stop) throw new Error('Debugger is not attached to the tab with id: ' + wc.id);
+        stop();
+        return undefined;
+      }
+      case 'debugger.sendCommand': {
+        const wc = this.debugTarget(ext, a.target);
+        if (!this.debugging.has(`${ext.id}:${wc.id}`)) throw new Error('Debugger is not attached to the tab with id: ' + wc.id);
+        return wc.debugger.sendCommand(String(a.method), a.params || {}, a.target && a.target.sessionId);
+      }
+      case 'debugger.getTargets': {
+        const tabs = this.hooks.listTabs ? this.hooks.listTabs() : [];
+        return tabs.map((t) => ({ type: 'page', id: String(t.id), tabId: t.id, url: t.url, title: t.title,
+          attached: this.debugging.has(`${ext.id}:${t.id}`) }));
+      }
+      case 'tabs.captureVisibleTab': {
+        if (!this.hooks.captureActive) throw new Error('pictures of the page aren’t available here');
+        return this.hooks.captureActive(a);
+      }
       default: throw new Error(`${op} isn’t available in Debrowser yet`);
     }
   }
@@ -706,6 +882,11 @@ class Extensions {
           id, dir, name: displayName(dir, manifest), version: String(manifest.version || ''),
           from: meta.from || 'chrome', addedAt: meta.addedAt || 0, manifestVersion: manifest.manifest_version || 2,
           popup: popupOf(manifest), background: meta.background || null, token: meta.token || null,
+          // The page its side panel opens on, if the manifest names one; it
+          // may name it later instead, with sidePanel.setOptions.
+          sidePanel: manifest.side_panel && manifest.side_panel.default_path
+            ? String(manifest.side_panel.default_path).replace(/^\/+/, '') : null,
+          permissions: [...(manifest.permissions || [])].map(String),
           // Rules it ships, or only ones it adds while running: those are
           // saved too, and must be in force from the next start.
           rules: Boolean(manifest.declarative_net_request) || [...(manifest.permissions || [])].some((p) =>
@@ -819,11 +1000,72 @@ class Extensions {
     return results;
   }
 
+  /**
+   * Bring an installed copy up to this version of Debrowser before it loads:
+   * the compatibility layer as this version has it, and the page policy that
+   * lets it reach the browser. Both were written once, at install, so an
+   * extension added before an update kept the old layer and the old policy.
+   */
+  refresh(ext) {
+    try {
+      const layer = path.join(ext.dir, COMPAT_FILE);
+      const now = COMPAT_SOURCE();
+      let had = '';
+      try { had = fs.readFileSync(layer, 'utf8'); } catch { /* none */ }
+      if (had !== now) fs.writeFileSync(layer, now);
+      const file = path.join(ext.dir, 'manifest.json');
+      const before = fs.readFileSync(file, 'utf8');
+      const manifest = allowBridgeIn(JSON.parse(before));
+      const after = JSON.stringify(manifest, null, 2);
+      if (after !== before) fs.writeFileSync(file, after);
+    } catch (err) {
+      this.log(`extensions: ${ext.name} could not be updated for this version: ${err.message}`);
+    }
+  }
+
+  /**
+   * Whether an extension's service worker may still be running an older
+   * layer. Chromium keeps a registered worker's scripts and does not look at
+   * them again - not even when its own file changes - so a worker registered
+   * before this version of Debrowser kept the old layer for good: Claude's
+   * worker never saw its button clicked. The answer is what to write once the
+   * worker has been started afresh (`freshWorker`), or null if it is current.
+   */
+  staleWorker(ext) {
+    if (!ext.worker) return null;
+    const want = crypto.createHash('sha256').update(COMPAT_SOURCE()).digest('hex');
+    let had = '';
+    try { had = fs.readFileSync(path.join(ext.dir, LAYER_FILE), 'utf8').trim(); } catch { /* never recorded */ }
+    return had === want ? null : want;
+  }
+
+  /**
+   * Start an extension's service worker again from its files: its registration
+   * dropped (the worker only - its saved data is kept), and the extension
+   * loaded again, which registers it anew.
+   */
+  async freshWorker(ses, ext, loaded, stamp) {
+    const api = ses.extensions || ses;
+    try {
+      await ses.clearStorageData({ origin: `chrome-extension://${loaded.id}`, storages: ['serviceworkers'] });
+      api.removeExtension(loaded.id);
+      const again = await api.loadExtension(ext.dir, { allowFileAccess: false });
+      fs.writeFileSync(path.join(ext.dir, LAYER_FILE), stamp);
+      return again;
+    } catch (err) {
+      this.log(`extensions: ${ext.name}'s worker could not be restarted: ${err.message}`);
+      return loaded;
+    }
+  }
+
   async loadInto(ses, ext) {
     if (ses.__debrowserExt?.has(ext.id)) return { id: ext.id, ok: true };
+    this.refresh(ext);
     try {
       const api = ses.extensions || ses;
-      const loaded = await api.loadExtension(ext.dir, { allowFileAccess: false });
+      let loaded = await api.loadExtension(ext.dir, { allowFileAccess: false });
+      const stale = this.staleWorker(ext);
+      if (stale) loaded = await this.freshWorker(ses, ext, loaded, stale);
       (ses.__debrowserExt ||= new Map()).set(ext.id, loaded.id);
       if (ext.background) this.hostBackground(ses, ext, loaded.id);
       if (ext.worker) this.ensureRelay(ses, ext, loaded.id);
@@ -883,6 +1125,9 @@ class Extensions {
   }
 
   unloadEverywhere(id) {
+    this.debuggerDetachAll(id);
+    if (this.hooks.closeSidePanel) this.hooks.closeSidePanel({ id }, null);
+    this.panels.delete(id);
     this.dnr.drop(id);
     this.listeners.delete(id);
     this.subscriptions.delete(id);
@@ -913,4 +1158,5 @@ class Extensions {
   }
 }
 
-module.exports = { Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, storeTarget, downloadFromStore, COMPAT_FILE };
+module.exports = {
+  allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, storeTarget, downloadFromStore, COMPAT_FILE };

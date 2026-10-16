@@ -2,12 +2,17 @@
 
 ## Unreleased
 
+### New
+
+- **Extension side panels, Claude's among them.** An extension that opens in Chrome's side panel now opens down the right of the window, beside the page, for the tab you opened it on; choose it again in the puzzle menu to close it. Extensions can sign in to their own service, and those that ask for the debugger permission can read and operate a tab, as Claude does to act for you – Debrowser shows a notice when one starts.
+
 ### Improved
 
 - **As many windows as you like, each with its own colour.** A tab dragged out of the strip and let go anywhere but on another window's tabs now gets a window of its own. Before, letting go anywhere over another Debrowser window put the tab into it, and since windows open nearly as big as the screen, almost every drop after the first landed in one of the first two. With several windows open, each now has a colour – Teal, Green, Copper, Gold, Violet, Blue or Rose – shown as a band along its top edge, and a tab's menu lists every other window by its colour, where it used to offer only "the other window". A window keeps its colour when Debrowser reopens it.
 
 ### Fixed
 
+- **Extensions that did nothing now work.** Many extensions list which servers their own pages may contact, and Debrowser's connection to them wasn't on the list, so they couldn't use anything Debrowser adds for them: their button, their menu items, alarms, notifications. An extension without a popup, such as Claude, also never heard its name chosen in the puzzle menu. And an extension added before an update kept running Debrowser's older support for good; it's now brought up to date each time it starts.
 - **A tab pulled quickly out of the strip comes out.** A quick pull straight down was past the strip before the browser noticed a drag had begun, and the tab stayed where it was. It now comes out however fast it is pulled.
 - **Dragging a tab out of the side panel follows the pointer all the way.** With the tabs down the side in the panel that slides away, the panel used to close as soon as a dragged tab left it, and the picture of the tab stopped where the panel went while the pointer carried on. The panel now stays out until the tab is let go. The picture also no longer starts as a blank white box, and it costs no memory of its own: it used to keep a hidden page of about 75 MB around after the first drag.
 

@@ -19,6 +19,11 @@
  *    right-click items, alarms, notifications, tabs opened and closed,
  *    declarativeNetRequest, webRequest listeners, tabs and webNavigation
  *    events, the toolbar badge, and runtime.reload.
+ *  - What Chrome has and Electron lacks, through the browser: the side panel
+ *    (drawn beside the page), runtime.getContexts for it, identity's
+ *    launchWebAuthFlow (signing in with the browsing session's cookies), the
+ *    debugger on a tab, tabs.captureVisibleTab, and action.onClicked and the
+ *    badge where Electron's own action has no toolbar behind it.
  *  - Firefox's `browser.*`: the same API with promises, `menus` for
  *    `contextMenus`, and `onMessage` listeners that answer with a promise -
  *    installed over the `browser` newer Chromium has, which lacks all of
@@ -84,10 +89,23 @@
       try { Object.defineProperty(obj, key, { value, configurable: true, writable: true }); } catch { /* below */ }
       if (obj[key] === value) return;
     }
+    const had = obj[key];
     try { obj[key] = value; } catch { /* refused: wrapped below */ }
     if (obj[key] !== value) {
       if (!extra.has(obj)) extra.set(obj, {});
       extra.get(obj)[key] = value;
+      // An event of Electron's that will not make way - in a service worker,
+      // where the extension's code reaches it past the wrapper: its listeners
+      // are added to ours as well, so what the browser fires reaches them.
+      // Electron's own action.onClicked never fires; ours does.
+      if (replace && had && typeof had.addListener === 'function' && value && typeof value.addListener === 'function') {
+        try {
+          const add = had.addListener.bind(had);
+          const remove = had.removeListener.bind(had);
+          had.addListener = (fn, ...rest) => { value.addListener(fn); return add(fn, ...rest); };
+          had.removeListener = (fn) => { value.removeListener(fn); return remove(fn); };
+        } catch { /* sealed: this one event stays Electron's */ }
+      }
     }
   };
 
@@ -394,6 +412,21 @@
       onClicked: event('action.onClicked')
     });
   }
+  // Electron has an `action` of its own for a V3 extension, with no toolbar
+  // behind it: its onClicked never fires, and its badge is drawn nowhere.
+  // A click from the puzzle menu arrives as ours, and the badge is told to
+  // the browser too - otherwise every V3 extension without a popup, Claude
+  // among them, did nothing at all when chosen.
+  else {
+    const act = c.action || c.browserAction;
+    define(act, 'onClicked', event('action.onClicked'), true);
+    const nativeBadge = typeof act.setBadgeText === 'function' ? act.setBadgeText.bind(act) : null;
+    define(act, 'setBadgeText', (d, cb) => {
+      call('action.badge', { text: String((d && d.text) || ''), tabId: d && d.tabId }).catch(() => {});
+      if (!nativeBadge) return answer(Promise.resolve(), cb);
+      try { return nativeBadge(d, cb); } catch { return answer(Promise.resolve(), cb); }
+    }, true);
+  }
   if (c.action && !c.browserAction) define(c, 'browserAction', c.action);
   if (c.browserAction && !c.action) define(c, 'action', c.browserAction);
   if (c.action && !c.pageAction) define(c, 'pageAction', c.action);
@@ -438,6 +471,92 @@
   }
 
   /*
+   * The side panel: a page of the extension's beside the page in front,
+   * drawn by Debrowser (window.js, extension panel). Its page is the
+   * manifest's side_panel.default_path, or what setOptions last said - for
+   * every tab, or for one (Claude gives each tab its own). open() shows it;
+   * a click on the extension's button opens it too where setPanelBehavior
+   * asked for that.
+   */
+  const panelCall = (op) => (arg, cb) => answer(call(`sidePanel.${op}`, typeof arg === 'function' ? {} : (arg || {})),
+    typeof arg === 'function' ? arg : cb);
+  define(c, 'sidePanel', {
+    setOptions: panelCall('setOptions'),
+    getOptions: panelCall('getOptions'),
+    open: panelCall('open'),
+    close: panelCall('close'),
+    setPanelBehavior: panelCall('setPanelBehavior'),
+    getPanelBehavior: panelCall('getPanelBehavior'),
+    setLayout: (_o, cb) => answer(Promise.resolve(), cb),
+    getLayout: (cb) => answer(Promise.resolve({ side: 'right' }), cb),
+    onOpened: event('sidePanel.onOpened'),
+    onClosed: event('sidePanel.onClosed'),
+    Side: { LEFT: 'left', RIGHT: 'right' }
+  });
+  // Which of the extension's pages are open: asked by extensions that toggle
+  // their side panel, as Claude does. Only the side panel is known here.
+  if (c.runtime) {
+    define(c.runtime, 'ContextType', { TAB: 'TAB', POPUP: 'POPUP', BACKGROUND: 'BACKGROUND',
+      OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT', SIDE_PANEL: 'SIDE_PANEL', DEVELOPER_TOOLS: 'DEVELOPER_TOOLS' });
+    define(c.runtime, 'getContexts', (filter, cb) => answer(call('runtime.getContexts', filter || {}).then((l) => l || []), cb));
+  }
+
+  /*
+   * Signing in, as Chrome's identity API does it: the browser opens the
+   * address with the browsing session's cookies - so a site already signed
+   * in to answers at once, unseen - and hands back the address the sign-in
+   * finally sends it to, https://<extension id>.chromiumapp.org/...
+   * Interactive, it shows a window if the site asks for anything.
+   */
+  if (c.runtime) {
+    const later = (v) => (...args) => answer(Promise.resolve(v), args.find((x) => typeof x === 'function'));
+    define(c, 'identity', {
+      getRedirectURL: (p) => `https://${c.runtime.id}.chromiumapp.org/${String(p || '').replace(/^\/+/, '')}`,
+      launchWebAuthFlow: (details, cb) => answer(call('identity.launchWebAuthFlow', {
+        url: String(details && details.url || ''),
+        interactive: Boolean(details && details.interactive),
+        timeout: Number(details && details.timeoutMsForNonInteractive) || 0
+      }), cb),
+      getAuthToken: later(undefined),
+      removeCachedAuthToken: later(undefined),
+      clearAllCachedAuthTokens: later(undefined),
+      getProfileUserInfo: later({ email: '', id: '' }),
+      getAccounts: later([]),
+      onSignInChanged: event()
+    });
+  }
+
+  /*
+   * The debugger: Chrome's DevTools protocol on a tab, for extensions that
+   * declare the permission - Claude reads and operates pages through it. The
+   * browser attaches to the tab and says so, as Chrome's bar across the top
+   * does, while it is attached.
+   */
+  define(c, 'debugger', {
+    attach: (target, version, cb) => answer(call('debugger.attach', { target, version }), cb),
+    detach: (target, cb) => answer(call('debugger.detach', { target }), cb),
+    sendCommand: (target, method, params, cb) => {
+      if (typeof params === 'function') { cb = params; params = undefined; }
+      return answer(call('debugger.sendCommand', { target, method, params: params || {} }), cb);
+    },
+    getTargets: (cb) => answer(call('debugger.getTargets', {}), cb),
+    onEvent: event('debugger.onEvent'),
+    onDetach: event('debugger.onDetach'),
+    DetachReason: { CANCELED_BY_USER: 'canceled_by_user', TARGET_CLOSED: 'target_closed' },
+    TargetInfoType: { PAGE: 'page', BACKGROUND_PAGE: 'background_page', WORKER: 'worker', OTHER: 'other' }
+  });
+
+  // A picture of the page in front, for extensions that look at it.
+  if (c.tabs) {
+    define(c.tabs, 'captureVisibleTab', (windowId, options, cb) => {
+      if (typeof windowId === 'function') { cb = windowId; windowId = undefined; options = undefined; }
+      if (typeof windowId === 'object' && windowId !== null) { cb = options; options = windowId; }
+      if (typeof options === 'function') { cb = options; options = undefined; }
+      return answer(call('tabs.captureVisibleTab', options || {}), cb);
+    });
+  }
+
+  /*
    * The rest of Chrome's extension API that Electron does not have, as
    * stand-ins: a call settles with nothing, an event takes listeners and never
    * fires. An extension that registers a keyboard command or an alarm at
@@ -446,8 +565,8 @@
    * something that is not an extension API at all still finds nothing.
    */
   const NAMESPACES = ['bookmarks', 'browsingData', 'commands', 'contentSettings', 'cookies',
-    'declarativeContent', 'downloads', 'fontSettings', 'history', 'identity', 'idle', 'offscreen', 'omnibox', 'pageCapture', 'power', 'privacy', 'proxy', 'search', 'sessions',
-    'sidePanel', 'tabGroups', 'topSites', 'tts', 'userScripts'];
+    'declarativeContent', 'downloads', 'fontSettings', 'history', 'idle', 'offscreen', 'omnibox', 'pageCapture', 'power', 'privacy', 'proxy', 'search', 'sessions',
+    'tabGroups', 'topSites', 'tts', 'userScripts'];
   const standIns = new Map();
   const isStandIn = new WeakSet();
   // Any depth: privacy.network.networkPredictionEnabled.set(...) is a chain

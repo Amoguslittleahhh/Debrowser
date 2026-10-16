@@ -1678,6 +1678,90 @@ function main() {
           for (const t of allTabs.all()) if (t.wc && !t.wc.isDestroyed() && ids.includes(t.wc.id)) tabsOf(t).close(t.id);
           publish();
         },
+        // A tab by the id extensions know it by (its page's webContents id).
+        tabContents: (id) => {
+          const t = allTabs.all().find((x) => x.wc && !x.wc.isDestroyed() && x.wc.id === id);
+          return t ? t.wc : null;
+        },
+        listTabs: () => allTabs.all().filter((t) => t.wc && !t.wc.isDestroyed())
+          .map((t) => ({ id: t.wc.id, url: t.url, title: t.title })),
+        activeTabId: () => {
+          const here = tabs.activeTab();
+          return here && here.wc && !here.wc.isDestroyed() ? here.wc.id : null;
+        },
+        captureActive: async ({ format, quality }) => {
+          const here = tabs.activeTab();
+          if (!here || !here.wc || here.wc.isDestroyed()) throw new Error('No active tab');
+          const image = await here.wc.capturePage();
+          return format === 'png' ? image.toDataURL()
+            : `data:image/jpeg;base64,${image.toJPEG(Math.max(0, Math.min(100, Number(quality) || 92))).toString('base64')}`;
+        },
+        // The side panel, in the window in use, with the page in front's session.
+        openSidePanel: (ext, page, tabId) => {
+          const here = tabs.activeTab();
+          const ses = (here && here.wc && !here.wc.isDestroyed() && here.wc.session) || session.fromPartition(BROWSING_PARTITION);
+          const loaded = extensions.loadedId(ses, ext.id);
+          if (!loaded) throw new Error(`${ext.name} isn’t running`);
+          extensions.setActiveTab(ext.id, Number.isInteger(tabId) ? tabId : (here && here.wc && !here.wc.isDestroyed() ? here.wc.id : null));
+          const info = { path: page, windowId: 1, ...(Number.isInteger(tabId) ? { tabId } : {}) };
+          shell.openExtPanel({
+            extId: ext.id, name: ext.name, url: `chrome-extension://${loaded}/${page}`, tabId, session: ses,
+            onClosed: () => extensions.dispatch(ext.id, 'sidePanel.onClosed', [info]),
+            openLink: (url) => openLinkTab(tabs, prefs, tabs.activeTab(), url)
+          });
+          extensions.dispatch(ext.id, 'sidePanel.onOpened', [info]);
+        },
+        closeSidePanel: (ext, tabId) => {
+          for (const w of windows) if (w.shell && !w.shell.window.isDestroyed()) w.shell.closeExtPanel(ext.id, tabId);
+        },
+        sidePanelsOf: (ext) => windows.map((w) => w.shell && w.shell.extPanel)
+          .filter((p) => p && p.extId === ext.id).map((p) => ({ url: p.url, tabId: p.tabId })),
+        // An extension driving a tab through the debugger says so, as Chrome's
+        // bar does: it can read and act on everything in that page.
+        debugging: (ext, wc, on) => {
+          if (on) runCommand.toast(`${ext.name} is controlling a tab. Remove it in Settings → Labs to stop it`);
+        },
+        /*
+         * Signing in for an extension (identity.launchWebAuthFlow): the page,
+         * with the browsing session's cookies, in a window of its own that is
+         * shown only when the sign-in is interactive; done when it sends the
+         * browser to https://<the extension's id>.chromiumapp.org/.
+         */
+        webAuthFlow: (ext, { url, interactive, timeout }) => new Promise((resolve, reject) => {
+          const here = tabs.activeTab();
+          const ses = (here && here.wc && !here.wc.isDestroyed() && here.wc.session) || session.fromPartition(BROWSING_PARTITION);
+          const loaded = extensions.loadedId(ses, ext.id);
+          if (!loaded) { reject(new Error(`${ext.name} isn’t running`)); return; }
+          const target = `https://${loaded}.chromiumapp.org/`;
+          const win = new BrowserWindow({
+            show: false, width: 520, height: 700, title: `Sign in – ${ext.name}`, autoHideMenuBar: true,
+            ...(interactive && shell && !shell.window.isDestroyed() ? { parent: shell.window } : {}),
+            webPreferences: { session: ses, sandbox: true, contextIsolation: true }
+          });
+          let done = false;
+          let timer = null;
+          const finish = (err, value) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            if (!win.isDestroyed()) win.destroy();
+            if (err) reject(err); else resolve(value);
+          };
+          const arrived = (address) => String(address || '').toLowerCase().startsWith(target);
+          const watch = (event, address) => { if (arrived(address)) { if (event && event.preventDefault) event.preventDefault(); finish(null, address); } };
+          win.webContents.on('will-redirect', watch);
+          win.webContents.on('will-navigate', watch);
+          win.webContents.on('did-start-navigation', (details, legacy) => watch(null, (details && details.url) || legacy));
+          win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+          win.webContents.on('did-finish-load', () => { if (!done && interactive && !win.isVisible()) win.show(); });
+          win.webContents.on('did-fail-load', (_e, code, _desc, address, isMain) => {
+            if (isMain && !done && !arrived(address) && code !== -3 && !interactive) finish(new Error('Authorization page could not be loaded.'));
+          });
+          win.on('closed', () => finish(new Error('The user did not approve access.')));
+          timer = setTimeout(() => finish(new Error(interactive ? 'The user did not approve access.' : 'User interaction required.')),
+            interactive ? 5 * 60 * 1000 : timeout);
+          win.loadURL(url).catch(() => {});
+        }),
         notify: ({ title, message, iconPath }, onClick) => {
           const { Notification } = require('electron');
           if (!Notification.isSupported()) return;
@@ -3712,7 +3796,10 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         const store = here && storeTarget(here.url);
         // Its badge beside its name - uBlock's blocked count, a mail checker's unread.
         const label = (e) => (ext.badges?.get(e.id) ? `${e.name}  ·  ${ext.badges.get(e.id)}` : e.name);
-        const items = ext.list().map((e) => (e.popup
+        const items = ext.list().map((e) => (shell.extPanel && shell.extPanel.extId === e.id && shell.extPanelShown()
+          // Its side panel is open here: the same place closes it.
+          ? { id: 'close-extension-panel', label: `Close ${e.name}`, icon: 'close', payload: { id: e.id } }
+          : e.popup
           ? { id: 'open-extension-popup', label: label(e), icon: 'puzzle', payload: { id: e.id, ...anchor } }
           : { id: 'click-extension', label: label(e), icon: 'puzzle', payload: { id: e.id } }));
         if (store) items.unshift({ id: 'add-extension-from-page', label: 'Add this extension to Debrowser', icon: 'plus', payload: {} },
@@ -3772,10 +3859,21 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
 
       // An extension with no popup, chosen from the puzzle button: it hears
       // the click as action.onClicked, as from its button in Chrome.
+      case 'close-extension-panel':
+        if (payload?.id) shell.closeExtPanel(String(payload.id));
+        break;
+
       case 'click-extension': {
         const ext = getExtensions();
         const here = tabs.activeTab();
         if (!ext || !payload?.id) break;
+        // One that asked for its side panel on a click (setPanelBehavior) gets
+        // it, as in Chrome; the rest hear the click.
+        const entry = ext.list().find((e) => e.id === payload.id);
+        if (entry && ext.panelFor(entry).openOnClick) {
+          ext.bridge(entry.token, 'sidePanel.open', {}).catch((e) => runCommand.toast(`${entry.name}: ${e.message}`));
+          break;
+        }
         const tabInfo = here && here.wc && !here.wc.isDestroyed()
           ? { id: here.wc.id, url: here.url, title: here.title, active: true, windowId: 1, index: tabs.all().indexOf(here) } : undefined;
         ext.dispatch(String(payload.id), 'action.onClicked', [tabInfo]);

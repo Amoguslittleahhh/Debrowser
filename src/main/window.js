@@ -40,6 +40,8 @@ const WAYLAND = process.platform === 'linux' && (() => {
 
 const CHROME_HEIGHT = 84;
 const PANEL_WIDTH = 360;
+/** An extension's side panel, as wide as Chrome opens one with room to read in. */
+const EXT_PANEL_WIDTH = 400;
 /** The toast view: wide enough for a sentence and a button, tall enough for its shadow. */
 const TOAST_WIDTH = 460;
 const TOAST_HEIGHT = 84;
@@ -382,6 +384,8 @@ class BrowserShell {
     if (INCOGNITO) this.window.setContentProtection(true);
 
     this.panelView = null;
+    /** An extension's side panel, while one is open: {extId, name, url, tabId, view}. */
+    this.extPanel = null;
     // Tucked away in a window, the tab list's own view (see `layout`).
     this.stripView = null;
     this.panelOpen = false;
@@ -709,7 +713,7 @@ class BrowserShell {
     // switching tabs changes both who gets the content rectangle and whether
     // the dock should be on screen at all. Returning early left tab A's
     // inspector painted over tab B, with B sized as though it had the window.
-    if (this.devToolsView || this.inSplit(tab)) this.layout();
+    if (this.devToolsView || this.inSplit(tab) || this.extPanel) this.layout();
     else tab.setBounds(this.contentBounds());
     // A tab realised after the layout ran has never been shaped, so the change
     // guard in `layout` would skip it. Cheap, and once per attach.
@@ -2181,6 +2185,66 @@ class BrowserShell {
     return this.panelOpen;
   }
 
+  /*
+   * An extension's side panel: its page, down the right of the window beside
+   * the page in front, as Chrome draws one (extensions.js, sidePanel). One at
+   * a time. Opened for one tab, it shows while that tab is in front and waits,
+   * hidden, while another is; opened for all, it stays.
+   */
+
+  /**
+   * @param {{extId: string, name: string, url: string, tabId: number|null, session: Electron.Session,
+   *          onClosed?: Function, openLink?: (url: string) => void}} options
+   */
+  openExtPanel({ extId, name, url, tabId = null, session, onClosed = null, openLink = null }) {
+    const had = this.extPanel;
+    if (had && had.extId === extId && had.url === url && had.tabId === tabId && !had.view.webContents.isDestroyed()) {
+      this.layout();
+      return;
+    }
+    this.closeExtPanel();
+    const view = new WebContentsView({ webPreferences: { session, sandbox: true, contextIsolation: true } });
+    view.setBackgroundColor('#ffffff');
+    const root = this.window.contentView;
+    const sheet = this.sheetView ? root.children.indexOf(this.sheetView) : -1;
+    root.addChildView(view, sheet === -1 ? undefined : sheet);
+    this.bindShortcuts(view.webContents);
+    // Links and tabs.create from the panel open as tabs here, never windows.
+    view.webContents.setWindowOpenHandler(({ url: to }) => {
+      if (openLink && /^(https?|chrome-extension):/i.test(to)) openLink(to);
+      return { action: 'deny' };
+    });
+    // The panel closing itself (window.close()), or its page going away.
+    view.webContents.once('destroyed', () => { if (this.extPanel && this.extPanel.view === view) this.closeExtPanel(); });
+    view.webContents.on('render-process-gone', () => { if (this.extPanel && this.extPanel.view === view) this.closeExtPanel(); });
+    this.extPanel = { extId, name, url, tabId, view, onClosed };
+    view.webContents.loadURL(url).catch(() => {});
+    this.layout();
+  }
+
+  /** Close the extension panel - any, or only `extId`'s, or only the one for `tabId`. */
+  closeExtPanel(extId = null, tabId = null) {
+    const panel = this.extPanel;
+    if (!panel || (extId && panel.extId !== extId) || (tabId !== null && panel.tabId !== null && panel.tabId !== tabId)) return false;
+    this.extPanel = null;
+    try {
+      this.window.contentView.removeChildView(panel.view);
+      if (!panel.view.webContents.isDestroyed()) panel.view.webContents.close();
+    } catch { /* window going */ }
+    if (panel.onClosed) panel.onClosed();
+    if (!this.window.isDestroyed()) this.layout();
+    return true;
+  }
+
+  /** Whether the extension panel is on screen now: open, and for the tab in front if it is for one. */
+  extPanelShown() {
+    const panel = this.extPanel;
+    if (!panel) return false;
+    if (panel.tabId === null) return true;
+    const front = this.tabs && this.tabs.activeTab ? this.tabs.activeTab() : null;
+    return Boolean(front && front.wc && !front.wc.isDestroyed() && front.wc.id === panel.tabId);
+  }
+
   /* ---------------------------------------------------------------- */
 
   /**
@@ -2966,7 +3030,7 @@ class BrowserShell {
 
   contentArea() {
     const { width, height } = this.window.getContentBounds();
-    const panelWidth = this.panelOpen ? PANEL_WIDTH : 0;
+    const panelWidth = (this.panelOpen ? PANEL_WIDTH : 0) + (this.extPanelShown() ? EXT_PANEL_WIDTH : 0);
 
     // Full screen gives the page the window, in both layouts. Across the top
     // there is no chrome to make room for; down the side the strip is a panel
@@ -3165,6 +3229,21 @@ class BrowserShell {
         width: PANEL_WIDTH,
         height: Math.max(0, height - top)
       });
+    }
+
+    if (this.extPanel) {
+      const shown = this.extPanelShown();
+      this.extPanel.view.setVisible(shown);
+      if (shown) {
+        const top = this.fullScreen() && (this.vertical() || this.chromeHidden()) ? 0
+          : (this.vertical() ? SIDEBAR_TOP_BAND : this.chromeHeight());
+        this.extPanel.view.setBounds({
+          x: width - EXT_PANEL_WIDTH - (this.panelOpen ? PANEL_WIDTH : 0),
+          y: top,
+          width: EXT_PANEL_WIDTH,
+          height: Math.max(0, height - top)
+        });
+      }
     }
 
     if (this.crashView) this.crashView.setBounds(this.contentBounds());

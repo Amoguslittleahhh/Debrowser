@@ -78,6 +78,17 @@ function start() {
         res.end();
         return;
       }
+      // A sign-in page that is already signed in: straight back to the
+      // extension's address (https://<id>.chromiumapp.org/...) with a code,
+      // as an OAuth server does - for identity.launchWebAuthFlow.
+      if ((req.url || '').startsWith('/authorize')) {
+        const q = new URL(req.url, 'http://fixture').searchParams;
+        const back = String(q.get('redirect_uri') || '');
+        if (!/^https:\/\/[a-p]{32}\.chromiumapp\.org\//.test(back)) { res.writeHead(400); res.end('bad redirect'); return; }
+        res.writeHead(302, { Location: `${back}?code=fixture-code&state=${encodeURIComponent(q.get('state') || '')}` });
+        res.end();
+        return;
+      }
       // What the browser told the site about itself, for the fingerprint check.
       if (req.url === '/headers') {
         const told = Object.fromEntries(Object.entries(req.headers)

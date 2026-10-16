@@ -941,8 +941,17 @@ tried, measured and removed — live on the `claude/research-build` branch.
   own faces. Secondary text is at least 7:1 against its background (WCAG AAA)
   and nothing is set below 12px. The new tab page keeps its original face and
   colours, as its layout is frozen.
-- **No extensions yet.** Chrome extension support is intended and not built.
-  Anything not in Settings is not a setting yet, which is deliberate: a control
+- **Extensions are a Lab.** Settings → Labs → Chrome and Firefox extensions
+  adds them from the Chrome Web Store, Edge Add-ons or Firefox Add-ons, or from
+  a file, and the puzzle button by the address bar lists them. A popup opens
+  under the button; a side panel - Claude's, for one - opens down the right of
+  the window, for the tab it was opened on, and choosing the extension again
+  closes it. Extensions can sign in to their own service and, if they asked
+  for the debugger permission, read and operate a tab, which Debrowser says
+  when it starts. Not everything Chrome lets an extension do is here yet: the
+  keyboard shortcuts it declares, tab groups and talking to programs on the
+  computer do nothing so far. Never in private windows.
+- Anything not in Settings is not a setting yet, which is deliberate: a control
   that does nothing is worse than a short page.
 - `legacy/debrowser.hta` ports the residency model to MSHTML for machines that
   can only run an HTA. It is a curiosity, not a supported browser: unsandboxed,
