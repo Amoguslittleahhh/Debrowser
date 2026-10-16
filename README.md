@@ -43,7 +43,7 @@ curl -fsSL https://amoguslittleahhh.github.io/Debrowser/install.sh | sh
 
 It installs the right package for your system (on Arch, a `debrowser-bin` package built with makepkg), checks it against the release first, and updates it when run again.
 
-**With no desktop at all** - over SSH, on a server, on the console - `debrowser --terminal` opens it inside the terminal: pages drawn in coloured blocks with their words as real text, the keyboard and the mouse working as on a screen. See [In a terminal](docs/GUIDE.md#in-a-terminal).
+**With no desktop at all** - over SSH, on a server, on the console - `debrowser --terminal` opens it inside the terminal: pages drawn in coloured blocks with their words as real text, in tabs, with find on the page, the keyboard and the mouse working as on a screen. See [In a terminal](docs/GUIDE.md#in-a-terminal).
 
 The release's other files are for updates and package managers.
 

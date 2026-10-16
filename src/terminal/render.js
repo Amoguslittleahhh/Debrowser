@@ -100,6 +100,40 @@ function cells(bmp, width, height, cols, rows, texts = []) {
   return out;
 }
 
+/**
+ * The match Ctrl+F is on, marked over the cells it covers. Chromium's own mark
+ * is a box around the glyphs, and a line of text rarely sits square on a row
+ * of cells, so drawn as it is it shows as a smudge half a row off its word.
+ * So the smudge, in the rows above and below, is painted over in the colour
+ * beside it, and the mark is drawn on the word's own cells. `area` is the
+ * match's box in page pixels, as found-in-page reports it.
+ */
+function highlight(cells, cols, rows, area) {
+  const row = Math.floor((area.y + area.height / 2) / CELL_H);
+  if (row < 0 || row >= rows) return;
+  const from = Math.max(0, Math.round(area.x / CELL_W));
+  const to = Math.min(cols - 1, Math.max(from, Math.round((area.x + area.width) / CELL_W) - 1));
+  const top = Math.max(0, Math.floor(area.y / CELL_H));
+  const bottom = Math.min(rows - 1, Math.floor((area.y + area.height - 1) / CELL_H));
+  for (let r = Math.min(top, row); r <= Math.max(bottom, row); r++) {
+    // Two cells out: the one next to the word is in the smudge too.
+    const ref = cells[r * cols + (from > 1 ? from - 2 : Math.min(cols - 1, to + 2))];
+    const plain = ref.text ? { ch: ' ', fg: ref.bg, bg: ref.bg } : { ...ref };
+    for (let col = Math.max(0, from - 1); col <= Math.min(cols - 1, to + 1); col++) {
+      if (r === row && col >= from && col <= to) continue;
+      if (!cells[r * cols + col].text) cells[r * cols + col] = { ...plain };
+    }
+  }
+  for (let col = from; col <= to; col++) {
+    const cell = cells[row * cols + col];
+    cells[row * cols + col] = cell.text
+      ? { ...cell, fg: [0, 0, 0], bg: MATCH }
+      : { ch: ' ', fg: MATCH, bg: MATCH };
+  }
+}
+
+const MATCH = [255, 150, 50];
+
 const luminance = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
 /**
@@ -186,4 +220,4 @@ function same(a, b, mode) {
   return nearest16(a) === nearest16(b);
 }
 
-module.exports = { CELL_W, CELL_H, colorMode, cells, encode, sgr, to256, nearest16, readable };
+module.exports = { CELL_W, CELL_H, colorMode, cells, highlight, encode, sgr, to256, nearest16, readable };

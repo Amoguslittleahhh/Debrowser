@@ -228,18 +228,27 @@ underneath, so sites work as they do there, scripts and sign-ins included.
 | | Keys |
 |---|---|
 | Address or search | `Ctrl+L`, then `Enter` (`Esc` to leave it) |
-| Back · forward · reload | `Alt+←` · `Alt+→` · `Ctrl+R`, or the arrows in the top row |
+| Back · forward · reload | `Alt+←` · `Alt+→` · `Ctrl+R`, or the arrows above the page |
 | Follow a link, use a field | click it, or `Tab` to it and `Enter` |
 | Scroll | the wheel, the arrows, `Page Up` · `Page Down` |
+| New tab · close tab | `Ctrl+T` · `Ctrl+W`, or `+` and `×` in the tab row |
+| Next · previous tab · tab 1–8 · last tab | `Ctrl+Page Down` · `Ctrl+Page Up` · `Alt+1`…`Alt+8` · `Alt+9`, or click it |
+| Find on the page | `Ctrl+F`, then `Enter` or `↓` for the next, `↑` for the one before, `Esc` to close |
 | Quit | `Ctrl+Q` |
+
+Tabs are along the top row, the one in front highlighted; with more than fit,
+the row follows the one in front and the bottom row says which of how many it
+is. A link that would open a new window opens a tab beside its page, and a tab
+behind the one in front draws nothing until it is in front again. Closing the
+last tab leaves a new one rather than quitting. Find marks the match it is on
+and counts them, "2 of 5", as the desktop browser's find bar does.
 
 The mouse needs a terminal that reports it, which nearly all do; the Linux
 console needs `gpm` running for one. Colour follows the terminal: millions of
 colours where it says it has them (`COLORTERM=truecolor`), 256 otherwise, and
 16 on the Linux console, where the background has only eight, so words on a
 white page sit on grey. `DEBROWSER_TERMINAL_COLORS=truecolor`, `256` or `16`
-overrides it. Downloads go to your Downloads folder, and a link that would
-open a window opens in place. It keeps its own profile (`Debrowser/Terminal`
+overrides it. Downloads go to your Downloads folder. It keeps its own profile (`Debrowser/Terminal`
 in the config folder), so it runs beside the desktop browser without either
 seeing the other's history or sign-ins, and writes the engine's own messages to
 `terminal.log` there rather than over the page. As root, add `--no-sandbox`,

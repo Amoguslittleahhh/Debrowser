@@ -6387,11 +6387,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
 
   // In a terminal, a page is cells: the picture in half blocks, the words laid
   // over it in the colour most of their cell is, and only what changed sent
-  // again; what the terminal sends back becomes keys, text and clicks.
+  // again; what the terminal sends back becomes keys, text and clicks. Tabs
+  // fit the row with the one in front shown, and a found word is marked.
   {
     const render = require('../../terminal/render');
     const { parse } = require('../../terminal/input');
-    const { addressFor, monoCss } = require('../../terminal');
+    const { addressFor, monoCss, tabStrip } = require('../../terminal');
     // 16 x 32 pixels, BGRA: red over blue on the left, all white on the right.
     const bmp = Buffer.alloc(16 * 32 * 4);
     for (let y = 0; y < 32; y++) {
@@ -6406,8 +6407,15 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const again = render.encode(cells, cells, 2, 2, 'truecolor', 2);
     const console16 = render.encode(cells, null, 2, 2, '16', 1);
     const events = parse('ab\x1b[<0;6;3M\x1b[<0;6;3m\x1b[<65;1;1M\x1b\x1b[D\x1b[1;5C\x0c\x7f\x1b[5~\x1b[');
+    // Tabs: as many as fit, the one in front among them, and a + after.
+    const few = tabStrip(['Example Domain', 'Hello'], 1, 80);
+    const many = tabStrip(Array.from({ length: 20 }, (_, i) => `T${i}`), 15, 80);
+    const shownMany = many.tabs.map((t) => t.index);
+    // The match Ctrl+F is on: marked on its own cells, not half a row off.
+    const lit = render.cells(bmp, 16, 32, 2, 2, [[4, 8, 'x', [0, 0, 0]]]);
+    render.highlight(lit, 2, 2, { x: 0, y: 2, width: 8, height: 12 });
     const kinds = events.events.map((e) => (e.type === 'key' ? `${e.ctrl ? 'C-' : ''}${e.alt ? 'M-' : ''}${e.key}` : e.type === 'text' ? e.text : `${e.action}:${e.button}@${e.col},${e.row}`));
-    check('a page in a terminal is half blocks with its words on top, sent only where it changed, and the terminal\'s keys and clicks are read back',
+    check('a page in a terminal is half blocks with its words on top, sent only where it changed, with tabs and a marked find; the terminal\'s keys and clicks are read back',
       cells[0].ch === '▀' && cells[0].fg.join() === '200,0,0' && cells[0].bg.join() === '0,0,200' &&
         cells[3].ch === 'A' && cells[3].bg.join() === '255,255,255' && cells[3].fg.join() === '0,0,0' &&
         first.startsWith('\x1b[2;1H\x1b[38;2;200;0;0;48;2;0;0;200m▀') && first.endsWith('\x1b[0m') && again === '' &&
@@ -6418,7 +6426,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         kinds.join(' ') === 'ab down:left@6,3 up:left@6,3 wheel:down@1,1 M-Left C-Right C-l Backspace PageUp' && events.rest === '\x1b[' &&
         addressFor('example.com/a') === 'https://example.com/a' && addressFor('http://x.test') === 'http://x.test' &&
         addressFor('localhost:8080') === 'https://localhost:8080' && addressFor('two words') === 'https://duckduckgo.com/?q=two%20words' &&
-        addressFor('  ') === null && /font-size: 13\.333px !important/.test(monoCss(0.6)),
+        addressFor('  ') === null && /font-size: 13\.333px !important/.test(monoCss(0.6)) &&
+        few.tabs.length === 2 && few.tabs[1].from === 25 && few.tabs[1].close === 47 && few.tabs[0].label.startsWith(' Example Domain') && few.plus === 50 &&
+        shownMany.includes(15) && shownMany.length === 9 && Math.max(...many.tabs.map((t) => t.to)) < many.plus && many.plus <= 80 &&
+        lit[0].ch === 'x' && lit[0].bg.join() === '255,150,50' && lit[0].fg.join() === '0,0,0',
       `cells ${JSON.stringify(cells.map((c) => c.ch))}; keys ${kinds.join(' ')}; rest ${JSON.stringify(events.rest)}`);
   }
 
