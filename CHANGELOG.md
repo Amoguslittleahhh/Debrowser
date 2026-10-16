@@ -28,6 +28,10 @@
 - **Linux: Debrowser's icon in the dock and the window switcher.** Every window showed a generic gear. A Linux window's icon is handed to the system in one go, and Debrowser's, at full size, was too big to be taken - so windows had none, private windows included; they now carry it at a size that is. And on Wayland, Ubuntu's default, the dock finds an app's icon only through its menu entry, which an AppImage or a folder copy has only once Add to your apps is chosen; until then Debrowser keeps a hidden entry for the icon alone, which adds nothing to the apps menu and goes when Debrowser is uninstalled.
 - **The downloads button is drawn straight.** Its arrow sat a pixel right of the progress ring around it, so the button looked crooked while a download ran. The star and the other buttons at the end of the address bar were off by the same pixel and are centred too.
 
+### Security
+
+- **Private windows run on Tor 15.0.25,** from Tor Browser 15.0.25, the Tor Project's current release, checked against its signing key as every Tor update is. The Tor Project has withdrawn 15.0.24, the version before.
+
 ## 2.3.0
 
 Debrowser 2.3.0 notices when it runs without a graphics card - a virtual machine, or an old driver - and lightens itself, says which work the graphics card does and which the processor does, and adds Paste and go, answers and site shortcuts in the address bar, tab hover cards, a reading list and picture-in-picture that follows you between tabs; it also makes private windows clear what you copied again.
