@@ -116,8 +116,12 @@ async function load() {
 
   if (data.update) {
     const say = WAITING[data.update.state] || WAITING.available;
-    document.getElementById('update-text').textContent =
-      `${say(data.update.version)} You’re still on ${data.version}, so its notes will be here once you update.`;
+    // An install the browser can't update itself (a .deb, .rpm or a build from
+    // source) is told where its update comes from; Settings says the same.
+    const how = data.update.inApp === false
+      ? 'This copy is updated by your package manager or from the download page; Settings says how.'
+      : `You’re still on ${data.version}, so its notes will be here once you update.`;
+    document.getElementById('update-text').textContent = `${say(data.update.version)} ${how}`;
     document.getElementById('update-go').addEventListener('click', () => api.send('open-settings', { section: 'updates' }));
     document.getElementById('update').hidden = false;
   }

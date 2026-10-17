@@ -39,6 +39,7 @@ const { LinkCleaner } = require('./protection/link-cleaner');
 const { Threats } = require('./protection/threats');
 const { Receipts } = require('./data/receipts');
 const WhatsNew = require('./whats-new');
+const { ReleaseFeed, compare: compareVersions } = require('./release-feed');
 const { backupProfile } = require('./data/store-file');
 const { StartupGuard } = require('./startup-guard');
 const CrashReport = require('./crash-report');
@@ -724,6 +725,8 @@ function main() {
   let prefs = null;
   /** @type {Updater|null} */
   let updater = null;
+  /** @type {ReleaseFeed|null} */
+  let releaseFeed = null;
   /** @type {Credentials|null} */
   let credentials = null;
   /** The passcode lock in front of them; see vault.js. */
@@ -1910,6 +1913,7 @@ function main() {
       made.bookmarks = bookmarks;
       made.downloads = downloads;
       made.updater = updater;
+      made.releaseFeed = releaseFeed;
       made.saver = windows.length ? windows[0].shell.saver : false;
       // Focused, it is the window in use - and the one on top, for a drop
       // where windows overlap (windowAt).
@@ -2508,6 +2512,16 @@ function main() {
       });
       updater.start();
       for (const w of windows) w.shell.updater = updater;
+      // Asks GitHub for new releases itself, for the release notes page; the
+      // updater only knows where it can install one (release-feed.js).
+      releaseFeed = new ReleaseFeed({
+        file: path.join(app.getPath('userData'), 'release-feed.json'),
+        fetch: (url, init) => electronNet.fetch(url, init),
+        channel: () => prefs.get('updateChannel'),
+        current: app.getVersion(),
+        log
+      });
+      for (const w of windows) w.shell.releaseFeed = releaseFeed;
       // Coming back to the browser is when a stale answer gets refreshed;
       // see Updater#nudge.
       powerMonitor.on('resume', () => updater.nudge('woke'));
@@ -5915,15 +5929,34 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       // This version's notes, from the packed CHANGELOG.md.
       case 'whats-new-notes': {
         // Every version's notes, and whether a newer one is out but not yet
-        // installed - the one case the page asks you to do something.
+        // installed - the one case the page asks you to do something. The
+        // updater's own state wins while it is fetching or holding one; the
+        // release feed covers installs it can't update (release-feed.js).
+        const current = app.getVersion();
+        const feed = shell.releaseFeed;
+        // The page waits briefly for a stale answer; a slow one lands in the
+        // cache for next time rather than holding the notes back.
+        if (feed) await Promise.race([feed.refresh(), new Promise((r) => setTimeout(r, 2500))]);
         const update = shell.updater ? shell.updater.snapshot() : null;
-        const waiting = update && update.version && WhatsNew.newer(update.version, app.getVersion()) &&
-          ['available', 'downloading', 'ready'].includes(update.state);
-        return {
-          version: app.getVersion(),
-          versions: WhatsNew.readAll(app.getAppPath()),
-          update: waiting ? { version: update.version, state: update.state } : null
-        };
+        let waiting = null;
+        if (update && update.version && WhatsNew.newer(update.version, current) &&
+            ['available', 'downloading', 'ready'].includes(update.state)) {
+          waiting = { version: update.version, state: update.state, inApp: true };
+        } else if (feed) {
+          const { latest, newer } = feed.status();
+          if (latest && newer.length) {
+            waiting = { version: latest.version, state: 'available', inApp: !!(update && update.available) };
+          }
+        }
+        // The packed changelog first; any released version it lacks comes
+        // from that release's own notes on GitHub.
+        const versions = WhatsNew.readAll(app.getAppPath());
+        if (feed) {
+          const have = new Set(versions.map((v) => v.version));
+          for (const notes of feed.releasedNotes()) if (!have.has(notes.version)) versions.push(notes);
+          versions.sort((a, b) => compareVersions(b.version, a.version));
+        }
+        return { version: current, versions, update: waiting };
       }
 
       // The week's receipt, for its page.
