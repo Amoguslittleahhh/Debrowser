@@ -498,7 +498,17 @@ window.addEventListener('submit', (event) => {
 ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
   try {
     if (!record || location.origin !== record.origin) return;   // never cross-origin
-    const password = document.querySelector('input[type="password"]');
+    // A field the user can see: a hidden or off-screen one is where a page
+    // collects a password the user never meant to type there.
+    const seen = (el) => {
+      const box = el.getBoundingClientRect();
+      if (box.width < 4 || box.height < 4) return false;
+      // Placed above or left of the page, where no scrolling reaches.
+      if (box.right + window.scrollX <= 0 || box.bottom + window.scrollY <= 0) return false;
+      const style = getComputedStyle(el);
+      return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0.1;
+    };
+    const password = [...document.querySelectorAll('input[type="password"]')].find(seen);
     if (!password) return;
 
     const setValue = (el, value) => {
@@ -515,7 +525,7 @@ ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
       for (const el of form.querySelectorAll('input')) {
         if (el === password) break;
         const type = (el.getAttribute('type') || 'text').toLowerCase();
-        if (['text', 'email', 'tel'].includes(type)) user = el;
+        if (['text', 'email', 'tel'].includes(type) && seen(el)) user = el;
       }
       if (user) setValue(user, record.username);
     }
@@ -697,17 +707,22 @@ ipcRenderer.on('debrowser:address-fill', (_event, record) => {
  */
 function installFileCleaner() {
   /* global DataTransfer, File, DragEvent, ClipboardEvent -- page-side constructors */
-  const IMAGE = /\.(jpe?g|png|webp)$/i;
+  // Photos and phone videos: everything here either comes back clean or, if
+  // it cannot be cleaned, is refused (main.js, debrowser:clean-files).
+  const IMAGE = /\.(jpe?g|png|webp|hei[cf]|avif|tiff?|dng|mov|mp4|m4v|3gp|3g2|qt)$/i;
   const ours = new WeakSet();
 
   const cleanFiles = async (list) => {
     const files = [...list];
-    const images = files.map((f, i) => (IMAGE.test(f.name) || /^image\/(jpeg|png|webp)$/.test(f.type) ? i : -1))
+    const images = files.map((f, i) => (IMAGE.test(f.name) || /^(image\/(jpeg|png|webp|hei[cf]|avif|tiff)|video\/(mp4|quicktime|3gpp2?))$/.test(f.type) ? i : -1))
       .filter((i) => i >= 0);
     let cleaned = [];
     if (images.length) {
       const payload = await Promise.all(images.map(async (i) => ({
-        name: files[i].name, type: files[i].type, bytes: new Uint8Array(await files[i].arrayBuffer())
+        // A video is refused by its name alone; its bytes need not cross over.
+        name: files[i].name, type: files[i].type,
+        bytes: /\.(mov|mp4|m4v|3gp|3g2|qt)$/i.test(files[i].name) || /^video\//.test(files[i].type)
+          ? new Uint8Array(0) : new Uint8Array(await files[i].arrayBuffer())
       })));
       cleaned = await ipcRenderer.invoke('debrowser:clean-files', payload);
       if (!Array.isArray(cleaned) || cleaned.length !== images.length) throw new Error('not cleaned');
