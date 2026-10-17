@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * Release notes: every version, newest first, one short line per change.
+ * Release notes: every version, newest first, with its summary and one row
+ * per change - the headline and the sentence that says what it fixed or added.
  * Built as DOM nodes, never as HTML: the only markup kept from the changelog
  * is `code`, which becomes a <code> element.
  *
@@ -27,11 +28,20 @@ function inline(text) {
   return out;
 }
 
-/** An item's headline, or the first sentence of an item written without one. */
+function firstSentence(text) {
+  const t = String(text).trim();
+  const m = /^(.+?[.!?])(\s|$)/.exec(t);
+  return (m ? m[1] : t).replace(/[,:;]$/, '.');
+}
+
+/**
+ * A change in two parts: its headline, and the first sentence of what it says
+ * after that - enough to tell what was fixed or added without the whole
+ * paragraph. An item written without a headline gives its first sentence.
+ */
 function line(item) {
-  const text = (item.head || item.text).trim();
-  const first = /^(.+?[.!?])(\s|$)/.exec(text);
-  return (first ? first[1] : text).replace(/[,:;]$/, '.');
+  if (!item.head) return { head: firstSentence(item.text), detail: '' };
+  return { head: item.head.trim(), detail: item.text ? firstSentence(item.text) : '' };
 }
 
 function el(tag, className, text) {
@@ -53,9 +63,10 @@ function release(notes, installed) {
   const top = el('div', 'version');
   top.append(el('h2', '', `v${notes.version}`));
   if (installed) top.append(el('span', 'installed', 'Installed'));
-  // The paragraph a version opens with sums it up at length; the lines under
-  // it say the same thing shorter, so it is left to the release page.
-  const sections = notes.sections.length > 1 && !notes.sections[0].title ? notes.sections.slice(1) : notes.sections;
+  // The paragraph a version opens with is its summary, set under its number.
+  const opens = notes.sections.length > 1 && !notes.sections[0].title;
+  const sections = opens ? notes.sections.slice(1) : notes.sections;
+  const summary = opens ? notes.sections[0].items.map((i) => [i.head, i.text].filter(Boolean).join(' ')).join(' ') : '';
   // One row per change, its section named beside it, as Zen lists them.
   const list = el('ul', 'changes');
   for (const section of sections) {
@@ -64,12 +75,26 @@ function release(notes, installed) {
       const li = el('li', i === 0 ? 'first' : '');
       const tag = el('span', `kind ${cls}`, label);
       const text = el('span', 'text');
-      text.append(inline(line(item)));
+      const { head, detail } = line(item);
+      const strong = el('strong');
+      strong.append(inline(head));
+      text.append(strong);
+      if (detail) {
+        const more = el('span', 'detail');
+        more.append(' ', inline(detail));
+        text.append(more);
+      }
       li.append(tag, text);
       list.append(li);
     });
   }
-  article.append(top, list);
+  article.append(top);
+  if (summary) {
+    const p = el('p', 'summary');
+    p.append(inline(summary));
+    article.append(p);
+  }
+  article.append(list);
   return article;
 }
 
