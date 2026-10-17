@@ -24,17 +24,7 @@ const fs = require('fs');
 const { readJson } = require('./data/store-file');
 const { setAside } = require('./set-aside');
 const path = require('path');
-const { originOf: webOrigin } = require('./data/credentials');
-
-/**
- * A website's origin, or an extension's own (chrome-extension://<id>): its
- * pages' camera, location and the rest are kept here as a site's are, and
- * set from its site settings (Settings → Extensions → Details).
- */
-function originOf(url) {
-  const m = /^chrome-extension:\/\/([a-p]{32})(?:\/|$)/.exec(String(url || ''));
-  return m ? `chrome-extension://${m[1]}` : webOrigin(url);
-}
+const { originOf } = require('./data/credentials');
 
 const FILE = 'site-permissions.json';
 
@@ -241,12 +231,6 @@ class PermissionAsks {
   request(wc, kinds, details, callback) {
     const origin = originOf(details?.requestingUrl);
     const tab = this.tabFor(wc);
-    // An extension's popup or background has no tab to ask in: what its
-    // site settings allow, and nothing else.
-    if (origin && origin.startsWith('chrome-extension://') && !tab) {
-      callback(this.store.decide(origin, kinds) === 'allow');
-      return;
-    }
     // Only the site in the address bar may ask. A frame from somewhere else
     // would be borrowing the trust the user gives that site.
     if (!origin || !tab || originOf(tab.url) !== origin) { callback(false); return; }
@@ -354,4 +338,4 @@ class PermissionAsks {
   }
 }
 
-module.exports = { SitePermissions, PermissionAsks, KINDS, kindsFor, permissionOrigin: originOf };
+module.exports = { SitePermissions, PermissionAsks, KINDS, kindsFor };

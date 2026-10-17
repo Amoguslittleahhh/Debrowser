@@ -731,6 +731,7 @@ function buildAll(state = {}) {
     document.querySelector('[data-rows="appearance"]').prepend(welcomeRow());
     document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow(), safetyRow());
     extensionRows(document.querySelector('[data-rows="extensions"]'));
+    showExtensionPage();
     const advanced = document.querySelector('[data-rows="advanced"]');
     setupRows(advanced);
     window.addEventListener('focus', () => setupRows(advanced));
@@ -916,12 +917,12 @@ async function extensionPage(page, id, dev, back) {
   const perms = el('div', 'ext-perms');
   perms.hidden = true;
   const drawPerms = (r) => {
-    if (!r || !r.ok) { perms.replaceChildren(el('span', 'row-hint', 'Available while it is on.')); return; }
+    if (!r || !r.ok) { perms.replaceChildren(el('span', 'row-hint', 'This extension is no longer installed.')); return; }
     const rows = r.kinds.map((k) => {
       const pick = document.createElement('select');
       pick.setAttribute('aria-label', k.label);
-      for (const [value, name] of [['ask', 'Ask (default)'], ['allow', 'Allow'], ['block', 'Block']]) {
-        const o = el('option', '', name);
+      for (const [value, name] of [['allow', 'Allow'], ['ask', 'Ask'], ['block', 'Block']]) {
+        const o = el('option', '', value === k.def ? `${name} (default)` : name);
         o.value = value;
         pick.append(o);
       }
@@ -935,7 +936,7 @@ async function extensionPage(page, id, dev, back) {
     const reset = smallButton('Reset permissions');
     reset.addEventListener('click', async () => drawPerms(await api.request('extension-site-permissions', { id, reset: true })));
     const usage = el('div', 'ext-perm-head');
-    usage.append(el('span', 'row-hint', `Permissions for chrome-extension://${d.id || ''}`), reset);
+    usage.append(el('span', 'row-hint', `Permissions for chrome-extension://${d.id || d.folderId}`), reset);
     perms.replaceChildren(usage, ...rows);
   };
   const openPerms = smallButton('', 'icon-more');
@@ -1008,6 +1009,36 @@ async function extensionPage(page, id, dev, back) {
  * folder. Shown while they are on; the browser picks the file, so this
  * page never sees a path.
  */
+/** Developer mode as the browser last sent it, for an extension's own page. */
+let extensionDev = false;
+/** Whether the page was opened from the list here, so Back is history's back. */
+let extensionFromList = false;
+
+/*
+ * An extension's own page: `settings#extension/<id>`, drawn alone in place of
+ * every section, as Chrome opens chrome://extensions/?id=. Back - the arrow,
+ * the mouse's back button, Alt+Left - returns to the list where it was.
+ */
+function showExtensionPage() {
+  const m = /^extension\/([0-9a-f]{24})$/.exec(decodeURIComponent(location.hash.slice(1)));
+  const section = document.querySelector('section[data-section="extension"]');
+  if (!section) return;
+  if (!m) {
+    extensionFromList = false;
+    delete document.body.dataset.subpage;
+    section.hidden = true;
+    return;
+  }
+  document.body.dataset.subpage = 'extension';
+  section.hidden = false;
+  const page = section.querySelector('.ext-page');
+  extensionPage(page, m[1], extensionDev, () => {
+    if (extensionFromList) history.back();
+    else location.hash = 'extensions';
+  }).then(() => { const main = document.querySelector('main'); if (main) main.scrollTop = 0; });
+}
+window.addEventListener('hashchange', showExtensionPage);
+
 function extensionRows(host) {
   const box = document.createElement('div');
   box.className = 'extension-rows';
@@ -1016,21 +1047,10 @@ function extensionRows(host) {
   // state arrives after the page is built.
   let on = false;
   let dev = false;
-  // The extension whose own page is open in place of the list, if any.
-  let shown = null;
-  const page = document.createElement('div');
-  page.className = 'ext-page';
-  page.hidden = true;
-  host.append(page);
   const toggle = () => on;
   const render = async () => {
-    box.hidden = !toggle() || Boolean(shown);
-    page.hidden = !toggle() || !shown;
+    box.hidden = !toggle();
     if (!toggle()) return;
-    if (shown) {
-      await extensionPage(page, shown, dev, () => { shown = null; render(); });
-      return;
-    }
     const res = await api.request('extensions-list');
     const rows = ((res && res.items) || []).flatMap((ext) => {
       const where = ext.from === 'firefox' ? 'Firefox' : 'Chrome';
@@ -1050,12 +1070,10 @@ function extensionRows(host) {
         await api.request('extension-remove', { id: ext.id });
         render();
       });
-      // Its own page, opened beside Remove, as Chrome has it.
+      // Its own page, a page of its own as in Chrome: the address changes,
+      // so Back returns to the list.
       const more = smallButton('Details');
-      more.addEventListener('click', () => {
-        shown = ext.id;
-        render().then(() => host.closest('section')?.scrollIntoView({ block: 'start' }));
-      });
+      more.addEventListener('click', () => { extensionFromList = true; location.hash = `extension/${ext.id}`; });
       control.append(more, remove);
       if (ext.off) row.classList.add('ext-off');
       return [row];
@@ -1097,7 +1115,12 @@ function extensionRows(host) {
   api.onState((state) => {
     const now = state?.prefs?.extensions === true;
     const devNow = state?.prefs?.extensionsDeveloperMode === true;
-    if (now !== on || devNow !== dev) { on = now; dev = devNow; render(); }
+    if (now !== on || devNow !== dev) {
+      const devChanged = devNow !== extensionDev;
+      on = now; dev = devNow; extensionDev = devNow;
+      render();
+      if (devChanged) showExtensionPage();
+    }
   });
   render();
 }
@@ -2103,7 +2126,7 @@ function buildRail() {
   const rail = document.getElementById('rail');
   if (!rail) return;
 
-  sections = [...document.querySelectorAll('section[data-section]')];
+  sections = [...document.querySelectorAll('section[data-section]:not(.ext-subpage)')];
 
   for (const section of sections) {
     const name = section.dataset.section;
@@ -2116,6 +2139,11 @@ function buildRail() {
     button.append(sectionIcon(name), label);
     button.addEventListener('click', () => {
       setDrawer(false);
+      // Off an extension's own page, back to the sections first.
+      if (document.body.dataset.subpage) {
+        history.replaceState(null, '', `#${name}`);
+        showExtensionPage();
+      }
       // A section at a time, unless a search is showing every match: then the
       // list is a way down the results, as on the long page.
       if (pagesLayout() && !document.body.classList.contains('searching')) {

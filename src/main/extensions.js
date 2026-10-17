@@ -81,6 +81,49 @@ const KEPT_FILES = ['debrowser-dnr.json', 'debrowser-alarms.json'];
  */
 const EXT_SETTINGS = { enabled: true, siteAccess: 'all', sites: [], fileAccess: false, collectErrors: true, pinned: false };
 
+/**
+ * Site settings for an extension's own pages, every one Chrome's page lists,
+ * in its order, with Chrome's default. Each names the permission requests
+ * it answers; a choice left at its default answers nothing, so the browser
+ * decides as it would. Those naming none are kept, as Chrome keeps them.
+ */
+const SITE_SETTINGS = [
+  ['location', 'Location', 'ask', ['geolocation']],
+  ['camera', 'Camera', 'ask', ['media:video']],
+  ['microphone', 'Microphone', 'ask', ['media:audio']],
+  ['sensors', 'Motion sensors', 'allow', ['sensors', 'accelerometer', 'gyroscope', 'magnetometer']],
+  ['notifications', 'Notifications', 'ask', ['notifications']],
+  ['javascript', 'JavaScript', 'allow', []],
+  ['images', 'Images', 'allow', []],
+  ['popups', 'Pop-ups and redirects', 'block', []],
+  ['ads', 'Intrusive ads', 'block', []],
+  ['backgroundSync', 'Background sync', 'allow', ['background-sync', 'periodic-background-sync']],
+  ['sound', 'Sound', 'allow', []],
+  ['downloads', 'Automatic downloads', 'ask', []],
+  ['midi', 'MIDI device control and reprogram', 'ask', ['midi', 'midiSysex']],
+  ['usb', 'USB devices', 'ask', ['usb']],
+  ['serial', 'Serial ports', 'ask', ['serial']],
+  ['fileEditing', 'File editing', 'ask', ['fileSystem']],
+  ['hid', 'HID devices', 'ask', ['hid']],
+  ['protectedContent', 'Protected content IDs', 'allow', ['mediaKeySystem']],
+  ['clipboard', 'Clipboard', 'ask', ['clipboard-read']],
+  ['payment', 'Payment handlers', 'allow', ['payment-handler']],
+  ['insecureContent', 'Insecure content', 'block', []],
+  ['v8', 'JavaScript optimisation and security', 'allow', []],
+  ['federatedIdentity', 'Third-party sign-in', 'allow', ['identity-credentials-get']],
+  ['ar', 'Augmented reality', 'ask', ['ar']],
+  ['vr', 'Virtual reality', 'ask', ['vr']],
+  ['handTracking', 'Hand tracking', 'ask', ['hand-tracking']],
+  ['deviceUse', 'Your device use', 'ask', ['idle-detection']],
+  ['windowManagement', 'Window management', 'ask', ['window-management']],
+  ['fonts', 'Fonts', 'ask', ['local-fonts']],
+  ['autoPip', 'Automatic picture-in-picture', 'ask', []],
+  ['scrollZoom', 'Scrolling and zooming shared tabs', 'ask', []],
+  ['webApps', 'Web app installations', 'ask', []],
+  ['localNetwork', 'Local network', 'ask', ['local-network-access']],
+  ['appsOnDevice', 'Apps on device', 'ask', []]
+];
+
 /** A site as typed - "example.com" or a whole address - as its host name, or null. */
 function siteHost(text) {
   let t = String(text || '').trim().toLowerCase().replace(/^\*\./, '');
@@ -1559,6 +1602,53 @@ class Extensions {
     return { ...cache.get(id) };
   }
 
+  /** Its site settings, every one, as its page lists them. */
+  sitePermissions(id) {
+    const chosen = this.settingsOf(id).site || {};
+    return SITE_SETTINGS.map(([kind, label, def]) => ({ kind, label, def, value: chosen[kind] || def }));
+  }
+
+  /** Set one (`kind` null: all back to their defaults, Reset permissions). */
+  setSitePermission(id, kind, value) {
+    const ext = this.list().find((e) => e.id === id);
+    if (!ext) return;
+    const file = path.join(ext.dir, META_FILE);
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* none */ }
+    const settings = { ...EXT_SETTINGS, ...(meta.settings || {}) };
+    const site = { ...(settings.site || {}) };
+    const spec = SITE_SETTINGS.find(([k]) => k === kind);
+    if (kind === null) for (const k of Object.keys(site)) delete site[k];
+    else if (!spec) return;
+    else if (!['ask', 'allow', 'block'].includes(value) || value === spec[2]) delete site[kind];
+    else site[kind] = value;
+    meta.settings = { ...settings, site };
+    fs.writeFileSync(file, JSON.stringify(meta));
+    this.settingCache?.delete(id);
+  }
+
+  /**
+   * What an extension's own page is answered when it asks for a permission:
+   * true or false where its site settings say so, null where they leave it
+   * to the browser.
+   */
+  decidePermission(url, permission, details = {}) {
+    const m = /^chrome-extension:\/\/([a-p]{32})(?:\/|$)/.exec(String(url || ''));
+    if (!m) return null;
+    let id = null;
+    for (const ses of this.sessions) {
+      for (const [folder, loaded] of ses.__debrowserExt || new Map()) if (loaded === m[1]) id = folder;
+    }
+    if (!id) return null;
+    const media = [...(details.mediaTypes || []), ...(details.mediaType ? [details.mediaType] : [])];
+    const asked = permission === 'media' ? (media.length ? media : ['video', 'audio']).map((t) => `media:${t}`) : [permission];
+    const chosen = this.settingsOf(id).site || {};
+    const answers = SITE_SETTINGS.filter(([, , , perms]) => perms.some((p) => asked.includes(p))).map(([kind]) => chosen[kind]);
+    if (!answers.length || answers.some((a) => !a || a === 'ask')) return answers.includes('block') ? false : null;
+    if (answers.includes('block')) return false;
+    return answers.every((a) => a === 'allow') ? true : null;
+  }
+
   /** Change one; what changes what it may reach loads it again. */
   async setSetting(id, key, value) {
     const ext = this.list().find((e) => e.id === id);
@@ -1642,5 +1732,5 @@ class Extensions {
 }
 
 module.exports = {
-  restrictAccess, siteHost,
+  restrictAccess, siteHost, SITE_SETTINGS,
   allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, iconOf, matchesPattern, crxKey, idFromKey, storeTarget, downloadFromStore, COMPAT_FILE };
