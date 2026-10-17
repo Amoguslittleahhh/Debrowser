@@ -740,83 +740,107 @@ function buildAll(state = {}) {
 }
 
 /*
- * One extension's details, as Chrome's details page has them: what it is,
- * where it came from, its own settings - site access, pinned, file pages,
- * its site settings - and its options and store page. With developer mode
- * on, also its IDs, what it runs, its manifest's parts, the errors its own
- * code logged, and the tools: inspect its background or popup, open its
- * manifest, reload it, show its folder.
+ * What a permission lets an extension do, in Chrome's words: the list its
+ * details page shows. Permissions Chrome doesn't warn about aren't listed.
  */
-async function extensionDetails(panel, id, dev) {
+const PERMISSION_WORDS = {
+  tabs: 'Read your browsing history',
+  webNavigation: 'Read your browsing history',
+  history: 'Read and change your browsing history on all your signed-in devices',
+  bookmarks: 'Read and change your bookmarks',
+  downloads: 'Manage your downloads',
+  'downloads.open': 'Open downloaded files',
+  clipboardRead: 'Read data you copy and paste',
+  clipboardWrite: 'Modify data you copy and paste',
+  notifications: 'Display notifications',
+  geolocation: 'Detect your physical location',
+  management: 'Manage your apps, extensions and themes',
+  nativeMessaging: 'Communicate with cooperating native applications',
+  privacy: 'Change your privacy-related settings',
+  proxy: 'Read and change all your data on all websites',
+  debugger: 'Access the page debugger backend',
+  declarativeNetRequest: 'Block content on any page',
+  declarativeNetRequestFeedback: 'Read your browsing history',
+  topSites: 'Read a list of your most frequently visited websites',
+  contentSettings: 'Change your settings that control websites’ access to features such as cookies, JavaScript, camera and microphone',
+  tabCapture: 'Capture the content of your screen',
+  desktopCapture: 'Capture the content of your screen',
+  pageCapture: 'Read and change all your data on all websites',
+  sessions: 'Read your browsing history on all your signed-in devices',
+  readingList: 'Read and change entries in the reading list',
+  tts: 'Read all text spoken using synthesised speech',
+  userScripts: 'Run scripts you add on the sites it can reach'
+};
+
+function permissionWords(d) {
+  const out = [];
+  const hosts = d.hosts.filter((h) => h !== 'file:///*');
+  if (hosts.some((h) => h === '<all_urls>' || /^(\*|https?):\/\/\*\//.test(h))) out.push('Read and change all your data on all websites');
+  else if (hosts.length) {
+    const names = [...new Set(hosts.map((h) => h.replace(/^[^:]+:\/\/(\*\.)?/, '').replace(/\/.*$/, '')))];
+    out.push(`Read and change your data on ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} other sites` : ''}`);
+  }
+  for (const p of d.permissions) if (PERMISSION_WORDS[p]) out.push(PERMISSION_WORDS[p]);
+  return [...new Set(out)];
+}
+
+/*
+ * One extension's own page, as Chrome draws it when you press Details: a
+ * back arrow over its logo and name, On, then one item to a line - what it
+ * is, what it may do, its settings (site access, pinned, private windows,
+ * file pages, its site settings), its options and store page, where it came
+ * from, and Remove. Developer mode adds its ID, the views to inspect, its
+ * manifest's parts, the errors its own code logged, and the tools.
+ */
+async function extensionPage(page, id, dev, back) {
   const d = await api.request('extension-details', { id });
-  if (!d) { panel.replaceChildren(document.createTextNode('This extension is no longer installed.')); return; }
+  if (!d) { back(); return; }
   const el = (tag, cls, text) => {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
     if (text !== undefined) n.textContent = text;
     return n;
   };
-  const again = () => extensionDetails(panel, id, dev);
-  const facts = el('dl', 'ext-facts');
-  const fact = (term, value, mono = false) => {
-    if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) return;
-    facts.append(el('dt', '', term), el('dd', mono ? 'mono' : '', Array.isArray(value) ? value.join(', ') : String(value)));
-  };
-  const size = d.size >= 1048576 ? `${(d.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(d.size / 1024))} KB`;
-  fact('Description', d.description);
-  fact('Version', d.version);
-  fact('Size', d.size ? size : '');
-  if (dev) {
-    fact('ID', d.storeId || d.geckoId || d.id, true);
-    if (d.id && d.id !== (d.storeId || d.geckoId)) fact('Running as', `chrome-extension://${d.id}/`, true);
-    fact('Manifest', `Version ${d.manifestVersion}`);
-    fact('Background', d.background ? `${d.background}, ${d.running ? 'running' : 'stopped'}` : 'none');
-  }
-  fact('Permissions', d.permissions, dev);
-  fact('Can reach', d.hosts, dev);
-  if (dev) {
-    fact('Popup', d.popup, true);
-    fact('Options page', d.options, true);
-    fact('Side panel', d.sidePanel, true);
-    fact('Optional', d.optionalPermissions, true);
-    fact('Content scripts', d.contentScripts.map((c) => `${c.matches.join(' ')} (${c.js} script, ${c.css} style${c.world === 'MAIN' ? ', page world' : ''})`), true);
-    fact('Keyboard shortcuts', d.commands.map((c) => (c.key ? `${c.name}: ${c.key}` : c.name)), true);
-    fact('Request rule sets', d.rules, true);
-    fact('Files pages may load', d.webAccessible ? String(d.webAccessible) : '');
-    fact('Page policy', d.csp, true);
-    fact('Folder', d.dir, true);
-    fact('Added', d.addedAt ? new Date(d.addedAt).toLocaleString() : '');
-  }
-  fact('Source', d.source && d.source.label);
-
-  const status = el('span', 'row-hint', '');
-  const button = (label, action, after) => {
-    const b = smallButton(label);
-    b.addEventListener('click', async () => {
-      const r = await api.request('extension-dev', { id, action });
-      status.textContent = r && r.ok ? (action === 'reload' ? 'Reloaded.' : action === 'copy-id' ? 'ID copied.' : '')
-        : (r && r.error) || 'That didn’t work while it isn’t running.';
-      if (after) after();
-    });
-    return b;
-  };
-
-  // Its settings, one line each, as on Chrome's page.
-  const list = el('div', 'ext-settings');
-  const line = (label, hint, ...controls) => {
-    const row = el('div', 'ext-setting');
-    const text = el('div', 'row-text');
-    text.append(el('span', 'row-label', label));
-    if (hint) text.append(el('span', 'row-hint', hint));
-    const holder = el('div', 'row-control');
-    for (const c of controls) if (!c.getAttribute('aria-label')) c.setAttribute('aria-label', label);
-    holder.append(...controls);
-    row.append(text, holder);
-    list.append(row);
+  const again = () => extensionPage(page, id, dev, back);
+  const status = el('span', 'row-hint ext-status', '');
+  const parts = [];
+  // One item: its name, what it is under it, and a control at the right.
+  const item = (label, value, ...controls) => {
+    const row = el('div', 'ext-item');
+    const text = el('div', 'ext-item-text');
+    text.append(el('span', 'ext-item-label', label));
+    for (const v of [].concat(value ?? [])) {
+      if (v === '' || v === null) continue;
+      text.append(typeof v === 'string' ? el('span', 'ext-item-value', v) : v);
+    }
+    row.append(text);
+    if (controls.length) {
+      const holder = el('div', 'row-control');
+      for (const c of controls) if (!c.getAttribute('aria-label')) c.setAttribute('aria-label', label);
+      holder.append(...controls);
+      row.append(holder);
+    }
+    parts.push(row);
     return row;
   };
+  const bullets = (list, mono = false) => {
+    const ul = el('ul', `ext-bullets${mono ? ' mono' : ''}`);
+    for (const x of list) ul.append(typeof x === 'string' ? el('li', '', x) : (() => { const li = el('li'); li.append(x); return li; })());
+    return ul;
+  };
+  const run = async (action, after) => {
+    const r = await api.request('extension-dev', { id, action });
+    status.textContent = r && r.ok ? (action === 'reload' ? 'Reloaded.' : action === 'copy-id' ? 'ID copied.' : '')
+      : (r && r.error) || 'That didn’t work while it isn’t running.';
+    if (after) after();
+  };
+  const link = (label, action, after) => {
+    const b = smallButton(label, 'link-btn');
+    b.addEventListener('click', () => run(action, after));
+    return b;
+  };
   const set = (key, value) => api.request('extension-setting', { id, key, value });
-  const toggle = (key, { disabled = false, checked } = {}) => {
+  const toggle = (key, { disabled = false, checked, after } = {}) => {
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = checked ?? d.settings[key] === true;
@@ -825,46 +849,74 @@ async function extensionDetails(panel, id, dev) {
       box.disabled = true;
       await set(key, box.checked);
       box.disabled = false;
+      if (after) after();
     });
     return box;
   };
 
+  // The header: back to the list, its logo and its name.
+  const head = el('div', 'ext-page-head');
+  const backBtn = smallButton('', 'icon-back');
+  backBtn.setAttribute('aria-label', 'Back to extensions');
+  backBtn.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8H3.5M7.5 3.5 3 8l4.5 4.5"/></svg>';
+  backBtn.addEventListener('click', back);
+  head.append(backBtn);
+  if (typeof d.icon === 'string' && /^data:image\//.test(d.icon)) {
+    const img = el('img', 'ext-page-icon');
+    img.alt = '';
+    img.src = d.icon;
+    head.append(img);
+  }
+  head.append(el('h3', 'ext-page-name', d.name));
+
+  item(d.settings.enabled ? 'On' : 'Off', '', toggle('enabled', { after: again }));
+  if (d.description) item('Description', d.description);
+  item('Version', d.version);
+  if (d.size) item('Size', d.size >= 1048576 ? `${(d.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(d.size / 1024))} KB`);
+  if (dev) {
+    item('ID', el('span', 'ext-item-value mono', d.storeId || d.geckoId || d.id || ''));
+    const views = [];
+    if (d.background) views.push(link(d.background === 'service worker' ? `service worker${d.running ? '' : ' (Inactive)'}` : 'background page', 'inspect-background'));
+    if (d.popup) views.push(link('popup', 'inspect-popup'));
+    item('Inspect views', views.length ? bullets(views) : 'None');
+  }
+  const words = permissionWords(d);
+  item('Permissions', words.length ? bullets(words) : 'This extension requires no special permissions.');
+  if (dev && d.permissions.length) item('Permissions in its manifest', bullets([...d.permissions, ...d.hosts], true));
+
+  // Site access: Chrome's three choices.
   const access = document.createElement('select');
-  access.setAttribute('aria-label', 'Site access');
-  for (const [value, name] of [['click', 'Only when you open it'], ['specific', 'On specific sites'], ['all', 'On all sites']]) {
+  for (const [value, name] of [['click', 'On click'], ['specific', 'On specific sites'], ['all', 'On all sites']]) {
     const o = el('option', '', name);
     o.value = value;
     access.append(o);
   }
   access.value = d.settings.siteAccess;
-  const sites = document.createElement('input');
-  sites.type = 'text';
-  sites.placeholder = 'example.com, another.org';
-  sites.setAttribute('aria-label', 'Sites it may reach');
-  sites.value = d.settings.sites.join(', ');
-  const saveSites = smallButton('Save');
-  const showSites = () => { sites.hidden = saveSites.hidden = access.value !== 'specific'; };
-  showSites();
-  access.addEventListener('change', async () => {
-    showSites();
-    await set('siteAccess', access.value);
-    again();
-  });
-  saveSites.addEventListener('click', async () => {
-    await set('sites', sites.value.split(/[\s,]+/).filter(Boolean));
-    again();
-  });
-  line('Site access', 'Which sites it may read and change. Changing this starts it again.', access, sites, saveSites);
-  line('Pin to toolbar', 'Its own button beside the puzzle button.', toggle('pinned'));
-  line('Allow in private windows', 'Debrowser never runs extensions in private windows.', toggle('private', { disabled: true, checked: false }));
-  line('Allow access to file URLs', 'Lets it read pages opened from files on this computer.', toggle('fileAccess'));
-  if (dev) line('Collect errors', 'Keep what its own code reports going wrong, listed below.', toggle('collectErrors'));
+  access.addEventListener('change', async () => { await set('siteAccess', access.value); again(); });
+  const accessItem = item('Site access', 'Allow this extension to read and change all your data on websites that you visit:', access);
+  if (d.settings.siteAccess === 'specific') {
+    const sites = document.createElement('input');
+    sites.type = 'text';
+    sites.placeholder = 'example.com, another.org';
+    sites.setAttribute('aria-label', 'Sites it may reach');
+    sites.value = d.settings.sites.join(', ');
+    const save = smallButton('Save');
+    save.addEventListener('click', async () => { await set('sites', sites.value.split(/[\s,]+/).filter(Boolean)); again(); });
+    const line = el('div', 'ext-sites');
+    line.append(sites, save);
+    accessItem.querySelector('.ext-item-text').append(line);
+  }
+  item('Pin to toolbar', '', toggle('pinned'));
+  item('Allow in private windows', 'Debrowser never runs extensions in private windows, so it can’t see what you do there.',
+    toggle('private', { disabled: true, checked: false }));
+  item('Allow access to file URLs', '', toggle('fileAccess'));
+  if (dev) item('Collect errors', '', toggle('collectErrors', { after: again }));
 
-  // Its site settings: what its own pages may use.
+  // Site settings: what its own pages may use, as a site's are set.
   const perms = el('div', 'ext-perms');
   perms.hidden = true;
   const drawPerms = (r) => {
-    if (!r || !r.ok) { perms.replaceChildren(el('span', 'row-hint', 'Available while it is running.')); return; }
+    if (!r || !r.ok) { perms.replaceChildren(el('span', 'row-hint', 'Available while it is on.')); return; }
     const rows = r.kinds.map((k) => {
       const pick = document.createElement('select');
       pick.setAttribute('aria-label', k.label);
@@ -876,54 +928,78 @@ async function extensionDetails(panel, id, dev) {
       pick.value = k.value;
       pick.addEventListener('change', async () =>
         drawPerms(await api.request('extension-site-permissions', { id, kind: k.kind, value: pick.value })));
-      const row = el('div', 'ext-setting');
-      const text = el('div', 'row-text');
-      text.append(el('span', 'row-label', k.label));
-      const holder = el('div', 'row-control');
-      holder.append(pick);
-      row.append(text, holder);
+      const row = el('div', 'ext-perm');
+      row.append(el('span', '', k.label), pick);
       return row;
     });
     const reset = smallButton('Reset permissions');
     reset.addEventListener('click', async () => drawPerms(await api.request('extension-site-permissions', { id, reset: true })));
-    const foot = el('div', 'ext-tools');
-    foot.append(reset);
-    perms.replaceChildren(...rows, foot);
+    const usage = el('div', 'ext-perm-head');
+    usage.append(el('span', 'row-hint', `Permissions for chrome-extension://${d.id || ''}`), reset);
+    perms.replaceChildren(usage, ...rows);
   };
-  const openPerms = smallButton('Site settings');
+  const openPerms = smallButton('', 'icon-more');
+  openPerms.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
   openPerms.setAttribute('aria-expanded', 'false');
-  openPerms.addEventListener('click', async () => {
+  const permItem = item('Site settings', '', openPerms);
+  permItem.classList.add('clickable');
+  const flip = async () => {
     perms.hidden = !perms.hidden;
     openPerms.setAttribute('aria-expanded', String(!perms.hidden));
     if (!perms.hidden) drawPerms(await api.request('extension-site-permissions', { id }));
-  });
-  line('Site settings', 'Its own pages’ camera, microphone, location and notifications.', openPerms);
-  list.append(perms);
-  if (d.options) line('Extension options', '', button('Open', 'options'));
-  if (d.source && d.source.url) line(`View in ${d.source.label}`, '', button('Open', 'store'));
+  };
+  permItem.addEventListener('click', (e) => { if (e.target === permItem || !e.target.closest('button') || e.target.closest('.icon-more')) flip(); });
+  parts.push(perms);
+  page.flipPerms = flip;
+  if (d.options) item('Extension options', '', link('Open', 'options'));
+  if (d.source && d.source.url) item(`View in ${d.source.label}`, '', link('Open', 'store'));
+  item('Source', d.source && d.source.label);
 
-  const parts = [facts, list];
   if (dev) {
+    const facts = el('dl', 'ext-facts');
+    const fact = (term, value) => {
+      if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) return;
+      facts.append(el('dt', '', term), el('dd', 'mono', Array.isArray(value) ? value.join(', ') : String(value)));
+    };
+    if (d.id && d.id !== (d.storeId || d.geckoId)) fact('Running as', `chrome-extension://${d.id}/`);
+    fact('Manifest', `Version ${d.manifestVersion}`);
+    fact('Background', d.background ? `${d.background}, ${d.running ? 'running' : 'stopped'}` : 'none');
+    fact('Popup', d.popup);
+    fact('Options page', d.options);
+    fact('Side panel', d.sidePanel);
+    fact('Optional', d.optionalPermissions);
+    fact('Content scripts', d.contentScripts.map((c) => `${c.matches.join(' ')} (${c.js} script, ${c.css} style${c.world === 'MAIN' ? ', page world' : ''})`));
+    fact('Keyboard shortcuts', d.commands.map((c) => (c.key ? `${c.name}: ${c.key}` : c.name)));
+    fact('Request rule sets', d.rules);
+    fact('Files pages may load', d.webAccessible ? String(d.webAccessible) : '');
+    fact('Page policy', d.csp);
+    fact('Folder', d.dir);
+    fact('Added', d.addedAt ? new Date(d.addedAt).toLocaleString() : '');
+    item('Manifest', facts);
     const tools = el('div', 'ext-tools');
-    tools.append(button('Copy ID', 'copy-id'));
-    if (d.background) tools.append(button(d.background === 'service worker' ? 'Inspect service worker' : 'Inspect background page', 'inspect-background'));
-    if (d.popup) tools.append(button('Inspect popup', 'inspect-popup'));
-    tools.append(button('View manifest', 'manifest'), button('Reload', 'reload', again), button('Show folder', 'reveal'));
-    const errors = el('div', 'ext-errors');
-    const logged = [...(d.startError ? [{ message: `It didn’t start: ${d.startError}`, source: '', line: 0 }] : []), ...d.errors];
-    errors.append(el('span', 'row-label', logged.length ? `Errors (${logged.length})` : 'No errors'));
-    if (logged.length) {
-      const ul = el('ul', 'mono');
-      for (const e of logged.slice().reverse()) {
-        const where = e.source ? ` (${e.source.replace(/^chrome-extension:\/\/[a-p]+\//, '')}${e.line ? `:${e.line}` : ''})` : '';
-        ul.append(el('li', '', `${e.message}${where}`));
-      }
-      errors.append(ul);
-      tools.append(button('Clear errors', 'clear-errors', again));
+    for (const [label, action] of [['Copy ID', 'copy-id'], ['View manifest', 'manifest'], ['Reload', 'reload'], ['Show folder', 'reveal']]) {
+      const b = smallButton(label);
+      b.addEventListener('click', () => run(action, action === 'reload' ? again : null));
+      tools.append(b);
     }
-    parts.push(tools, errors);
+    item('Developer tools', tools);
+    const logged = [...(d.startError ? [{ message: `It didn’t start: ${d.startError}`, source: '', line: 0 }] : []), ...d.errors];
+    const clear = smallButton('Clear all');
+    clear.addEventListener('click', () => run('clear-errors', again));
+    item(logged.length ? `Errors (${logged.length})` : 'Errors', logged.length
+      ? bullets(logged.slice().reverse().map((e) => `${e.message}${e.source ? ` (${e.source.replace(/^chrome-extension:\/\/[a-p]+\//, '')}${e.line ? `:${e.line}` : ''})` : ''}`), true)
+      : 'None', ...(logged.length ? [clear] : []));
   }
-  panel.replaceChildren(...parts, status);
+  const remove = smallButton('', 'icon-more');
+  remove.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>';
+  remove.addEventListener('click', async () => { await api.request('extension-remove', { id }); back(); });
+  const removeItem = item('Remove extension', '', remove);
+  removeItem.classList.add('clickable', 'danger');
+  removeItem.addEventListener('click', (e) => { if (e.target === removeItem || !e.target.closest('button')) remove.click(); });
+
+  const body = el('div', 'ext-page-body');
+  body.append(...parts, status);
+  page.replaceChildren(head, body);
 }
 
 /*
@@ -940,18 +1016,27 @@ function extensionRows(host) {
   // state arrives after the page is built.
   let on = false;
   let dev = false;
-  // The ones whose details are open, kept open when the list is drawn again.
-  const open = new Set();
+  // The extension whose own page is open in place of the list, if any.
+  let shown = null;
+  const page = document.createElement('div');
+  page.className = 'ext-page';
+  page.hidden = true;
+  host.append(page);
   const toggle = () => on;
   const render = async () => {
-    box.hidden = !toggle();
-    if (box.hidden) return;
+    box.hidden = !toggle() || Boolean(shown);
+    page.hidden = !toggle() || !shown;
+    if (!toggle()) return;
+    if (shown) {
+      await extensionPage(page, shown, dev, () => { shown = null; render(); });
+      return;
+    }
     const res = await api.request('extensions-list');
     const rows = ((res && res.items) || []).flatMap((ext) => {
       const where = ext.from === 'firefox' ? 'Firefox' : 'Chrome';
       const { row, control } = simpleRow(`${ext.name} ${ext.version}`,
         ext.error ? `${where} extension. It didn’t start: ${ext.error}`
-          : `${where} extension${dev && ext.publicId ? ` · ID ${ext.publicId}` : ''}`);
+          : `${where} extension${ext.off ? ' · Off' : ''}${dev && ext.publicId ? ` · ID ${ext.publicId}` : ''}`);
       // Its own logo before its name, as Chrome lists them.
       if (typeof ext.icon === 'string' && /^data:image\//.test(ext.icon)) {
         const img = document.createElement('img');
@@ -965,19 +1050,15 @@ function extensionRows(host) {
         await api.request('extension-remove', { id: ext.id });
         render();
       });
-      // Its details and settings, beside Remove, as Chrome has them.
+      // Its own page, opened beside Remove, as Chrome has it.
       const more = smallButton('Details');
-      const panel = document.createElement('div');
-      panel.className = 'row ext-dev';
-      const show = (shown) => {
-        panel.hidden = !shown;
-        more.setAttribute('aria-expanded', String(shown));
-        if (shown) { open.add(ext.id); extensionDetails(panel, ext.id, dev); } else open.delete(ext.id);
-      };
-      more.addEventListener('click', () => show(panel.hidden));
-      show(open.has(ext.id));
+      more.addEventListener('click', () => {
+        shown = ext.id;
+        render().then(() => host.closest('section')?.scrollIntoView({ block: 'start' }));
+      });
       control.append(more, remove);
-      return [row, panel];
+      if (ext.off) row.classList.add('ext-off');
+      return [row];
     });
     const { row: addRow, note, control } = simpleRow('Add an extension',
       'A .crx from Chrome, a .xpi from Firefox, or an unpacked folder.');

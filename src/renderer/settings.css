@@ -802,19 +802,39 @@ input[type="range"]:disabled { opacity: 0.4; }
   object-fit: contain;
 }
 
-/* An extension's developer details, under its row. */
-.row.ext-dev { display: grid; gap: var(--s3); align-items: start; background: var(--bg); }
-.ext-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px var(--s4); margin: 0; font-size: var(--fs-small); }
+/*
+ * One extension's own page, in place of the list, as Chrome draws it: a
+ * back arrow over its logo and name, then one item to a line, each its name
+ * over what it is, any control at the right.
+ */
+.ext-page { background: var(--bg-raised, transparent); }
+.ext-page-head { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border-soft); }
+.ext-page-name { margin: 0; font-size: var(--fs-body, 14px); font-weight: 600; }
+.ext-page-icon { width: 24px; height: 24px; object-fit: contain; }
+.icon-back, .icon-more { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--text-dim); cursor: pointer; }
+.icon-back:hover, .icon-more:hover { background: var(--wash-soft); color: var(--text); }
+.icon-back svg, .icon-more svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.icon-more[aria-expanded="true"] svg { transform: rotate(90deg); }
+.ext-item { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding: 12px var(--s4); border-bottom: 1px solid var(--border-soft); }
+.ext-item.clickable { cursor: pointer; }
+.ext-item.clickable:hover { background: var(--wash-soft); }
+.ext-item.danger .ext-item-label { color: var(--crit); }
+.ext-item-text { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.ext-item-label { font-weight: 500; }
+.ext-item-value { color: var(--text-dim); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.ext-item .row-control { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; flex: none; }
+.ext-bullets { margin: 0; padding-left: 18px; color: var(--text-dim); font-size: var(--fs-small); max-height: 220px; overflow: auto; }
+.ext-bullets li + li { margin-top: 2px; }
+.ext-sites { display: flex; gap: 6px; margin-top: 6px; }
+.ext-sites input { flex: 1; min-width: 0; }
+.ext-perms { padding: 4px var(--s4) 8px calc(var(--s4) + 16px); border-bottom: 1px solid var(--border-soft); }
+.ext-perm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: 8px 0; }
+.ext-perm { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: 6px 0; }
+.ext-status:empty { display: none; }
+.ext-status { display: block; padding: 8px var(--s4); }
+.row.ext-off .row-label { opacity: 0.6; }
+.ext-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px var(--s4); margin: 4px 0 0; font-size: var(--fs-small); }
 .ext-facts dt { color: var(--text-dim); }
 .ext-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.ext-dev .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-.ext-tools { display: flex; flex-wrap: wrap; gap: 6px; }
-.ext-errors ul { margin: 4px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; color: var(--text-dim); }
-.ext-errors li + li { margin-top: 2px; }
-
-/* Its settings, one line each, under its facts. */
-.ext-settings { display: grid; border-top: 1px solid var(--border); }
-.ext-setting { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding: 8px 0; border-bottom: 1px solid var(--border); }
-.ext-setting .row-control { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
-.ext-setting input[type="text"] { min-width: 200px; }
-.ext-perms { padding-left: var(--s4); }
+.ext-page .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.ext-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }

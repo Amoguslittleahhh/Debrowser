@@ -74,11 +74,12 @@ const LAYER_FILE = 'debrowser-layer.txt';
 const KEPT_FILES = ['debrowser-dnr.json', 'debrowser-alarms.json'];
 
 /**
- * Each extension's own settings, as Chrome's details page has them: which
+ * Each extension's own settings, as Chrome's details page has them: on or
+ * off (off, it stays installed but isn't loaded), which
  * sites it may reach, whether it is pinned beside the puzzle button, whether
  * it may read file:// pages, and whether its errors are kept.
  */
-const EXT_SETTINGS = { siteAccess: 'all', sites: [], fileAccess: false, collectErrors: true, pinned: false };
+const EXT_SETTINGS = { enabled: true, siteAccess: 'all', sites: [], fileAccess: false, collectErrors: true, pinned: false };
 
 /** A site as typed - "example.com" or a whole address - as its host name, or null. */
 function siteHost(text) {
@@ -1380,6 +1381,7 @@ class Extensions {
 
   async loadInto(ses, ext) {
     if (ses.__debrowserExt?.has(ext.id)) return { id: ext.id, ok: true };
+    if (!this.settingsOf(ext.id).enabled) return { id: ext.id, ok: true, off: true };
     this.refresh(ext);
     this.applyAccess(ext);
     try {
@@ -1571,7 +1573,9 @@ class Extensions {
     fs.writeFileSync(file, JSON.stringify(meta));
     this.settingCache?.delete(id);
     if (key === 'collectErrors' && !v) this.logged?.delete(id);
-    if (key === 'pinned' && this.hooks.pinsChanged) this.hooks.pinsChanged();
+    if ((key === 'pinned' || key === 'enabled') && this.hooks.pinsChanged) this.hooks.pinsChanged();
+    if (key === 'enabled' && !v) this.unloadEverywhere(id);
+    if (key === 'enabled' && v) await this.loadEverywhere(id);
     if (key === 'siteAccess' || key === 'sites' || key === 'fileAccess') await this.reload(id);
     return this.settingsOf(id);
   }
