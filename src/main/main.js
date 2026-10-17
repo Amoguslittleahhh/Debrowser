@@ -113,7 +113,7 @@ const contextMenu = require('./context-menu');
 const fs = require('fs');
 const path = require('path');
 const incognito = require('./incognito/mode');
-const { launchIncognito } = require('./incognito/launch');
+const { launchIncognito, sweepLogs: sweepIncognitoLogs } = require('./incognito/launch');
 const { Tripwire } = require('./incognito/tripwire');
 const { Tor, bundleDir: torBundleDir } = require('./incognito/tor');
 const bridges = require('./incognito/bridges');
@@ -439,6 +439,40 @@ if (STREAMVIEW_TEST) {
   if (INCOGNITO) incognito.wipe(incognitoCtx);
   app.quit();
 } else {
+  // A site asking for a client certificate during the handshake. Unanswered,
+  // Electron sends the first one in the system store - a work, ID-card or
+  // developer certificate carrying a real name - without a word to the user.
+  // A private window never sends one: it would say exactly who is browsing.
+  // The ordinary browser asks, and not sending is the default.
+  app.on('select-client-certificate', (event, _wc, url, list, callback) => {
+    event.preventDefault();
+    if (INCOGNITO || !Array.isArray(list) || list.length === 0) { callback(); return; }
+    let host = url;
+    try { host = new URL(url).host; } catch { /* keep the raw address */ }
+    const certs = list.slice(0, 5);
+    const label = (c) => `${c.subjectName || 'Unnamed'}${c.issuerName ? ` (issued by ${c.issuerName})` : ''}`;
+    Promise.resolve(ask(null, {
+      type: 'question',
+      message: `${host} is asking for a certificate`,
+      detail: 'Sending one tells the site who you are. Only send it to a site you trust and expected this from.',
+      buttons: ['Don’t send', ...certs.map(label)],
+      defaultId: 0,
+      cancelId: 0
+    })).then(({ response }) => callback(response > 0 ? certs[response - 1] : undefined),
+      () => callback());
+  });
+  // Web Bluetooth, likewise: unanswered, Electron connects the page to the
+  // first device in range with no chooser shown. There is no chooser here, so
+  // the request is cancelled, the way USB, HID and serial already are.
+  app.on('web-contents-created', (_event, wc) => {
+    wc.on('select-bluetooth-device', (event, _devices, callback) => {
+      event.preventDefault();
+      callback('');
+    });
+  });
+  // A private window's log left by a crash, or by this browser closing first.
+  if (!INCOGNITO && !OFFLINE_MODE) sweepIncognitoLogs();
+
   if (INCOGNITO) {
     // Holding the lock is what makes this safe: whatever is left in the profile
     // belongs to an incognito process that is no longer running.
@@ -452,14 +486,19 @@ if (STREAMVIEW_TEST) {
     // and "proceed anyway" is the button that makes that work. Electron already
     // refuses when nothing answers this event; it is answered here so the rule
     // is written down, and cannot be undone by some later handler that allows.
-    app.on('certificate-error', (event, _wc, url, error, _cert, callback) => {
+    app.on('certificate-error', (event, _wc, _url, error, _cert, callback) => {
       event.preventDefault();
-      console.error(`[debrowser] refused ${url}: ${error}`);
+      // Not the address: this goes to a log file outside the private profile.
+      console.error(`[debrowser] refused a certificate: ${error}`);
       callback(false);
     });
     // `exit` rather than `will-quit`: it also runs when something calls
     // `app.exit()` or `process.exit()`, which skip the quit events entirely.
-    process.on('exit', () => incognito.wipe(incognitoCtx));
+    process.on('exit', (code) => {
+      incognito.wipe(incognitoCtx);
+      // A failure leaves the log for the browser that started this to read.
+      if (code === 0) require('./incognito/launch').removeOwnLog();
+    });
     incognito.startReaper(incognitoCtx,
       platform.helperPath(process.platform === 'win32' ? 'net-watch.exe' : 'net-watch'), log);
 
@@ -1466,13 +1505,38 @@ function main() {
         });
         return res.canceled ? [] : res.filePaths;
       };
+      // A photo or video this cannot clean goes up only if the user says so.
+      const confirm = async (name) => (await ask(shell, {
+        type: 'warning',
+        message: `${name} may show where and when it was taken`,
+        detail: 'This browser can’t remove that from this kind of file. Upload it only if you don’t mind the site seeing it.',
+        buttons: ['Don’t upload', 'Upload anyway'],
+        defaultId: 0,
+        cancelId: 0
+      })).response === 1;
       require('./incognito/fingerprint').onCovered(
-        (tab) => require('./incognito/sanitise').interceptUploads(tab, uploads, pick, log));
+        (tab) => require('./incognito/sanitise').interceptUploads(tab, uploads, pick, log, confirm));
       // Files dropped or pasted into a page, from the page preload: images
       // come back without their metadata. Bytes in, bytes out; no paths.
       ipcMain.handle('debrowser:clean-files', (_event, files) => {
         if (!Array.isArray(files) || files.length > 100) return null;
-        const { stripImage } = require('./incognito/sanitise');
+        const { stripImage, carriesMetadata } = require('./incognito/sanitise');
+        // One that cannot be cleaned refuses the whole drop: the preload then
+        // delivers nothing, and the user is told how to send it on purpose.
+        const stuck = files.find((f) => {
+          const bytes = Buffer.from(f && f.bytes ? f.bytes : []);
+          return !stripImage(bytes) && carriesMetadata(bytes, f && f.name);
+        });
+        if (stuck) {
+          log('sanitise', `${String(stuck.name).slice(0, 80)}: not delivered, could not be cleaned`);
+          ask(shell, {
+            type: 'warning',
+            message: `${String(stuck.name).slice(0, 80)} wasn’t added`,
+            detail: 'It may show where and when it was taken, and this browser can’t remove that from this kind of file. To send it anyway, use the site’s upload button instead.',
+            buttons: ['OK']
+          });
+          return null;
+        }
         return files.map((f) => {
           const bytes = Buffer.from(f && f.bytes ? f.bytes : []);
           const result = stripImage(bytes);
@@ -6230,14 +6294,20 @@ async function askAndSave({ origin, offer, credentials, shell, log }) {
  */
 function fillSavedLogin(tab, credentials, prefs, log, vault = null) {
   if (!credentials || !tab || tab.internal) return;
-  // The feature is off until a passcode is set; see vault.js.
-  if (!vault || !vault.configured()) return;
+  // The feature is off until a passcode is set, and fills only while it is
+  // unlocked: a filled field is as readable as a revealed one - DevTools, the
+  // site's show-password eye - so the lock that guards Show guards this too.
+  if (!vault || !vault.unlocked()) return;
   if (!prefs || prefs.get('fillPasswords') === false) return;
   if (!credentials.capability().available) return;
+  // Never into plain http: anyone on the network can answer for the saved
+  // site there, and add a field of their own to collect the password.
+  if (!/^https:/i.test(String(tab.url || ''))) return;
 
   const matches = credentials.forOrigin(tab.url);
   if (matches.length !== 1) return;
 
+  vault.touch();
   // Through sendToPage, which refuses a stopped renderer. Reaching past it to
   // `wc.send` on a frozen tab segfaults the browser.
   tab.sendToPage('debrowser:credential-fill', matches[0]);

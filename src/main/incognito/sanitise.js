@@ -272,6 +272,24 @@ function stripImage(buf) {
   return stripJpeg(buf) || stripPng(buf) || stripWebp(buf) || stripHeif(buf);
 }
 
+/**
+ * Whether a file this could not clean is of a kind that carries where and
+ * when it was made: a photo stripImage did not understand (a slightly broken
+ * JPEG, say), a TIFF or camera raw, or a phone video, whose GPS sits in the
+ * container. Such a file used to go up as it was, without a word.
+ */
+const UNCLEANABLE_NAME = /\.(jpe?g|png|webp|hei[cf]|avif|tiff?|dng|cr[23]|nef|arw|orf|rw2|raf|mov|mp4|m4v|3gp|3g2|qt)$/i;
+function carriesMetadata(buf, name = '') {
+  if (UNCLEANABLE_NAME.test(String(name))) return true;
+  if (!buf || buf.length < 12) return false;
+  if (buf[0] === 0xff && buf[1] === 0xd8) return true;                                  // JPEG
+  if (buf.subarray(0, 8).equals(PNG_SIGNATURE)) return true;
+  const head = buf.toString('latin1', 0, 4);
+  if (head === 'II*\0' || head === 'MM\0*') return true;                               // TIFF and most raw
+  if (head === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return true;
+  return buf.toString('latin1', 4, 8) === 'ftyp';                                       // HEIF, MP4, MOV, 3GP
+}
+
 /* ------------------------------------------------------------------ */
 /* The picker                                                          */
 /* ------------------------------------------------------------------ */
@@ -284,7 +302,7 @@ function stripImage(buf) {
  * @param {string} dir        - where cleaned copies go: this run's private directory
  * @param {(opts) => Promise<string[]>} pick - shows the picker, resolves to paths
  */
-async function interceptUploads(tab, dir, pick, log = () => {}) {
+async function interceptUploads(tab, dir, pick, log = () => {}, confirm = async () => false) {
   const wc = tab.wc;
   // Page.enable first, and not optional: without it the interception is
   // accepted - `{}`, no error - and does nothing, and the native picker opens
@@ -297,13 +315,17 @@ async function interceptUploads(tab, dir, pick, log = () => {}) {
     wc.__sanitiserWired = true;
     wc.debugger.on('message', (_event, method, params) => {
       if (method !== 'Page.fileChooserOpened') return;
-      chosen(tab, dir, pick, params, log).catch((err) => log('sanitise', `upload failed: ${err.message}`));
+      chosen(tab, dir, pick, params, log, confirm).catch((err) => log('sanitise', `upload failed: ${err.message}`));
     });
   }
   return true;
 }
 
-async function chosen(tab, dir, pick, params, log) {
+/**
+ * @param {(name: string) => Promise<boolean>} confirm - asked about a file
+ *   that may carry its location and could not be cleaned; false leaves it out
+ */
+async function chosen(tab, dir, pick, params, log, confirm = async () => false) {
   const multiple = params.mode === 'selectMultiple';
   const picked = await pick({ multiple });
   if (!picked || !picked.length || !tab.wc || tab.wc.isDestroyed()) {
@@ -313,8 +335,23 @@ async function chosen(tab, dir, pick, params, log) {
   }
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const files = [];
-  for (const file of picked) files.push(cleanCopy(file, dir, log));
+  for (const file of picked) {
+    const out = cleanCopy(file, dir, log);
+    if (out !== file || !uncleanable(file)) { files.push(out); continue; }
+    if (await confirm(path.basename(file))) files.push(file);
+    else log('sanitise', `${path.basename(file)}: not uploaded, could not be cleaned`);
+  }
   await tab.cdp.send('DOM.setFileInputFiles', { files, backendNodeId: params.backendNodeId });
+}
+
+/** Whether `file` is one cleanCopy hands back unchanged though it may carry a location. */
+function uncleanable(file) {
+  let head = null;
+  try {
+    const fd = fs.openSync(file, 'r');
+    try { head = Buffer.alloc(16); fs.readSync(fd, head, 0, 16, 0); } finally { fs.closeSync(fd); }
+  } catch { return false; }
+  return carriesMetadata(head, file);
 }
 
 /** A copy of `file` with its image metadata removed, under the same name. */
@@ -458,6 +495,6 @@ function safeCopyName(file) {
 
 module.exports = {
   stripJpeg,
-  stripHeif, stripPng, stripWebp, stripImage, interceptUploads, cleanCopy,
+  stripHeif, stripPng, stripWebp, stripImage, carriesMetadata, interceptUploads, cleanCopy,
   countPages, flattenPdf, safeCopyName
 };

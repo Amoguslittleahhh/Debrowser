@@ -92,6 +92,7 @@ function childEnv(from = process.env) {
   delete env.DEBROWSER_TOR_PID;
   delete env.DEBROWSER_TOR_SEED;
   delete env.FONTCONFIG_FILE;
+  delete env.DEBROWSER_ERR_LOG;
   // Set by Electron in this process for its own window, and fatal inherited:
   // a private browser started with it had its zygote - the process every page
   // is forked from - exit before saying hello, and Chromium ended there
@@ -101,8 +102,37 @@ function childEnv(from = process.env) {
   return env;
 }
 
+/**
+ * The private browser's start-up logs, `debrowser-private-<hex>.log` in the
+ * temp folder. Each names addresses it refused, so none may outlive its
+ * window: the private browser deletes its own on a clean exit, this process
+ * deletes one when its child ends, and any left by a crash or by a browser
+ * that closed first go the next time one starts here.
+ */
+const ERR_LOG = /^debrowser-private-[0-9a-f]{12}\.log$/;
+const liveLogs = new Set();
+
+function sweepLogs(dir = os.tmpdir()) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return; }
+  for (const name of names) {
+    const full = path.join(dir, name);
+    if (ERR_LOG.test(name) && !liveLogs.has(full)) {
+      try { fs.rmSync(full, { force: true }); } catch { /* still open on Windows */ }
+    }
+  }
+}
+
+/** In the private browser: its own log, gone on a clean exit. */
+function removeOwnLog(env = process.env) {
+  const file = env.DEBROWSER_ERR_LOG;
+  if (!file || path.dirname(file) !== os.tmpdir() || !ERR_LOG.test(path.basename(file))) return;
+  try { fs.rmSync(file, { force: true }); } catch { /* still open on Windows */ }
+}
+
 function launchIncognito(log = () => {}, torExtra = [], state = {}) {
   const env = childEnv();
+  sweepLogs();
 
   try {
     // Fonts, on Linux: the private browser's font configuration has to be in
@@ -130,6 +160,7 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
     const errFile = path.join(os.tmpdir(), `debrowser-private-${crypto.randomBytes(6).toString('hex')}.log`);
     let errFd = 'ignore';
     try { errFd = fs.openSync(errFile, 'w', 0o600); } catch { errFd = 'ignore'; }
+    if (typeof errFd === 'number') { liveLogs.add(errFile); env.DEBROWSER_ERR_LOG = errFile; }
     const child = spawn(program, args, { detached: true, stdio: ['ignore', 'ignore', errFd], env });
     if (typeof errFd === 'number') fs.closeSync(errFd);
     child.on('error', (err) => log('incognito', `could not start: ${err.message}`));
@@ -141,6 +172,7 @@ function launchIncognito(log = () => {}, torExtra = [], state = {}) {
     const started = Date.now();
     child.on('exit', (code, signal) => {
       const why = failureReason(errFile);
+      liveLogs.delete(errFile);
       fs.rm(errFile, { force: true }, () => {});
       if ((code || signal) && state.onFail) state.onFail(code || signal, Date.now() - started, why);
     });
@@ -167,4 +199,4 @@ function failureReason(file) {
   return lines.slice(-2).map((l) => l.slice(0, 220)).join('\n');
 }
 
-module.exports = { launchIncognito, command, failureReason, childEnv };
+module.exports = { launchIncognito, command, failureReason, childEnv, sweepLogs, removeOwnLog };

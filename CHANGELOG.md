@@ -19,6 +19,16 @@
 - **A tab pulled quickly out of the strip comes out.** A quick pull straight down was past the strip before the browser noticed a drag had begun, and the tab stayed where it was. It now comes out however fast it is pulled.
 - **Dragging a tab out of the side panel follows the pointer all the way.** With the tabs down the side in the panel that slides away, the panel used to close as soon as a dragged tab left it, and the picture of the tab stopped where the panel went while the pointer carried on. The panel now stays out until the tab is let go. The picture also no longer starts as a blank white box, and it costs no memory of its own: it used to keep a hidden page of about 75 MB around after the first drag.
 
+### Security
+
+- **Sites can no longer take your certificates without asking.** A site that asked for a client certificate, such as a work, ID-card or developer certificate, was silently sent the first one on your computer, along with the name in it. Debrowser now asks which one to send, and sends none unless you choose one. Private windows never send one.
+- **Saved passwords fill only while they are unlocked.** With a passcode set, a saved password used to fill on its site even while Passwords was locked, where anyone at the computer could read it from the field. It now fills only after you've unlocked within the last few minutes. It also no longer fills on plain http pages, or into a field the page has hidden.
+- **Bluetooth devices aren't connected without asking.** A site could connect to a nearby Bluetooth device without being shown a chooser. Those requests are now refused.
+- **Private windows: each site keeps its own circuit, however long you browse.** After about twenty site changes, a new site could be put on the same Tor circuit as a tab still open on another site. A circuit in use by an open tab is no longer given to another.
+- **Private windows: nothing you visit is left in a temporary log.** The log a private window writes while it starts named addresses it refused. It no longer names them, it's deleted when the window closes cleanly, and any left behind by a crash are removed the next time Debrowser starts.
+- **Private windows: stronger protection against canvas and audio fingerprinting.** A page could undo the small changes made to what it reads from a canvas or from audio, and so read your computer's real fingerprint. The changes can no longer be read out or cancelled, and they now also cover video frames made from a canvas and every kind of audio analyser reading.
+- **Private windows: photos and videos that can't be cleaned aren't uploaded without asking.** A phone video, a HEIC or TIFF photo, or a slightly damaged JPEG went up with its location and time still in it. HEIC and AVIF photos you drag in are now cleaned too, and for a file that can't be, Debrowser asks before uploading it, or, if you dragged or pasted it, doesn't add it and tells you why.
+
 ## 2.4.0
 
 Debrowser 2.4.0 adds several windows with tabs you can drag out into their own, a friendlier first run in a typeface made to be easy to read, and, on Linux, a package for Fedora and openSUSE, an installer for any distribution from the terminal and Debrowser inside the terminal itself, with tabs and find; private windows give each site its own Tor circuit and try other bridges when Snowflake is blocked, and run on Tor 15.0.25.

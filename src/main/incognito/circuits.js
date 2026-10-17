@@ -81,13 +81,28 @@ class Circuits {
     return true;
   }
 
-  /** The slot handed out longest ago, or never. */
+  /**
+   * The slot handed out longest ago, or never - among those no open page is
+   * on. Reusing the oldest regardless put a long-lived tab (webmail, say) on
+   * the same circuit as whatever site another tab moved to some twenty sites
+   * later. Only with every slot held by an open page is one shared.
+   */
   nextSlot() {
+    const held = new Set();
+    for (const wc of webContents.getAllWebContents()) {
+      try {
+        if (!wc.isDestroyed()) held.add(mode.slotOf(wc.session));
+      } catch { /* gone */ }
+    }
     let best = FIRST_TAB_SLOT;
     let bestAt = Infinity;
-    for (let slot = FIRST_TAB_SLOT; slot < mode.POOL_SIZE; slot++) {
-      const at = this.handedOut.get(slot) ?? -1;
-      if (at < bestAt) { best = slot; bestAt = at; }
+    for (const free of [true, false]) {
+      for (let slot = FIRST_TAB_SLOT; slot < mode.POOL_SIZE; slot++) {
+        if (free && held.has(slot)) continue;
+        const at = this.handedOut.get(slot) ?? -1;
+        if (at < bestAt) { best = slot; bestAt = at; }
+      }
+      if (bestAt !== Infinity) break;
     }
     this.handedOut.set(best, ++this.clock);
     return best;

@@ -74,11 +74,25 @@ function scrubber(seed, cores, languages) {
   const next = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return state >>> 0; };
   const offsets = Array.from({ length: 64 }, () => next());
 
-  // Canvas: flip the low bit of a sparse, seed-chosen set of pixels.
+  // Which values change depends on the value as well as the place and the
+  // seed. On place and seed alone the change was a fixed mask: a blank canvas
+  // of the same size read it out, and drawing an exported image back in and
+  // reading it applied the mask twice, which undid it - either way the raw
+  // drawing, and with it the hardware, came back. Keyed on the value, a known
+  // input says nothing about any other, and a second pass is a new draw of
+  // the dice rather than the same one reversed.
+  const mix = (h) => {
+    h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+    h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+    return (h ^ (h >>> 16)) >>> 0;
+  };
+  // Canvas: flip the low bit of a sparse set of pixels. Fully transparent
+  // ones are left alone, so an empty canvas reads back empty.
   const blur = (data) => {
     for (let i = 0; i < data.length; i += 4) {
-      const k = (i >> 2) & 63;
-      if ((offsets[k] + (i >> 8)) % 23 === 0) data[i] ^= 1;
+      if (data[i + 3] === 0) continue;
+      const px = data[i] | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24);
+      if (mix(px ^ offsets[(i >> 2) & 63] ^ Math.imul(i >> 2, 0x9e3779b1)) % 23 === 0) data[i] ^= 1;
     }
     return data;
   };
@@ -124,14 +138,45 @@ function scrubber(seed, cores, languages) {
     });
   }
 
-  // Audio: the rendered samples of an offline context, and analyser output,
-  // shifted by a seed-derived amount far below anything audible.
+  // A drawing handed to video: `new VideoFrame(canvas)` and `copyTo` read the
+  // pixels without passing through anything above.
+  if (g.VideoFrame && originalGetImageData) {
+    const Original = g.VideoFrame;
+    const isCanvas = (src) => (g.HTMLCanvasElement && src instanceof g.HTMLCanvasElement) ||
+      (g.OffscreenCanvas && src instanceof g.OffscreenCanvas);
+    const VideoFrame = class VideoFrame extends Original {
+      constructor(src, ...rest) {
+        super(isCanvas(src) && src.width && src.height
+          ? blurredCopy(src, src.width, src.height, g.HTMLCanvasElement && src instanceof g.HTMLCanvasElement ? MakeCanvas : g.OffscreenCanvas)
+          : src, ...rest);
+      }
+    };
+    try { Object.defineProperty(g, 'VideoFrame', { value: VideoFrame, configurable: true, writable: true }); } catch { /* frozen */ }
+  }
+
+  // Audio: every sample read back is scaled by a seed- and value-derived
+  // amount far below anything audible. Scaled rather than shifted: a shift
+  // was the same at every value, so rendering silence read it out to be
+  // subtracted. Silence stays silence, and a known signal - a constant, say -
+  // tells a page the change at that value only.
+  const bits = new Uint32Array(1);
+  const asFloat = new Float32Array(bits.buffer);
+  const scale = (value, i) => {
+    asFloat[0] = value;
+    return value * (1 + (((mix(bits[0] ^ offsets[i & 63]) & 0xff) - 128) * 1e-8));
+  };
   const nudged = new WeakSet();
   const nudge = (arr) => {
     if (nudged.has(arr)) return arr;
     nudged.add(arr);
-    for (let i = 0; i < arr.length; i += 1) arr[i] += ((offsets[i & 63] & 0xff) - 128) * 1e-9;
+    for (let i = 0; i < arr.length; i += 1) arr[i] = scale(arr[i], i);
     return arr;
+  };
+  // Analyser bytes: the low bit of a sparse, value-chosen set.
+  const nudgeBytes = (arr) => {
+    for (let i = 0; i < arr.length; i += 1) {
+      if (mix(arr[i] ^ offsets[i & 63] ^ Math.imul(i, 0x9e3779b1)) % 23 === 0) arr[i] ^= 1;
+    }
   };
   if (g.AudioBuffer) {
     replace(g.AudioBuffer.prototype, 'getChannelData', (original) => function getChannelData(...args) {
@@ -139,14 +184,23 @@ function scrubber(seed, cores, languages) {
     });
     replace(g.AudioBuffer.prototype, 'copyFromChannel', (original) => function copyFromChannel(dest, ...rest) {
       original.call(this, dest, ...rest);
-      for (let i = 0; i < dest.length; i += 1) dest[i] += ((offsets[i & 63] & 0xff) - 128) * 1e-9;
+      for (let i = 0; i < dest.length; i += 1) dest[i] = scale(dest[i], i);
     });
   }
   if (g.AnalyserNode) {
-    replace(g.AnalyserNode.prototype, 'getFloatFrequencyData', (original) => function getFloatFrequencyData(arr) {
-      original.call(this, arr);
-      for (let i = 0; i < arr.length; i += 1) arr[i] += ((offsets[i & 63] & 0xff) - 128) * 1e-6;
-    });
+    const proto = g.AnalyserNode.prototype;
+    for (const name of ['getFloatFrequencyData', 'getFloatTimeDomainData']) {
+      replace(proto, name, (original) => function read(arr) {
+        original.call(this, arr);
+        for (let i = 0; i < arr.length; i += 1) arr[i] = scale(arr[i], i);
+      });
+    }
+    for (const name of ['getByteFrequencyData', 'getByteTimeDomainData']) {
+      replace(proto, name, (original) => function read(arr) {
+        original.call(this, arr);
+        nudgeBytes(arr);
+      });
+    }
   }
 }
 
