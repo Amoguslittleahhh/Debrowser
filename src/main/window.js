@@ -2432,8 +2432,8 @@ class BrowserShell {
     const choice = this.prefs ? this.prefs.get('tabBarColor') : 'default';
     if (choice === 'mirror') return this.prefs.get('accent');
     if (choice === 'default') {
-      // Down the side, pinned, the default is a tone of its own (`sideFor`).
-      return this.vertical() && !this.detached()
+      // Tucked away at the side, the default is a tone of its own (`sideFor`).
+      return this.detached()
         ? sideFor(this.prefs ? this.prefs.get('design') : 'legacy', this.lightTheme()) : this.surface();
     }
     return choice;
