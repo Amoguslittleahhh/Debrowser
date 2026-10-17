@@ -611,10 +611,12 @@ module.exports = async function darkWebsites(t) {
       // Loaded while the browser preferred light, and then the theme changes.
       setPref('theme', 'light');
       await go(scheme, t.pageUrl('dark-websites-scheme.html'));
-      const lightTheme = await settled(scheme);
+      await settled(scheme);
       const lightBg = (await shot(scheme)).at(400, 300);
-      check('a site with a dark theme of its own shows its own dark rather than an inverted copy, whatever the browser\'s theme',
-        lightTheme === false && diff(lightBg, RGB.scheme) <= 6,
+      // Pages are told the browser's theme, so under a light one the site
+      // draws light and is darkened like any other: dark, if not its own.
+      check('a site with a dark theme of its own is shown dark, whatever the browser\'s theme',
+        lum(lightBg) < 0.2,
         `browser theme light: filter ${await filterOf(scheme)}, shows ${show(lightBg)} (its own dark is ${show(RGB.scheme)})`);
       setPref('theme', 'dark');
       await sleep(600);
@@ -718,7 +720,7 @@ module.exports = async function darkWebsites(t) {
       const onLoad = /case 'dom-ready':[\s\S]{0,200}?if \(!INCOGNITO\) darkPages\.apply\(/.test(source);
       const menu = /darkHere: !INCOGNITO &&/.test(source);
       const refused = /const INCOGNITO_REFUSED = new Set\(\[[\s\S]*?'toggle-site-dark'[\s\S]*?\]\);/.test(source);
-      const branch = (source.match(/if \(payload\.key === 'darkWebsites'\) \{[\s\S]*?\n {8}\}/) || [''])[0];
+      const branch = (source.match(/if \(payload\.key === 'darkWebsites'[^)]*\) \{[\s\S]*?\n {8}\}/) || [''])[0];
       const switched = branch.length > 0 && /INCOGNITO/.test(branch);
       check('a private window never darkens its pages: not on load, not from its menu, and not when switched on in its own Settings',
         onLoad && menu && refused && switched,

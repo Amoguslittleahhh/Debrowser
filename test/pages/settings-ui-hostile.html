@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout: hostile</title>
+  <!--
+    A site that tries every way it has of reaching the browser's own controls:
+    the page bridge, Node, the browser's pages in a frame and by fetch, and the
+    new commands by name. What it managed is written into #report.
+  -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    input { display: block; margin: 2px 0 8px; padding: 4px; width: 300px; font: inherit; }
+    iframe { width: 200px; height: 80px; }
+  </style>
+</head>
+<body>
+  <form onsubmit="return false">
+    <label for="full">Full name</label>
+    <input id="full" autocomplete="name">
+    <label for="email">Email</label>
+    <input id="email" autocomplete="email">
+  </form>
+  <pre id="report">pending</pre>
+  <script>
+    const report = {
+      bridge: typeof window.debrowser,
+      require: typeof window.require,
+      process: typeof window.process,
+      ipcRenderer: typeof window.ipcRenderer,
+      sent: []
+    };
+    // Every new command and request, by name, through anything that looks like a bridge.
+    const names = ['sync-status', 'sync-start', 'sync-now', 'sync-stop', 'save-address', 'fill-address',
+      'fill-card-here', 'fill-address-here', 'translate-page', 'translate-selection', 'translate-original',
+      'toggle-site-dark', 'set-pref'];
+    for (const bridge of [window.debrowser, window.electron, window.api]) {
+      if (!bridge) continue;
+      for (const name of names) {
+        try { bridge.send && bridge.send(name, { key: 'darkWebsites', value: false, id: 'Home' }); report.sent.push(name); } catch (e) { /* refused */ }
+      }
+    }
+    const frame = document.createElement('iframe');
+    frame.src = 'debrowser://passwords';
+    document.body.append(frame);
+    report.fetch = 'pending';
+    fetch('debrowser://settings/settings.js').then(() => { report.fetch = 'loaded'; }, () => { report.fetch = 'refused'; })
+      .finally(() => { document.getElementById('report').textContent = JSON.stringify(report); });
+  </script>
+</body>
+</html>
