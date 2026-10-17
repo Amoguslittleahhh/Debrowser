@@ -668,6 +668,12 @@ const SECTIONS = {
       label: 'Chrome and Firefox extensions',
       hint: 'Add from the Chrome Web Store, Edge or Firefox Add-ons, or from a file; they open from the puzzle button beside the address bar. Never in private windows.',
       type: 'checkbox'
+    },
+    {
+      key: 'extensionsDeveloperMode',
+      label: 'Developer mode',
+      hint: 'Show each extension’s ID, manifest and errors, with tools to inspect and reload it.',
+      type: 'checkbox'
     }
   ],
 
@@ -734,12 +740,14 @@ function buildAll(state = {}) {
 }
 
 /*
- * One extension's developer details, as Chrome's developer mode has them and
- * more: its IDs, what it runs, its permissions and the parts of its manifest,
- * the errors its own code logged, and the tools - inspect its background or
- * popup, open its options or manifest, reload it, show its folder.
+ * One extension's details, as Chrome's details page has them: what it is,
+ * where it came from, its own settings - site access, pinned, file pages,
+ * its site settings - and its options and store page. With developer mode
+ * on, also its IDs, what it runs, its manifest's parts, the errors its own
+ * code logged, and the tools: inspect its background or popup, open its
+ * manifest, reload it, show its folder.
  */
-async function extensionDetails(panel, id, rerender) {
+async function extensionDetails(panel, id, dev) {
   const d = await api.request('extension-details', { id });
   if (!d) { panel.replaceChildren(document.createTextNode('This extension is no longer installed.')); return; }
   const el = (tag, cls, text) => {
@@ -748,66 +756,174 @@ async function extensionDetails(panel, id, rerender) {
     if (text !== undefined) n.textContent = text;
     return n;
   };
+  const again = () => extensionDetails(panel, id, dev);
   const facts = el('dl', 'ext-facts');
   const fact = (term, value, mono = false) => {
     if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) return;
     facts.append(el('dt', '', term), el('dd', mono ? 'mono' : '', Array.isArray(value) ? value.join(', ') : String(value)));
   };
-  fact('ID', d.storeId || d.geckoId || d.id, true);
-  if (d.id && d.id !== (d.storeId || d.geckoId)) fact('Running as', `chrome-extension://${d.id}/`, true);
-  fact('Version', d.version);
-  fact('Manifest', `Version ${d.manifestVersion}`);
-  fact('From', d.from === 'firefox' ? 'Firefox Add-ons or a .xpi' : 'Chrome Web Store, Edge Add-ons or a .crx');
+  const size = d.size >= 1048576 ? `${(d.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(d.size / 1024))} KB`;
   fact('Description', d.description);
-  fact('Background', d.background ? `${d.background}, ${d.running ? 'running' : 'stopped'}` : 'none');
-  fact('Popup', d.popup, true);
-  fact('Options page', d.options, true);
-  fact('Side panel', d.sidePanel, true);
-  fact('Permissions', d.permissions, true);
-  fact('Site access', d.hosts, true);
-  fact('Optional', d.optionalPermissions, true);
-  fact('Content scripts', d.contentScripts.map((c) => `${c.matches.join(' ')} (${c.js} script, ${c.css} style${c.world === 'MAIN' ? ', page world' : ''})`), true);
-  fact('Keyboard shortcuts', d.commands.map((c) => (c.key ? `${c.name}: ${c.key}` : c.name)), true);
-  fact('Request rule sets', d.rules, true);
-  fact('Files pages may load', d.webAccessible ? String(d.webAccessible) : '');
-  fact('Page policy', d.csp, true);
-  fact('Folder', d.dir, true);
-  fact('Added', d.addedAt ? new Date(d.addedAt).toLocaleString() : '');
+  fact('Version', d.version);
+  fact('Size', d.size ? size : '');
+  if (dev) {
+    fact('ID', d.storeId || d.geckoId || d.id, true);
+    if (d.id && d.id !== (d.storeId || d.geckoId)) fact('Running as', `chrome-extension://${d.id}/`, true);
+    fact('Manifest', `Version ${d.manifestVersion}`);
+    fact('Background', d.background ? `${d.background}, ${d.running ? 'running' : 'stopped'}` : 'none');
+  }
+  fact('Permissions', d.permissions, dev);
+  fact('Can reach', d.hosts, dev);
+  if (dev) {
+    fact('Popup', d.popup, true);
+    fact('Options page', d.options, true);
+    fact('Side panel', d.sidePanel, true);
+    fact('Optional', d.optionalPermissions, true);
+    fact('Content scripts', d.contentScripts.map((c) => `${c.matches.join(' ')} (${c.js} script, ${c.css} style${c.world === 'MAIN' ? ', page world' : ''})`), true);
+    fact('Keyboard shortcuts', d.commands.map((c) => (c.key ? `${c.name}: ${c.key}` : c.name)), true);
+    fact('Request rule sets', d.rules, true);
+    fact('Files pages may load', d.webAccessible ? String(d.webAccessible) : '');
+    fact('Page policy', d.csp, true);
+    fact('Folder', d.dir, true);
+    fact('Added', d.addedAt ? new Date(d.addedAt).toLocaleString() : '');
+  }
+  fact('Source', d.source && d.source.label);
 
-  const tools = el('div', 'ext-tools');
   const status = el('span', 'row-hint', '');
-  const tool = (label, action, enabled = true) => {
-    if (!enabled) return;
+  const button = (label, action, after) => {
     const b = smallButton(label);
     b.addEventListener('click', async () => {
       const r = await api.request('extension-dev', { id, action });
       status.textContent = r && r.ok ? (action === 'reload' ? 'Reloaded.' : action === 'copy-id' ? 'ID copied.' : '')
         : (r && r.error) || 'That didn’t work while it isn’t running.';
-      if (action === 'reload' || action === 'clear-errors') extensionDetails(panel, id, rerender);
+      if (after) after();
     });
-    tools.append(b);
+    return b;
   };
-  tool('Copy ID', 'copy-id');
-  tool(d.background === 'service worker' ? 'Inspect service worker' : 'Inspect background page', 'inspect-background', Boolean(d.background));
-  tool('Inspect popup', 'inspect-popup', Boolean(d.popup));
-  tool('Options', 'options', Boolean(d.options));
-  tool('View manifest', 'manifest');
-  tool('Reload', 'reload');
-  tool('Show folder', 'reveal');
 
-  const errors = el('div', 'ext-errors');
-  const list = [...(d.startError ? [{ message: `It didn’t start: ${d.startError}`, source: '', line: 0 }] : []), ...d.errors];
-  errors.append(el('span', 'row-label', list.length ? `Errors (${list.length})` : 'No errors'));
-  if (list.length) {
-    const ul = el('ul', 'mono');
-    for (const e of list.slice().reverse()) {
-      const where = e.source ? ` (${e.source.replace(/^chrome-extension:\/\/[a-p]+\//, '')}${e.line ? `:${e.line}` : ''})` : '';
-      ul.append(el('li', '', `${e.message}${where}`));
-    }
-    errors.append(ul);
-    tool('Clear errors', 'clear-errors');
+  // Its settings, one line each, as on Chrome's page.
+  const list = el('div', 'ext-settings');
+  const line = (label, hint, ...controls) => {
+    const row = el('div', 'ext-setting');
+    const text = el('div', 'row-text');
+    text.append(el('span', 'row-label', label));
+    if (hint) text.append(el('span', 'row-hint', hint));
+    const holder = el('div', 'row-control');
+    for (const c of controls) if (!c.getAttribute('aria-label')) c.setAttribute('aria-label', label);
+    holder.append(...controls);
+    row.append(text, holder);
+    list.append(row);
+    return row;
+  };
+  const set = (key, value) => api.request('extension-setting', { id, key, value });
+  const toggle = (key, { disabled = false, checked } = {}) => {
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = checked ?? d.settings[key] === true;
+    box.disabled = disabled;
+    box.addEventListener('change', async () => {
+      box.disabled = true;
+      await set(key, box.checked);
+      box.disabled = false;
+    });
+    return box;
+  };
+
+  const access = document.createElement('select');
+  access.setAttribute('aria-label', 'Site access');
+  for (const [value, name] of [['click', 'Only when you open it'], ['specific', 'On specific sites'], ['all', 'On all sites']]) {
+    const o = el('option', '', name);
+    o.value = value;
+    access.append(o);
   }
-  panel.replaceChildren(facts, tools, status, errors);
+  access.value = d.settings.siteAccess;
+  const sites = document.createElement('input');
+  sites.type = 'text';
+  sites.placeholder = 'example.com, another.org';
+  sites.setAttribute('aria-label', 'Sites it may reach');
+  sites.value = d.settings.sites.join(', ');
+  const saveSites = smallButton('Save');
+  const showSites = () => { sites.hidden = saveSites.hidden = access.value !== 'specific'; };
+  showSites();
+  access.addEventListener('change', async () => {
+    showSites();
+    await set('siteAccess', access.value);
+    again();
+  });
+  saveSites.addEventListener('click', async () => {
+    await set('sites', sites.value.split(/[\s,]+/).filter(Boolean));
+    again();
+  });
+  line('Site access', 'Which sites it may read and change. Changing this starts it again.', access, sites, saveSites);
+  line('Pin to toolbar', 'Its own button beside the puzzle button.', toggle('pinned'));
+  line('Allow in private windows', 'Debrowser never runs extensions in private windows.', toggle('private', { disabled: true, checked: false }));
+  line('Allow access to file URLs', 'Lets it read pages opened from files on this computer.', toggle('fileAccess'));
+  if (dev) line('Collect errors', 'Keep what its own code reports going wrong, listed below.', toggle('collectErrors'));
+
+  // Its site settings: what its own pages may use.
+  const perms = el('div', 'ext-perms');
+  perms.hidden = true;
+  const drawPerms = (r) => {
+    if (!r || !r.ok) { perms.replaceChildren(el('span', 'row-hint', 'Available while it is running.')); return; }
+    const rows = r.kinds.map((k) => {
+      const pick = document.createElement('select');
+      pick.setAttribute('aria-label', k.label);
+      for (const [value, name] of [['ask', 'Ask (default)'], ['allow', 'Allow'], ['block', 'Block']]) {
+        const o = el('option', '', name);
+        o.value = value;
+        pick.append(o);
+      }
+      pick.value = k.value;
+      pick.addEventListener('change', async () =>
+        drawPerms(await api.request('extension-site-permissions', { id, kind: k.kind, value: pick.value })));
+      const row = el('div', 'ext-setting');
+      const text = el('div', 'row-text');
+      text.append(el('span', 'row-label', k.label));
+      const holder = el('div', 'row-control');
+      holder.append(pick);
+      row.append(text, holder);
+      return row;
+    });
+    const reset = smallButton('Reset permissions');
+    reset.addEventListener('click', async () => drawPerms(await api.request('extension-site-permissions', { id, reset: true })));
+    const foot = el('div', 'ext-tools');
+    foot.append(reset);
+    perms.replaceChildren(...rows, foot);
+  };
+  const openPerms = smallButton('Site settings');
+  openPerms.setAttribute('aria-expanded', 'false');
+  openPerms.addEventListener('click', async () => {
+    perms.hidden = !perms.hidden;
+    openPerms.setAttribute('aria-expanded', String(!perms.hidden));
+    if (!perms.hidden) drawPerms(await api.request('extension-site-permissions', { id }));
+  });
+  line('Site settings', 'Its own pages’ camera, microphone, location and notifications.', openPerms);
+  list.append(perms);
+  if (d.options) line('Extension options', '', button('Open', 'options'));
+  if (d.source && d.source.url) line(`View in ${d.source.label}`, '', button('Open', 'store'));
+
+  const parts = [facts, list];
+  if (dev) {
+    const tools = el('div', 'ext-tools');
+    tools.append(button('Copy ID', 'copy-id'));
+    if (d.background) tools.append(button(d.background === 'service worker' ? 'Inspect service worker' : 'Inspect background page', 'inspect-background'));
+    if (d.popup) tools.append(button('Inspect popup', 'inspect-popup'));
+    tools.append(button('View manifest', 'manifest'), button('Reload', 'reload', again), button('Show folder', 'reveal'));
+    const errors = el('div', 'ext-errors');
+    const logged = [...(d.startError ? [{ message: `It didn’t start: ${d.startError}`, source: '', line: 0 }] : []), ...d.errors];
+    errors.append(el('span', 'row-label', logged.length ? `Errors (${logged.length})` : 'No errors'));
+    if (logged.length) {
+      const ul = el('ul', 'mono');
+      for (const e of logged.slice().reverse()) {
+        const where = e.source ? ` (${e.source.replace(/^chrome-extension:\/\/[a-p]+\//, '')}${e.line ? `:${e.line}` : ''})` : '';
+        ul.append(el('li', '', `${e.message}${where}`));
+      }
+      errors.append(ul);
+      tools.append(button('Clear errors', 'clear-errors', again));
+    }
+    parts.push(tools, errors);
+  }
+  panel.replaceChildren(...parts, status);
 }
 
 /*
@@ -823,6 +939,9 @@ function extensionRows(host) {
   // From the preference as the browser last sent it, not the box: the first
   // state arrives after the page is built.
   let on = false;
+  let dev = false;
+  // The ones whose details are open, kept open when the list is drawn again.
+  const open = new Set();
   const toggle = () => on;
   const render = async () => {
     box.hidden = !toggle();
@@ -831,7 +950,8 @@ function extensionRows(host) {
     const rows = ((res && res.items) || []).flatMap((ext) => {
       const where = ext.from === 'firefox' ? 'Firefox' : 'Chrome';
       const { row, control } = simpleRow(`${ext.name} ${ext.version}`,
-        ext.error ? `${where} extension. It didn’t start: ${ext.error}` : `${where} extension${ext.publicId ? ` · ID ${ext.publicId}` : ''}`);
+        ext.error ? `${where} extension. It didn’t start: ${ext.error}`
+          : `${where} extension${dev && ext.publicId ? ` · ID ${ext.publicId}` : ''}`);
       // Its own logo before its name, as Chrome lists them.
       if (typeof ext.icon === 'string' && /^data:image\//.test(ext.icon)) {
         const img = document.createElement('img');
@@ -845,18 +965,18 @@ function extensionRows(host) {
         await api.request('extension-remove', { id: ext.id });
         render();
       });
-      // Developer details: everything Chrome's developer mode has for it.
+      // Its details and settings, beside Remove, as Chrome has them.
       const more = smallButton('Details');
-      more.setAttribute('aria-expanded', 'false');
       const panel = document.createElement('div');
       panel.className = 'row ext-dev';
-      panel.hidden = true;
-      more.addEventListener('click', () => {
-        panel.hidden = !panel.hidden;
-        more.setAttribute('aria-expanded', String(!panel.hidden));
-        if (!panel.hidden) extensionDetails(panel, ext.id, render);
-      });
-      control.prepend(more);
+      const show = (shown) => {
+        panel.hidden = !shown;
+        more.setAttribute('aria-expanded', String(shown));
+        if (shown) { open.add(ext.id); extensionDetails(panel, ext.id, dev); } else open.delete(ext.id);
+      };
+      more.addEventListener('click', () => show(panel.hidden));
+      show(open.has(ext.id));
+      control.append(more, remove);
       return [row, panel];
     });
     const { row: addRow, note, control } = simpleRow('Add an extension',
@@ -895,7 +1015,8 @@ function extensionRows(host) {
   };
   api.onState((state) => {
     const now = state?.prefs?.extensions === true;
-    if (now !== on) { on = now; render(); }
+    const devNow = state?.prefs?.extensionsDeveloperMode === true;
+    if (now !== on || devNow !== dev) { on = now; dev = devNow; render(); }
   });
   render();
 }

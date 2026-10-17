@@ -2491,4 +2491,7 @@ body[data-windows="several"] .strip-count::before {
    nearer each other than the toolbar's gap, and tucked up against the memory
    meter (the task manager) they sit beside. */
 .toolbar > #extensions { margin-right: -4px; }
+.pinned-extensions { display: flex; align-items: center; }
+.pinned-extensions[hidden] { display: none; }
+.pinned-ext img { width: 16px; height: 16px; object-fit: contain; }
 .toolbar > #downloads { margin-right: -10px; }
