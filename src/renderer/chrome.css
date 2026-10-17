@@ -2270,7 +2270,7 @@ body.calm[data-band="true"][data-layout="left"]::before { transition: none !impo
  * `--omni-side`, and below a width where that would leave it too narrow it goes
  * back to filling the gap.
  */
-body:not([data-layout="left"]) .omnibox { --omni-side: 240px; }
+body:not([data-layout="left"]) .omnibox { --omni-side: 234px; }
 body.incognito .omnibox { --omni-side-extra: 110px; }
 @media (min-width: 900px) {
   body:not([data-layout="left"]) .omnibox,
@@ -2282,7 +2282,7 @@ body.incognito .omnibox { --omni-side-extra: 110px; }
        by `fitOmnibox` in chrome.js, because the right side holds a private
        pill whose words change and buttons that come and go. A constant alone
        let the onion button slide under the bar in a private window. */
-    width: min(760px, calc(100vw - 2 * max(var(--omni-side) + var(--omni-side-extra, 0px), var(--omni-fit, 0px))));
+    width: min(840px, calc(100vw - 2 * max(var(--omni-side) + var(--omni-side-extra, 0px), var(--omni-fit, 0px))));
     margin: 0;
     transform: translate(-50%, -50%);
   }
