@@ -1,0 +1,937 @@
+/*
+ * The design system: type, colour, space, elevation and motion, in one file.
+ *
+ * Every view the browser draws itself links this first and then its own layout
+ * rules. It lives in one file because it was previously copied into each of
+ * them, and a copied palette is one that drifts - the panel's light background
+ * was already a different grey from the chrome's for no reason anyone chose.
+ *
+ * Nothing here costs anything at runtime: custom properties are resolved during
+ * style recalculation, and no rule below animates, filters or loads a resource.
+ *
+ * The one rule that governs all of it: the chrome is a live renderer for the
+ * whole life of the window, so it uses no web fonts, no images, and no effect
+ * that forces an offscreen layer.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Type                                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Aptos, then Calibri, then whatever the system has.
+ *
+ * Both are humanist sans faces with open apertures and rounded terminals, which
+ * is a different voice from the neutral grotesques desktop UI defaults to
+ * (Segoe UI, Roboto, Helvetica) - warmer, and easier on a long list of tab
+ * titles. Aptos is first because it is the newer of the two and ships with
+ * current Office and Windows; Calibri is the twenty-year incumbent and is on
+ * every Windows and every machine with Office installed.
+ *
+ * Neither can be bundled: both are Microsoft's and not redistributable. So the
+ * stack degrades, and names `Carlito` explicitly before the system default -
+ * Carlito is metric-compatible with Calibri, is under the Open Font License and
+ * is one `apt install fonts-crosextra-carlito` away on Linux. A machine with it
+ * gets the same layout to the pixel; a machine without it gets its own UI face
+ * and nothing looks broken.
+ *
+ * Two measured consequences, both of which the rest of this file is built
+ * around. Measured with canvas text metrics at 200px, not taken on trust:
+ *
+ *   x-height / em      Calibri 0.480   Segoe-class 0.50-0.53   DejaVu 0.550
+ *   advance, 54 chars  Calibri  303px  Arial-metric 333px      DejaVu 379px
+ *
+ * Calibri sets around 10% narrower and its x-height is roughly 10% shorter than
+ * the faces this UI was drawn for, so at an unchanged 13px it reads small and
+ * loose. The base size is 14px here for that reason: 14 x 0.48 = 6.7px of
+ * x-height, against 13 x 0.53 = 6.9px before. The same apparent size, in less
+ * horizontal space.
+ */
+:root {
+  --font-ui: Aptos, Calibri, Carlito, "Segoe UI Variable Text", "Segoe UI",
+             system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
+
+  /*
+   * Sizes, and there are deliberately only six.
+   *
+   * A scale with a step for every occasion is how an interface ends up with
+   * nine sizes doing the work of four. These are the ones the browser actually
+   * needs, named for their job rather than for their size, so a change is made
+   * once.
+   */
+  --fs-micro: 12px;     /* stat labels, the one-line footer; 12px is the floor for text anywhere */
+  --fs-small: 13px;     /* hints, shortcuts, secondary lines */
+  --fs-body: 14px;      /* everything the user reads */
+  --fs-lead: 16px;      /* a figure worth reading first */
+  --fs-title: 19px;     /* a page's own name */
+  --fs-hero: 34px;      /* the new tab wordmark, and nothing else */
+
+  /*
+   * Two weights, because Calibri has two.
+   *
+   * Measured: at 13px, `font-weight` 300, 400 and 500 all rasterise to exactly
+   * the same advance width in Calibri, and 600 and 700 to another - the face
+   * ships Regular and Bold and nothing between. So a stylesheet asking for 550
+   * or 600 to mean "slightly stronger" gets full bold, and a UI with bold in
+   * every third row reads as shouting.
+   *
+   * Emphasis is therefore carried by colour and size, and weight is spent only
+   * where something genuinely leads: a page title, a live figure, the tab in
+   * front of you.
+   */
+  --fw-regular: 400;
+  --fw-bold: 700;
+
+  --lh-tight: 1.25;     /* headings and single-line rows */
+  --lh-body: 1.45;      /* anything that can wrap */
+
+  /* Calibri is loose at heading sizes, so headings are pulled in slightly. */
+  --ls-title: -0.01em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Colour                                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Ink and paper, not blue-black and cobalt.
+ *
+ * The palette this replaces was `#16181d` surfaces under a `#5b8cff` accent:
+ * a blue-tinted near-black with a saturated cornflower blue on top. That is the
+ * default of every dark interface generated in the last two years, and it is
+ * what made this browser look like something assembled rather than designed -
+ * you can name the theme from a thumbnail.
+ *
+ * So the base is a *warm* neutral. Red and green sit a shade above blue in
+ * every surface below, which is a difference of two or three points per channel
+ * and never reads as brown - it reads as ink rather than as screen. Against it
+ * the one accent is a petrol teal: cool on a warm ground, which is the oldest
+ * pairing there is, and far enough from the alert colours that no two things in
+ * this browser can be confused for each other.
+ *
+ * The rule that keeps it minimal: colour means something. Surfaces are
+ * neutral, the accent marks what is selected or focused, and the three
+ * semantic colours are spent on state and nothing else. Nothing here is
+ * coloured to be interesting.
+ */
+:root {
+  /*
+   * Tell the engine which way round this UI is.
+   *
+   * Without it every control the *engine* draws - a checkbox, a scrollbar, a
+   * select's dropdown, the text caret, an autofill highlight - is rendered with
+   * light styling, because `color-scheme` defaults to `normal` and nothing in a
+   * stylesheet changes that. Our own CSS cannot reach them: a checkbox with
+   * `appearance: auto` is painted by Chromium, not by us.
+   *
+   * Photographed, which is how it was found: the unchecked box on Settings' own
+   * "Reduce motion" row was a stark white square on a dark page, beside checked
+   * boxes that looked fine, and the scrollbar beside it was a light track. One
+   * declaration fixes every one of them at once.
+   */
+  color-scheme: dark;
+
+  --bg: #161614;
+  --bg-raised: #1e1e1b;
+  --bg-input: #252521;
+  --border: #33332e;
+  /* A second, quieter rule for dividers *inside* a surface. One border weight
+     for both the edge of a card and the lines between its rows makes a list
+     read as a table. */
+  --border-soft: #24241f;
+  --text: #eae7e0;
+  --text-dim: #b2afa8;
+
+  /*
+   * One accent, and it has to work on both palettes.
+   *
+   * `--accent` is written to <body> as an inline style from the user's
+   * preference, so a per-theme override in this file could never win - which
+   * means the value has to be legible on warm paper *and* on warm ink. This
+   * teal is the darkest one that still reads on the dark palette and the
+   * lightest that still passes on the light one. Small text is never set in it
+   * for that reason; it marks, fills and rings.
+   */
+  --accent: #2f857b;
+
+  /* State, and only state. Far enough apart in hue and in lightness that the
+     tier dots are distinguishable at 6px without reading their tooltips. */
+  --ok: #6f9f6a;
+  --warn: #c9953f;
+  /* Readable as text at 4.5:1 on every surface it sits on; the light palette
+     has its own, below. */
+  --crit: #d97866;
+  /* A private window's own colour, and nothing else's: the pill, the onion
+     button, the tint on its toolbar. */
+  --private: #8a6bd1;
+
+  /*
+   * The site chip's colour, as saturation and lightness rather than as a
+   * colour.
+   *
+   * Every chip's hue is set per element by `siteHue()`, and a custom property
+   * that referenced `--hue` would be substituted against the element that
+   * *declares* it - the root, where there is no hue - so the colour itself
+   * cannot be a token. These can: each view writes one rule using them, the
+   * theme swaps the numbers, and the six near-identical blocks that used to
+   * exist in four stylesheets are gone.
+   */
+  --chip-fg-s: 34%;
+  --chip-fg-l: 70%;
+  --chip-bg-s: 22%;
+  --chip-bg-l: 24%;
+
+  /* Tighter than they were. A 13px radius on a 34px control is most of the way
+     to a pill, and everything ends up looking soft; at 12 and below the shape
+     still reads as considered without rounding off what it is. */
+  /*
+   * One icon system, rather than icons collected from different places.
+   *
+   * They were 16px, 15px and 14px at stroke weights of 1.6, 1.4 and 1.3,
+   * depending on which file drew them - which is invisible in any one view and
+   * obvious the moment two sit near each other: the same glyph looked heavier
+   * in the toolbar than in the menu it opened. Size is a token because a
+   * smaller icon beside body text is a real decision; weight is a single value
+   * because an icon set has one weight.
+   */
+  --icon: 16px;
+  --icon-sm: 14px;
+  --icon-stroke: 1.5;
+
+  --radius-sm: 5px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /*
+   * Space, on a 4px grid.
+   *
+   * Named by step rather than by use, because the same gap means different
+   * things in different views and naming it `--gap-row` in one of them is how
+   * a token ends up used for something it was not meant for.
+   */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 28px;
+  --s7: 40px;
+}
+
+/*
+ * Three ways to reach the light palette, and they are not redundant.
+ *
+ * `prefers-color-scheme` follows the OS, which is the default and what most
+ * people want. But a user who explicitly picks Light in Settings must get it on
+ * a machine set to dark, and vice versa - a media query alone cannot express
+ * that, so an explicit choice is stamped on <body> and wins over the OS.
+ */
+/*
+ * The light palette is paper, on the same terms: warm, and not white.
+ *
+ * `#ffffff` under `#f4f5f8` was the other half of the stock look. Card on page
+ * here is a warm off-white on a warmer ground, which is the difference between
+ * a document and a dialog box.
+ */
+@media (prefers-color-scheme: light) {
+  body:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f3f1ec;
+    --bg-raised: #fbfaf7;
+    --bg-input: #fffefc;
+  --crit: #a8483b;
+  /* Status colours dark enough to read as text on the light palette. */
+  --ok: #4b6c48;
+  --warn: #815f28;
+    --border: #dcd7cc;
+    --border-soft: #e9e5db;
+    --text: #201f1c;
+    --text-dim: #555147;
+    --chip-fg-s: 34%;
+    --chip-fg-l: 32%;
+    --chip-bg-s: 30%;
+    --chip-bg-l: 90%;
+  }
+}
+
+body[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f1ec;
+  --bg-raised: #fbfaf7;
+  --bg-input: #fffefc;
+  --crit: #a8483b;
+  /* Status colours dark enough to read as text on the light palette. */
+  --ok: #4b6c48;
+  --warn: #815f28;
+  --border: #dcd7cc;
+  --border-soft: #e9e5db;
+  --text: #201f1c;
+  --text-dim: #555147;
+  --chip-fg-s: 34%;
+  --chip-fg-l: 32%;
+  --chip-bg-s: 30%;
+  --chip-bg-l: 90%;
+}
+
+body[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161614;
+  --bg-raised: #1e1e1b;
+  --bg-input: #252521;
+  --border: #33332e;
+  --border-soft: #24241f;
+  --text: #eae7e0;
+  --text-dim: #b2afa8;
+  --chip-fg-s: 34%;
+  --chip-fg-l: 70%;
+  --chip-bg-s: 22%;
+  --chip-bg-l: 24%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Designs                                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A design is a set of neutrals, radii and faces - never a colour of its own.
+ * The accent, the strip colour and its translucency are the user's and apply
+ * on top of every design unchanged; `theme` still picks light or dark inside
+ * it. The palettes above are the Legacy design and stay exactly as they were.
+ *
+ * Each design is written three times for the same reason the Legacy palette
+ * is: dark by default, light when the system says so and nothing overrides it,
+ * and light when chosen outright. The selectors carry the design attribute, so
+ * they outrank the Legacy blocks they sit after.
+ *
+ * Faces are system faces, as everywhere else in this file: the chrome is alive
+ * for the life of the window and loads no fonts. `--font-display` is the one
+ * serif the new tab page and page titles use; `--font-mono` is Grid's labels.
+ */
+:root {
+  --font-display: "Iowan Old Style", Charter, "Bitstream Charter", "Source Serif Pro",
+                  "Noto Serif", Georgia, serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
+}
+
+/*
+ * On a Mac, the Mac's own face: San Francisco, at the 13px macOS sets its
+ * interface in. The Calibri tuning above is for Windows; a Mac with Office
+ * installed has Calibri too, and was given it ahead of the system font - the
+ * one thing that most makes an app look like it was not made for the Mac.
+ * Grid keeps its grotesque and Paper its serif headings; this is the body face.
+ */
+body[data-platform="darwin"] {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --fs-body: 13px;
+  --ls-title: -0.015em;
+}
+
+/*
+ * The face for reading: Atkinson Hyperlegible Next, by the Braille Institute,
+ * drawn so that letters which are easily confused - I, l and 1; O and 0; rn and
+ * m - never are, at small sizes and for people who see less well. Bundled
+ * (fonts/, SIL Open Font License, OFL.txt) because the stack it replaces was a
+ * different face on every system - Aptos, Calibri, or on Linux whatever stood
+ * in for Calibri - and so a different-looking browser on each. Only the Latin
+ * subsets, 110 KB, read from disk; other scripts fall through to the system's.
+ *
+ * Ledger and Paper only: Grid's grotesque and Legacy's look are what those
+ * designs are. And not on a Mac, which keeps San Francisco (above) - the face
+ * every Mac app is set in.
+ */
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: italic;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-ext-wght-italic.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: italic;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-wght-italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url("fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+body[data-design="ledger"]:not([data-platform="darwin"]),
+body[data-design="paper"]:not([data-platform="darwin"]) {
+  --font-ui: "Atkinson Hyperlegible Next", Aptos, Calibri, Carlito, "Segoe UI Variable Text", "Segoe UI",
+             system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
+}
+
+/* Ledger: sage and pine by light, near-black green by dark. Soft corners. */
+body[data-design="ledger"] {
+  color-scheme: dark;
+  --bg: #131514; --bg-raised: #1a1c1b; --bg-input: #212422;
+  --border: #2e322f; --border-soft: #222523;
+  --text: #e6e8e4; --text-dim: #aaafab;
+  --radius-sm: 6px; --radius: 8px; --radius-lg: 16px;
+}
+@media (prefers-color-scheme: light) {
+  body[data-design="ledger"]:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #e4e8e1; --bg-raised: #f7f8f5; --bg-input: #ffffff;
+    --border: #cdd3cb; --border-soft: #e1e5df;
+    --text: #1c2320; --text-dim: #454d49;
+  }
+}
+body[data-design="ledger"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #e4e8e1; --bg-raised: #f7f8f5; --bg-input: #ffffff;
+  --border: #cdd3cb; --border-soft: #e1e5df;
+  --text: #1c2320; --text-dim: #454d49;
+}
+
+/* Paper: warm paper by light, warm ink by dark. Barely rounded. */
+body[data-design="paper"] {
+  color-scheme: dark;
+  --bg: #1b1916; --bg-raised: #22201c; --bg-input: #2a2722;
+  --border: #3a3630; --border-soft: #2e2b26;
+  --text: #ede7da; --text-dim: #b8b1a7;
+  --radius-sm: 3px; --radius: 4px; --radius-lg: 10px;
+}
+@media (prefers-color-scheme: light) {
+  body[data-design="paper"]:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4f1ea; --bg-raised: #fbfaf6; --bg-input: #ffffff;
+    --border: #d9d3c7; --border-soft: #e6e1d6;
+    --text: #1e1c19; --text-dim: #555149;
+  }
+}
+body[data-design="paper"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f1ea; --bg-raised: #fbfaf6; --bg-input: #ffffff;
+  --border: #d9d3c7; --border-soft: #e6e1d6;
+  --text: #1e1c19; --text-dim: #555149;
+}
+
+/* Grid: black and white, square, a neo-grotesque face. */
+body[data-design="grid"] {
+  color-scheme: dark;
+  --font-ui: "Helvetica Neue", Helvetica, Arial, "Liberation Sans", "Nimbus Sans", sans-serif;
+  --bg: #0a0a0a; --bg-raised: #111111; --bg-input: #1a1a1a;
+  --border: #3a3a3a; --border-soft: #1f1f1f;
+  --text: #f2f2f2; --text-dim: #a5a5a5;
+  --radius-sm: 0px; --radius: 0px; --radius-lg: 0px; --radius-pill: 0px;
+}
+@media (prefers-color-scheme: light) {
+  body[data-design="grid"]:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #ffffff; --bg-raised: #ffffff; --bg-input: #f2f2f2;
+    --border: #cfcfcf; --border-soft: #ececec;
+    --text: #0f0f0f; --text-dim: #515151;
+  }
+}
+body[data-design="grid"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff; --bg-raised: #ffffff; --bg-input: #f2f2f2;
+  --border: #cfcfcf; --border-soft: #ececec;
+  --text: #0f0f0f; --text-dim: #515151;
+}
+
+/*
+ * Anything defined in terms of another custom property belongs on <body>, not
+ * on :root, and this is not a detail.
+ *
+ * `var()` inside a custom property is substituted where the property is
+ * *declared*, not where it is used. Both palette overrides above are on <body>,
+ * so a `--strip: var(--bg)` declared on :root computes against the root's
+ * value - the dark one - and inherits that down even when the light palette is
+ * in force. The tab strip was painted dark in the light theme for exactly that
+ * reason, on every view that draws one. Declared here, it resolves against the
+ * palette that actually applies.
+ *
+ * An explicit strip colour set in Settings is written to `body.style` by
+ * theme.js, which is an inline declaration and outranks this.
+ */
+body {
+  /* The tab strip's own colour, unless one has been chosen. */
+  --strip: var(--bg);
+  /* The accent where it carries text; theme.js replaces both with values
+     worked out to pass 4.5:1 for the accent and palette in use. */
+  --accent-fill: var(--accent);
+  --accent-text: var(--accent);
+
+  /*
+   * One tint, derived from the accent, for every surface and state that needs
+   * to be something other than another grey.
+   *
+   * The chrome used to be four values of the same neutral - strip, toolbar,
+   * tab, hover - and read as a wireframe of a browser rather than as one. A few
+   * percent of the accent in each surface, and more of it in the states that
+   * mean something, gives the whole UI a colour identity that follows whatever
+   * accent the user picked, with nothing new to theme.
+   *
+   * Kept at single digits on surfaces. The moment a background is obviously
+   * tinted it stops being a surface and starts being a decoration.
+   */
+  --tint-1: color-mix(in srgb, var(--accent) 4%, var(--strip));
+  --tint-2: color-mix(in srgb, var(--accent) 2%, var(--bg-input));
+  --wash: color-mix(in srgb, var(--accent) 14%, transparent);
+  --wash-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+
+  /*
+   * The controls Chromium draws follow the accent too.
+   *
+   * `color-scheme` above tells the engine which way round the UI is, but it has
+   * nothing to say about colour: a checked checkbox, a radio, a range slider
+   * and a progress bar are all painted in Chromium's *own* accent, which is a
+   * saturated blue. Photographed on Settings: a column of bright blue
+   * checkboxes and a blue slider beside a browser with no blue anywhere else in
+   * it - the one part of the palette a stylesheet cannot reach by styling the
+   * element, because the element is not ours to style.
+   */
+  accent-color: var(--accent);
+
+  /*
+   * Focus, as one token used everywhere.
+   *
+   * A ring outside the box rather than a thicker border: a border that grows on
+   * focus moves everything beside it, and a control that shifts as you tab onto
+   * it is the clearest sign nobody tabbed onto it while building the thing.
+   */
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 42%, transparent);
+
+  /*
+   * Elevation, and there is exactly one shadow in this browser's own UI.
+   *
+   * It belongs to the menu, which floats over a page it has no other separation
+   * from, and it is affordable there because that view is created when the menu
+   * opens and destroyed when it closes. A shadow on the chrome would be a blur
+   * pass held for the life of the window.
+   */
+  /* Layered as macOS draws a popover: a hairline edge, a tight contact shadow
+     and a wide, faint one, so it lifts off any surface - light or dark -
+     without a heavy halo. */
+  --shadow-menu: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 2px 6px -1px rgba(18, 16, 12, 0.22),
+                 0 18px 44px -12px rgba(18, 16, 12, 0.5);
+}
+
+/* Battery mode: a steady text cursor rather than a blinking one, which
+   redraws twice a second for as long as a field has focus (chrome-preload.js,
+   watchSaver). */
+:root[data-saver] * { caret-animation: manual; }
+
+/* The shared close cross - see `crossIcon()` in theme.js. */
+.x-icon {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+}
+
+/* ------------------------------------------------------------------ */
+/* The site chip                                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A site's logo, over its letter, in one component.
+ *
+ * Four views draw this - history, downloads, the new tab tiles and the flyout -
+ * and two of them held byte-identical copies of these rules. That is the drift
+ * this file exists to prevent, and it had already cost one real bug: the chip
+ * kept painting *behind* transparent favicons, so every site logo in the
+ * browser sat on a coloured tile with the site's initial showing through it.
+ * Fixing that in four places is how it comes back in the fifth.
+ *
+ * `--hue` is set per element by `siteHue()` in theme.js, which is shared for
+ * the same reason: one site has to be one colour everywhere, or the colour
+ * means nothing at all.
+ */
+.chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  /* Desaturated well below what a hue rotation gives by default: at the 45%
+     these used to carry, a list of them reads as a paint chart, and the whole
+     job of the colour is to tell two sites apart at a glance. */
+  color: hsl(var(--hue, 220) var(--chip-fg-s) var(--chip-fg-l));
+  background: hsl(var(--hue, 220) var(--chip-bg-s) var(--chip-bg-l));
+}
+
+.site-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+}
+
+/*
+ * And the chip stops painting once a real icon has loaded.
+ *
+ * Almost no favicon is opaque and square - most are transparent PNG or SVG, and
+ * `object-fit: contain` letterboxes the rest - so a chip left painting behind
+ * one shows through it and around it. `body` on the selector because the theme
+ * blocks qualify their own chip rules and would otherwise win.
+ */
+/* The browser's own mark (ownMark in theme.js): its outline in the text
+   colour, its dot in the accent, on no tile at all - it is not a site. */
+body :is(.chip, .tab-chip).own {
+  background: none;
+  color: var(--text);
+}
+:is(.chip, .tab-chip).own svg { width: 100%; height: 100%; display: block; }
+:is(.chip, .tab-chip).own circle { fill: var(--accent); }
+
+body .chip.has-icon {
+  background: none;
+  color: transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion                                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Every animation in this browser is a transform or an opacity change on a
+ * small element, so it stays on the compositor and never causes layout - the
+ * chrome is a live renderer for the whole life of the window, and an animation
+ * that reflows it would undo part of what the governor saves.
+ */
+/*
+ * Three curves, each with one job (Material 3's standard and emphasized
+ * pair; Fluent 2 carries the same shapes):
+ *
+ *   --ease       something already on screen moving or changing
+ *   --ease-out   something arriving - fast start, long settle, which is what
+ *                makes a menu feel like it answered rather than loaded
+ *   --ease-in    something leaving, and leaving quicker than it came
+ *
+ * Hover colour goes on in --fast and comes off slower (--slow), so sweeping
+ * the pointer across a row of controls leaves a short trail rather than a
+ * strobe.
+ */
+:root {
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Apple's own arrival curve - the one its sheets and popovers settle on:
+     quick off the mark, then a long, soft landing with no overshoot. */
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-in: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --instant: 70ms;
+  --fast: 120ms;
+  --slow: 200ms;
+  /* How far a pressed control gives. Enough to feel, not enough to see
+     the label wobble. */
+  --press: scale(0.96);
+}
+
+/* Two ways to ask for stillness, and both are honoured everywhere. Played
+   once, too: an endless animation cut to a hundredth of a millisecond does
+   not stop, it lands on a random frame every frame - a spinner that
+   flickers instead of turning. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body.calm *, body.calm *::before, body.calm *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+
+* { box-sizing: border-box; }
+
+/* Every button gives a little under the pointer, as a key does under a
+   finger. Before, only the handful listed with `--press` did, and a click on
+   any other landed with nothing to feel. `scale` rather than `transform`, so
+   it composes with a button that is positioned by a transform of its own. */
+button:not(:disabled):active { scale: 0.97; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  user-select: none;
+  cursor: default;
+  /* Text this small on a dark background gains more from lighter stems than it
+     loses in weight. Only affects macOS, where the default is heavier. */
+  -webkit-font-smoothing: antialiased;
+  /* Calibri and Aptos both carry proper kerning and standard ligatures; asking
+     for them costs nothing and is what the face was drawn expecting. */
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+}
+
+/*
+ * One focus treatment, for every focusable thing in the browser's own UI.
+ *
+ * Declared once here rather than per control, so a new button is correct before
+ * anyone remembers to style it - which is the only way a rule like this
+ * survives. `:focus-visible`, so a pointer click does not draw a ring the
+ * keyboard user is the only one who needs.
+ */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  /* And shown. Several controls stay transparent until hover - a tab's close
+     cross, a row's forget button - and one reached by keyboard was a ring
+     around nothing. Declared here so the next such control is covered too. */
+  opacity: 1 !important;
+}
+
+/*
+ * `hidden` means hidden, whatever the element's own rule says.
+ *
+ * The UA's `[hidden] { display: none }` is a *user-agent* rule, so any author
+ * declaration beats it however weak - and the browser's own UI sets `display`
+ * on nearly everything it lays out. So `el.hidden = true` silently did nothing
+ * in three places at once: the downloads button in the toolbar (`display: grid`
+ * from `.icon-btn`) stayed visible with no downloads, and in the downloads
+ * flyout (`display: block`) every finished row kept a full progress bar and
+ * every row offered "Open file", including one that had failed.
+ *
+ * Found by photographing the panels rather than by reading them. Fixed here
+ * rather than per element, because the next person to write `hidden = true`
+ * should not have to know this.
+ */
+[hidden] { display: none !important; }
+
+/*
+ * Figures that change keep their width.
+ *
+ * This browser puts a memory reading in the chrome and updates it twice a
+ * second. In a proportional face a 1 is narrower than a 0, so every update
+ * shifts the digits around and the number appears to twitch even when it has
+ * barely moved. Tabular figures pin each digit to the same advance width, so a
+ * changing number changes in place.
+ *
+ * Calibri's figures are already fixed-width - measured: `111` and `000` set to
+ * the same width with and without the property - so this is a no-op there and
+ * does the work on whatever face a machine without Calibri falls back to.
+ * Applied to the elements that hold live numbers rather than globally: tabular
+ * figures are slightly stiffer, which is right for data and wrong for a
+ * sentence.
+ */
+.meter-text,
+.stat-value,
+.row-mem,
+.stat,
+.time,
+.count,
+.zoom-value,
+.visits {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/*
+ * Scrollbars, because the default one is a stripe of the operating system
+ * running down the middle of an interface that is otherwise ours.
+ *
+ * The standard properties rather than `::-webkit-scrollbar`: they are two lines
+ * instead of six rules, they leave the scrollbar's behaviour to the platform,
+ * and Chromium has supported them for years. Overlay scrollbars stay overlay.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 22%, transparent) transparent;
+}
+
+/* Selection in the accent, at a strength that leaves the text readable rather
+   than reversed out. */
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--text);
+}
+
+/*
+ * A placeholder is a prompt, not content, and at full `--text-dim` it reads as
+ * a filled field from across the room.
+ */
+::placeholder {
+  color: color-mix(in srgb, var(--text-dim) 78%, transparent);
+  opacity: 1;                      /* Firefox-ism, harmless and explicit here */
+}
+
+/*
+ * Continuous corners: Debrowser's shape.
+ *
+ * A rounded rectangle on the web is a square with quarter-circles stuck on;
+ * where the straight edge meets the arc the curvature jumps, and the eye reads
+ * the joint. Apple draws its own surfaces as a superellipse, where the curve
+ * eases out of the straight - and almost nothing on the web can, so no other
+ * browser looks like this. Chromium can now (`corner-shape`, measured supported
+ * in this build). Only on surfaces: circles stay circles, and Grid's square
+ * cells have no radius to shape. Legacy keeps the shape it always had.
+ */
+body:not([data-design="legacy"]) :is(.card, .sheet, .omnibox, #q, .continue, .chip, .tab-chip, .tab,
+  .rows, .btn, .tile-open, .continue-row, .item, .toast, select, input[type="text"], input[type="search"],
+  .rail-item, .receipt, .total, .totals, .list, .status, .tile-forget, .continue-pop, .go) {
+  corner-shape: superellipse(1.8);
+}
+
+/*
+ * Text a website wrote runs in its own direction.
+ *
+ * A title in Arabic or Hebrew was laid out left to right like the interface
+ * around it: aligned to the wrong edge, and cut with its ellipsis at the
+ * beginning of the title rather than the end. Each of these takes its
+ * direction from its own first letter, as Chrome's tab titles do - the
+ * browser's own labels keep the interface's.
+ */
+:is(.tab-title, .bookmark-label, .continue-title, .visit-title, .dl-name, .download-name, .row-title,
+  .tab-group-name, .space-name, .tile-label, .suggest .title, #title.page-title) {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+/* See applyThemePrefs: a theme switch does not animate. */
+body.switching-theme *, body.switching-theme *::before, body.switching-theme *::after {
+  transition: none !important;
+}
+
+/*
+ * The chevron is ours, because the platform's is not.
+ *
+ * Left alone, a <select> keeps the operating system's own arrow and well - a
+ * Win32 combo box on Windows, a different one again on GTK - dropped into a
+ * panel styled like none of them. It is the loudest remaining sign that the
+ * controls were placed rather than drawn.
+ *
+ * The data URI is the one image in this project and is deliberate: it is 200
+ * bytes, arrives with the stylesheet, hits no network and decodes no file. A
+ * pure-CSS triangle would need a pseudo-element, which <select> does not
+ * reliably render. Its colour is fixed rather than `currentColor`, which a data
+ * URI cannot see - `--text-dim` is chosen to read on both palettes, and it has
+ * to be updated by hand when that token moves. It was missed when the palette
+ * changed, leaving a blue-grey arrow on every dropdown in a browser with no
+ * blue-grey left in it.
+ *
+ * Here rather than in Settings alone, so every page's dropdown is the same
+ * one: the site panel and the welcome tour had the platform's. A page that
+ * colours its own sets `background-color`, not `background`, which would wipe
+ * the chevron.
+ */
+select {
+  cursor: default;
+  appearance: none;
+  padding-right: 26px;
+  /* A long option ends in an ellipsis rather than being cut mid-word. */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239b978e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+
+/*
+ * Windows High Contrast themes (and any forced-colours mode).
+ *
+ * The browser repaints every page in the user's few system colours, which is
+ * the point - but it also drops box-shadows and background images, and this
+ * design leans on both: the focus ring is a shadow, controls are told apart
+ * by a tint, the dropdown chevron is an image. Without this block a keyboard
+ * user in High Contrast could not see where focus was. So: a real outline in
+ * the system's highlight colour, borders where tints were, and the chevron
+ * drawn again from the text colour.
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+  button, select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea {
+    border: 1px solid ButtonText;
+  }
+  button:disabled, select:disabled, input:disabled { border-color: GrayText; color: GrayText; }
+  [aria-pressed="true"], [aria-selected="true"], [aria-current="true"], .current {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  select {
+    forced-color-adjust: none;
+    background-color: Field;
+    color: FieldText;
+    background-image: linear-gradient(45deg, transparent 50%, FieldText 50%),
+      linear-gradient(135deg, FieldText 50%, transparent 50%);
+    background-position: right 13px center, right 9px center;
+    background-size: 4px 4px, 4px 4px;
+  }
+  /* A colour that is the choice itself - an accent, a space, a group - keeps it. */
+  .swatch, .space-swatches button, .tab-group, .tab-group-bar, .brand-dot {
+    forced-color-adjust: none;
+  }
+  ::selection { background: Highlight; color: HighlightText; }
+}
+
+/*
+ * The new tab page keeps its look (CLAUDE.md: its layout is frozen). It loads
+ * this file, so the readability changes above - secondary text raised to 7:1,
+ * the 12px floor, the bundled face - would reach it too. #wordmark is on that
+ * page alone; each rule here is one above with the page's old value, so the
+ * cascade between designs and themes is the same as it was.
+ */
+:root:has(#wordmark) {
+  --fs-micro: 11px;
+  --fs-small: 12px;
+}
+:root:has(#wordmark) { --text-dim: #9b978e; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark):not([data-theme="dark"]) { --text-dim: #6b6559; }
+}
+body:has(#wordmark)[data-theme="light"] { --text-dim: #6b6559; }
+body:has(#wordmark)[data-theme="dark"] { --text-dim: #9b978e; }
+body:has(#wordmark)[data-design="ledger"] { --text-dim: #8e948f; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark)[data-design="ledger"]:not([data-theme="dark"]) { --text-dim: #5f6a64; }
+}
+body:has(#wordmark)[data-design="ledger"][data-theme="light"] { --text-dim: #5f6a64; }
+body:has(#wordmark)[data-design="paper"] { --text-dim: #a39b8e; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark)[data-design="paper"]:not([data-theme="dark"]) { --text-dim: #6e685e; }
+}
+body:has(#wordmark)[data-design="paper"][data-theme="light"] { --text-dim: #6e685e; }
+body:has(#wordmark)[data-design="grid"] { --text-dim: #8c8c8c; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark)[data-design="grid"]:not([data-theme="dark"]) { --text-dim: #595959; }
+}
+body:has(#wordmark)[data-design="grid"][data-theme="light"] { --text-dim: #595959; }
+body:has(#wordmark)[data-design="ledger"]:not([data-platform="darwin"]),
+body:has(#wordmark)[data-design="paper"]:not([data-platform="darwin"]) {
+  --font-ui: Aptos, Calibri, Carlito, "Segoe UI Variable Text", "Segoe UI",
+             system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
+}

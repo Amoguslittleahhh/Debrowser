@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Keyboard shortcuts</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="menu.css">
+  <link rel="stylesheet" href="shortcuts.css">
+</head>
+<body class="menu-body">
+  <div class="backdrop" id="backdrop"></div>
+  <div class="sheet keys-card" id="sheet" role="dialog" aria-labelledby="title" tabindex="-1">
+    <header class="keys-head">
+      <h2 id="title">Keyboard shortcuts</h2>
+      <button class="keys-close" id="close" type="button" aria-label="Close"></button>
+    </header>
+    <div class="keys-groups" id="groups"></div>
+  </div>
+  <script src="theme.js"></script>
+  <script src="shortcuts.js"></script>
+</body>
+</html>

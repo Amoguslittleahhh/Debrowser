@@ -1,0 +1,304 @@
+'use strict';
+
+/**
+ * Is the browser drawing with the graphics card, or with the processor?
+ *
+ * Chromium keeps a list of graphics drivers it does not trust, and virtual
+ * machines' adapters are often on it - VMware's and VirtualBox's among them.
+ * On those, pages are drawn by the processor instead, and a 3D game in a tab
+ * (WebGL) costs most of the machine: every frame of it rendered in software,
+ * on the same cores the page's own code needs. Nothing on screen said so.
+ *
+ * So the task manager says which it is, and Settings → Advanced can ask
+ * Chromium to use the adapter anyway (`ignore-gpu-blocklist`, Chrome's
+ * "Override software rendering list"). That is a request, not a promise: an
+ * adapter is on the list for a reason, so if the graphics process falls over
+ * twice in the first minute with it on, it is turned off again by itself and
+ * the next start says why.
+ */
+
+const CRASH_WINDOW_MS = 60_000;
+
+/**
+ * A virtual machine's graphics adapter, used rather than drawn around.
+ *
+ * Chromium keeps the virtual adapters of VMware, VirtualBox and QEMU on its
+ * list of graphics it does not trust, so in such a guest pages and WebGL are
+ * drawn by the processor even with the VM's 3D acceleration on - when the VM
+ * would hand that work to the host's card. Where the last start found an
+ * adapter that can give 3D (VM_3D), the next one asks Chromium to use it
+ * (`ignore-gpu-blocklist`), then checks: still drawing in software means the
+ * VM has no 3D to give (its setting is off), and two crashes of the graphics
+ * process mean the adapter is not up to it - either way it stops asking, and
+ * says why once. An adapter that never gives 3D (VM_NO_3D) is not tried; the
+ * browser says which one to switch to instead.
+ *
+ * 'auto' does this, 'off' never does; `vmGpuFailed` remembers a try that did
+ * not work, so it is not tried again every start.
+ */
+function vmGpuWanted(prefs) {
+  const g = vmGpu(prefs.get('graphicsDetected'));
+  return Boolean(g && g.threeD) && prefs.get('vmGpu') !== 'off' && prefs.get('vmGpuFailed') !== true;
+}
+
+/** The VM adapter found - in use, or listed beside a software renderer, which is what a VM without 3D shows - or null. */
+function vmGpu(found) {
+  return (found && found.vmGpu) || null;
+}
+
+/**
+ * The switches to add before the app is ready: the override chosen by hand,
+ * or a VM's adapter found last time. Returns why, or false.
+ */
+function applySwitches(app, prefs) {
+  if (prefs.get('hardwareAcceleration') === false) return false;
+  const why = prefs.get('gpuIgnoreBlocklist') === true ? 'chosen' : vmGpuWanted(prefs) ? 'vm' : false;
+  if (!why) return false;
+  app.commandLine.appendSwitch('ignore-gpu-blocklist');
+  return why;
+}
+
+/**
+ * Watch the graphics process while the override is on: two crashes soon
+ * after start and the override goes - the hand-chosen one and a VM
+ * adapter's alike - with a note for the next start.
+ */
+function guardOverride(app, prefs, log = () => {}) {
+  if (!app.commandLine.hasSwitch('ignore-gpu-blocklist')) return;
+  const started = Date.now();
+  let crashes = 0;
+  app.on('child-process-gone', (_event, details) => {
+    if (!details || details.type !== 'GPU' || details.reason === 'clean-exit') return;
+    if (Date.now() - started > CRASH_WINDOW_MS) return;
+    crashes += 1;
+    log('graphics', `graphics process gone (${details.reason}) with the override on, ${crashes} time(s)`);
+    if (crashes >= 2 && !prefs.get('gpuOverrideFailed')) {
+      if (prefs.get('gpuIgnoreBlocklist') === true) prefs.set('gpuIgnoreBlocklist', false);
+      if (vmGpuWanted(prefs)) {
+        prefs.set('vmGpuFailed', true);
+        prefs.set('vmGpuState', 'crashed');
+        prefs.set('vmGpu', 'off');   // choosing it again is the way to retry
+      }
+      prefs.set('gpuOverrideFailed', true);
+    }
+  });
+}
+
+/**
+ * After a start that asked for a VM's adapter: did it give 3D? Returns
+ * 'working', 'no-3d' (still drawn in software - the VM's 3D is off), or
+ * null when this start did not ask.
+ */
+function vmGpuOutcome(app, prefs, found) {
+  if (!app.commandLine.hasSwitch('ignore-gpu-blocklist') || prefs.get('gpuIgnoreBlocklist') === true) return null;
+  const g = vmGpu(found);
+  if (!g || !g.threeD) return null;
+  return found.software || found.vendorId !== g.id ? 'no-3d' : 'working';
+}
+
+/** The feature status Chromium reports, read as one plain answer. */
+function status(app) {
+  let features = {};
+  try { features = app.getGPUFeatureStatus() || {}; } catch { /* before ready */ }
+  const soft = (v) => typeof v === 'string' && /software|disabled|unavailable/.test(v);
+  // Each kind of work, as done by the card or by the processor: what a
+  // `chrome://gpu` page would say, in two words. Unknown before the graphics
+  // process has answered.
+  const by = (v) => (!v ? 'unknown' : /^enabled/.test(v) && !soft(v) ? 'card' : 'processor');
+  return {
+    // The page itself, and 3D in it: either one on the processor is what costs.
+    software: soft(features.gpu_compositing) || soft(features.webgl),
+    webgl: features.webgl || 'unknown',
+    compositing: features.gpu_compositing || 'unknown',
+    work: {
+      pages: by(features.gpu_compositing),
+      threeD: by(features.webgl),
+      video: by(features.video_decode),
+      drawing: by(features.rasterization)
+    },
+    overridden: app.commandLine.hasSwitch('ignore-gpu-blocklist')
+  };
+}
+
+/* ---- What the machine is ------------------------------------------------- */
+
+/**
+ * Graphics adapters that are not a graphics card: a hypervisor's display
+ * device, or Windows' own fallback. Chromium may still use some of them, but
+ * whatever they do is done by the host's processor or by the guest's, and a
+ * page drawn on them costs as much as one drawn in software.
+ */
+const VIRTUAL_ADAPTERS = {
+  0x15ad: 'VMware SVGA',
+  0x80ee: 'VirtualBox graphics',
+  0x1414: 'Microsoft Basic Render Driver',
+  0x1234: 'QEMU standard VGA',
+  0x1af4: 'virtio-gpu',
+  0x1b36: 'QXL',
+  0x1ab8: 'Parallels graphics',
+  0x1013: 'Cirrus Logic (emulated)'
+};
+/**
+ * Of those, the VMs' own: the ones that hand 3D to the host's card when the
+ * VM is set up for it - VMware SVGA (VirtualBox's VMSVGA reports the same id),
+ * VirtualBox's VBoxSVGA, QEMU's virtio-gpu with virgl or Venus - and QEMU's
+ * that never do.
+ */
+const VM_3D = [0x15ad, 0x80ee, 0x1af4];
+const VM_NO_3D = [0x1234, 0x1b36, 0x1013];
+
+/** How to give the VM 3D, in the words of its own settings. */
+function how3d(id, vm) {
+  if (!VM_3D.includes(id)) return 'switch the VM’s video to Virtio with 3D acceleration on, and its display to Spice with OpenGL on (virt-manager’s names)';
+  if (vm === 'VirtualBox' || id === 0x80ee) return 'turn on Enable 3D Acceleration under Display in the VM’s settings, with VMSVGA or VBoxSVGA as the graphics controller';
+  if (id === 0x15ad) return 'turn on Accelerate 3D graphics in the VM’s Display settings';
+  return 'turn on 3D acceleration for the VM’s Virtio video and OpenGL for its Spice display (virt-manager’s names); Windows guests have no 3D driver for it';
+}
+
+/** A VM adapter by vendor id, with what it can do and how to turn that on; null for any other. */
+function vmGpuOf(id, vm) {
+  if (!VM_3D.includes(id) && !VM_NO_3D.includes(id)) return null;
+  return {
+    id,
+    name: id === 0x15ad && vm === 'VirtualBox' ? 'VirtualBox VMSVGA' : VIRTUAL_ADAPTERS[id],
+    threeD: VM_3D.includes(id),
+    how: how3d(id, vm)
+  };
+}
+
+const GPU_VENDORS = { 0x10de: 'NVIDIA', 0x1002: 'AMD', 0x1022: 'AMD', 0x8086: 'Intel', 0x106b: 'Apple', 0x5143: 'Qualcomm', 0x13b5: 'Arm' };
+
+/** The hypervisor named by a manufacturer or product string, or null. */
+function hypervisorIn(text) {
+  const t = String(text || '');
+  if (/vmware/i.test(t)) return 'VMware';
+  if (/virtualbox|innotek/i.test(t)) return 'VirtualBox';
+  if (/parallels/i.test(t)) return 'Parallels';
+  if (/qemu|kvm|bochs/i.test(t)) return 'QEMU/KVM';
+  if (/\bxen\b/i.test(t)) return 'Xen';
+  if (/virtual machine|hyper-v/i.test(t)) return 'Hyper-V';
+  return null;
+}
+
+/**
+ * Is this a virtual machine? Asked of the operating system, not guessed from
+ * the graphics: Windows' BIOS strings in the registry, Linux's DMI and the
+ * CPU's hypervisor flag, macOS's own answer. Never throws; null when it is not
+ * one, or cannot tell.
+ */
+async function detectVm({ platform = process.platform, run = execFileText, read = readText } = {}) {
+  try {
+    if (platform === 'win32') {
+      const key = 'HKLM\\HARDWARE\\DESCRIPTION\\System\\BIOS';
+      const out = await run('reg', ['query', key]);
+      const field = (name) => (new RegExp(`${name}\\s+REG_SZ\\s+(.+)`, 'i').exec(out) || [])[1] || '';
+      return hypervisorIn(`${field('SystemManufacturer')} ${field('SystemProductName')} ${field('BaseBoardManufacturer')}`);
+    }
+    if (platform === 'linux') {
+      const dmi = `${await read('/sys/class/dmi/id/sys_vendor')} ${await read('/sys/class/dmi/id/product_name')}`;
+      const named = hypervisorIn(dmi);
+      if (named) return named;
+      return /\bhypervisor\b/.test(await read('/proc/cpuinfo')) ? 'a virtual machine' : null;
+    }
+    if (platform === 'darwin') {
+      return (await run('sysctl', ['-n', 'kern.hv_vmm_present'])).trim() === '1' ? 'a virtual machine' : null;
+    }
+  } catch { /* cannot tell */ }
+  return null;
+}
+
+/** Which adapter Chromium is really drawing with, from its own report. */
+async function detectAdapter(app) {
+  let info = null;
+  try { info = await app.getGPUInfo('basic'); } catch { /* none */ }
+  const devices = (info && Array.isArray(info.gpuDevice)) ? info.gpuDevice : [];
+  const active = devices.find((d) => d.active) || devices[0] || null;
+  const vendorId = active ? Number(active.vendorId) || 0 : 0;
+  // A VM's adapter, the one in use or one listed beside a software renderer.
+  const isVm = (id) => VM_3D.includes(id) || VM_NO_3D.includes(id);
+  const vmAdapterId = isVm(vendorId) ? vendorId : devices.map((d) => Number(d.vendorId)).find(isVm) || 0;
+  if (!active) return { name: 'none found', virtual: true, basic: true, vendorId: 0, vmAdapterId };
+  const virtualName = VIRTUAL_ADAPTERS[vendorId];
+  const driver = String(active.driverVendor || active.deviceString || '');
+  // Drawing in software whatever the adapter: Windows' fallback driver, or a
+  // software renderer (SwiftShader reports Google's vendor id with no device).
+  const basic = vendorId === 0 || vendorId === 0x1414 ||
+    /swiftshader|llvmpipe|softpipe|basic render/i.test(`${driver} ${active.deviceString || ''}`);
+  return {
+    vendorId,
+    name: vendorId === 0 ? 'no graphics adapter' : virtualName || active.deviceString || GPU_VENDORS[vendorId] || driver ||
+      `vendor 0x${vendorId.toString(16)}`,
+    // A hypervisor's display device. With the VM's 3D acceleration on it hands
+    // work to the host's card, so on its own it is not "no graphics card".
+    virtual: Boolean(virtualName) || basic,
+    basic,
+    vmAdapterId
+  };
+}
+
+/**
+ * Everything at once, for the browser to decide by and to show: the VM, the
+ * adapter, and whether pages end up drawn by the processor.
+ */
+async function detectMachine(app, opts = {}) {
+  const [vm, adapter] = await Promise.all([detectVm(opts), detectAdapter(app)]);
+  const drawing = status(app);
+  return {
+    vm,
+    adapter: adapter.name,
+    vendorId: adapter.vendorId,
+    vmGpu: vmGpuOf(adapter.vmAdapterId, vm),
+    virtualAdapter: adapter.virtual,
+    software: drawing.software,
+    work: drawing.work,
+    // No graphics card doing the work: pages drawn in software, or by a
+    // driver that is software underneath.
+    noGpu: drawing.software || adapter.basic,
+    at: Date.now()
+  };
+}
+
+/**
+ * Light graphics: chosen, or found to be needed - no graphics card doing the
+ * work, or a virtual machine drawing through its own display adapter. A VM
+ * with a real card passed through to it is not light.
+ */
+function isLight(mode, detected) {
+  if (mode === 'light') return true;
+  if (mode === 'full') return false;
+  return Boolean(detected && (detected.noGpu || (detected.vm && detected.virtualAdapter)));
+}
+
+/** "3D and video on the processor; pages on the card" - which work goes where. */
+function workLine(work) {
+  if (!work) return '';
+  const names = { pages: 'pages', threeD: '3D (WebGL)', video: 'video decoding', drawing: 'drawing' };
+  const on = (where) => Object.keys(names).filter((k) => work[k] === where).map((k) => names[k]);
+  const card = on('card');
+  const cpu = on('processor');
+  const parts = [];
+  if (card.length) parts.push(`${card.join(', ')} on the graphics card`);
+  if (cpu.length) parts.push(`${cpu.join(', ')} on the processor`);
+  return parts.length ? `${parts.join('; ')}.` : '';
+}
+
+/** In plain words, for Settings and the task manager. */
+function describe(detected) {
+  if (!detected || !detected.at) return 'Not checked yet';
+  const where = detected.vm ? `${detected.vm === 'a virtual machine' ? 'A virtual machine' : `A ${detected.vm} virtual machine`}` : 'This computer';
+  if (detected.noGpu) return `${where} with no graphics card in use (${detected.adapter}): pages are drawn by the processor`;
+  if (detected.vm && detected.virtualAdapter) return `${where}, drawing through its virtual display (${detected.adapter})`;
+  return `${where}, drawing with ${detected.adapter}`;
+}
+
+function execFileText(cmd, args) {
+  return new Promise((resolve) => {
+    require('child_process').execFile(cmd, args, { timeout: 3000, windowsHide: true }, (err, stdout) => resolve(err ? '' : String(stdout)));
+  });
+}
+function readText(file) {
+  return require('fs').promises.readFile(file, 'utf8').catch(() => '');
+}
+
+module.exports = { applySwitches, guardOverride, vmGpuWanted, vmGpuOutcome, vmGpu, vmGpuOf, status, detectVm, detectAdapter, detectMachine, hypervisorIn, isLight, describe, workLine,
+  VIRTUAL_ADAPTERS };

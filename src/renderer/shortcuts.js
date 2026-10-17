@@ -1,0 +1,59 @@
+'use strict';
+
+/** The keyboard shortcut sheet: drawn from the browser's own table. */
+
+const api = window.debrowser;
+const groups = document.getElementById('groups');
+const sheet = document.getElementById('sheet');
+const close = () => api.send('close-menu');
+
+document.getElementById('close').append(crossIcon());
+document.getElementById('close').addEventListener('click', close);
+document.getElementById('backdrop').addEventListener('mousedown', close);
+// The keys that scroll a page scroll the list, wherever focus is in the card.
+const SCROLL = {
+  ArrowDown: 40, ArrowUp: -40, PageDown: 0.9, PageUp: -0.9, ' ': 0.9
+};
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') { close(); return; }
+  if (event.key === 'Home' || event.key === 'End') {
+    groups.scrollTo({ top: event.key === 'Home' ? 0 : groups.scrollHeight });
+    event.preventDefault();
+    return;
+  }
+  const step = SCROLL[event.key];
+  if (step === undefined) return;
+  // Space on a focused button presses it - the Close button.
+  if (event.key === ' ' && event.target.closest && event.target.closest('button')) return;
+  // Shift turns Space around, as on a page; Shift+PageUp is still up.
+  const back = event.key === ' ' && event.shiftKey ? -1 : 1;
+  const by = Math.abs(step) < 1 ? step * groups.clientHeight * back : step;
+  groups.scrollBy({ top: by });
+  event.preventDefault();
+});
+
+async function load() {
+  const res = await api.request('shortcut-list');
+  for (const group of res?.groups || []) {
+    const section = document.createElement('section');
+    section.className = 'keys-group';
+    const title = document.createElement('h3');
+    title.textContent = group.title;
+    section.append(title);
+    for (const row of group.rows) {
+      const line = document.createElement('div');
+      line.className = 'keys-row';
+      const label = document.createElement('span');
+      label.textContent = row.label;
+      const keys = document.createElement('kbd');
+      keys.textContent = row.keys;
+      line.append(label, keys);
+      section.append(line);
+    }
+    groups.append(section);
+  }
+  sheet.focus();
+}
+
+api.onState((state) => applyThemePrefs(state.prefs));
+load();

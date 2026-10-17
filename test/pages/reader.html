@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>The long read</title></head>
+<body>
+  <!-- Reader view's fixture: an article with the clutter around it, and a script the reader must not keep. -->
+  <nav>Home · News · Sport · Subscribe now</nav>
+  <aside class="ad">Advertisement</aside>
+  <article>
+    <h1>The long read</h1>
+    <p class="byline">By A. Writer</p>
+    <p>Browsers used to be windows onto documents. Somewhere along the way they became operating systems of their own, holding dozens of applications in memory at once, each one convinced it deserves the whole machine. This paragraph exists to be long enough for an article detector to believe it.</p>
+    <p>The second paragraph continues the argument with more words, because a reader view needs text to show, and a detector needs a few hundred characters before it believes a page is an article rather than a navigation page or a search result.</p>
+    <p onclick="window.readerRan = true">A third paragraph, carrying a handler that must never survive into reader view, and a link to <a href="javascript:alert(1)">nowhere</a> and one to <a href="https://example.com/next">the next story</a>.</p>
+    <script>window.articleScript = true;</script>
+    <p>And a fourth, to be sure: memory is a shared resource, and a browser that remembers that is a better neighbour to everything else running on the computer.</p>
+  </article>
+  <footer>Footer links · Privacy · Terms</footer>
+</body>
+</html>

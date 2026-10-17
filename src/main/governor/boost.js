@@ -43,6 +43,8 @@ class BoostController {
     /** Tabs whose priority we raised, so we can always put them back. */
     this.yieldedPids = new Set();
     this.warnedAboutPrivileges = false;
+    /** True while the only thing making the active tab heavy is its audio. */
+    this.audioOnly = false;
   }
 
   /**
@@ -57,13 +59,27 @@ class BoostController {
     // Audible media is always heavy: dropping audio is more noticeable than
     // dropping frames, and it is the one signal that is reliable even when
     // the page is doing its work off the main thread.
-    if (tab.audible) return Demand.HEAVY;
-
     let fromCpu = Demand.IDLE;
     if (cpu >= CPU_HEAVY_PCT) fromCpu = Demand.HEAVY;
     else if (cpu >= CPU_LIGHT_PCT) fromCpu = Demand.LIGHT;
 
-    return maxDemand(reported, fromCpu);
+    const drawn = maxDemand(reported, fromCpu);
+    if (!tab.audible) { this.audioOnly = false; return drawn; }
+
+    // Audio is remembered separately from the level it produces.
+    //
+    // It still forces HEAVY - dropping audio is more noticeable than dropping
+    // frames, and it is the one signal that stays reliable when a page does its
+    // work off the main thread. But a tab that is *only* audible is not
+    // animating, and `quiesceRequested` exists to defer reclaim while frames
+    // are being drawn. Without this distinction a foreground tab playing music
+    // refreshed the boost on every tick and stood the entire governor down -
+    // budget enforcement, the live-tab cap, heap limits, hibernation and
+    // speculation - for the whole of playback. That is the same session-wide
+    // stand-down the stale-boost fix below was written to prevent, reached by a
+    // different route.
+    this.audioOnly = drawn !== Demand.HEAVY;
+    return Demand.HEAVY;
   }
 
   /**
@@ -77,6 +93,23 @@ class BoostController {
     if (!activeTab) {
       this.releaseAll(allTabs);
       return;
+    }
+
+    // A boost belongs to the tab the user is looking at. Everything below only
+    // ever released one when the boosted tab *was* the active tab, so switching
+    // away from an animating page left the boost in place permanently - and
+    // with it `quiesceRequested`, which stands the governor down. Budget
+    // enforcement, the live-tab cap, heap limits, hibernation and speculation
+    // all stopped for the rest of the session, and closing the tab made it
+    // unrecoverable because nothing was left to match against.
+    if (this.boostedTabId !== null && this.boostedTabId !== activeTab.id) {
+      const stale = [...allTabs].find((t) => t.id === this.boostedTabId);
+      if (stale) this.release(stale, allTabs);
+      else {
+        // The tab is gone. Clear directly and put everyone else back.
+        this.boostedTabId = null;
+        this.unyieldOthers(allTabs);
+      }
     }
 
     const demand = this.demandFor(activeTab);
@@ -165,12 +198,18 @@ class BoostController {
    * always undone in `unyieldOthers`.
    */
   yieldOthers(boostedTab, allTabs) {
+    // Read once per tab. `Tab#pid` is a live getter now - it asks the renderer
+    // rather than returning a field, because a cached one goes stale the moment
+    // a tab navigates across sites - so four reads in this loop were four
+    // native calls per tab per boost.
+    const boostedPid = boostedTab.pid;
     for (const tab of allTabs) {
-      if (tab.id === boostedTab.id || !tab.pid) continue;
-      if (tab.pid === boostedTab.pid) continue; // same process; cannot differentiate
-      if (this.yieldedPids.has(tab.pid)) continue;
-      if (platform.setProcessPriority(tab.pid, this.cfg.boost.niceBackground)) {
-        this.yieldedPids.add(tab.pid);
+      const pid = tab.pid;
+      if (tab.id === boostedTab.id || !pid) continue;
+      if (pid === boostedPid) continue;          // same process; cannot differentiate
+      if (this.yieldedPids.has(pid)) continue;
+      if (platform.setProcessPriority(pid, this.cfg.boost.niceBackground)) {
+        this.yieldedPids.add(pid);
       }
     }
   }
@@ -178,7 +217,10 @@ class BoostController {
   unyieldOthers(allTabs) {
     if (!this.yieldedPids.size) return;
     const byPid = new Map();
-    for (const tab of allTabs) if (tab.pid) byPid.set(tab.pid, tab);
+    for (const tab of allTabs) {
+      const pid = tab.pid;
+      if (pid) byPid.set(pid, tab);
+    }
 
     for (const pid of this.yieldedPids) {
       const tab = byPid.get(pid);
@@ -191,8 +233,9 @@ class BoostController {
   }
 
   setPriority(tab, priority) {
-    if (!tab.pid) return false;
-    const ok = platform.setProcessPriority(tab.pid, priority);
+    const pid = tab.pid;
+    if (!pid) return false;
+    const ok = platform.setProcessPriority(pid, priority);
     if (ok) tab.priority = priority;
     return ok;
   }
@@ -202,7 +245,9 @@ class BoostController {
    * True while anything is animating in front of the user.
    */
   get quiesceRequested() {
-    return this.boostedTabId !== null;
+    // A boost held only because a tab is making noise is not a reason to stop
+    // reclaiming memory. Nothing is being drawn, so nothing can stutter.
+    return this.boostedTabId !== null && !this.audioOnly;
   }
 
   /** Tabs that have now been quiet long enough to count as settled. */

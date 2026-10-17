@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Passkey sign-in</title>
+<style>body { font: 15px system-ui, sans-serif; margin: 40px; } input { width: 320px; height: 32px; }</style>
+</head>
+<body>
+<h1>Sign in</h1>
+<!-- The field Chrome hangs its passkey dropdown from, and so does Debrowser. -->
+<label>Email <input id="user" autocomplete="username webauthn"></label>
+<script>
+const bytes = (s) => new TextEncoder().encode(s);
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+// A passkey for this site, made on the authenticator the test attached.
+window.reg = async (name, display) => {
+  const c = await navigator.credentials.create({ publicKey: {
+    challenge: bytes('register-' + name), rp: { name: 'Fixture', id: 'localhost' },
+    user: { id: bytes(name), name, displayName: display },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    authenticatorSelection: { residentKey: 'required', userVerification: 'required' } } });
+  return c.id;
+};
+
+// "Any passkey of mine for this site", asked there and then.
+window.login = async () => {
+  const a = await navigator.credentials.get({ publicKey: { challenge: bytes('sign-in'), rpId: 'localhost', userVerification: 'required' } });
+  return a.id;
+};
+
+// The same, left waiting on the field (Chrome's autofill passkeys).
+window.waitOnField = (signal) => {
+  window.waiting = navigator.credentials.get({ mediation: 'conditional', signal,
+    publicKey: { challenge: bytes('conditional'), rpId: 'localhost' } })
+    .then((a) => a.id, (e) => e.name);
+  return true;
+};
+
+// One named credential: the site knows who is signing in.
+window.loginAs = async (id) => {
+  const raw = Uint8Array.from(atob(id.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((id.length + 3) % 4)), (c) => c.charCodeAt(0));
+  const a = await navigator.credentials.get({ publicKey: { challenge: bytes('named'), rpId: 'localhost',
+    allowCredentials: [{ type: 'public-key', id: raw }] } });
+  return a.id;
+};
+window.b64url = b64url;
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>This tab stopped working</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="crashed.css">
+</head>
+<body>
+  <!--
+    Laid over the content area while the active tab's renderer is dead. The
+    same shape as the page a failed load draws (src/main/error-page.js), so
+    the two read as one thing.
+  -->
+  <main>
+    <h1>This tab stopped working</h1>
+    <p>Something on the page made it crash. Reloading usually brings it back.</p>
+    <div class="actions">
+      <button id="reload" class="primary">Reload</button>
+    </div>
+  </main>
+  <script src="theme.js"></script>
+  <script src="crashed.js"></script>
+</body>
+</html>

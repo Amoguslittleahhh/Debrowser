@@ -1,0 +1,153 @@
+'use strict';
+
+/**
+ * Bridges: what makes Tor look like something else to the ISP.
+ *
+ * Plain Tor hides which sites you visit but not that you use Tor - the relays
+ * are a public list. A bridge is an unlisted entry point, and a pluggable
+ * transport disguises the connection to it: obfs4 as random bytes, Snowflake as
+ * a WebRTC call through volunteers' browsers, WebTunnel as ordinary HTTPS to a
+ * real website. They come from the Tor Expert Bundle, which also carries the
+ * Tor Project's own built-in bridge lines (pt_config.json) - nothing here
+ * fetches bridges from anywhere.
+ *
+ *   auto    every built-in obfs4 and Snowflake bridge at once. Tor tries them
+ *           all and uses whichever connect, which is the racing: no transport
+ *           waits for another to time out first.
+ *   custom  the user's own lines - a bridge of their own from the bridge kit
+ *           (tools/bridge-kit), which is the only kind no list contains.
+ *   none    plain Tor: fastest, and the ISP can see that it is Tor.
+ *
+ * Built-in bridges are published, so an ISP that matches addresses against the
+ * list can still tell. That is said in the UI rather than left implied.
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+/** Transports this browser ships a client for. Conjure is left out of the bundle. */
+const TRANSPORTS = ['obfs4', 'webtunnel', 'snowflake', 'meek_lite'];
+
+/** The bundle's own transport config, or null if it is not there. */
+function ptConfig(bundle) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(bundle, 'pluggable_transports', 'pt_config.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One bridge line, checked: the transport first, then an address with a port.
+ * Anything else is refused rather than handed to Tor, which would otherwise
+ * be given whatever was pasted - including a torrc option on its own line.
+ */
+function parseLine(raw) {
+  const line = String(raw).trim().replace(/^Bridge\s+/i, '');
+  if (!line || line.startsWith('#')) return null;
+  const [transport, address] = line.split(/\s+/);
+  if (!TRANSPORTS.includes(transport)) return { error: `unknown transport "${transport}"`, line };
+  if (!/^(\[[0-9a-f:]+\]|[\w.-]+):\d{1,5}$/i.test(address || '')) return { error: 'no address:port', line };
+  if (/[\r\n]/.test(line)) return { error: 'more than one line', line };
+  return { transport, line };
+}
+
+/** The user's pasted lines, split into what Tor gets and what was refused. */
+function parseCustom(text) {
+  const good = [];
+  const bad = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const parsed = parseLine(raw);
+    if (!parsed) continue;
+    if (parsed.error) bad.push(parsed);
+    else good.push(parsed);
+  }
+  return { good, bad };
+}
+
+/**
+ * Which built-in transports each mode uses.
+ *
+ * `auto`, the default, is Snowflake alone. Measured on the real network from
+ * Windows and Linux (test/real-tor.js, the Real Tor workflow): Snowflake on its
+ * own connected every time, in 20-41 seconds, while the built-in obfs4 bridges
+ * - two of which had stopped answering - took two minutes or stalled, and
+ * racing the two together inherited the stalls: Tor fetched the directory
+ * through whichever bridge answered first and waited on it. obfs4 stays as a
+ * choice for networks that block Snowflake.
+ */
+const BUILT_IN = { auto: ['snowflake'], snowflake: ['snowflake'], obfs4: ['obfs4'], fallback: ['snowflake', 'obfs4', 'meek'] };
+
+/**
+ * What `auto` moves on to when Snowflake has made no progress (tor.js): every
+ * built-in bridge the bundle carries, Snowflake still among them. obfs4 gets
+ * through where WebRTC is blocked, and meek - slow, but HTTPS to a CDN - where
+ * nearly everything else is. Only `auto` falls back: a chosen transport, or the
+ * user's own bridges, are never swapped for others.
+ */
+const FALLS_BACK = new Set(['auto']);
+
+/**
+ * The torrc lines for a bridge mode.
+ *
+ * Transport programs are named relative to Tor's working directory - the
+ * bundle - because torrc splits on spaces and "C:\Program Files" would break an
+ * absolute path in two.
+ */
+function torrcLines({ mode = 'auto', custom = '' } = {}, bundle) {
+  if (mode === 'none') return [];
+  const config = ptConfig(bundle);
+  const bridges = mode === 'custom'
+    ? parseCustom(custom).good
+    : (BUILT_IN[mode] || BUILT_IN.auto)
+      // The transport is the line's own first word: the "meek" list holds
+      // meek_lite lines, and Tor matches the plugin by that name.
+      .flatMap((t) => ((config && config.bridges && config.bridges[t]) || []).map((line) => ({ transport: line.split(/\s+/)[0], line })));
+  // Bridges asked for and none usable - every custom line mistyped, or the
+  // built-in list missing from the bundle - is a refusal to connect, never a
+  // quiet fall back to plain Tor. Someone who chose bridges chose them so the
+  // network would not see a Tor connection. `UseBridges` with no `Bridge` line
+  // is a configuration Tor itself will not start with.
+  if (!bridges.length) return ['UseBridges 1'];
+
+  const exe = process.platform === 'win32' ? '.exe' : '';
+  const plugin = `pluggable_transports${path.sep}lyrebird${exe}`;
+  const used = [...new Set(bridges.map((b) => b.transport))];
+  return [
+    'UseBridges 1',
+    // lyrebird carries every transport this browser uses, Snowflake included.
+    `ClientTransportPlugin ${used.join(',')} exec ${plugin}`,
+    ...bridges.map((b) => `Bridge ${b.line}`)
+  ];
+}
+
+/**
+ * `{ command, lines }`: the control-port command that switches a running Tor
+ * to the fallback bridges and the torrc lines it amounts to; or null when the mode does not fall back or there is nothing to fall back to.
+ * SETCONF takes a list option as the key repeated, so every Bridge goes in one
+ * command and replaces the old list at once.
+ */
+function fallbackCommand({ mode = 'auto' } = {}, bundle) {
+  if (!FALLS_BACK.has(mode)) return null;
+  const lines = torrcLines({ mode: 'fallback' }, bundle);
+  if (!lines.some((l) => l.startsWith('Bridge '))) return null;
+  const quote = (v) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const command = `SETCONF ${lines.map((l) => {
+    const space = l.indexOf(' ');
+    return `${l.slice(0, space)}=${quote(l.slice(space + 1))}`;
+  }).join(' ')}`;
+  return { command, lines };
+}
+
+/** Which transport a bridge fingerprint belongs to, for saying what connected. */
+function transportFor(fingerprint, lines) {
+  const fp = String(fingerprint || '').replace(/^\$/, '').split(/[~=]/)[0].toUpperCase();
+  if (!fp) return null;
+  for (const line of lines) {
+    if (!line.startsWith('Bridge ')) continue;
+    if (line.toUpperCase().includes(fp)) return line.split(/\s+/)[1];
+  }
+  return null;
+}
+
+module.exports = { TRANSPORTS, ptConfig, parseLine, parseCustom, torrcLines, fallbackCommand, transportFor };

@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>js-levels</title>
+<body>
+<script>
+'use strict';
+/*
+ * The workloads, each a kind of work real pages do. Each is run RUNS times and
+ * the median kept, so one garbage collection landing in one run does not
+ * decide the answer.
+ */
+const RUNS = 5;
+
+function dom() {
+  const root = document.createElement('div');
+  document.body.appendChild(root);
+  for (let i = 0; i < 4000; i++) {
+    const row = document.createElement('div');
+    row.className = 'row r' + (i % 7);
+    row.textContent = 'item ' + i;
+    root.appendChild(row);
+  }
+  const h = root.offsetHeight;                 // force layout
+  root.remove();
+  return h;
+}
+
+const DOC = { items: Array.from({ length: 20000 }, (_, i) => ({ id: i, name: 'n' + i, tags: ['a', 'b', String(i % 13)], ok: i % 3 === 0 })) };
+function json() {
+  let n = 0;
+  for (let i = 0; i < 3; i++) n += JSON.parse(JSON.stringify(DOC)).items.length;
+  return n;
+}
+
+const TEXT = Array.from({ length: 30000 }, (_, i) => `user${i}@example${i % 50}.com some words ${i}`).join('\n');
+function regex() {
+  const re = /([a-z0-9._-]+)@([a-z0-9-]+)\.com/g;
+  let n = 0;
+  while (re.exec(TEXT)) n++;
+  return n + TEXT.replace(/\d+/g, '#').length;
+}
+
+function numeric() {
+  // A tight floating-point loop: where an optimising compiler earns its keep.
+  let x = 0;
+  for (let i = 1; i < 6e6; i++) x += Math.sqrt(i) * Math.sin(i) / i;
+  return x;
+}
+
+/*
+ * A hand-assembled WebAssembly module: (func (param i32) (result i32)) that
+ * sums 0..n-1 in a loop. Balanced keeps Wasm on Liftoff, its baseline
+ * compiler; this shows what that costs.
+ */
+const WASM = new Uint8Array([
+  0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,             // magic, version
+  0x01, 0x06, 0x01, 0x60, 0x01, 0x7f, 0x01, 0x7f,             // type: (i32) -> i32
+  0x03, 0x02, 0x01, 0x00,                                     // function 0 has type 0
+  0x07, 0x07, 0x01, 0x03, 0x73, 0x75, 0x6d, 0x00, 0x00,       // export "sum"
+  0x0a, 0x27, 0x01, 0x25, 0x02, 0x01, 0x7f, 0x01, 0x7f,       // code: 39 bytes, one 37-byte body; locals i, acc
+  0x02, 0x40, 0x03, 0x40,                                     // block, loop
+  0x20, 0x01, 0x20, 0x00, 0x4e, 0x0d, 0x01,                   // if i >= n: br 1
+  0x20, 0x02, 0x20, 0x01, 0x6a, 0x21, 0x02,                   // acc += i
+  0x20, 0x01, 0x41, 0x01, 0x6a, 0x21, 0x01,                   // i += 1
+  0x0c, 0x00, 0x0b, 0x0b,                                     // br 0, end loop, end block
+  0x20, 0x02, 0x0b                                            // return acc
+]);
+let wasmSum = null;
+function wasm() {
+  if (!wasmSum) wasmSum = new WebAssembly.Instance(new WebAssembly.Module(WASM)).exports.sum;
+  let n = 0;
+  for (let i = 0; i < 20; i++) n += wasmSum(2e6);
+  return n;
+}
+
+const WORKLOADS = { dom, json, regex, numeric, wasm };
+
+window.runAll = async () => {
+  const out = {};
+  for (const [name, fn] of Object.entries(WORKLOADS)) {
+    const times = [];
+    try {
+      for (let r = 0; r < RUNS; r++) {
+        const t = performance.now();
+        fn();
+        times.push(performance.now() - t);
+        await new Promise((res) => setTimeout(res, 0));
+      }
+    } catch (err) {
+      // Maximum (--jitless) has no WebAssembly at all: that is the answer.
+      out[name] = null;
+      continue;
+    }
+    times.sort((a, b) => a - b);
+    out[name] = Math.round(times[RUNS >> 1] * 10) / 10;
+  }
+  return out;
+};
+</script>

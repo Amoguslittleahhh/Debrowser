@@ -1,0 +1,463 @@
+'use strict';
+
+/**
+ * Files leaving a private window lose what they say about you.
+ *
+ * A photo from a phone carries where it was taken (GPS), when, on what
+ * device, often the owner's name - in metadata the page it is uploaded to can
+ * read, and that usually survives to wherever the site publishes it. Private
+ * windows strip it from every JPEG, PNG, WebP, HEIC and AVIF picked for upload before the
+ * page is handed the file.
+ *
+ * Only metadata is removed: the compressed image data is copied byte for byte,
+ * so the pixels a site decodes are exactly the ones in the original. Colour
+ * profiles are kept - they change how an image looks, not who took it.
+ *
+ * How the page gets the clean copy: the DevTools protocol's file-chooser
+ * interception (Page.setInterceptFileChooserDialog). The browser shows the
+ * picker itself, writes cleaned copies into this run's private directory, and
+ * hands the page those (DOM.setFileInputFiles). Measured in M0: Electron has
+ * no API of its own for this. A file dragged onto a page does not pass through
+ * the picker and is not cleaned; the connection page says so.
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+/* ------------------------------------------------------------------ */
+/* The formats                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * JPEG: a run of marker segments before the image data. Dropped: APP1 (Exif,
+ * with the GPS block, and XMP), APP13 (IPTC and Photoshop), APP3-APP15 other
+ * than APP14 (Adobe colour transform, needed to decode some files), and COM
+ * comments. Kept: APP0 (JFIF), APP2 (ICC profile), and everything from the
+ * start of scan on.
+ */
+function stripJpeg(buf) {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  const parts = [buf.subarray(0, 2)];
+  const removed = [];
+  let i = 2;
+  while (i + 4 <= buf.length) {
+    if (buf[i] !== 0xff) return null;                     // not a marker: not a JPEG we understand
+    const marker = buf[i + 1];
+    if (marker === 0xff) { i += 1; continue; }            // fill byte
+    if (marker === 0xda || marker === 0xd9) break;        // start of scan / end: the rest is image data
+    if (marker >= 0xd0 && marker <= 0xd7) { parts.push(buf.subarray(i, i + 2)); i += 2; continue; }
+    const len = buf.readUInt16BE(i + 2);
+    if (len < 2 || i + 2 + len > buf.length) return null;
+    const segment = buf.subarray(i, i + 2 + len);
+    // APP2 is kept for its colour profile, but not when it is the MPF index
+    // of further pictures stored after this one - which are dropped below.
+    const mpf = marker === 0xe2 && segment.subarray(4, 8).toString('latin1') === 'MPF\u0000';
+    const drop = mpf || marker === 0xe1 || marker === 0xed || marker === 0xfe ||
+      (marker >= 0xe3 && marker <= 0xef && marker !== 0xee);
+    if (drop) removed.push(jpegName(marker, segment));
+    else parts.push(segment);
+    i += 2 + len;
+  }
+  // The image ends at its end-of-image marker. Phones store more after it -
+  // the extra pictures an MPF index points at, a Samsung trailer, a Motion
+  // Photo's whole MP4 - each with its own Exif and location, and copying
+  // "everything from the start of scan on" copied those too. Inside the
+  // compressed data 0xFF is always followed by 0x00 or a restart marker, so
+  // the first FF D9 is the end of this image.
+  const end = buf.indexOf(Buffer.from([0xff, 0xd9]), i);
+  if (end === -1) {
+    parts.push(buf.subarray(i));
+  } else {
+    parts.push(buf.subarray(i, end + 2));
+    if (end + 2 < buf.length) removed.push('data after the image');
+  }
+  return { data: Buffer.concat(parts), removed };
+}
+
+function jpegName(marker, segment) {
+  if (marker === 0xfe) return 'comment';
+  if (marker === 0xe2) return 'MPF';
+  if (marker === 0xed) return 'IPTC';
+  if (marker === 0xe1) {
+    const id = segment.subarray(4, 10).toString('latin1');
+    return id.startsWith('Exif') ? 'Exif' : 'XMP';
+  }
+  return `APP${marker - 0xe0}`;
+}
+
+/**
+ * PNG: chunks after the signature. Dropped: text (tEXt, zTXt, iTXt - where
+ * XMP and "Author" live), eXIf, and tIME. Everything else is copied, CRCs and
+ * all, because nothing else is changed.
+ */
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PNG_DROP = new Set(['tEXt', 'zTXt', 'iTXt', 'eXIf', 'tIME']);
+function stripPng(buf) {
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
+  const parts = [buf.subarray(0, 8)];
+  const removed = [];
+  let i = 8;
+  while (i + 12 <= buf.length) {
+    const len = buf.readUInt32BE(i);
+    const type = buf.subarray(i + 4, i + 8).toString('latin1');
+    const end = i + 12 + len;
+    if (end > buf.length) return null;
+    if (PNG_DROP.has(type)) removed.push(type);
+    else parts.push(buf.subarray(i, end));
+    i = end;
+    if (type === 'IEND') break;
+  }
+  return { data: Buffer.concat(parts), removed };
+}
+
+/**
+ * WebP: a RIFF file of chunks. Dropped: EXIF and XMP; the VP8X header's flags
+ * for them are cleared and the RIFF size rewritten, since both would
+ * otherwise describe chunks that are no longer there.
+ */
+function stripWebp(buf) {
+  if (buf.length < 12 || buf.toString('latin1', 0, 4) !== 'RIFF' || buf.toString('latin1', 8, 12) !== 'WEBP') return null;
+  const parts = [];
+  const removed = [];
+  let vp8x = null;
+  let i = 12;
+  while (i + 8 <= buf.length) {
+    const type = buf.toString('latin1', i, i + 4);
+    const len = buf.readUInt32LE(i + 4);
+    const end = i + 8 + len + (len & 1);                  // chunks are padded to even sizes
+    if (i + 8 + len > buf.length) return null;
+    const chunk = Buffer.from(buf.subarray(i, Math.min(end, buf.length)));
+    if (type === 'EXIF' || type === 'XMP ') removed.push(type.trim());
+    else {
+      if (type === 'VP8X') vp8x = chunk;
+      parts.push(chunk);
+    }
+    i = end;
+  }
+  if (vp8x) vp8x[8] &= ~(0x08 | 0x04);                    // the EXIF and XMP flags
+  const body = Buffer.concat(parts);
+  const header = Buffer.alloc(12);
+  header.write('RIFF', 0, 'latin1');
+  header.writeUInt32LE(body.length + 4, 4);
+  header.write('WEBP', 8, 'latin1');
+  return { data: Buffer.concat([header, body]), removed };
+}
+
+/**
+ * The file's metadata removed, or null for a format this does not handle -
+ * which is then passed on unchanged, and said so.
+ */
+/**
+ * HEIC and AVIF - what iPhones and many Android phones save - are ISO media
+ * files: boxes, with the metadata stored as items of their own. The `meta`
+ * box lists the items (`iinf`) and where each one's bytes are (`iloc`); the
+ * Exif item holds the GPS block, and XMP is an item of type `mime`.
+ *
+ * Their bytes are overwritten with zeros where they lie, rather than cut out:
+ * every other item's position is an absolute offset into the file, and
+ * removing bytes would move the image itself out from under its own index.
+ * Readers then find an Exif item that says nothing. Anything this cannot
+ * parse is refused (null), as for the other formats.
+ */
+function stripHeif(buf) {
+  if (buf.length < 16 || buf.toString('latin1', 4, 8) !== 'ftyp') return null;
+  const brands = buf.toString('latin1', 8, Math.min(buf.length, 8 + buf.readUInt32BE(0)));
+  if (!/heic|heix|hevc|mif1|msf1|avif|avis/.test(brands)) return null;
+
+  // [start, end) of each box's content, walking one level.
+  const boxes = (from, to) => {
+    const out = [];
+    let i = from;
+    while (i + 8 <= to) {
+      let size = buf.readUInt32BE(i);
+      const type = buf.toString('latin1', i + 4, i + 8);
+      let head = 8;
+      if (size === 1) {
+        if (i + 16 > to) return null;
+        size = Number(buf.readBigUInt64BE(i + 8));
+        head = 16;
+      } else if (size === 0) {
+        size = to - i;
+      }
+      if (size < head || i + size > to) return null;
+      out.push({ type, start: i + head, end: i + size });
+      i += size;
+    }
+    return out;
+  };
+  const top = boxes(0, buf.length);
+  const meta = top && top.find((b) => b.type === 'meta');
+  if (!meta) return null;
+  const inner = boxes(meta.start + 4, meta.end);          // FullBox: version and flags first
+  if (!inner) return null;
+  const iinf = inner.find((b) => b.type === 'iinf');
+  const iloc = inner.find((b) => b.type === 'iloc');
+  const idat = inner.find((b) => b.type === 'idat');
+  if (!iinf || !iloc) return null;
+
+  // Which items are metadata.
+  const wanted = new Map();                                // item id -> name
+  const infVersion = buf[iinf.start];
+  const entries = boxes(iinf.start + 4 + (infVersion === 0 ? 2 : 4), iinf.end);
+  if (!entries) return null;
+  for (const e of entries) {
+    if (e.type !== 'infe') continue;
+    const v = buf[e.start];
+    if (v < 2) continue;                                   // pre-2 entries carry no item type
+    let p = e.start + 4;
+    const id = v === 2 ? buf.readUInt16BE(p) : buf.readUInt32BE(p);
+    p += (v === 2 ? 2 : 4) + 2;                            // item id, protection index
+    const type = buf.toString('latin1', p, p + 4);
+    p += 4;
+    const name = buf.toString('latin1', p, buf.indexOf(0, p) === -1 ? p : buf.indexOf(0, p));
+    if (type === 'Exif') wanted.set(id, 'Exif');
+    else if (type === 'mime') {
+      // The item name comes first; the content type is the next string.
+      const at = buf.indexOf(0, p) + 1;
+      const contentType = at > 0 ? buf.toString('latin1', at, Math.max(at, buf.indexOf(0, at))) : '';
+      if (/xmp|rdf\+xml/i.test(contentType) || /xmp/i.test(name)) wanted.set(id, 'XMP');
+    }
+  }
+  if (!wanted.size) return { data: buf, removed: [] };
+
+  // Where their bytes are.
+  const out = Buffer.from(buf);
+  const removed = new Set();
+  const v = buf[iloc.start];
+  let p = iloc.start + 4;
+  const offsetSize = buf[p] >> 4;
+  const lengthSize = buf[p] & 15;
+  const baseSize = buf[p + 1] >> 4;
+  const indexSize = v === 1 || v === 2 ? buf[p + 1] & 15 : 0;
+  p += 2;
+  const read = (n) => {
+    let value = 0;
+    for (let k = 0; k < n; k++) value = value * 256 + buf[p + k];
+    p += n;
+    return value;
+  };
+  const count = v < 2 ? read(2) : read(4);
+  for (let item = 0; item < count; item++) {
+    if (p > iloc.end) return null;
+    const id = v < 2 ? read(2) : read(4);
+    const method = v === 1 || v === 2 ? read(2) & 15 : 0;
+    read(2);                                               // data reference index
+    const base = read(baseSize);
+    const extents = read(2);
+    for (let x = 0; x < extents; x++) {
+      if (indexSize) read(indexSize);
+      const offset = read(offsetSize);
+      const length = read(lengthSize);
+      if (!wanted.has(id)) continue;
+      const origin = method === 0 ? 0 : method === 1 && idat ? idat.start : -1;
+      if (origin < 0) continue;                            // stored by reference: nothing here to clear
+      const from = origin + base + offset;
+      const to = length ? from + length : (method === 1 ? idat.end : buf.length);
+      if (from < 0 || to > buf.length || from > to) return null;
+      out.fill(0, from, to);
+      // An Exif item left as zeros reads as a damaged file to some readers
+      // (Pillow refuses it outright), and an upload that fails to parse is
+      // an upload that fails. The first extent gets a valid, empty one: no
+      // offset to skip, a TIFF header, an index with no entries.
+      if (wanted.get(id) === 'Exif' && !removed.has('Exif') && to - from >= 18) {
+        Buffer.from([0, 0, 0, 0, 0x49, 0x49, 0x2a, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0]).copy(out, from);
+      }
+      removed.add(wanted.get(id));
+    }
+  }
+  return { data: out, removed: [...removed] };
+}
+
+function stripImage(buf) {
+  return stripJpeg(buf) || stripPng(buf) || stripWebp(buf) || stripHeif(buf);
+}
+
+/* ------------------------------------------------------------------ */
+/* The picker                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Take over a tab's file picker. Called once the tab's debugger session is
+ * up (see fingerprint.shield), and again if that session is replaced.
+ *
+ * @param {object} tab        - has `wc` and `cdp`
+ * @param {string} dir        - where cleaned copies go: this run's private directory
+ * @param {(opts) => Promise<string[]>} pick - shows the picker, resolves to paths
+ */
+async function interceptUploads(tab, dir, pick, log = () => {}) {
+  const wc = tab.wc;
+  // Page.enable first, and not optional: without it the interception is
+  // accepted - `{}`, no error - and does nothing, and the native picker opens
+  // and hands the page the original file. Measured. It costs the page
+  // instrumentation cdp.js otherwise avoids, which a private tab pays.
+  if (!(await tab.cdp.enable('Page'))) return false;
+  const ok = await tab.cdp.send('Page.setInterceptFileChooserDialog', { enabled: true });
+  if (ok === null) return false;
+  if (!wc.__sanitiserWired) {
+    wc.__sanitiserWired = true;
+    wc.debugger.on('message', (_event, method, params) => {
+      if (method !== 'Page.fileChooserOpened') return;
+      chosen(tab, dir, pick, params, log).catch((err) => log('sanitise', `upload failed: ${err.message}`));
+    });
+  }
+  return true;
+}
+
+async function chosen(tab, dir, pick, params, log) {
+  const multiple = params.mode === 'selectMultiple';
+  const picked = await pick({ multiple });
+  if (!picked || !picked.length || !tab.wc || tab.wc.isDestroyed()) {
+    // Cancelled: the page is told nothing was chosen, as with the real picker.
+    await tab.cdp.send('DOM.setFileInputFiles', { files: [], backendNodeId: params.backendNodeId });
+    return;
+  }
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const files = [];
+  for (const file of picked) files.push(cleanCopy(file, dir, log));
+  await tab.cdp.send('DOM.setFileInputFiles', { files, backendNodeId: params.backendNodeId });
+}
+
+/** A copy of `file` with its image metadata removed, under the same name. */
+function cleanCopy(file, dir, log = () => {}) {
+  let result = null;
+  try {
+    result = stripImage(fs.readFileSync(file));
+  } catch (err) {
+    log('sanitise', `could not read ${path.basename(file)}: ${err.message}`);
+    return file;
+  }
+  if (!result) return file;                               // not an image this knows: unchanged
+  // A directory per file, so the page still sees the file's own name.
+  const own = fs.mkdtempSync(path.join(dir, 'u-'));
+  const out = path.join(own, path.basename(file));
+  fs.writeFileSync(out, result.data, { mode: 0o600 });
+  if (result.removed.length) log('sanitise', `${path.basename(file)}: removed ${result.removed.join(', ')}`);
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* PDF: a safe copy                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A PDF can run JavaScript, submit forms, fetch remote content and carry its
+ * author's name. The safe copy has none of it, because it is made of nothing
+ * but pictures: each page is rendered by Chromium's own viewer, in a session
+ * where every network request is refused, captured, and the captures are
+ * printed into a new PDF. What was visible is kept - a filled-in field's
+ * value included - as pixels; the text is no longer selectable, which is the
+ * price.
+ *
+ * Page count: read from the file where it is plain to see; where object
+ * streams hide it, pages are taken until one past the end shows the same
+ * image as the page before it (the viewer stays on the last page).
+ */
+const MAX_PAGES = 500;
+
+function countPages(buf) {
+  const n = (buf.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
+  return n > 0 ? Math.min(n, MAX_PAGES) : null;
+}
+
+/** The page itself, without the viewer's grey around it or its scrollbar. */
+function cropToPage(img) {
+  const { width, height } = img.getSize();
+  const b = img.toBitmap();
+  const bg = [b[0], b[1], b[2]];
+  const SCROLLBAR = 20;
+  let x0 = width; let y0 = height; let x1 = -1; let y1 = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width - SCROLLBAR; x++) {
+      const o = (y * width + x) * 4;
+      if (Math.abs(b[o] - bg[0]) + Math.abs(b[o + 1] - bg[1]) + Math.abs(b[o + 2] - bg[2]) > 30) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  if (x1 < x0 || y1 < y0) return img;
+  return img.crop({ x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 });
+}
+
+/** A capture once the page has finished drawing: two in a row that agree. */
+async function settledCapture(wc) {
+  let last = null;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, i ? 150 : 400));
+    const img = await wc.capturePage();
+    const bmp = img.toBitmap();
+    if (last && bmp.equals(last.toBitmap())) return img;
+    last = img;
+  }
+  return last;
+}
+
+/**
+ * Write a flat copy of `file` to `outFile`. Resolves to the page count.
+ * @param {typeof import('electron')} electron
+ */
+async function flattenPdf(electron, file, outFile, log = () => {}) {
+  const { BrowserWindow, session } = electron;
+  const ses = session.fromPartition('incognito-pdf-flatten');
+  // Nothing leaves: the viewer is an extension, the file is local, and the
+  // pictures are data URLs. Anything else the document asks for is refused.
+  ses.webRequest.onBeforeRequest((d, cb) => cb(/^(file|chrome-extension|data|blob|chrome):/.test(d.url) ? {} : { cancel: true }));
+  const known = countPages(fs.readFileSync(file));
+  const view = new BrowserWindow({
+    show: false, width: 900, height: 1000,
+    webPreferences: { plugins: true, sandbox: true, session: ses }
+  });
+  const pages = [];
+  try {
+    let previous = null;
+    for (let n = 1; n <= (known || MAX_PAGES); n++) {
+      await view.loadURL('about:blank');
+      await view.loadURL(`${require('url').pathToFileURL(file).href}#page=${n}&toolbar=0&view=Fit`);
+      const page = cropToPage(await settledCapture(view.webContents));
+      if (!known && previous && page.toBitmap().equals(previous.toBitmap())) break;
+      pages.push(page);
+      previous = page;
+    }
+  } finally {
+    view.destroy();
+  }
+  if (!pages.length) throw new Error('no pages could be drawn');
+
+  const { width, height } = pages[0].getSize();
+  const html = '<!doctype html><style>@page{margin:0}body{margin:0}' +
+    'img{display:block;width:100vw;height:100vh;object-fit:contain;page-break-after:always}</style>' +
+    pages.map((p) => `<img src="${p.toDataURL()}">`).join('');
+  const printer = new BrowserWindow({ show: false, webPreferences: { session: ses, javascript: false, sandbox: true } });
+  try {
+    await printer.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
+    const pdf = await printer.webContents.printToPDF({
+      pageSize: { width: 8.5, height: 8.5 * height / width },
+      margins: { marginType: 'none' },
+      printBackground: true
+    });
+    fs.writeFileSync(outFile, pdf, { mode: 0o600 });
+  } finally {
+    printer.destroy();
+  }
+  log('sanitise', `safe copy of ${path.basename(file)}: ${pages.length} page(s)`);
+  return pages.length;
+}
+
+/** "report.pdf" -> "report (safe copy).pdf", beside it, without overwriting anything. */
+function safeCopyName(file) {
+  const dir = path.dirname(file);
+  const base = path.basename(file, path.extname(file));
+  for (let i = 1; i < 1000; i++) {
+    const name = i === 1 ? `${base} (safe copy).pdf` : `${base} (safe copy ${i}).pdf`;
+    if (!fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+  }
+  throw new Error('no free name for the safe copy');
+}
+
+module.exports = {
+  stripJpeg,
+  stripHeif, stripPng, stripWebp, stripImage, interceptUploads, cleanCopy,
+  countPages, flattenPdf, safeCopyName
+};

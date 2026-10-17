@@ -1,0 +1,793 @@
+/* Settings. Palette and base reset come from theme.css. */
+
+html, body { height: 100%; }
+
+/*
+ * The page is the base surface and the cards sit above it, not the other way
+ * round.
+ *
+ * It was inverted - a raised page with wells cut into it - which is a real
+ * style, but it puts the darkest thing on the screen around the text the user
+ * is reading and reads as a form on a lit table. Elevation going the usual way
+ * costs nothing and matches the task manager, which was already doing it.
+ */
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: var(--s5) var(--s6);
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-bold);
+  letter-spacing: var(--ls-title);
+}
+
+.close, .rail-toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: default;
+}
+/* The section list's button, drawn only in a narrow window (below). */
+.rail-toggle { display: none; margin: 0 var(--s3) 0 calc(-1 * var(--s2)); }
+.close:hover, .rail-toggle:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.close:active, .rail-toggle:active { background: color-mix(in srgb, var(--text) 16%, transparent); }
+.rail-toggle svg {
+  width: var(--icon); height: var(--icon);
+  fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linecap: round;
+}
+.close svg {
+  width: var(--icon); height: var(--icon);
+  fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linecap: round;
+}
+
+/* The rail and the page, side by side, each scrolling on its own. */
+.shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * A rail of section names, which is what every settings page of this length
+ * has and what this one was missing: eight sections in one scroll, with no way
+ * to see what they were without scrolling through them.
+ *
+ * It is furniture, so it is set like the section labels it lists - quiet, and
+ * only the current one at full strength.
+ */
+.rail {
+  flex: none;
+  width: 232px;   /* "Passwords and payment" on one line beside its icon */
+  overflow-y: auto;
+  padding: var(--s5) var(--s3) var(--s6) var(--s5);
+  border-right: 1px solid var(--border);
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  margin-bottom: 1px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.rail-item svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.85;
+}
+.rail-item.current svg { color: var(--accent); opacity: 1; }
+
+.rail-item:hover { background: var(--wash-soft); color: var(--text); }
+.rail-item:active { background: var(--wash); }
+
+/*
+ * Where you are, marked down the leading edge rather than by a filled pill.
+ *
+ * A filled row in a list of eight makes the current section the loudest thing
+ * on the page, next to settings that are the actual content. The bar is the
+ * same mark the active tab carries in the side strip, for the same reason.
+ */
+.rail-item.current {
+  color: var(--text);
+  background: var(--wash-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s2) var(--s6) var(--s7);
+}
+
+/* One section at a time (settings.js, showPage) - except while searching,
+   which shows every section's matches. */
+body[data-settings-layout="pages"]:not(.searching) main > section:not(.on) { display: none; }
+
+/*
+ * Search, in the header beside the title.
+ *
+ * Sized so it does not dominate a header whose job is to say which page this
+ * is. `type="search"` for the engine's own clear button, which is drawn in the
+ * right palette because `color-scheme` is declared - see theme.css.
+ */
+header #q {
+  flex: 0 1 280px;
+  margin-left: auto;
+  margin-right: var(--s4);
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  outline: none;
+  user-select: text;
+  cursor: text;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+
+header #q:focus { border-color: var(--accent); box-shadow: var(--ring); }
+
+/*
+ * History and Downloads put the search in a group with a button beside it.
+ * Both pages used to restate the field in their own stylesheets, and lost to
+ * the rule above on specificity anyway - so the width never applied and the
+ * gap to the button was the header's margin plus the group's.
+ */
+.head-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  justify-content: flex-end;
+  margin-right: var(--s3);
+}
+.head-tools #q { margin: 0; }
+
+.empty-search {
+  max-width: 840px;
+  margin: var(--s7) auto 0;
+}
+
+/* Centred rather than pinned to the left edge: the content has a fixed comfortable
+   width, and against a full window that leaves an empty half if it does not move. */
+/* More air above a group than inside it, so the eye reads the page as a few
+   groups rather than one long list of equally-spaced rows. */
+/*
+ * Wider than it was, which was 620px.
+ *
+ * Photographed at 1280px, the page was a narrow ribbon down the middle with
+ * more empty window either side of it than the settings themselves occupied -
+ * the layout of a phone page opened on a desktop. Chrome and Firefox both give
+ * their settings roughly this. The hint text keeps its own 52ch measure, so
+ * widening the card does not turn the explanations into long lines.
+ */
+section {
+  max-width: 840px;
+  margin: var(--s7) auto 0;
+  /* A deep link lands with the heading in view, not flush under the edge. */
+  scroll-margin-top: var(--s5);
+}
+section:first-of-type { margin-top: var(--s5); }
+
+/*
+ * Section headings, as headings.
+ *
+ * They were tracked-out small caps, which is the label every generated
+ * settings page wears above every card - and here it sat beside a rail that
+ * already names the same section in sentence case, so the page said
+ * "Appearance" twice in two different voices. A plain heading a step above
+ * the body is what the system settings on every desktop OS use.
+ */
+h2 {
+  margin: 0 0 var(--s3) 2px;
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--ls-title);
+  color: var(--text);
+}
+
+.rows {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+/* An empty list draws nothing - not a card edge with nothing in it. Not even
+   in Paper, whose ruled lists drew an empty one as a doubled line. */
+.rows:empty { display: none; }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s5);
+  padding: var(--s3) var(--s4);
+  background: var(--bg-raised);
+}
+/* The divider inside a card is lighter than the card's own edge. One weight for
+   both makes a group of settings read as a table of them. */
+.row + .row { border-top: 1px solid var(--border-soft); }
+
+.row-text { flex: 1; min-width: 0; }
+
+/*
+ * The label outranks the hint by contrast and size, not by weight.
+ *
+ * It used to be `font-weight: 550`. In Calibri that is bold - the face has
+ * nothing between regular and bold - so every row in Settings would have had a
+ * bold first line, which is a page shouting its own furniture at you. Full-
+ * strength text over dimmed text at a smaller size separates them cleanly, and
+ * it is the same pairing the history rows and the task manager use.
+ */
+.row-label {
+  display: block;
+  color: var(--text);
+  /* A row's label is also its control's target - clicking it toggles the
+     checkbox - so it is grown to 26px tall and the space handed straight back,
+     leaving the text exactly where it was and the hint's gap unchanged. */
+  padding: 4px 0;
+  margin: -4px 0;
+}
+
+/* Held to a readable measure rather than the full row. A hint running the whole
+   620px reads as documentation that happens to be in a settings window; kept
+   near 50 characters it reads as a caption. */
+.row-hint {
+  display: block;
+  max-width: 52ch;
+  margin-top: 2px;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+  color: var(--text-dim);
+}
+
+/*
+ * Controls share a column instead of each ending wherever it likes.
+ *
+ * With `flex: none` alone every control was its own width, so a dropdown, a
+ * slider and a row of swatches left a ragged right edge down the page - the
+ * single clearest sign that a layout was assembled rather than designed.
+ */
+.row-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex: none;
+  min-width: 172px;
+}
+
+/* A list with a button that fills it: the button under the field, at its
+   right edge, rather than squeezed beside it. */
+.row-control-stack { flex-direction: column; align-items: flex-end; }
+
+/* Bridge lines: long, several of them, and pasted rather than typed. */
+textarea {
+  width: 320px;
+  min-height: 64px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text);
+  font: var(--fs-small) / var(--lh-body) ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+  outline: none;
+  resize: vertical;
+  user-select: text;
+}
+textarea:focus { border-color: var(--accent); box-shadow: var(--ring); }
+
+/* Beside the field, not under it. `.row-hint` is a block, which is right in the
+   label column and wrong here. */
+.unit { font-size: var(--fs-small); color: var(--text-dim); }
+
+select, input[type="text"], input[type="number"] {
+  height: 32px;
+  min-width: 150px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}
+
+/* The ring itself is in theme.css, on `:focus-visible`, so every control in
+   every view gets it without being asked. This is the border that goes with
+   it - which also shows for a pointer click, where the ring deliberately does
+   not. */
+select:focus, input:focus { border-color: var(--accent); }
+
+/*
+ * One width for every dropdown and text field in a row, so the right-hand
+ * column is a column. Sized to their content, "Across the top" and "Google"
+ * ended forty pixels apart on consecutive rows. Numbers keep their own
+ * width: they carry a unit beside them.
+ */
+.row-control > select,
+.row-control > input[type="text"] { width: 212px; }
+
+/* A real checkbox, accented and sized up - a hand-rolled toggle would mean
+   reimplementing focus, keyboard activation and the accessibility tree. */
+input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  cursor: default;
+}
+/* A 17px box is under the 24px comfortable minimum and cannot be grown here:
+   Chromium ignores padding on an `appearance: auto` checkbox, so the padding +
+   negative-margin trick used on the tab's close cross leaves the border box at
+   17px (measured). The target that does the work is the row's `<label for>`,
+   widened just below. */
+
+/* The swatch row: the accent is the one setting where seeing it beats naming
+   it, so it is picked from colours rather than from a list of words. */
+.swatches { display: flex; gap: 7px; }
+
+.swatch {
+  /* 24px, not 22, because 24 is the smallest comfortable target and a swatch
+     has no label to fall back on. The padding trick used on the tab's close
+     cross is wrong here: this control's ring *is* its border, so padding would
+     grow the circle rather than the space around it. */
+  width: 24px;
+  height: 24px;
+  /* Always outlined, never transparent. A swatch whose colour matches the row
+     it sits on - the dark "Default" one, against the dark surface - is
+     otherwise invisible, so the choice looks like it is missing. */
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  cursor: default;
+  padding: 0;
+}
+.swatch[aria-pressed="true"] { border-color: var(--text); }
+/* An inner edge, so a dark swatch stays visible on the dark palette and
+   dark ones stay apart from each other. */
+.swatch { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 22%, transparent); }
+.swatch:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.swatch { transition: transform var(--fast) var(--ease), border-color var(--fast) var(--ease); }
+.swatch:hover { transform: scale(1.12); }
+.swatch:active { transform: scale(1.02); }
+
+/* The "follow the accent" swatch says so by showing the accent itself, with a
+   ring that marks it as a rule rather than a colour. */
+.swatch.mirror { box-shadow: inset 0 0 0 2px var(--bg); }
+
+input[type="range"] {
+  width: 150px;
+  accent-color: var(--accent);
+  cursor: default;
+}
+
+.row { transition: background-color var(--fast) var(--ease); }
+.row:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg-raised)); }
+
+.ghost-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: default;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.ghost-btn:hover { background: var(--wash-soft); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+/* A link inside a note: reads as text, acts as a button. */
+.link-btn {
+  /* A 24px target in a line of text: padded up and down, and the padding
+     handed back, so the sentence keeps its line height. */
+  padding: 4px 0;
+  margin: -4px 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.ghost-btn.danger:hover { border-color: var(--crit); color: var(--crit); }
+.ghost-btn:active:not(:disabled) { background: var(--wash); }
+/* Every button of this kind, not only the update one: Clear on the history and
+   downloads pages was disabled with nothing to clear and looked pressable. */
+.ghost-btn:disabled,
+.ghost-btn:disabled:hover { opacity: 0.45; background: transparent; border-color: var(--border); cursor: default; }
+
+.note {
+  max-width: 840px;
+  margin: var(--s3) 2px 0;
+  font-size: var(--fs-small);
+  line-height: var(--lh-body);
+  color: var(--text-dim);
+}
+/* A note introducing a section sits between its heading and its card, and
+   needs room below it as well; with none, the card's edge touched the text. */
+h2 + .note { margin: 0 2px var(--s4); }
+
+/*
+ * The update line and its button share a row, and the button keeps its
+ * width while the line beside it changes length - a control that slides along
+ * the row as a percentage counts up is a control that is hard to press.
+ */
+.update-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  /* The row's own space above the card, rather than the note's: aligned to
+     the text's baseline, the taller button rose into the card's edge. */
+  margin-top: var(--s3);
+}
+.update-status { flex: 1; min-width: 0; }
+.update-foot .note { margin-top: 0; }
+
+/* The update's progress, under its line. Thin, in the accent, on the same
+   track colour as the rest of the page's rules. */
+.update-bar {
+  position: relative;
+  height: 4px;
+  margin-top: var(--s2);
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border-soft);
+}
+.update-bar[hidden] { display: none; }
+.update-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--slow) var(--ease-out);
+}
+.update-bar[data-mode="done"] > span { width: 100%; }
+/* No figure yet: a segment crossing, as the installer's own window does. */
+.update-bar[data-mode="sweep"] > span { width: 32%; animation: update-sweep 1.4s var(--ease) infinite; }
+@keyframes update-sweep { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+@media (prefers-reduced-motion: reduce) {
+  .update-bar[data-mode="sweep"] > span { animation: none; width: 100%; opacity: .45; }
+}
+body.calm .update-bar[data-mode="sweep"] > span { animation: none; width: 100%; opacity: .45; }
+.update-foot .ghost-btn { flex: none; }
+
+/*
+ * The section a deep link asked for.
+ *
+ * Two seconds of a tinted rule down the leading edge, then gone. The scroll
+ * alone is ambiguous - a page that opens part-way down looks like a page that
+ * lost its top - and this says "here is the thing you asked for" without
+ * leaving a permanent mark on a section that is not otherwise special.
+ */
+section.landed .rows {
+  box-shadow: -3px 0 0 var(--accent);
+  transition: box-shadow var(--slow) var(--ease);
+}
+
+/*
+ * The bookmark editor: two fields where a row usually has a label and a hint.
+ *
+ * They take the label column rather than the control column, because an
+ * address is long and the control column is 172px of right-aligned buttons.
+ * The name is narrower than the address for the same reason names are shorter
+ * than URLs - giving them equal halves wastes the half that needs the room.
+ */
+.bookmark-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 8px;
+  align-items: center;
+}
+.bookmark-fields input[type="text"] { min-width: 0; width: 100%; }
+/* The line that says what the two fields are, across both of them. */
+.bookmark-fields .row-label { grid-column: 1 / -1; padding: 0; margin: 0; }
+/* The problem line spans both fields and takes no room until there is one. */
+.bookmark-fields .row-hint { grid-column: 1 / -1; margin: 0; color: var(--crit); }
+.bookmark-fields .row-hint:empty { display: none; }
+
+/* A form is one row taller than the rows around it; the buttons stay with the
+   fields rather than drifting to the middle of that extra height. */
+.bookmark-form .row-control { align-self: center; }
+
+/* A setting that does nothing here says so, and looks it. */
+.row.unavailable .row-label { color: var(--text-dim); }
+.row.unavailable input,
+.row.unavailable select { opacity: 0.5; }
+
+/* A switched-off checkbox looks it, label and all. */
+input[type="checkbox"]:disabled { opacity: 0.45; }
+.row:has(input[type="checkbox"]:disabled) .row-label { color: var(--text-dim); }
+
+/* Scrollbars that do not appear and vanish as a filter changes the page's
+   length - which shifted every row sideways by the bar's width. */
+main { scrollbar-gutter: stable; }
+/* No scroll anchoring: the room under the last section is sized by script
+   (settings.js, watchSections), and when a section grows as that room shrinks
+   the browser's anchoring moved the page up by the difference - off its end,
+   and the rail back to the section before. */
+main { overflow-anchor: none; }
+
+/*
+ * A narrow window - beside docked developer tools, or snapped to half a
+ * screen: the list of sections goes behind a button in the header and comes
+ * out over the page as a drawer, as Chrome's does. A row of section names
+ * across the top, which this was, showed four of twelve and cut the fifth in
+ * half. Each setting's control goes under its label rather than squeezing the
+ * hint into a column a few words wide.
+ */
+@media (max-width: 860px) {
+  header { padding-left: var(--s4); padding-right: var(--s4); }
+  .rail-toggle { display: grid; }
+  .shell { position: relative; }
+  .rail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 5;
+    width: 240px;
+    background: var(--bg-raised);
+    box-shadow: var(--shadow-menu);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform var(--fast) var(--ease-in), visibility 0s linear var(--fast);
+  }
+  body.rail-open .rail {
+    transform: none;
+    visibility: visible;
+    transition: transform 160ms var(--ease-out), visibility 0s;
+  }
+  main { padding: var(--s2) var(--s4) var(--s7); }
+  .row { flex-wrap: wrap; }
+  .row-control { margin-left: auto; }
+}
+
+/* A bookmark's three buttons, when the row is pointed at or reached by the
+   keyboard: a list of forty with a hundred and twenty permanent buttons
+   was mostly buttons. */
+.bookmark-row { gap: var(--s3); }
+.bookmark-row .row-control { opacity: 0; transition: opacity var(--fast) var(--ease); }
+.bookmark-row:hover .row-control,
+.bookmark-row:focus-within .row-control { opacity: 1; }
+@media (hover: none) { .bookmark-row .row-control { opacity: 1; } }
+
+/* Passwords and payment: the passcode card, then the fill option under it. */
+#passcode-rows + .rows { margin-top: var(--s3); }
+.passcode-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+.passcode-form input {
+  height: 32px;
+  width: 190px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+}
+.passcode-form input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.passcode-form .note { flex-basis: 100%; margin: 0; }
+.passcode-form .note.error { color: var(--crit); }
+.passcode-form .note.error:empty { display: none; }
+
+
+/* ------------------------------------------------------------------ */
+/* Designs                                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The browser's own pages - Settings, History, Downloads, Passwords, the Tor
+ * and warning pages - in the selected design, not only its colours. Each takes
+ * the same idea its tab strip and new tab page do: Ledger's soft filled cards
+ * and chips, Paper's serif headings and ruled lists, Grid's square, numbered,
+ * inverted blocks. Legacy keeps everything above, unchanged.
+ */
+
+/* Ledger: filled cards, but the side list and the header keep their rules -
+   without them the list and the settings ran together as one field. */
+body[data-design="ledger"] .rail-item { border-radius: var(--radius); }
+body[data-design="ledger"] .rail-item.current {
+  background: var(--bg-raised);
+  box-shadow: none;
+  font-weight: var(--fw-medium, 500);
+}
+body[data-design="ledger"] h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+body[data-design="ledger"] .rows { border-color: transparent; border-radius: var(--radius-lg); }
+body[data-design="ledger"] header #q { border-radius: 12px; }
+body[data-design="ledger"] :is(select, input[type="text"], input[type="number"], textarea) { border-radius: 10px; }
+body[data-design="ledger"] .ghost-btn { border-radius: var(--radius); }
+
+/* Paper: a page of type. Serif headings, lists ruled rather than boxed. */
+body[data-design="paper"] :is(h1, h2) { font-family: var(--font-display); font-weight: 400; letter-spacing: 0; }
+body[data-design="paper"] h1 { font-size: 26px; }
+body[data-design="paper"] h2 { font-size: 22px; margin-bottom: var(--s2); }
+body[data-design="paper"] .rows {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+/* Two lists in a row are one ruled list: each drawing its own rules put a
+   doubled line between them (the passcode and the fill setting; bookmarks'
+   actions and the list itself, past an empty note). */
+body[data-design="paper"] .rows:not(:empty) + .rows,
+body[data-design="paper"] .rows:not(:empty) + .note:empty + .rows { margin-top: 0; border-top: 0; }
+body[data-design="paper"] .row { background: transparent; padding-left: 2px; padding-right: 2px; }
+body[data-design="paper"] .row:hover { background: transparent; }
+body[data-design="paper"] .rail-item.current {
+  background: transparent;
+  box-shadow: inset 1.5px 0 0 var(--accent);
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+body[data-design="paper"] header #q {
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Grid: square blocks, numbered sections, the current one inverted. */
+body[data-design="grid"] main { counter-reset: section; }
+body[data-design="grid"] section { counter-increment: section; }
+body[data-design="grid"] h2 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+body[data-design="grid"] h2::before {
+  content: counter(section, decimal-leading-zero) "  ";
+  white-space: pre;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+body[data-design="grid"] .rows { border-color: var(--border); }
+body[data-design="grid"] .row + .row { border-top-color: var(--border); }
+body[data-design="grid"] .rail { border-right-color: var(--border); }
+body[data-design="grid"] .rail-item.current {
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: none;
+}
+body[data-design="grid"] header { border-bottom-color: var(--border); }
+
+/*
+ * The slider, drawn rather than left to the system: a slim track filled in the
+ * accent up to the thumb, and a plain round thumb - the native one was a large
+ * green knob on a thick bar, the only control on the page that looked borrowed.
+ * Each design's corners apply, so Grid's is square.
+ */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  /* 24px to grab, however thin the track looks; the track centres in it. */
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  --fill: 0%;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill, 999px);
+  background: linear-gradient(90deg, var(--accent) var(--fill), color-mix(in srgb, var(--text) 16%, transparent) var(--fill));
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: var(--radius-pill, 50%);
+  background: var(--bg-raised);
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform var(--fast) var(--ease);
+}
+input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.15); }
+input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--ring); }
+input[type="range"]:disabled { opacity: 0.4; }
+
+/* Spaces: the name edited in place, and the colours to choose from. */
+.space-name-input {
+  width: min(220px, 100%);
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: var(--fw-bold);
+}
+.space-name-input:hover { border-color: var(--border); }
+.space-name-input:focus { border-color: var(--accent); outline: none; background: var(--bg-input); }
+.space-swatches { display: flex; gap: 0; margin-right: var(--s2); }
+.space-swatches button {
+  /* A 24px target around the same 16px dot, which is drawn by ::before in
+     the button's colour (set by settings.js). */
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.space-swatches button::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg-raised);
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 1px var(--border);
+}
+.space-swatches button[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--text); }
+
+/* Follows the system's accent: a ring inside says "automatic". */
+.swatch-system { position: relative; margin-left: 6px; }
+.swatch-system::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  border: 1.5px solid rgb(255 255 255 / 0.85);
+}
+
+/* High Contrast: the range track and thumb in system colours (theme.css). */
+@media (prefers-reduced-motion: reduce) {
+  .rail, body.rail-open .rail { transition: none; }
+}
+
+@media (forced-colors: active) {
+  input[type="range"] { forced-color-adjust: none; }
+  input[type="range"]::-webkit-slider-runnable-track { background: CanvasText; }
+  input[type="range"]::-webkit-slider-thumb { background: Canvas; border-color: Highlight; }
+}
+
+/* The installed extensions, under the Lab that loads them. */
+.extension-rows[hidden] { display: none; }

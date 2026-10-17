@@ -1,0 +1,151 @@
+/*
+ * The site panel. Sits on menu.css for the sheet itself; everything here is
+ * what goes inside it.
+ */
+
+.site {
+  width: 300px;
+  padding: 0;
+  transform-origin: top left;
+}
+
+section { padding: var(--s3) var(--s4) var(--s3); }
+
+/* ---------------------------------------------------------------- */
+
+.ask-line {
+  margin: 0 0 var(--s2);
+}
+.ask-line strong { font-weight: var(--fw-bold); }
+
+.kinds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.kinds li {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 30px;
+}
+
+.kinds svg,
+.row.zoom svg {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--text-dim);
+}
+
+.kinds .label { flex: 1; }
+.kinds select {
+  height: 26px;
+  padding: 0 24px 0 var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+}
+.kinds .count { display: block; color: var(--text-dim); font-size: var(--fs-small); }
+#shield { margin-bottom: var(--s1); padding-bottom: var(--s1); border-bottom: 1px solid var(--border); }
+#shield:has(+ .kinds[hidden]) { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+.btn {
+  height: 30px;
+  padding: 0 var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: default;
+  transition: background-color var(--fast) var(--ease), filter var(--fast) var(--ease);
+}
+.btn:hover { background: var(--wash-soft); }
+.btn:active { background: var(--wash); }
+.btn.primary { border-color: transparent; background: var(--accent-fill); color: #fff; }
+.btn.primary:hover { filter: brightness(1.1); }
+.btn.primary:active { filter: brightness(0.94); }
+
+/* ---------------------------------------------------------------- */
+
+.head h2 {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection {
+  margin: 2px 0 0;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+.connection.insecure { color: color-mix(in srgb, var(--warn) 65%, var(--text)); }
+
+.rows { margin-top: var(--s2); }
+
+.rows input { margin: 0; }
+
+.note {
+  margin: var(--s2) 0 0;
+  padding: 0;                /* menu.css's is for the menu */
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 30px;
+  margin-top: var(--s1);
+}
+/* menu.css is loaded here too, and its menu zoom row - `.zoom`, indented to
+   the menu's icon column - put this panel's zoom row 36px to the right of the
+   rows above it. */
+.row.zoom { height: auto; padding: 0; }
+.row .value { flex: 1; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin: var(--s2) calc(-1 * var(--s4)) calc(-1 * var(--s3));
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--border-soft);
+}
+
+.link {
+  padding: 4px var(--s1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 60%, var(--text));
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: default;
+  transition: background-color var(--fast) var(--ease);
+}
+.link:hover { background: var(--wash-soft); }
+.link:active { background: var(--wash); }
+.link:disabled { color: var(--text-dim); background: transparent; }
+.link.danger { color: var(--crit); }

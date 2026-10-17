@@ -21,8 +21,8 @@
  *             compressor. Undo cost: the pages fault back, measured at 4-12ms.
  *             Nothing is lost, which is what makes it the one reclaim available
  *             on a tab the protections refuse to destroy.
- *   DISCARDED renderer destroyed. Undo cost: a reload. Reserved for genuine
- *             memory contention, never used on a schedule alone.
+ *   DISCARDED renderer destroyed. Undo cost: a reload. Reserved for memory
+ *             contention and for tabs left unvisited past `discardAfterMs`.
  *
  * Promotion always runs the inverse in the right order, and always completes
  * before the tab is shown.
@@ -57,15 +57,35 @@ async function applyTier(tab, target, ctx) {
     return null;
   }
 
-  const goingUp = tierRank(target) < tierRank(current);
+  // `<=`, not `<`, and the difference is 400ms on the tab-switch path.
+  //
+  // ACTIVE is deliberately exempt from the early return above, so that
+  // re-activating the foreground tab still re-asserts its priority and detaches
+  // the protocol agents. But with a strict `<`, ACTIVE -> ACTIVE is not "going
+  // up", so it fell through to `demote` - which captures page state, waits up
+  // to 400ms for the renderer to answer, and on a page that never does, waits
+  // all of it. Measured: switch p50 0.3ms, p95 401ms, the p95 being entirely
+  // this. Nothing about re-activating the tab already in front of the user
+  // needs a snapshot; that is what demotion takes one for.
+  //
+  // Every other same-tier case returned above, so this only ever routes ACTIVE
+  // -> ACTIVE, where `promote` is a no-op that reaches the tier it started at
+  // and is discarded as unmoved.
+  const goingUp = tierRank(target) <= tierRank(current);
+  // What it held before going down, for "gave back 240 MB" on the sleeping
+  // tab (the strip's tooltip): read now, since a discarded tab has no
+  // renderer left to measure.
+  const heldMB = goingUp ? 0 : Math.round(tab.memNowMB ?? tab.rssMB ?? 0);
   const reached = goingUp
     ? await promote(tab, target, ctx)
-    : await demote(tab, target, ctx);
+    : await demote(tab, target, ctx).finally(() => { tab.freezing = false; });
 
   if (!reached || reached === current) return null;
 
   tab.tier = reached;
   tab.tierChangedAt = Date.now();
+  if (reached === Tier.DISCARDED && heldMB > 0) tab.gaveBackMB = heldMB;
+  else if (tierRank(reached) < tierRank(Tier.FROZEN)) tab.gaveBackMB = 0;
   log(`tab ${tab.id}: ${current} -> ${reached}`);
   tab.emit('updated');
   return reached;
@@ -90,10 +110,30 @@ async function promote(tab, target, ctx) {
   // there means a restored tab that stays throttled.
   if (tab.tier === Tier.HIBERNATED) platform.untrimProcessMemory(tab.pid);
 
+  // A demotion that has frozen the page and is still waiting on the trim -
+  // 0.2-0.6s for an ordinary tab, nearly 3s for a 1GB one - has not recorded
+  // the tier yet, so the check below would pass over it and leave a stopped
+  // page on screen until the trim returned (measured 310ms). Thaw it now;
+  // the demotion sees it was overtaken and leaves it alone.
+  if (tab.freezing && tab.cdp) {
+    tab.freezing = false;
+    await tab.cdp.unfreeze();
+  }
+
   // Undo freezing before anything else: a stopped page cannot run the script
   // that would repaint it, so showing it first would flash stale content.
   if (tab.cdp && tierRank(tab.tier) >= tierRank(Tier.FROZEN)) {
-    await tab.cdp.unfreeze();
+    // The answer matters. A CDP call that times out returns false, and
+    // reporting the tier anyway recorded the tab as ACTIVE while its document
+    // was still stopped - after which `tierRank(active) >= tierRank(FROZEN)` is
+    // false, so no later promotion ever tried the unfreeze again and the tab
+    // stayed dead for the rest of the session. Staying at the tier we are
+    // actually in leaves the next tick free to retry, which is the same posture
+    // freezing already takes when it fails.
+    if (!await tab.cdp.unfreeze()) {
+      log(`tab ${tab.id}: unfreeze did not take, staying ${tab.tier}`);
+      return tab.tier;
+    }
   }
 
   // The foreground tab needs no instrumentation: nothing freezes, collects or
@@ -103,6 +143,11 @@ async function promote(tab, target, ctx) {
   if (target === Tier.ACTIVE && tab.cdp) {
     tab.cdp.detach();
   }
+
+  // Out of efficiency mode at once, not at the next tick (governor,
+  // applyEfficiency): on battery that is up to five seconds of a page in
+  // front of the user running throttled.
+  if (target === Tier.ACTIVE && tab.pid) platform.setEfficiency(tab.pid, false);
 
   // Note: background throttling is deliberately left to Chromium, which
   // already throttles a hidden page's timers and rAF on its own. Toggling
@@ -140,7 +185,9 @@ async function demote(tab, target, ctx) {
   // in form was never snapshotted, so `hasDirtyInput` stayed false and the
   // protection against discarding unsubmitted input silently did not apply to
   // exactly the tabs most likely to be discarded.
+  const from = tab.tier;
   await tab.capturePageState(ipcHub);
+  if (superseded(tab, from)) return null;
 
   // COLD performs no action on the renderer, and that is deliberate rather
   // than unfinished. Forcing a collection here was measured as a net loss
@@ -155,7 +202,17 @@ async function demote(tab, target, ctx) {
   // below deliberately detached - paying ~2.4MB inside the renderer, on the
   // tier whose entire purpose is to give memory back, moments before trimming.
   if (tierRank(target) >= tierRank(Tier.FROZEN) && tierRank(tab.tier) < tierRank(Tier.FROZEN)) {
-    const frozen = await tab.cdp.freeze();
+    // Guarded like every other cdp use here. The `capturePageState` above is
+    // awaited, which is all the time a renderer needs to die - and teardown
+    // nulls `tab.cdp`, so this threw a TypeError straight out of the governor
+    // tick. A tab with no renderer is already holding nothing, so there is
+    // nothing to freeze and COLD is the honest answer.
+    const frozen = tab.cdp ? await tab.cdp.freeze() : false;
+    tab.freezing = frozen;
+    // Shown while the freeze was in flight. The promotion that ran meanwhile
+    // saw a tier below FROZEN and so did not unfreeze, which would leave the
+    // page the user is now looking at stopped.
+    if (superseded(tab, from)) return backOut(tab, { frozen });
     if (!frozen) {
       // Freezing is the one step that can legitimately fail (DevTools
       // attached, page in an unfreezable state such as holding a lock). Stay
@@ -183,11 +240,16 @@ async function demote(tab, target, ctx) {
     const advised = await platform.trimProcessMemory(tab.pid, log);
     if (advised == null) {
       // Trimming is unavailable or was refused. The tab is frozen, which is a
-      // legitimate tier, so report that rather than a state it is not in.
+      // legitimate tier, so report that rather than a state it is not in -
+      // or, if it was shown while the trim was asked for, thaw it.
+      if (superseded(tab, from)) return backOut(tab, { frozen: true });
       log(`tab ${tab.id}: trim unavailable; holding at frozen`);
       return Tier.FROZEN;
     }
     tab.trimmedAt = Date.now();
+    // As after the freeze: the promotion that overtook this saw the tier we
+    // started from, so the undo is ours to do.
+    if (superseded(tab, from)) return backOut(tab, { frozen: true, trimmed: true });
   }
 
   return target;
@@ -207,15 +269,24 @@ async function discard(tab, ctx) {
   // already has one, taken when it was demoted to COLD.
   // Only an unstopped page can answer; a hibernated one is as mute as a frozen
   // one and already had its snapshot taken on the way down.
+  const from = tab.tier;
   if (!isStopped(tab.tier)) {
     try {
       await tab.capturePageState(ipcHub);
     } catch (err) {
       log(`tab ${tab.id}: page state capture failed: ${err.message}`);
     }
+    if (superseded(tab, from)) return null;
   }
 
   tab.captureNavigation();
+
+  // Started playing sound, or was given the camera or microphone, while the
+  // snapshot was taken: no longer a tab to discard.
+  if (tab.audible || tab.capturing) {
+    log(`tab ${tab.id}: discard cancelled, now audible or capturing`);
+    return tab.tier;
+  }
 
   if (tab.hasDirtyInput) {
     // The snapshot revealed unsubmitted input after all. Freezing keeps the
@@ -224,11 +295,32 @@ async function discard(tab, ctx) {
     log(`tab ${tab.id}: discard cancelled, holds unsubmitted input`);
     if (isStopped(tab.tier)) return tab.tier;       // already stopped; leave it there
     const frozen = tab.cdp ? await tab.cdp.freeze() : false;
+    if (superseded(tab, from)) return backOut(tab, { frozen });
     return frozen ? Tier.FROZEN : tab.tier;
   }
 
+  // A stopped tab skipped the capture above and with it the check after it.
+  if (superseded(tab, from)) return null;
   tab.teardownView();
   return Tier.DISCARDED;
+}
+
+/**
+ * Whether a demotion was overtaken while it awaited the page. The capture can
+ * take up to its timeout, and the user can switch to the tab in that window;
+ * carrying on would freeze or tear down the page now on screen. Returning null
+ * from the step reports the tab as unmoved, which is what it should be.
+ */
+function superseded(tab, from) {
+  return tab.visible || tab.activating === true || tab.tier !== from;
+}
+
+/** Undo what a superseded demotion had done so far, and report no move. */
+async function backOut(tab, { frozen = false, trimmed = false } = {}) {
+  if (trimmed) platform.untrimProcessMemory(tab.pid);
+  // Unless the promotion that overtook us has already thawed it.
+  if (frozen && tab.freezing) await tab.cdp?.unfreeze();
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -242,9 +334,12 @@ function refreshPriority(tab, cfg, tier = tab.tier) {
   if (!tab.pid) return;
   if (tab.boosted) return; // the boost controller owns this tab's priority
 
+  // In efficiency mode (battery mode, background) the helper has put it in
+  // Windows' idle class, which is half of what that mode is; the usual
+  // background priority would take it out again on the next pass.
   const priority = tier === Tier.ACTIVE
     ? cfg.boost.niceForeground
-    : cfg.boost.niceBackground;
+    : platform.isWindows && platform.efficiencyOf(tab.pid) ? 19 : cfg.boost.niceBackground;
 
   platform.setProcessPriority(tab.pid, priority);
   tab.priority = priority;

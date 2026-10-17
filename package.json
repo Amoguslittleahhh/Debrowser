@@ -1,6 +1,7 @@
 {
   "name": "debrowser",
-  "version": "1.0.1",
+  "version": "2.4.0",
+  "license": "MIT",
   "private": true,
   "description": "A memory-adaptive web browser: minimum RAM and CPU per tab, without costing smoothness.",
   "main": "src/main/main.js",
@@ -9,21 +10,39 @@
     "start:economy": "electron . --profile=economy",
     "start:performance": "electron . --profile=performance",
     "bench": "node bench/bench.js",
+    "speed": "electron . --speed-test --disable-gpu",
+    "soak": "electron --js-flags=--expose-gc . --speed-test --soak --speed-runs=300 --disable-gpu",
     "smoke": "electron . --smoke-test --disable-gpu",
     "start:minimal": "electron . --profile=minimal",
-    "build:ksm": "cc -O2 -Wall -o tools/ksm-launch tools/ksm-launch.c",
-    "build:memtrim": "cc -O2 -Wall -o tools/mem-trim tools/mem-trim.c",
-    "start:merged": "npm run build:ksm && tools/ksm-launch electron .",
+    "build:ksm": "cc -O2 -Wall -o native/helpers/ksm-launch native/helpers/ksm-launch.c",
+    "build:memtrim": "node tools/build-helper.js mem-trim",
+    "start:merged": "npm run build:ksm && native/helpers/ksm-launch electron .",
     "smoke:headless": "xvfb-run -a electron . --smoke-test --no-sandbox --disable-gpu",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "npm run build:memtrim && electron-builder --linux"
+    "dist:win": "npm run build:memprobe && npm run build:memtrim && npm run build:netwatch && npm run build:setupui && npm run build:passkeys && npm run build:streamview && electron-builder --win",
+    "dist:mac": "npm run build:memprobe && electron-builder --mac",
+    "dist:linux": "npm run build:memtrim && electron-builder --linux",
+    "build:memprobe": "node tools/build-helper.js mem-probe",
+    "build:netwatch": "node tools/build-helper.js net-watch",
+    "build:setupui": "node tools/build-helper.js setup-ui",
+    "build:passkeys": "node tools/build-helper.js passkeys",
+    "build:netns": "node tools/build-helper.js netns-launch",
+    "build:streamview": "node tools/build-streamview.js",
+    "test:incognito": "node test/incognito-leak.js",
+    "audit": "electron tools/shoot.js --audit --disable-gpu",
+    "dist:intune": "npm run build:memprobe && npm run build:memtrim && node tools/build-intune.js",
+    "lint": "eslint src tools bench test"
+  },
+  "engines": {
+    "node": ">=22.13"
   },
   "devDependencies": {
-    "electron": "^44.0.0",
-    "electron-builder": "^26.15.3"
+    "axe-core": "^4.13.0",
+    "electron": "github:castlabs/electron-releases#v44.5.1+wvcus",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.12.0",
+    "js-yaml": "^5.4.2"
   },
   "author": {
     "name": "amoguslittleahhh",
@@ -34,5 +53,12 @@
     "type": "git",
     "url": "https://github.com/Amoguslittleahhh/Debrowser.git"
   },
-  "desktopName": "debrowser.desktop"
+  "desktopName": "debrowser.desktop",
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.18.2",
+    "@ghostery/adblocker-electron-preload": "^2.18.2",
+    "@mozilla/readability": "^0.6.0",
+    "electron-updater": "^6.8.9",
+    "tldts-experimental": "^7.4.16"
+  }
 }

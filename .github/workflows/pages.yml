@@ -1,0 +1,136 @@
+# The release archive (tools/changelog-site.js) on GitHub Pages: every version's
+# notes with its date, one page each, and an Atom feed.
+#
+# Needs Pages turned on once, with "GitHub Actions" as the source
+# (Settings → Pages). Until then the deploy step fails and nothing else does.
+
+name: Release archive
+
+on:
+  push:
+    branches: [claude/master-build]
+    paths: [CHANGELOG.md, tools/changelog-site.js, tools/install.sh, tools/pkgbuild.js, .github/workflows/pages.yml, build/linux/archive-keyring.asc]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # tags give each version its date
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Build the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export RELEASE_ASSETS=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '[.assets[].name] | join(",")' || true)
+          node tools/changelog-site.js site
+      # The key the Linux packages and repositories are signed with, at a
+      # fixed address, for setting a repository up by hand. The packages carry
+      # it too; it is not a release file, so as not to be one more to pick from.
+      - name: The signing key
+        run: |
+          if [ -s build/linux/archive-keyring.asc ]; then
+            cp build/linux/archive-keyring.asc site/debrowser-archive-keyring.asc
+          fi
+      # The terminal installer, at a fixed address (tools/install.sh):
+      #   curl -fsSL https://amoguslittleahhh.github.io/Debrowser/install.sh | sh
+      # And the Arch package recipe for the newest release, which it builds on
+      # Arch (tools/pkgbuild.js) and which is what goes to the AUR - made from
+      # the release's .deb and its SHA-256, so it needs no key.
+      - name: The installer and the Arch package recipe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp tools/install.sh site/install.sh
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || true)
+          work=$(mktemp -d)
+          if [ -n "$tag" ] && gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern 'Debrowser-Linux.deb' -D "$work" 2>/dev/null; then
+            node tools/pkgbuild.js --version "${tag#v}" --sha256 "$(sha256sum "$work/Debrowser-Linux.deb" | cut -d' ' -f1)" --out site/arch
+          else
+            echo "::notice::${tag:-The newest release} has no Debrowser-Linux.deb, so no Arch package recipe yet."
+          fi
+          rm -rf "$work"
+
+      # The dnf and zypper repository: a signed index (repodata/) of the newest
+      # stable release's .rpm, whose entries point at that release's download,
+      # so only a few kilobytes live here. The .rpm's install script adds it
+      # (build/linux/rpm-after-install.tpl). Rebuilt with the site, from
+      # whatever release is latest, so the two never disagree. Signed with the
+      # same LINUX_SIGNING_KEY as the packages, and only once they are signed.
+      - name: The rpm repository
+        env:
+          LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$LINUX_SIGNING_KEY" ]; then
+            echo "::notice::No LINUX_SIGNING_KEY secret, so no rpm repository."
+            exit 0
+          fi
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          work=$(mktemp -d)
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" --pattern '*.rpm' -D "$work" || true
+          if ! ls "$work"/*.rpm >/dev/null 2>&1; then
+            echo "::notice::$tag has no .rpm, so no rpm repository yet."
+            exit 0
+          fi
+          export GNUPGHOME=$(mktemp -d)
+          printf '%s\n' "$LINUX_SIGNING_KEY" | gpg --batch --quiet --import
+          signing=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr:/{print $10; exit}')
+          sudo apt-get install -y --no-install-recommends createrepo-c rpm >/dev/null
+          # Only packages signed with this key: dnf would refuse the rest anyway.
+          db=$(mktemp -d)
+          rpm --dbpath "$db" --initdb
+          rpm --dbpath "$db" --import build/linux/archive-keyring.asc
+          for f in "$work"/*.rpm; do
+            if ! rpm --dbpath "$db" -K "$f" | grep -q 'digests signatures OK'; then
+              echo "::notice::$(basename "$f") in $tag is not signed with this key, so no rpm repository yet."
+              exit 0
+            fi
+          done
+          mkdir -p site/rpm
+          createrepo_c --baseurl "${{ github.server_url }}/$GITHUB_REPOSITORY/releases/download/$tag/" \
+            --outputdir site/rpm "$work"
+          gpg --batch --yes --local-user "$signing" --armor --detach-sign site/rpm/repodata/repomd.xml
+          gpg --batch --export "$signing" > "$GNUPGHOME/check.gpg"
+          gpgv --keyring "$GNUPGHOME/check.gpg" site/rpm/repodata/repomd.xml.asc site/rpm/repodata/repomd.xml
+          # For setting it up by hand: `sudo dnf config-manager addrepo --from-repofile=<this>`.
+          cat > site/rpm/debrowser.repo <<REPO
+          [debrowser]
+          name=Debrowser
+          baseurl=https://amoguslittleahhh.github.io/Debrowser/rpm/
+          enabled=1
+          gpgcheck=1
+          repo_gpgcheck=1
+          gpgkey=https://amoguslittleahhh.github.io/Debrowser/debrowser-archive-keyring.asc
+          REPO
+          sed -i 's/^ *//' site/rpm/debrowser.repo
+          ls -R site/rpm
+          rm -rf "$GNUPGHOME"
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,190 @@
+# Build and publish the Intune package on its own, as a pre-release.
+#
+# On demand, and never as part of a normal release. Deploying a browser through
+# Intune is a narrow case, and a normal release has no reason to carry an
+# artifact almost nobody downloading it can use.
+#
+# The stronger reason is fragility. Packaging a `.intunewin` means fetching
+# Microsoft's Win32 Content Prep Tool and checking it against a pinned hash, so
+# doing that on the release path made shipping the browser to ordinary users
+# depend on a third-party binary staying reachable and unchanged. A moved file
+# or a new upstream release would have failed every platform's release over an
+# artifact none of them contain. That dependency belongs here, where its
+# failure costs only the thing that needs it.
+#
+# It also ships one platform and one artifact rather than all three, and
+# `release.yml`'s gate deliberately refuses to publish unless every platform is
+# present - so this could not go through it without weakening that check.
+#
+# Always a pre-release. The package is experimental and untested against a real
+# tenant (build/intune/README.md), and a pre-release is not GitHub's "latest",
+# so it cannot be mistaken for the build an ordinary user should download. It
+# also carries no `latest.yml`, so the in-app updater never sees it.
+#
+# The build steps mirror the Windows leg of release.yml. The part with any real
+# subtlety - fetching, verifying and driving Microsoft's content prep tool -
+# lives in one composite action that both workflows call.
+
+name: Intune package
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v1.2.1-intune-only. Leave empty to build only.'
+        required: false
+        default: ''
+      draft:
+        description: 'Create the release as a draft.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read   # the build runs dependency install scripts; only the release job writes
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Ensure the Electron binary is present
+        shell: bash
+        run: node -e "require('electron')" > /dev/null || npm rebuild electron
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build the measurement helper
+        run: npm run build:memprobe
+
+      # Private windows need both, exactly as the normal Windows build ships
+      # them. electron-builder only warns when a file it was told to copy is
+      # missing, so without these two steps the Intune installer went out with
+      # private windows that could not start Tor and had no tripwire.
+      - name: Build the incognito tripwire
+        run: npm run build:netwatch
+
+      - name: Fetch and verify Tor
+        run: node tools/fetch-tor.js
+
+      # The same gate the normal Windows build passes. An Intune deployment is
+      # the hardest place to notice a broken browser and the slowest to roll
+      # back, so it is the last place to skip the suite.
+      - name: Smoke test
+        run: npm run smoke
+
+      - name: Package the Intune variant
+        env:
+          WIN_CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:intune
+
+      - name: Find the installer
+        id: intune
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = @(Get-ChildItem dist-intune/*.exe -ErrorAction SilentlyContinue)
+          if ($exe.Count -ne 1) { throw "expected exactly one installer in dist-intune/, found $($exe.Count)" }
+          "exe=dist-intune/$($exe[0].Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Package for Intune (.intunewin)
+        uses: ./.github/actions/intunewin
+        with:
+          installer: ${{ steps.intune.outputs.exe }}
+          out: dist-intune
+
+      - name: Report signature status
+        shell: pwsh
+        run: |
+          Get-ChildItem dist-intune/*.exe | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "{0}: {1} {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
+          }
+
+      # Refuses to publish half the deliverable. The .intunewin alone cannot be
+      # tested by hand and the .exe alone cannot be deployed, so a release with
+      # one of them is not a release.
+      - name: Check both halves exist
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($pat in '*-intune.exe', '*.intunewin') {
+            $f = @(Get-ChildItem "dist-intune/$pat" -ErrorAction SilentlyContinue)
+            if ($f.Count -lt 1) { throw "nothing matching $pat in dist-intune/" }
+            $f | ForEach-Object { "{0,-48} {1,8:N1} MB" -f $_.Name, ($_.Length/1MB) }
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: intune
+          path: |
+            dist-intune/*.exe
+            dist-intune/*.intunewin
+          if-no-files-found: error
+
+  # Verifying and publishing happen on Linux, away from the machine that built
+  # the bundle. That is partly so the check does not depend on what the Windows
+  # runner happens to have installed, and partly because a package is best
+  # checked after the round trip that will actually deliver it.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: intune
+          path: artifacts
+
+      - name: Check both halves arrived
+        run: |
+          ls -lh artifacts/
+          fail=0
+          for want in '*-intune.exe' '*.intunewin'; do
+            find artifacts/ -maxdepth 1 -type f -name "$want" | grep -q . \
+              || { echo "::error::no $want in artifacts/"; fail=1; }
+          done
+          exit $fail
+
+      # Opens the bundle the way a device would. Its payload is encrypted, so
+      # nothing short of decrypting it shows whether the installer is inside -
+      # and the failure this guards against is a correctly named, empty bundle.
+      - name: Verify the Intune bundle
+        run: python3 tools/verify-intunewin.py artifacts/*.intunewin
+
+      # The release body is this version's changelog section, from the same
+      # script release.yml uses.
+      - name: Build the release body
+        if: github.event.inputs.tag != ''
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          python3 .github/scripts/release-notes.py "$version" > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Release
+        if: github.event.inputs.tag != ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          # The commit that was built, not the default branch's head.
+          target_commitish: ${{ github.sha }}
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          prerelease: true
+          body_path: RELEASE_NOTES.md
+          files: artifacts/*
+          fail_on_unmatched_files: true

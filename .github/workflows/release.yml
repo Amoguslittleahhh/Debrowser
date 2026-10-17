@@ -14,13 +14,34 @@
 
 name: Release
 
+# What the run is called in the Actions list: "Release v1.7.0 - Test 3"
+# rather than "Release #36". The test number counts the tries at that version,
+# and is given by whoever starts the run, since a workflow cannot count its own
+# earlier runs; a tag push is the real thing and has none.
+run-name: "${{ format('Release {0}{1}', inputs.tag || (github.event_name == 'push' && github.ref_name) || '(build only)', inputs.test && format(' - Test {0}', inputs.test) || '') }}"
+
 on:
   push:
-    tags: ['v*']
+    # Version tags only. The negations matter: not every `v*` tag is a build.
+    #
+    # `v1.2.1-intune-only` and `v1.2.1-announcements` are published by other
+    # workflows - one ships a single Windows artifact, the other ships no files
+    # at all - and both would otherwise match `v*` and start a full
+    # three-platform build that overwrote them. A tag created by a workflow's
+    # own GITHUB_TOKEN does not trigger another workflow, so this has never
+    # fired; it exists for the day someone pushes one of those tags by hand.
+    tags:
+      - 'v*'
+      - '!v*-intune-only'
+      - '!v*-announcements'
   workflow_dispatch:
     inputs:
       tag:
         description: 'Tag to release, e.g. v1.0.0. Leave empty to build artifacts only.'
+        required: false
+        default: ''
+      test:
+        description: 'Which try at this version this is (1, 2, 3...). Shown in the run name only.'
         required: false
         default: ''
       draft:
@@ -28,9 +49,21 @@ on:
         type: boolean
         required: false
         default: false
+      beta:
+        description: 'Publish as a beta (a prerelease): only the Beta update channel is offered it.'
+        type: boolean
+        required: false
+        default: false
+      rollout:
+        description: 'Offer the update to this percentage of users at first (1-100). Raise it later by editing stagingPercentage in latest*.yml on the release.'
+        required: false
+        default: '100'
 
+# Read-only by default: the build runs dependency install scripts, and a
+# compromised one must not find a token that can push tags, edit releases or
+# sign attestations. Only the release job, which runs none of that, writes.
 permissions:
-  contents: write        # create the tag, the release, and upload its assets
+  contents: read
 
 jobs:
   build:
@@ -38,20 +71,36 @@ jobs:
       fail-fast: false   # a macOS failure must not hide a working Windows build
       matrix:
         include:
+          # Every path here must sit under `dist/`, on all three legs.
+          #
+          # upload-artifact keeps the least common ancestor of the paths it is
+          # given. List only `dist/...` and that ancestor is `dist/`, so the
+          # files arrive flat; add one path outside it - `dist-intune/*.exe`
+          # once did exactly this - and the ancestor becomes the workspace root,
+          # so the whole leg arrives nested a directory deeper than the other
+          # two. The release job's `files: artifacts/*` is not recursive, so it
+          # then matched two directories, skipped them, and published a release
+          # with no Windows build in it at all.
           - os: windows-latest
             platform: --win
-            artifacts: dist/*.exe
+            artifacts: |
+              dist/*.exe
+              dist/*.blockmap
+              dist/latest.yml
           - os: macos-latest
             platform: --mac
             artifacts: |
               dist/*.dmg
               dist/*.zip
+              dist/*.blockmap
+              dist/latest-mac.yml
           - os: ubuntu-latest
             platform: --linux
             artifacts: |
               dist/*.AppImage
               dist/*.deb
-              dist/*.tar.gz
+              dist/*.rpm
+              dist/latest-linux.yml
 
     runs-on: ${{ matrix.os }}
 
@@ -63,9 +112,9 @@ jobs:
       AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -80,24 +129,167 @@ jobs:
       # Windows and macOS, so it is worth a cheap check rather than a re-run.
       - name: Ensure the Electron binary is present
         shell: bash
-        run: node -e "require('electron')" > /dev/null || npm rebuild electron
+        # castLabs' Electron (a git dependency) fetches its binary the same way,
+        # from castLabs' releases; running its installer directly is the
+        # fallback that works when a rebuild does not.
+        run: node -e "require('electron')" > /dev/null || npm rebuild electron || node node_modules/electron/install.js
 
-      # The trim helper is Linux-only and is the one artifact that needs a
-      # compiler. On the other two runners it is neither built nor shipped.
+      # Before either helper is built, because on Windows both are compiled
+      # with `cl`, which exists only inside a Visual Studio developer
+      # environment. This step used to come second and the trim helper would
+      # have looked for a compiler that was not on PATH yet.
+      - name: Set up MSVC
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5   # v1.9.0
+
+      # The trim helper has a backend on Linux and on Windows; macOS has no
+      # public API to force its compressor, so there it is neither built nor
+      # shipped.
       - name: Build the trim helper
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os != 'macos-latest'
         run: npm run build:memtrim
 
-      # Runs the real 41-check suite against real renderers before anything is
-      # packaged, on the platform being packaged. This is the step that would
-      # have caught every packaging bug found while writing this config.
+      # The measurement helper is the near-opposite: needed only where the
+      # platform will not report per-process memory honestly by itself. Linux
+      # has smaps_rollup and does not build it.
+      #
+      # These two steps are also the only place the Windows and macOS backends
+      # are ever compiled - they cannot be built or run in the container this
+      # was written in - so a compile error here is the first and only warning.
+      # The streaming view module: WebView2 on Windows, WebKit on macOS. Linux
+      # has none. Compiled here and nowhere else - the container this was
+      # written in has neither SDK.
+      - name: Build the streaming view
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run build:streamview
+
+      # What the embedded engine offers for DRM, measured on the runner.
+      # Advisory: a runner has no real graphics card, so hardware levels may
+      # be missing here that a real PC has.
+      - name: Build the measurement helper
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run build:memprobe
+
+      # The installer's and uninstaller's own window (native/helpers/setup-ui.c),
+      # drawn in the browser's design instead of NSIS's progress box.
+      # build/installer.nsh embeds it when the file exists, so it must be
+      # built before packaging - and a compile error here fails the release
+      # rather than shipping the stock window unnoticed.
+      - name: Build the installer window
+        if: matrix.os == 'windows-latest'
+        run: npm run build:setupui
+
+      # Lists the passkeys Windows Hello keeps for a site, so the browser can
+      # offer them in its own list (native/helpers/passkeys.c).
+      - name: Build the passkey lister
+        if: matrix.os == 'windows-latest'
+        run: npm run build:passkeys
+
+      # Incognito's tripwire and reaper, on every platform: the three socket
+      # backends differ completely, and this step is the only place the Windows
+      # and macOS ones are ever compiled.
+      - name: Build the incognito tripwire
+        run: npm run build:netwatch
+
+      # Linux's kill switch: the launcher that puts the private browser in a
+      # network namespace with nowhere to go.
+      # electron-builder makes the .rpm with rpmbuild, which the runner lacks.
+      - name: Install rpmbuild
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install -y --no-install-recommends rpm
+
+      - name: Build the incognito kill switch
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run build:netns
+
+      # Tor for private windows. Downloaded from the Tor Project and checked
+      # against its signing key, pinned by fingerprint in tools/tor.json; a
+      # bundle that does not verify fails the build rather than shipping.
+      # macOS builds both architectures from one runner, so it fetches both.
+      - name: Fetch and verify Tor
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            node tools/fetch-tor.js --arch=x64
+            node tools/fetch-tor.js --arch=arm64
+          else
+            node tools/fetch-tor.js
+          fi
+
+      # Cheap, and it catches the one class of fault this project has shipped
+      # twice: a name used in a scope that does not have it. Under 'use strict'
+      # that is a ReferenceError on whatever path touches it - so `node --check`
+      # passes, the app starts, the suite goes green, and the function is simply
+      # broken for anyone who calls it. Runs before the suite because it takes
+      # two seconds and the suite takes a minute.
+      - name: Lint
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint
+
+      # Runs the real suite against real renderers before anything is packaged,
+      # on the platform being packaged. This is the step that would have caught
+      # every packaging bug found while writing this config.
       - name: Smoke test (headless)
         if: matrix.os == 'ubuntu-latest'
         run: npm run smoke:headless
 
+      # Every page measured against the rules that hold on every platform:
+      # text at least 11px, 4.5:1 contrast, 24px targets (tools/audit-probe.js).
+      # Both themes of the default design; `npm run audit` locally for any other.
+      # Known vulnerabilities in what ships (production dependencies). High or
+      # critical fails the build; anything less is printed for the record.
+      - name: Dependency audit
+        if: matrix.os == 'ubuntu-latest'
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Design audit
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          xvfb-run -a npx electron tools/shoot.js --audit --no-sandbox --disable-gpu
+          xvfb-run -a npx electron tools/shoot.js --audit --theme=light --no-sandbox --disable-gpu
+
       - name: Smoke test
         if: matrix.os == 'windows-latest'
         run: npm run smoke
+
+      # Incognito's leak test: every request through a stand-in for Tor that
+      # records what it is asked for, Chromium's own log of how each request
+      # was routed, and two deliberate leaks that both detectors must catch.
+      # On Linux it runs inside a network namespace with no route anywhere,
+      # which Ubuntu's AppArmor refuses to unprivileged users by default.
+      - name: Allow unprivileged network namespaces
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Incognito leak test
+        if: matrix.os != 'macos-latest'
+        timeout-minutes: 10
+        run: npm run test:incognito
+
+      # The kill switch, where the operating system has one. Linux: the private
+      # browser started through native/helpers/netns-launch, in a namespace with no
+      # route, and a direct connection has to fail at the kernel. Windows: the
+      # private browser run as a hard link that a firewall rule blocks, and a
+      # real connection to 1.1.1.1 - which an ordinary process on the same
+      # runner makes first - has to be refused by Windows.
+      - name: Incognito kill switch (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 10
+        run: npm run test:incognito -- --kill-switch
+
+      - name: Incognito kill switch (Windows)
+        if: matrix.os == 'windows-latest'
+        timeout-minutes: 10
+        run: npm run test:incognito -- --windows-firewall
+
+      # Advisory for the same reason the macOS smoke run is, and the first
+      # place its socket backend ever runs - so a failure here is read, not
+      # ignored.
+      - name: Incognito leak test (advisory on macOS)
+        if: matrix.os == 'macos-latest'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: npm run test:incognito
 
       # Advisory on macOS, blocking everywhere else.
       #
@@ -130,6 +322,11 @@ jobs:
             echo "The macOS artifact was built anyway; this gate is advisory. See .github/workflows/release.yml." >> $GITHUB_STEP_SUMMARY
           fi
 
+      # No castLabs EVS login: EVS denies every build with Electron fuses set,
+      # so build/vmp-sign.js skips VMP signing whatever is set up, and the step
+      # only handed a password to an unpinned package for nothing. Bring it
+      # back, with castlabs-evs pinned, if the fuses ever go.
+
       # Signing is driven entirely by secrets, and their absence is a supported
       # state rather than an error: electron-builder treats an empty CSC_LINK as
       # "no certificate" and produces the same unsigned build as before. So this
@@ -159,6 +356,27 @@ jobs:
         if: ${{ !(matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true') }}
         run: npx electron-builder ${{ matrix.platform }} --publish never
 
+      # The fuses (electron-builder.yml), read back from what was actually
+      # packaged - and the one that matters most tried for real: with
+      # RunAsNode off, ELECTRON_RUN_AS_NODE=1 starts the browser instead of
+      # running the script, so the marker must never appear. Linux only: the
+      # fuse wire is the same on every platform, and this runner has the
+      # unpacked build to hand.
+      - name: Check the packaged fuses
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 3
+        run: |
+          npx electron-fuses read --app dist/linux-unpacked/debrowser | tee fuses.txt
+          for want in "RunAsNode is Disabled" "EnableNodeOptionsEnvironmentVariable is Disabled" \
+                      "EnableNodeCliInspectArguments is Disabled" "EnableEmbeddedAsarIntegrityValidation is Enabled" \
+                      "OnlyLoadAppFromAsar is Enabled"; do
+            grep -q "$want" fuses.txt || { echo "fuse not set: $want"; exit 1; }
+          done
+          (ELECTRON_RUN_AS_NODE=1 timeout 15 xvfb-run -a dist/linux-unpacked/debrowser --no-sandbox \
+            -e "console.log('RAN' + ' AS NODE')" > ran.txt 2>&1 || true)
+          if grep -q "RAN AS NODE" ran.txt; then echo "ELECTRON_RUN_AS_NODE still runs Node"; exit 1; fi
+          echo "ELECTRON_RUN_AS_NODE=1 ran no Node code"
+
       # Azure Trusted Signing. Windows only, and only when its secrets exist.
       # The endpoint/account/profile are not secret, but they are deployment
       # detail rather than source, so they are variables rather than literals.
@@ -186,7 +404,7 @@ jobs:
             "{0}: {1} {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
           }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}
           path: ${{ matrix.artifacts }}
@@ -195,6 +413,11 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the tag, the release, and upload its assets
+      id-token: write        # sign the build-provenance attestation
+      attestations: write    # and store it beside the release
+      actions: write         # start the release archive's rebuild (pages.yml)
     # A tag push, or a hand-run that named a tag. `inputs.tag` is empty on a
     # tag push, and comparing it against '' is what keeps the two apart.
     if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
@@ -202,28 +425,217 @@ jobs:
       # Only for CHANGELOG.md, which becomes the release body. Generated notes
       # on a first release are the entire commit history, which is not what
       # anyone wants to read on a download page.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
-      # Fails loudly rather than publishing an empty release. A release job that
-      # succeeds with nothing attached is worse than one that fails: the tag
-      # exists, the page looks real, and every download link is missing.
+      # Fails loudly rather than publishing an incomplete release. A release job
+      # that succeeds with the wrong things attached is worse than one that
+      # fails: the tag exists, the page looks real, and a whole platform is
+      # missing from it.
+      #
+      # Counting entries was not enough, and v1.2.0 is why. The Windows leg
+      # arrived nested in two subdirectories rather than flat, `files:
+      # artifacts/*` matched those directories and skipped them, and this check
+      # counted two and passed - publishing a release with no Windows build in
+      # it. So it now names what it expects, per platform, and it refuses a
+      # directory: anything that is not a plain file at the top level means an
+      # upload leg changed shape and will not be matched by the upload glob.
       - name: Check there is something to release
         run: |
           ls -lh artifacts/
-          test "$(ls -1 artifacts/ | wc -l)" -gt 0 || { echo "no artifacts"; exit 1; }
+
+          fail=0
+          for d in artifacts/*/; do
+            [ -e "$d" ] || continue
+            echo "::error::artifacts/$(basename "$d") is a directory - an upload leg is nested, so its files will not be released"
+            fail=1
+          done
+
+          # One per platform. Each is the thing a person actually downloads, so
+          # a missing one is a platform that silently did not ship.
+          for want in '*.exe' '*.dmg' '*.AppImage'; do
+            n=$(find artifacts/ -maxdepth 1 -type f -name "$want" | wc -l)
+            echo "$want: $n"
+            [ "$n" -gt 0 ] || { echo "::error::no $want in artifacts/"; fail=1; }
+          done
+
+          exit $fail
+
+      # The release page describes the release it is on, and nothing else.
+      #
+      # Publishing the whole CHANGELOG meant every download page repeated the
+      # notes for every version before it, so the thing a visitor actually came
+      # to read - what changed in the version they are about to download - was
+      # buried under the history of the ones they already have.
+      #
+      # Takes this version's `## ` section - the one package.json names, not
+      # merely the first: with fixes waiting under `## Unreleased` at the top,
+      # the first section is not this release's - and drops its heading, since
+      # the release is already titled with its version. A version with no
+      # section fails here, before anything is published.
+      # Both the body and its attribution footer come from one script, shared
+      # with the workflow that republishes notes for an already-published
+      # release. Two copies of this would drift.
+      # The checksums of every file attached, for the notes' footer - and
+      # attested, so anyone can check a download was built by this workflow
+      # from this commit (`gh attestation verify <file> -R <repo>`).
+      # A staged rollout: electron-updater offers the update to this share of
+      # installs (each machine draws its own number), so a bad release reaches
+      # a few people rather than everyone. 100 leaves the files untouched.
+      - name: Staged rollout
+        env:
+          ROLLOUT: ${{ github.event.inputs.rollout || '100' }}
+        run: |
+          if ! [[ "$ROLLOUT" =~ ^[0-9]+$ ]] || [ "$ROLLOUT" -lt 1 ] || [ "$ROLLOUT" -gt 100 ]; then
+            echo "::error::rollout must be a whole number from 1 to 100, not '$ROLLOUT'"; exit 1
+          fi
+          if [ "$ROLLOUT" -lt 100 ]; then
+            for f in artifacts/latest*.yml; do
+              [ -f "$f" ] || continue
+              sed -i '/^stagingPercentage:/d' "$f"
+              echo "stagingPercentage: $ROLLOUT" >> "$f"
+              echo "$f: offered to $ROLLOUT% of installs"
+            done
+          fi
+
+      # The Linux packages, signed with LINUX_SIGNING_KEY (an armoured RSA
+      # private key without a passphrase), which only this job sees: the build
+      # job runs dependency install scripts. The key must be the one the
+      # packages carry (build/linux/archive-keyring.asc), or every install
+      # would refuse what it signs. Without the secret, nothing is signed and
+      # the packages, carrying an empty key, add no repository either.
+      #
+      #   - The .rpm is signed itself: dnf and zypper check package signatures.
+      #     Its size and checksum in latest-linux.yml are then brought up to date.
+      #   - The .deb gets a signed apt index - InRelease and Packages.gz, the
+      #     two files apt needs and no more - attached to the release. Its install script points apt at
+      #     releases/latest/download/, which GitHub redirects to the newest
+      #     stable release's files, so the repository is always that release.
+      #     The rpm index lives on GitHub Pages instead (pages.yml): dnf wants a
+      #     repodata/ folder, and a release's files cannot be in folders.
+      #
+      # A beta is never "latest", so it is left out.
+      - name: Sign the Linux packages
+        if: github.event.inputs.beta != 'true'
+        env:
+          LINUX_SIGNING_KEY: ${{ secrets.LINUX_SIGNING_KEY }}
+        run: |
+          if [ -z "$LINUX_SIGNING_KEY" ]; then
+            echo "::notice::No LINUX_SIGNING_KEY secret, so the Linux packages are not signed and have no repository."
+            exit 0
+          fi
+          export GNUPGHOME=$(mktemp -d)
+          printf '%s\n' "$LINUX_SIGNING_KEY" | gpg --batch --quiet --import
+          signing=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr:/{print $10; exit}')
+          shipped=$(gpg --batch --with-colons --show-keys build/linux/archive-keyring.asc 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')
+          if [ "$signing" != "$shipped" ]; then
+            echo "::error::LINUX_SIGNING_KEY ($signing) is not the key in build/linux/archive-keyring.asc (${shipped:-none}) - installs could not verify what it signs"
+            exit 1
+          fi
+          # Checked as installs will check: against the public key alone.
+          gpg --batch --export "$signing" > "$GNUPGHOME/check.gpg"
+          cd artifacts
+
+          sudo apt-get install -y --no-install-recommends rpm >/dev/null
+          for rpm in *.rpm; do
+            rpmsign --define "_gpg_name $signing" --addsign "$rpm"
+            db=$(mktemp -d)
+            rpm --dbpath "$db" --initdb
+            rpm --dbpath "$db" --import ../build/linux/archive-keyring.asc
+            rpm --dbpath "$db" -K "$rpm" | grep -q 'digests signatures OK'
+            python3 ../.github/scripts/update-manifest.py latest-linux.yml "$rpm"
+          done
+
+          ls *.deb >/dev/null
+          # Filenames without "./": apt joins them to the address as written.
+          # Packages is indexed but not uploaded: apt fetches Packages.gz and
+          # checks what it unpacks against Packages' own hash, so that hash has
+          # to be listed. Release is written outside, or it indexes itself.
+          apt-ftparchive packages . | sed 's|^Filename: \./|Filename: |' > Packages
+          gzip -9kn Packages
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin=Debrowser \
+            -o APT::FTPArchive::Release::Label=Debrowser \
+            -o APT::FTPArchive::Release::Description="Debrowser releases" \
+            release . > "$GNUPGHOME/Release"
+          gpg --batch --yes --local-user "$signing" --clearsign -o InRelease "$GNUPGHOME/Release"
+          rm Packages
+          gpgv --keyring "$GNUPGHOME/check.gpg" InRelease
+          cat InRelease
+          rm -rf "$GNUPGHOME"
+
+      # What the release is made of, in a standard form (CycloneDX) that
+      # scanners read: every npm package shipped, with its version and licence.
+      - name: Software bill of materials
+        run: npm sbom --omit=dev --package-lock-only --sbom-format=cyclonedx > artifacts/debrowser-sbom.cdx.json
+
+      - name: Checksums
+        run: |
+          (cd artifacts && sha256sum * > ../SHA256SUMS.txt)
+          cat SHA256SUMS.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        continue-on-error: true
+        with:
+          subject-path: artifacts/*
+
+      - name: Build the release body
+        env:
+          COMMIT: ${{ github.sha }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CHECKSUMS: SHA256SUMS.txt
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          # The tag and package.json must agree: the installers, latest.yml and
+          # the notes all take package.json's version, so a mismatch would
+          # publish one version's files and notes under another's tag.
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Tag $TAG does not match package.json version $version"
+            exit 1
+          fi
+          # The Chromium this Electron carries, from Electron's own list; the
+          # header leaves it out rather than fail if that list is unreachable.
+          electron=$(node -p "require('./package.json').devDependencies.electron.match(/v(\d+\.\d+\.\d+)/)[1]")
+          export CHROMIUM=$(curl -fsSL https://releases.electronjs.org/releases.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const r=JSON.parse(s).find(x=>x.version==='$electron');process.stdout.write(r?r.chrome:'')})" || true)
+          prev=$(git ls-remote --tags origin 'v*' | awk -F/ '{print $3}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | grep -v "^v$version$" | tail -1)
+          [ -n "$prev" ] && export COMPARE_URL="${{ github.server_url }}/${{ github.repository }}/compare/$prev...${{ github.sha }}"
+          python3 .github/scripts/release-notes.py "$version" > RELEASE_NOTES.md
+          echo "--- release body ---"
+          cat RELEASE_NOTES.md
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64   # v3.0.3
         with:
           # On a hand-run the tag does not exist yet; the action creates it at
           # this run's commit.
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          # The commit that was built and tested. Without it a draft's tag is
+          # made when the draft is published, from whatever the branch holds
+          # by then - which need not be what the installers were built from.
+          target_commitish: ${{ github.sha }}
           draft: ${{ github.event.inputs.draft == 'true' }}
-          body_path: CHANGELOG.md
-          files: artifacts/*
+          # A beta is a prerelease: GitHub's "latest" (and so the Stable
+          # channel) stays on the last stable version.
+          prerelease: ${{ github.event.inputs.beta == 'true' }}
+          make_latest: ${{ github.event.inputs.beta == 'true' && 'false' || 'true' }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            artifacts/*
+            SHA256SUMS.txt
           fail_on_unmatched_files: true
+
+      # A release published with this job's token starts no other workflow, so
+      # the archive's own `release` trigger never fires; asked for here instead,
+      # now that the tag exists to date the new version.
+      - name: Rebuild the release archive
+        if: github.event.inputs.draft != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "${{ github.repository }}" --ref "${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch }}"

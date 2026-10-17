@@ -9,8 +9,8 @@ than the config.
 
 ```bash
 npm ci
-npm run dist:linux     # AppImage + .deb + .tar.gz  (builds the trim helper first)
-npm run dist:win       # NSIS installer + portable .exe
+npm run dist:linux     # AppImage + .deb + .rpm  (builds the trim helper first; .rpm needs rpmbuild)
+npm run dist:win       # NSIS installer
 npm run dist:mac       # .dmg + .zip  — macOS only, see below
 npm run dist           # whatever the host can do
 npm run pack           # unpacked tree only, for a quick look
@@ -22,13 +22,19 @@ Output lands in `dist/`.
 
 | Platform | Artifact | Notes |
 |---|---|---|
-| Windows | `Debrowser-1.0.0-win-x64.exe` | NSIS installer, per-user (no UAC prompt) |
-| Windows | `Debrowser-1.0.0-win-x64-portable.exe` | Single file, runs from anywhere, installs nothing |
-| macOS | `Debrowser-1.0.0-mac-{x64,arm64}.dmg` | Needs a macOS host to build |
-| macOS | `Debrowser-1.0.0-mac-{x64,arm64}.zip` | Unzip, drag to Applications |
-| Linux | `Debrowser-1.0.0-linux-x86_64.AppImage` | `chmod +x`, run. No install. |
-| Linux | `Debrowser-1.0.0-linux-amd64.deb` | Debian/Ubuntu. Installs to `/opt/Debrowser`. |
-| Linux | `Debrowser-1.0.0-linux-x64.tar.gz` | Extract and run |
+| Windows | `Debrowser-Windows-Setup.exe` | NSIS installer, per-user (no UAC prompt) |
+| macOS | `Debrowser-macOS-{x64,arm64}.dmg` | Needs a macOS host to build |
+| macOS | `Debrowser-macOS-{x64,arm64}.zip` | What updates install from; "arm64" in the name is how the updater tells them apart |
+| Linux | `Debrowser-Linux.AppImage` | `chmod +x`, run. Offers to add itself to the apps menu, or to install the package below for the system it is on |
+| Linux | `Debrowser-Linux.deb` | Debian, Ubuntu, Mint. Installs to `/opt/Debrowser` |
+| Linux | `Debrowser-Linux.rpm` | Fedora, RHEL, openSUSE. Installs to `/opt/Debrowser` |
+
+Names carry the system, not the version, so a release lists one obvious file
+per system and `releases/latest/download/<name>` never goes stale; the list
+lives in `src/main/setup/downloads.json`, which the release notes' download
+table and the download page (`tools/changelog-site.js`) are built from. The
+other files on a release are machinery: `latest*.yml` and the `.blockmap`s for
+updates, `InRelease` and `Packages.gz` for apt, `SHA256SUMS.txt` and the SBOM.
 
 ## Cross-building, and where it stops
 
@@ -233,16 +239,116 @@ the difference between "still works in three years" and "silently unsigned".
   `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. `hardenedRuntime` and the
   entitlements in `build/entitlements.mac.plist` are already configured for it.
   Unlike Windows, there is no reputation clock — notarizing works immediately.
-- **Linux.** Nothing to sign; the `.deb` is unsigned, which is normal outside a
-  distribution repository.
+- **Linux.** Signed with one key of the project's own (free, made once; see
+  below). The `.rpm` is signed itself, because dnf and zypper check package
+  signatures. The `.deb` is not - nothing on Ubuntu checks a downloaded `.deb`'s
+  signature, and App Center warns "Potentially unsafe" about every package from
+  outside its store, Chrome's included - so what is signed there is the apt
+  repository, which is what checks every update.
 
-An unsigned macOS build produced *on Linux* is doubly worth flagging: it has
-never been through `codesign` at all, so it is strictly for trying the app, not
-for distributing to anyone else.
+### The Linux repositories
+
+Each package's install script adds a repository, so updates arrive with the
+rest of the system's and the package manager refuses any not signed by the key
+the package carries (`/usr/share/debrowser/archive-keyring.asc`). Betas are never
+"latest", so they are in neither.
+
+- **apt** (Debian, Ubuntu, Mint, Pop!_OS, elementary): every stable release
+  carries a signed index of its own `.deb` (`InRelease`, `Release`,
+  `Release.gpg`, `Packages`, `Packages.gz`). The source points at
+  `releases/latest/download/`, which GitHub redirects to the newest stable
+  release's files, so the repository is always that release.
+- **dnf and zypper** (Fedora, RHEL and its rebuilds, openSUSE): a signed index
+  (`repodata/`, with `repomd.xml.asc`) on the project's GitHub Pages site at
+  `/rpm/`, rebuilt by `pages.yml` from the newest release, its entries pointing
+  at that release's `.rpm`. Pages rather than the release, because dnf wants a
+  `repodata/` folder and a release's files cannot be in folders.
+
+No server, nothing to host, nothing to pay for. Until there is a key, nothing
+changes: the packages are not signed, there are no indexes, and the packages add
+no repository. Turning it on, once, on any Linux machine (free; the key never
+expires unless you choose otherwise):
+
+```sh
+gpg --batch --passphrase '' --quick-gen-key "Debrowser packages" rsa4096 sign never
+gpg --armor --export-secret-keys "Debrowser packages"   # → the LINUX_SIGNING_KEY secret
+gpg --armor --export "Debrowser packages" > build/linux/archive-keyring.asc   # → commit this
+```
+
+RSA rather than ed25519: rpm 4.14 - RHEL 8, openSUSE Leap 15 - cannot check an
+ed25519 signature.
+
+1. Settings → Secrets and variables → Actions → New repository secret:
+   `LINUX_SIGNING_KEY`, the whole private key block, `-----BEGIN` to `-----END`.
+2. Commit `build/linux/archive-keyring.asc` (public; it is what installs check
+   against).
+3. Keep a copy of the private key somewhere safe and offline. Losing it means a
+   new key, and every existing install would need the new one by hand.
+
+The release job refuses to publish if the secret's key is not the committed one,
+and the Pages job indexes only packages signed with it. The private key is seen
+only by those two jobs, never the build job, which runs dependency install
+scripts. Its passphrase is empty because nothing could type one in CI; the
+secret store is what protects it.
+
+Removing the repository file (`/etc/apt/sources.list.d/debrowser.sources`,
+`/etc/yum.repos.d/debrowser.repo` or `/etc/zypp/repos.d/debrowser.repo`) turns
+those updates off for good on that machine; installing again does not add it
+back. Uninstalling the package removes it.
+
+Arch, Manjaro and EndeavourOS get a pacman package, `debrowser-bin`, built from
+the release's `.deb` (`tools/pkgbuild.js` writes the PKGBUILD and `.SRCINFO`;
+`pages.yml` publishes them for the newest release at `/arch/`). It is not in the
+AUR until someone with an AUR account pushes those two files to
+`ssh://aur@aur.archlinux.org/debrowser-bin.git`; after that, `yay -S
+debrowser-bin` installs and updates it. Other distributions use the AppImage,
+which updates itself.
+
+### Installing from a terminal
+
+`tools/install.sh`, published at the site's `/install.sh`:
+
+```sh
+curl -fsSL https://amoguslittleahhh.github.io/Debrowser/install.sh | sh
+```
+
+It reads `/etc/os-release` and installs the `.deb` with apt, the `.rpm` with dnf
+or zypper, builds and installs the Arch package with makepkg, or puts the
+AppImage in `~/Applications` - checking each download against the SHA-512 in
+the release's `latest-linux.yml` first. POSIX `sh`, so it runs under dash; kept
+clean with `shellcheck -s sh`. Run again, it updates. On the
+systems above, once the repositories are signed, the AppImage offers to install
+their package instead (`src/main/setup/linux-system.js`): it downloads this
+version's `.deb` or `.rpm`, checks it against the release's `latest-linux.yml`,
+installs it through pkexec and the package manager, and starts again from
+`/opt/Debrowser`.
+
+### What software centres show
+
+`build/linux/before-pack.js` writes Debrowser's AppStream entry for each build,
+twice from one description, into both the `.deb` and the `.rpm`: as installed
+metainfo (`/usr/share/metainfo/dev.debrowser.app.metainfo.xml`, read by GNOME
+Software and Discover) and as a one-app catalogue (`/usr/share/swcatalog/yaml/debrowser.yml`).
+Ubuntu's App Center reads only catalogues, and its page for a catalogue app
+takes the publisher from the developer name, the licence from the project
+licence and "last updated" from the newest release - so once Debrowser is
+installed, App Center lists it under Manage with all three. The icon is
+installed at every hicolor size from `build/linux/icons/`
+(`electron tools/make-icon.js --linux-only` redraws them). Check the metainfo
+with `appstreamcli validate --pedantic`.
+
+A downloaded `.deb` opened in App Center, before it is installed, still shows
+the package name (`debrowser` - Debian package names are lowercase only),
+"Unknown publisher", licence "unknown" and "last updated Unknown". That page is
+built from the file alone, and App Center fills those fields in with fixed
+values for every `.deb` (`deb/local_deb_model.dart` in App Center; PackageKit's
+apt backend reports every licence as "unknown"). No package contents or
+signature changes it. Only the Snap Store gives a downloaded app a named
+publisher there.
 
 ## Hibernation in a packaged build
 
-The `HIBERNATED` tier needs `tools/mem-trim`, and two things about it change
+The `HIBERNATED` tier needs `native/helpers/mem-trim`, and two things about it change
 once the app is packaged.
 
 **It cannot live inside `app.asar`.** An asar archive is a single file the
@@ -257,7 +363,7 @@ with a build instruction that does not apply to an installed app.
 | Format | Hibernation | Why |
 |---|---|---|
 | `.deb` | yes, after one command | The helper lands at a real path that `setcap` can be applied to |
-| `.tar.gz` | yes, after one command | Same |
+| `.rpm` | yes, after one command | Same |
 | AppImage | **no** | The helper lives inside a read-only mount; a file capability cannot be set on it |
 
 For the `.deb`:
@@ -297,7 +403,7 @@ password page being screenshotted) and was not.
 
 ## The macOS smoke gate is advisory
 
-`release.yml` runs the 41-check suite on each platform before packaging it. On
+`release.yml` runs the 89-check suite on each platform before packaging it. On
 Linux and Windows a failure blocks the build. On macOS it is reported and does
 not.
 
@@ -328,13 +434,82 @@ annotation when it fails, so a silently-degrading macOS build is still visible.
 
 ## Release process
 
-1. Bump `version` in `package.json`, update `CHANGELOG.md`.
+1. Bump `version` in `package.json`, and add the section to `CHANGELOG.md`.
+   Do **not** hard-wrap that section: it becomes the release body, GitHub
+   reflows it, and a wrap landing inside a hyphenated compound renders with a
+   stray hyphen. See `CLAUDE.md`.
 2. Commit, tag `vX.Y.Z`, push the tag.
 3. `.github/workflows/release.yml` builds all three platforms on native
-   runners, runs the smoke suite on each **before** packaging, and attaches
-   everything to a **draft** release.
-4. Check the draft, then publish.
+   runners, runs the smoke suite on each **before** packaging, and publishes
+   the release with the artifacts attached.
+
+The release body is that version's `## ` section alone, extracted by
+`.github/scripts/release-notes.py`, plus a footer crediting the owner and the
+bot. Publishing the whole changelog would make every download page repeat the
+notes for versions the reader already has.
 
 The workflow can also be run by hand from the Actions tab
-(`workflow_dispatch`), which builds and uploads the artifacts without creating
-a release — useful for testing a build on a platform you do not own.
+(`workflow_dispatch`). With the `tag` input filled in it creates the tag and
+the release from the runner, which is the only route available when the tag
+cannot be pushed from a workstation — a protected-tag ruleset, or a token
+scoped to branches only. Left empty, it builds and uploads artifacts without
+creating a release, which is useful for testing a build on a platform you do
+not own.
+
+Releases are published, not drafts. That is deliberate rather than an
+oversight: `electron-updater` cannot see a draft release, so a draft release is
+invisible to every installed copy.
+
+To correct the notes on a release that already exists, run the **Update release
+notes** workflow with the version number. It rewrites that release's body and
+touches nothing else — no rebuild, no change to the tag, the assets or the
+date. Re-running the release workflow against an old tag would attach the
+*current* version's installers to it, which is worse than bad prose.
+
+## Deploying with Intune
+
+`build/intune/README.md` covers it, including the `.intunewin` step, the install
+and uninstall commands, and the detection rule. Two things belong here as well,
+because they are packaging facts rather than deployment ones:
+
+- The Intune artifact is built by a **second electron-builder pass**
+  (`npm run dist:intune`), writing to `dist-intune/` so it cannot overwrite
+  `dist/latest.yml`. That manifest describes the updatable build, and publishing
+  this one's would tell every ordinary install to fetch an installer it cannot
+  run. The config is generated from `electron-builder.yml` rather than written
+  separately, so the two cannot drift.
+- It differs only in being **per-machine and silent**, because the Intune
+  Management Extension runs install commands as SYSTEM.
+
+**It is experimental and has never been tested against a real tenant.** It was
+written with no access to Windows or Intune.
+
+## Updates
+
+Installed copies update themselves through `electron-updater`, against the
+GitHub releases of this repository. The provider is recorded in
+`electron-builder.yml` under `publish:`, which is what puts `app-update.yml`
+inside the package; without it an installed build has nowhere to look and fails
+at runtime on a machine nobody is watching.
+
+**Downloads are differential.** electron-builder writes a `.blockmap` beside
+each installer describing its compressed stream in content-defined chunks, so
+the updater fetches only the blocks that changed and reuses the rest from the
+copy already installed. A full artifact is ~110MB and almost all of it is
+Chromium, which does not change between releases.
+
+Both the blockmaps and the `latest*.yml` manifests must reach the release, or
+the updater has nothing to read. They are generated into `dist/` automatically;
+what was missing for a long time was uploading them, since the workflow's
+per-platform `artifacts` globs listed only the installers themselves.
+
+| Target | Updates | Why |
+|---|---|---|
+| Windows NSIS | yes, differential | blockmap beside the installer |
+| Linux AppImage | yes, differential | blockmap embedded in the binary |
+| macOS | **no** | Squirrel.Mac validates that the update is signed by the same identity as the running app, and refuses when there is none. This build is unsigned. |
+| `.deb`, `.rpm` | through the repository | the package manager owns those files; the apt and dnf/zypper repositories carry the updates |
+
+The first release carrying blockmaps cannot itself be delivered as a delta —
+there is no previous blockmap to diff against. Deltas begin with the release
+after it.

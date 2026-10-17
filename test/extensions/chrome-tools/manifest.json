@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Debrowser test: Chrome tools",
+  "version": "1.0",
+  "description": "A background that adds a right-click item, sets an alarm and changes its request rules - each answered through Debrowser.",
+  "permissions": ["contextMenus", "alarms", "declarativeNetRequest", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "declarative_net_request": { "rule_resources": [{ "id": "base", "enabled": true, "path": "rules.json" }] }
+}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Debrowser</title>
+  <link rel="stylesheet" href="theme.css">
+  <!-- The buttons are the update prompt's, so they are every prompt's. -->
+  <link rel="stylesheet" href="update.css">
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body class="setup-body">
+  <main id="card" role="alertdialog" aria-modal="true" aria-labelledby="title" aria-describedby="lead">
+    <div class="brand" aria-hidden="true">
+      <svg class="brand-mark" viewBox="0 0 64 64" width="28" height="28">
+        <rect x="10" y="10" width="44" height="44" rx="13" fill="none" stroke="currentColor" stroke-width="5.5"/>
+        <circle class="brand-dot" cx="26" cy="26" r="7"/>
+      </svg>
+      <span class="brand-name">debrowser</span>
+    </div>
+
+    <h1 id="title"></h1>
+    <p id="lead"></p>
+
+    <label class="choice" id="choice" hidden>
+      <input type="checkbox" id="check">
+      <span>
+        <span class="choice-title" id="check-label"></span>
+        <span class="choice-detail" id="check-detail" hidden></span>
+      </span>
+    </label>
+
+    <p id="error" class="error" role="alert" hidden></p>
+
+    <div class="actions">
+      <button type="button" class="btn ghost" id="cancel"></button>
+      <button type="button" class="btn primary" id="confirm"></button>
+    </div>
+  </main>
+
+  <script src="theme.js"></script>
+  <script src="setup.js"></script>
+</body>
+</html>

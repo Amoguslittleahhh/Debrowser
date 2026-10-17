@@ -538,3 +538,613 @@ Every term in that expression is now at a measured floor. **This browser is
 finished on memory.** What remains is not optimisation but a different
 architecture - a lighter engine, which M6 already argued costs the CDP control
 surface the whole governor depends on.
+
+---
+
+## Compression, revisited: what is left to compress, and what can be trusted
+
+The question was whether a homemade compression system could beat what is here.
+Four candidates, measured before any of them was built.
+
+### 1. The session state a discarded tab keeps — 1 KB per tab. Not worth it.
+
+`bench/bench.js` now reports it on every run rather than leaving it to be
+guessed at, which is how the 0.6MB/tab of the old model got its imagined
+mechanism. Thirty tabs, one site each, after the ladder has discarded most of
+them:
+
+    retained: 31 KB of session state for 30 tabs (1 KB per tab,
+              biggest 1 KB, 29 navigation entries, 29 with page state)
+
+Compressing that perfectly would save 30 KB out of a 372 MB browser. This
+confirms 8a above by a second route: the navigation history and form state a
+discarded tab holds are not a cost worth attacking, and now nobody has to take
+that on trust — the figure prints beside the memory total.
+
+### 2. The history store — real, but only at the ceiling.
+
+10,000 entries (the cap) of realistic URLs and titles, measured in Node:
+
+    raw JSON                        2.03 MB   (213 B/entry)
+    live objects                    4.61 MB   heap
+    deflate-raw L1                  0.17 MB   11.96x    3.3 ms
+    deflate-raw L6                  0.14 MB   14.88x   11.6 ms
+    deflate-raw L6 + dictionary     0.14 MB   14.91x   11.5 ms
+    brotli q4                       0.14 MB   15.04x   10.2 ms
+    brotli q9                       0.07 MB   29.41x   56.2 ms
+    inflate                                             1.5 ms
+
+So a full history costs **4.6 MB of heap** and could be held in 0.14 MB — a
+~4.5 MB saving, at a 1.5 ms decompression whenever the history page searches
+it. Two reasons it is not built. It is 1.2% of a 372 MB browser at the *cap*,
+and a history of 500 entries — what a normal profile holds — costs 0.2 MB, so
+the lever pays nothing for almost everyone and its complexity (a hot head, a
+compressed tail, a hash index to answer "was this visited" without inflating)
+would sit in front of every visit and every keystroke of history search.
+
+Recorded rather than done, with the numbers, so it can be picked up if the cap
+ever rises or the entry shape grows.
+
+**The preset dictionary bought nothing** (14.91x vs 14.88x). It is the right
+tool for many small payloads, not for one 2 MB payload where deflate builds a
+better dictionary from the data itself in its own window. Worth knowing before
+reaching for it.
+
+### 3. The renderers themselves — the only place left, and not ours to compress.
+
+Per the model above, a live renderer is 13.2 MB and everything else is fixed.
+No userspace program can compress another process's pages: the only mechanisms
+are the kernel's (zram/zswap on Linux, Windows Memory Compression on Windows),
+which is what the HIBERNATED tier already drives. What *is* ours is the policy
+and the verification, and both had a hole.
+
+### 4. What was actually wrong, and is now fixed
+
+**The tier was Linux-only.** Windows was an honest stub. It is implemented now:
+`SetProcessWorkingSetSizeEx(h, -1, -1)` empties a renderer's working set and
+Windows Memory Compression takes what it can. It needs `PROCESS_SET_QUOTA`,
+which one process holds over another of the same user with no elevation and no
+one-time setup — unlike the Linux half, which needs `setcap cap_sys_nice+ep`.
+That is why this half could be written without a machine to run it on. It is
+compiled on a real Windows runner in CI, and the suite's checks run there.
+
+**The self-disable was measuring the wrong thing.** It compared a renderer's
+private bytes before and after the trim — which is the syscall agreeing with
+itself. Pages leaving a process reappear as the compressor's own allocation, at
+about 2:1, so on a host where compression achieved nothing the per-process drop
+would still have been large and the tier would have stayed on forever. This is
+the project's own named worst case ("a syscall returning success is not
+evidence it did anything") and it was sitting in the one place that decides
+whether the feature keeps running.
+
+The gate is now the machine's own figure — `MemAvailable` on Linux,
+`GlobalMemoryStatusEx` on Windows, read through the same helper on both — taken
+immediately before and after each trim. That is the reading which caught M4b's
+first two false positives by hand; it is automatic now. The panel reports both
+numbers side by side ("~270 MB left the renderers, ~146 MB back to the
+machine"), because quoting only the first is how a compressor that achieved
+nothing reads as a saving.
+
+---
+
+## The browser's own pages were loading through the network stack
+
+`debrowser://` is served by a handler in `pages.js`. It answered every request
+with `net.fetch(pathToFileURL(full))` — which sends a request for a file on the
+local disk out through the network service and back. Measured by opening the new
+tab page cold, the new tab page warm, and Settings, with the real partition,
+preload and protocol registration:
+
+```
+                       before          after
+cold new tab         1758.0 ms        80.1 ms
+warm new tab           97.4 ms        81.0 ms
+settings, warm        449.1 ms        94.1 ms
+in the handler        997.5 ms         8.3 ms   (15 sub-resource requests)
+```
+
+Per sub-resource the handler cost 2–6 ms once warm and **60–270 ms on the first
+touch of each file**, five requests per page. The new tab page is the
+most-opened page in the browser and it paid that every time.
+
+The fix is `fs.readFileSync` and a `Response` with the content type we name.
+
+**A cache was built on top of this and then deleted**, which is the more useful
+finding. Reading a page's five files costs **0.040 ms**; a `Map` lookup costs
+0.0003 ms. Saving four hundredths of a millisecond is not worth 47 KB per page
+held for the life of the browser, nor serving a stale stylesheet after an edit.
+The win was never the cache — it was not using the network stack to read a local
+file.
+
+## Initial memory: 2.5% of it is ours
+
+Asked whether the memory a freshly-started browser holds could be reduced. One
+tab, settled, on Linux:
+
+```
+total                285 MB
+  Browser            112 MB     of which our JavaScript: 7 MB heap + 4 MB external
+  Tab (1 renderer)    93 MB
+  Utility             28 MB     network.mojom.NetworkService
+  zygote              28 MB
+  GPU                 23 MB
+```
+
+M1 measured a bare Electron app with one `about:blank` view at 82 MB in its
+browser process before any of this project's code runs. So of the 112 MB, about
+30 MB is attributable to us, and V8's own accounting puts our JavaScript at 7 MB
+of heap plus 4 MB external. **Deleting every line of this project's main-process
+code would save ~11 MB of 285.**
+
+The Windows figure a user reported — 312 MB with the new tab page open, one tab —
+is the same shape: no zygote, a larger browser and GPU process, and a 43 MB
+renderer for the page itself.
+
+The network service starts at launch regardless of what is open; serving our own
+pages off the disk avoids *using* it, not starting it. Confirmed by listing the
+processes after opening only internal pages: `network.mojom.NetworkService` is
+there either way.
+
+This is the same conclusion 8b and 8c reached from other directions, now stated
+for the startup case specifically: **initial memory is Electron's and Chromium's,
+not this project's.** The bench prints the breakdown and our own heap on every
+run so the claim can be rechecked rather than believed.
+
+## Startup memory, attacked directly: one lever, worth 9MB, with a cost
+
+"Can the initial memory be smaller?" — asked after the breakdown above showed
+2.5% of it is ours. Four configurations, three runs each, GPU pinned off because
+SwiftShader under xvfb swings the total by 70MB and would swamp the comparison.
+The chrome view and the new tab page are both up, which is what a freshly
+started browser has.
+
+```
+baseline                                    235 MB   2 renderers
+--process-per-site alone                    235 MB   2 renderers   no change
+--js-flags=--optimize-for-size (browser)    235 MB   2 renderers   no change
+chrome on debrowser:// + process-per-site   226 MB   1 renderer    -9 MB
+```
+
+Only the last one moves, and it needs both halves. The chrome is loaded from
+`file://` and the pages from `debrowser://`, which are two sites, so no process
+model can merge them; and same-site pages only share a renderer under
+`--process-per-site`, because Chromium's default is a process per site
+*instance*. With both, the chrome and the new tab page share one renderer: the
+renderer total falls 66MB → 49MB while the browser process grows ~3MB.
+
+**Not taken, and the reason is not the 9MB.** Merging them makes the chrome
+same-origin with the new tab page and puts them in one process. The chrome holds
+the command bridge; every other page in this browser is deliberately kept out of
+that process, and privilege here is decided from the sender's live URL precisely
+so that a compromised renderer cannot borrow it. Trading a boundary that exists
+on purpose for 3% of startup memory is the wrong way round. It also requires
+`process-per-site` globally, which the config already documents as a
+crash-isolation trade offered in the economy profile rather than by default.
+
+Recorded because the number is real and someone will ask again.
+
+### A stale claim found on the way
+
+`prewarm.js` documented that the tab created after a warmed renderer "lands in
+the same process", with two pids as evidence. Re-measured: warmer pid 2092, the
+tab that follows pid 2106 — a process of its own. Two views on the same host do
+not share one either, by default. The *timing* claim holds exactly (79.3ms cold,
+46.1ms warmed), so prewarming works; what buys it is the work a first renderer
+pays for once — the zygote fork path, scheme and partition setup, V8's code
+cache — not process reuse. The comment has been corrected, because a wrong
+mechanism invites the wrong fix next time.
+
+## Incognito, M0 — the facts the design rests on
+
+Checked before any incognito code was written, because each one could have
+changed the design.
+
+**V8's compiler tiers, per security level.** `%GetOptimizationStatus` on a hot
+function after 200,000 calls, Electron 44 (V8 15.2):
+
+```
+level      flags                                                   status   what ran
+full       (none)                                                  0x29     TurboFan
+balanced   --no-turbofan --no-turbolev --no-maglev --liftoff-only  0x4003   Sparkplug, never-optimise
+maximum    --jitless                                               0x1043   interpreter, lite mode
+```
+
+Turbolev is in the list because this V8 has it as an alternative top tier: a
+flag set that named only TurboFan would leave an optimising compiler reachable
+the day it becomes the default. `--liftoff-only` rather than
+`--no-wasm-tier-up` because it says exactly what is meant: WebAssembly on its
+baseline compiler, nothing else. `--always-sparkplug` made no difference to
+this function's final state (it was already baseline); whether it helps
+start-up is left to the level benchmark.
+
+**`.onion` through SOCKS5.** A stub SOCKS5 server recorded the request for
+`duckduckgogg42….onion` as a domain name (ATYP 3). Chromium does not refuse
+onion names when a SOCKS5 proxy is set; Tor resolves them.
+
+**A new session phones home on its own.** The first request a fresh session
+made - before any page asked for anything - was to `redirector.gvt1.com`:
+the spellchecker fetching its dictionary. `setSpellCheckerEnabled(false)`
+alone did not stop it; `setSpellCheckerLanguages([])` did.
+
+**The environment's proxy leaks into "direct" contexts.** In this container a
+session with no proxy of its own sent its requests to `127.0.0.1:40085`, the
+container's own outbound proxy, taken from `HTTPS_PROXY`. So "any loopback
+connection is fine" is the wrong rule for a leak detector: it would pass
+traffic to a proxy that is not Tor. Incognito removes the proxy variables from
+its environment, and both the tripwire and the network-log check allow exactly
+one port.
+
+**CDP overrides reach workers.** `Emulation.setTimezoneOverride`,
+`setLocaleOverride` and `setHardwareConcurrencyOverride` all exist, and a
+dedicated worker reported UTC, 4 cores and `en-US` alongside its page, with the
+process's own timezone still Asia/Tokyo. The debugger has to attach after the
+first navigation: attached to a fresh view, the target is swapped out
+underneath it ("target closed while handling command").
+
+**A picked upload can be replaced.** `Page.setInterceptFileChooserDialog`
+plus `DOM.setFileInputFiles` delivered a different file to an
+`<input type=file>` than the one a dialog would have picked. Electron has no
+API of its own for this; CDP does, which is what the upload sanitiser uses.
+
+**Chromium's sandbox works inside our namespace.** As a non-root user, under
+`unshare --user --net --map-current-user`, a sandboxed renderer ran in a
+nested PID namespace with seccomp mode 2. Mapping to root instead makes
+Electron refuse to start without `--no-sandbox`, so the kill switch maps the
+user's own uid.
+
+**The Tor bundle.** 15.0.23's Expert Bundle verified against the Tor Browser
+Developers key `EF6E 286D DA85 EA2A 4BA7 DE68 4E2C 6E87 9329 8290`, confirmed
+against support.torproject.org. It carries `tor`, `lyrebird 0.8.1` (meek_lite,
+obfs2, obfs3, obfs4, scramblesuit, webtunnel, snowflake) and `conjure-client`.
+Built-in bridge lines: obfs4 ×7, snowflake ×2, meek ×1 - **no built-in
+WebTunnel**, so WebTunnel is reached only through a bridge of your own. Size on
+disk: tor and its libraries 10.5 MB, lyrebird 17.6 MB, conjure-client 12.8 MB
+(not shipped), geoip data 25 MB (not shipped: a client does not need it).
+
+**Tor cannot run in this container.** Bootstrap stops at 5% ("connecting to a
+relay"): the network policy allows only HTTPS through an intercepting proxy.
+Real Tor is proven by CI and on real machines, not here.
+
+## Incognito, M1 — the leak test, and what it found on its first runs
+
+`test/incognito-leak.js` runs an incognito process against a SOCKS5 stand-in
+for Tor that records every name it is asked for, inside a network namespace
+with no route anywhere, while Chromium logs every request's routing decision.
+Its first runs failed, and every failure was real:
+
+1. **The spellchecker** asked the proxy for `redirector.gvt1.com` (see above).
+2. **The tripwire checked nothing.** It reported "0 trips" over **0 checks**:
+   the request/reply correlation keyed replies by id and requests by verb, so
+   every check timed out waiting for an answer it had in hand. The test now
+   requires checks to have happened.
+3. **The browsing partition was persistent** (`persist:debrowser`), so
+   incognito was writing a disk cache of every page it visited - into the
+   private profile, deleted on exit, but written. Incognito now uses an
+   in-memory partition.
+4. **Chromium writes after the process stops running JavaScript.** `Local
+   State`, `Network Persistent State`, session storage and a `Crashpad`
+   database were all left behind after a clean exit, because they are written
+   after Node's `exit` handler. A native reaper (`net-watch --reap`) now waits
+   for the process to end and deletes its session directory.
+
+**The test was then shown to fail against a naive design.** With the proxy
+applied only to the browsing partition - the obvious first implementation -
+three separate checks failed: the stand-in never saw the favicon route's
+host, and Chromium's log recorded `DIRECT` routing for the favicon and
+touch-icon requests made from the default session. An earlier version of the
+test *passed* that design: it keyed the favicon check on a host the page itself
+had already requested, and it treated lookups refused by the resolver rules as
+harmless - when a request that resolves locally at all is one that was going
+direct. Both were tightened before trusting the result.
+
+Final state, inside the namespace and without it: **13/13**. Both canaries -
+a direct Chromium fetch to a non-proxy loopback port, and a direct socket from
+the main process to a LAN address - are caught every run; the tripwire also
+caught Chromium's own network-service socket for the first one.
+
+## Incognito, M3 — the kill switch, and the tripwire's real cost
+
+**Linux: the wall holds.** Started through `native/helpers/netns-launch`, the private
+browser runs in a network namespace containing only loopback, and Tor runs
+outside on Unix sockets. Under the leak test: every page, favicon and download
+arrived at the stand-in for Tor through the relay; a direct socket to the
+harness's address failed with `ENETUNREACH` inside the kernel; the canary
+listener received nothing at all (17/17). Chromium's sandbox keeps working
+inside the namespace as long as the user's own uid is mapped rather than root
+(see M0).
+
+**When the kernel says no.** With the user-namespace limit set to zero, the
+launcher reports `unavailable:unshare-No space left on device`, stops the Tor
+it had already started, and the browser runs its own Tor behind its settings
+and the tripwire - and says "tripwire only" on its connection page.
+
+**A launcher bug found by running it, not by the test.** The test's stand-in
+Tor was given an absolute path; handed a relative one, the launcher changed
+into Tor's directory for its libraries and then exec'd a path that no longer
+pointed anywhere, so Tor never started and the relay reported `ENOENT`. The
+launcher now resolves the path first and writes its own failure into the log
+the browser follows.
+
+**The tripwire's cost, measured.** It reads which sockets each browser
+process holds, four times a second, and has a budget of 1% of one core. The
+first version re-read all four of the namespace's socket tables once per
+process: 1.7 ms of CPU per check for four processes, enough to exceed the
+budget and back off to one check every two seconds - a much slower tripwire
+than designed. Reading the tables once per check, then matching each process's
+socket inodes against them: 1.2 ms for all ten processes of a live private
+window, about 0.5% of a core at four checks a second.
+
+## Incognito, M4 — bridges, your own bridge, and Tor's kept state
+
+**The built-in bridges start, and race.** With `auto`, Tor was given all seven
+built-in obfs4 bridges and both Snowflake bridges at once. It tried every
+obfs4 address in parallel (all blocked by this container's network) while
+lyrebird's Snowflake client reached its broker and was handed peers - the
+broker is domain-fronted through a CDN, which is why it got through. The WebRTC
+data channel to those peers then never opened, because this container blocks
+UDP, so bootstrap did not complete. Nothing waited for one transport to time
+out before trying the next.
+
+**The bridge kit, run for real.** `tools/bridge-kit/setup-bridge.sh` was run on
+this container (Ubuntu 24.04, no systemd) and failed four times before it
+worked, each time for a reason a real server could also hit: a nickname one
+character over Tor's 19-character limit; an ORPort that tried IPv6 on an
+IPv4-only host; a client SOCKS port a bridge does not need, colliding with the
+previous run; and, without systemd's defaults, Tor keeping its files in
+`~/.tor`, where the script never found the bridge line. It also raced its own
+restart until it waited for the old Tor to let go of its ports. Then it
+printed a line - and Debrowser's own Tor, given that line in "my own bridges"
+mode, went `Connecting to pluggable transport` → `Handshake with a relay done`
+→ `Loading networkstatus consensus` through obfs4, stopping at 30% only because
+the bridge itself cannot reach the Tor network from here.
+
+**Kept state, sealed.** A stand-in keystore (this container has no keyring,
+and the real store rightly refuses to write without one) sealed 500 KB of
+state and consensus into 2.5 KB, mode 0600, with no plaintext visible;
+restoring put back only the kept files (not Tor's lock file); flipping one bit
+of the file made the restore refuse it and delete it rather than start Tor on
+tampered state.
+
+**CI found two Windows faults in the fetcher, and one false alarm.** Git's
+MSYS `gpg` read a Windows path in `GNUPGHOME` as relative to the working
+directory; under Git Bash, `tar` is MSYS tar, which reads `C:\...` as a remote
+host. And on the Linux runner the network log recorded a UDP `connect()` to
+`[2001:4860:4860::8888]:443` - Chromium asking the routing table whether IPv6
+works. A UDP connect sends nothing; the check now fails on bytes actually sent
+and reports the probe separately. It never appeared here because this
+container has no IPv6 to ask about.
+
+## Incognito, M5 — a circuit per tab, and what happens when a site refuses Tor
+
+**Each tab really does leave from its own circuit.** The leak test's stand-in
+for Tor listens on all 24 pool ports, the way Tor does, and records which port
+each host name arrived on. Two tabs opened side by side arrived on ports 3 and
+4; a link opened from the first arrived on 3, with its opener; "new circuit"
+moved the first tab to 5; site icons arrived on 1, which no tab is ever given.
+Tor never lets two SOCKS ports share a circuit, so different ports means
+different exits.
+
+**"New identity" leaves nothing behind.** After it: one tab, and zero cookies
+in a partition that had one set just before.
+
+**A blocked site is retried, and then given up on.** The fixture server has a
+`/challenge` route that answers a 403 "Just a moment..." page for the first two
+requests. The tab loaded on its third attempt, and the three attempts arrived
+on three different ports. The same route with `always=1` was tried on four
+ports (the first load and three new circuits), then stopped, and the toolbar
+said "site refuses Tor" instead of looping. The page text is only read when the
+status is already 403, 429 or 503, so an ordinary load costs no extra
+round trip to the renderer.
+
+**What was nearly counted wrong.** The first run reported four ports for a
+page that took three attempts. The fourth was port 1: the site's icon, fetched
+on the icon circuit as designed. The check now leaves the icon circuit out.
+
+**Onion-Location is unit-checked, not end to end.** The header is honoured
+only from an HTTPS page, because on plain HTTP the exit could have written it.
+The fixtures are plain HTTP, so the harness checks the rule directly: an HTTPS
+page offering an onion address is followed; the same header on an HTTP page,
+or pointing at a non-onion address, is ignored.
+
+Leak test: 24/24; with the Linux kill switch, 25/25. Normal-mode smoke suite:
+148/148.
+
+## Incognito, M6 — what a site can read, and what each JavaScript level costs
+
+**Four mechanisms, and where each reaches.** A probe read the user agent,
+client-hint brands, time zone, locale, languages and core count from a page, a
+dedicated worker, a shared worker and a service worker, with the OS set to
+German and Tokyo time:
+
+- `session.setUserAgent` reaches pages and dedicated workers only. Shared and
+  service workers reported Electron's default string, `…Electron/44.3.0…`,
+  until `app.userAgentFallback` was set too.
+- Client-hint brands (`Not?A_Brand/24, Chromium/152`) cannot be changed for
+  shared or service workers. The DevTools protocol's user-agent override can
+  add "Google Chrome" to a page, but its service worker would still say
+  Chromium - and, without metadata, the same override wipes the brands to
+  nothing. So the private window says what its engine really is: Chrome's own
+  reduced string for this OS and major version, `Chrome/152.0.0.0`, with no
+  Electron or Debrowser token. Every surface agrees with it.
+- The protocol's time zone override reached all four kinds of context, since
+  the time zone belongs to the renderer process. `TZ=UTC` stays underneath it.
+- `--lang` did not change `navigator.languages` at all: Electron builds it from
+  the locale variables. With `LANG`, `LC_ALL`, `LC_MESSAGES` at `en_US.UTF-8`
+  and `LANGUAGE=en_US`, pages report `en-US,en` - exactly Chrome's default;
+  with `LANGUAGE` unset it was `en-US,en,en`. A shared worker reports only the
+  locale, `en-US`, whatever is set: Electron's behaviour, not Chrome's, and the
+  same in every private window, so the self-check expects it.
+
+**WebGPU has no off switch.** The binary has `use-webgpu-adapter`,
+`enable-unsafe-webgpu` and nothing that disables it; `disable-blink-features`
+and `disableBlinkFeatures` left `navigator.gpu` in place. The private window
+points WebGPU at SwiftShader, which this Chromium refuses without an unsafe
+flag. This container has no GPU adapter to confirm the result on, so the
+self-check asks for one on the user's machine and reports it if one appears.
+WebGL is off per view (`webgl: false`), confirmed.
+
+**Letterboxing.** The page is sized down to multiples of 200×100 and centred;
+a 1283×777 window shows a 1200×700 page, and `screen` reports 1200×700.
+
+**The overrides fail closed, and survive DevTools.** A tab loads a blank page,
+has its overrides confirmed, and only then loads what was asked for (about
+40 ms). Opening DevTools on the tab did not detach our debugger session, and
+the overrides held across a reload. Detaching it by force, as the leak test
+does, put them straight back.
+
+**The self-check.** `debrowser://fingerprint` reads the same surfaces from the
+page, a dedicated worker and a shared worker - 26 checks - and runs once,
+hidden, when a private window starts. Run without the overrides it flagged six
+mismatches (the Electron user agent in three places, the languages in two, the
+screen), so it is a check that can fail. The leak test repeats it from a web
+page, through the proxy, and reads the request headers the site received:
+`Chrome/152.0.0.0`, `Accept-Language: en-US,en;q=0.9`.
+
+**The JavaScript levels, measured** (`bench/js-levels`, median of five, twice):
+
+```
+level                  dom     json    regex  numeric     wasm
+full                  44ms   21.9ms      7ms    209ms   17.6ms
+balanced              42ms   20.6ms    7.9ms    415ms   28.8ms
+balanced+sparkplug    37ms   19.7ms    9.1ms    417ms   25.3ms
+maximum               36ms   21.4ms   33.4ms    507ms      n/a
+```
+
+Everyday page work - building a DOM, JSON - costs nothing at any level. Heavy
+numeric code runs at half speed under Balanced and WebAssembly at about 60%;
+Maximum also interprets regular expressions (about 4.5× slower) and has no
+WebAssembly. `--always-sparkplug` was not kept: no consistent gain across the
+two runs (37ms and 52ms on the same DOM workload), and one run cost 18 MB more.
+
+**Found on the way: a key file in the private profile.** On Windows, where
+the OS keystore always exists, filling a saved login on page load asked the
+credential store for its key - which created one, in the private profile, and
+the leak test found it left behind after exit. The store no longer exists in
+a private window, and the exit wipe now sweeps the whole private root rather
+than only this run's directory.
+
+Leak test: 29/29; with the Linux kill switch, 30/30. Smoke suite: 148/148.
+
+## Incognito, M7 — the panic key, clean files in both directions, and camouflage
+
+**The panic key.** Ctrl+Shift+Delete kills Tor with SIGKILL, destroys every
+window and calls `app.exit`, which skips the quit handlers - so nothing, Tor's
+sealed state included, is written on the way out. The Linux kill-switch leak
+run now ends this way and times it: the process was gone 70 ms after the key,
+the private profile 594 ms after (the reaper waits for the process to end,
+then 300 ms for the OS to let go of files), and `pgrep` found nothing still
+running with the profile on its command line.
+
+**Uploads.** Tested on the output of Chromium's own encoders, with metadata
+added: a JPEG with an Exif block carrying GPS coordinates, an ICC profile and
+a comment; a PNG with `tEXt` and `eXIf` chunks; a WebP with EXIF and XMP
+chunks. After stripping: no GPS anywhere, the ICC profile kept, the decoded
+pixels byte-identical - and for JPEG and PNG the result is byte-identical to
+what the encoder produced before the metadata was added. End to end in a
+private tab, a page reading the file it was given saw `holiday.jpg` with no
+GPS and the same pixels.
+
+The interception has a trap worth knowing: without `Page.enable`,
+`Page.setInterceptFileChooserDialog` answers `{}` - success - and does
+nothing; the native picker opens and the page gets the original file.
+Measured, fixed, and the reason is written where the call is made.
+
+**PDFs.** "Save a safe copy" renders each page in Chromium's viewer, in a
+session that refuses every network request, captures it, and prints the
+captures into a new PDF. A two-page fixture carrying JavaScript on open (which
+also tries to submit a form to a tracker), a filled-in form field, a link to a
+remote address and an author came out as two pages with none of the four, in
+1.4 s; the stand-in for Tor saw no request for the tracker's name. What was
+visible stays visible - the form's value is in the picture - and the text is
+no longer selectable.
+
+**Camouflage**, opt-in. Two real page loads with it on brought exactly two
+decoys, arriving on ports 20 and 22 while the pages used 19 and 21; with it
+off, a third load brought none. The decoy runs with JavaScript off in a view
+nobody sees, in a partition whose storage is cleared before each load.
+
+**Private downloads** land in `Private downloads`, mode 0700, inside the
+downloads folder.
+
+Leak test: 32/32; with the Linux kill switch, 34/34.
+
+## Incognito, M8 — the fuses, certificate errors, and two Windows findings
+
+**The fuses, on a real package.** A local `electron-builder --linux dir` build
+read back RunAsNode, NODE_OPTIONS and `--inspect` disabled and the archive
+integrity check and asar-only loading enabled. With `ELECTRON_RUN_AS_NODE=1`
+the packaged binary ignored the variable and started the browser; the
+unfused development binary, given the same command, printed from the script.
+The packaged smoke suite passed 148/148 with every fuse set. The release
+workflow repeats both checks on every Linux build.
+
+**Certificate errors.** The leak test serves an HTTPS page on a certificate
+made for the run and signed by nobody. The private window refused it
+(`ERR_CERT_AUTHORITY_INVALID`) and showed nothing offering to continue. With
+the handler deliberately flipped to allow, the same check failed and the page
+showed - so the check can fail.
+
+**Windows, from CI.** Two failures that the Linux runs could not show:
+
+- The credential store created its key in the private profile when a page
+  load asked it for saved logins - only where an OS keystore exists, which on
+  Windows is always. The store is now absent from private windows entirely.
+- `app.getPath('downloads')` threw "Failed to get 'downloads' path" when the
+  known Downloads folder did not exist, and every download failed with it. It
+  now falls back to `<home>/Downloads`, created if need be.
+
+And one difference that is not a failure: Windows builds `navigator.languages`
+from `--lang` alone (`en-US`), where Linux and macOS take it from the locale
+variables (`en-US,en`). Each OS is uniform with itself, and the user agent
+already names the OS.
+
+## Private windows, held to "nothing online": what else a page could read
+
+**The rule.** Anything that can reach the internet must carry nothing about
+the user or the computer; what stays on the device is out of scope.
+
+**Running first, everywhere.** `Page.addScriptToEvaluateOnNewDocument` put a
+script in the page and a cross-site frame in its own process;
+`Target.setAutoAttach` with `waitForDebuggerOnStart` held a dedicated worker
+until `Runtime.evaluate` had run the same script in it. A shared worker never
+reached the debugger - it reported `deviceMemory` 16 while the page said 8 -
+so shared and service workers are removed rather than scrubbed.
+
+**Client hints.** `about:blank` is not a secure context, so it cannot read
+`navigator.userAgentData`; a private tab's first page is an internal one that
+is, and the engine's own brands are read there once and repeated in the
+override, with the OS version, architecture and model fixed.
+
+**Canvas and audio.** The same drawing hashed the same twice in one tab and
+differently in another; with the scrub switched off, all three hashes matched.
+
+**Fonts, on Linux.** The fontconfig manual's `<rejectfont><glob>*</glob>`
+rejected nothing, and `/*` rejected the allowed families too; rejecting by
+pattern (scalable true, scalable false) and accepting by family left exactly
+the allowed set. And the variable has to be in the environment the browser
+starts with: set from inside, two fonts were hidden and four still measured
+differently from the fallback, because the processes pages run in are forked
+before any of the browser's code runs. Set by the launcher, all six were
+hidden and an allowed font still measured differently - so the method can
+see a font when there is one.
+
+**Drops, pastes, Referers.** With the private flag withheld from tabs, a photo
+dropped or pasted onto a page arrived with its GPS and original timestamp;
+with it, without either and with the same pixels. With the header rule off,
+another site received the referring page; with it, nothing - while a
+subdomain of the same site still did.
+
+**The in-memory cache.** An in-memory partition kept about 48 MB of 150 MB of
+1 MB responses; `--disk-cache-size` at 5 MB and at 64 MB changed nothing. It is
+not configurable from here, and already close to the 64 MB planned.
+
+**The real network (CI).** The bundled Tor bootstrapped and
+check.torproject.org reported `IsTor` directly and through the built-in
+bridges. Through a bridge the kit made on the runner, the client shook hands
+and then waited at 25% for five minutes: the bridge, behind NAT, logged
+"Unable to find IPv4 address" and served no directory. The kit now sets the
+address explicitly and waits for the bridge to join the network; on the next
+run, Debrowser's Tor bootstrapped through the kit's bridge and
+check.torproject.org reported `IsTor` - all three modes passing.
+
+Leak test 38/38 (40/40 with the Linux kill switch); smoke suite 148/148.

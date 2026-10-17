@@ -1,0 +1,146 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PlayReady test: starting</title>
+<!--
+  Microsoft's own PlayReady test content, played the way a streaming site's
+  player does it (EME), in the streaming view. Every step is written below the
+  video and the last one into the title bar, so a failure names itself:
+  no key system, the licence refused, the output not protected, or the video
+  never decoding. Served from loopback by streamview-probe.js
+  (--streamview-test=playready); content and licence from
+  https://learn.microsoft.com/en-us/playready/advanced/testcontent/playready-3x-test-content
+-->
+<style>
+  body { margin: 16px; background: #141413; color: #ddd; font: 14px system-ui, sans-serif; }
+  video { display: block; width: 100%; max-height: 62vh; background: #000; }
+  select, button { font: inherit; margin: 10px 8px 10px 0; }
+  #log { white-space: pre-wrap; font: 12px ui-monospace, Consolas, monospace; line-height: 1.5; }
+  .bad { color: #f08c7c; } .good { color: #9fd18b; }
+</style>
+<video id="video" controls muted playsinline></video>
+<div>
+  <select id="clip">
+    <option value="hevc4k">4K HEVC 8-bit (video protected)</option>
+    <option value="h2644k">4K H.264 (video protected)</option>
+    <option value="h2641080">1080p H.264 (audio and video protected)</option>
+  </select>
+  <select id="level">
+    <option value="3000">SL3000 - hardware, what 4K needs</option>
+    <option value="2000">SL2000 - software</option>
+  </select>
+  <button id="play">Play</button>
+</div>
+<div id="log"></div>
+<script>
+'use strict';
+const BASE = 'https://test.playready.microsoft.com/media/profficialsite/';
+const CLIPS = {
+  hevc4k: { file: 'tearsofsteel_4k_60s_24fps.12000kbps.3840x2160.h265-8b.2ch.128kbps.aac.audioclear.cenc.mp4',
+            codec: 'video/mp4; codecs="hvc1.1.6.L150.90"' },
+  h2644k: { file: 'tearsofsteel_4k_60s_24fps.12000kbps.3840x2160.h264-8b.2ch.128kbps.aac.audioclear.cenc.mp4',
+            codec: 'video/mp4; codecs="avc1.640033"' },
+  h2641080: { file: 'tearsofsteel_1080p_60s_24fps.6000kbps.1920x1080.h264-8b.2ch.128kbps.aac.avsep.cenc.mp4',
+              codec: 'video/mp4; codecs="avc1.640028"' }
+};
+const video = document.getElementById('video');
+const out = document.getElementById('log');
+
+function log(text, kind) {
+  const line = document.createElement('div');
+  if (kind) line.className = kind;
+  line.textContent = `${(performance.now() / 1000).toFixed(1).padStart(6)}s  ${text}`;
+  out.append(line);
+  document.title = `PlayReady test: ${text}`;
+}
+
+// A PlayReady licence request arrives as UTF-16 XML: the challenge to POST,
+// and the headers to POST it with.
+function licenceRequest(message) {
+  const xml = new DOMParser().parseFromString(new TextDecoder('utf-16le').decode(message), 'application/xml');
+  const challenge = xml.getElementsByTagName('Challenge')[0];
+  const headers = {};
+  for (const header of xml.getElementsByTagName('HttpHeader')) {
+    headers[header.getElementsByTagName('name')[0].textContent] = header.getElementsByTagName('value')[0].textContent;
+  }
+  if (!challenge) return { body: message, headers: { 'Content-Type': 'text/xml; charset=utf-8' } };
+  return { body: Uint8Array.from(atob(challenge.textContent), (c) => c.charCodeAt(0)), headers };
+}
+
+async function play() {
+  out.textContent = '';
+  const clip = CLIPS[document.getElementById('clip').value];
+  const level = document.getElementById('level').value;
+  const licenceUrl = `https://test.playready.microsoft.com/service/rightsmanager.asmx?cfg=(persist:false,sl:${level})`;
+  const systems = level === '3000'
+    ? ['com.microsoft.playready.recommendation.3000', 'com.microsoft.playready.recommendation']
+    : ['com.microsoft.playready.recommendation', 'com.microsoft.playready'];
+  log(`screen ${screen.width}x${screen.height} at ${devicePixelRatio}x`);
+
+  let access = null;
+  for (const system of systems) {
+    try {
+      access = await navigator.requestMediaKeySystemAccess(system, [{
+        initDataTypes: ['cenc'],
+        // The .3000 key system carries the level itself; the plain one is
+        // asked for it as robustness.
+        videoCapabilities: [{ contentType: clip.codec,
+          robustness: level === '3000' && !system.endsWith('.3000') ? '3000' : '' }],
+        audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }]
+      }]);
+      log(`key system ${system}: offered`, 'good');
+      break;
+    } catch (err) {
+      log(`key system ${system}: ${err.name}`, 'bad');
+    }
+  }
+  if (!access) { log('no PlayReady for this clip here - stopped', 'bad'); return; }
+
+  let keys;
+  try {
+    keys = await access.createMediaKeys();
+    await video.setMediaKeys(keys);
+    log('media keys attached', 'good');
+  } catch (err) { log(`media keys: ${err.name} ${err.message}`, 'bad'); return; }
+
+  video.onencrypted = async (event) => {
+    log(`encrypted media found (${event.initDataType})`);
+    const session = keys.createSession();
+    session.onmessage = async (message) => {
+      log(`licence requested (${message.messageType})`);
+      try {
+        const { body, headers } = licenceRequest(message.message);
+        const response = await fetch(licenceUrl, { method: 'POST', headers, body });
+        const licence = new Uint8Array(await response.arrayBuffer());
+        if (!response.ok) { log(`licence server said ${response.status}: ${new TextDecoder().decode(licence).slice(0, 300)}`, 'bad'); return; }
+        await session.update(licence);
+        log(`licence accepted (${licence.length} bytes)`, 'good');
+      } catch (err) { log(`licence: ${err.name} ${err.message}`, 'bad'); }
+    };
+    session.onkeystatuseschange = () => {
+      session.keyStatuses.forEach((status) => log(`key status: ${status}`, status === 'usable' ? 'good' : 'bad'));
+    };
+    session.closed.then((reason) => log(`session closed: ${reason}`, 'bad'));
+    try { await session.generateRequest(event.initDataType, event.initData); }
+    catch (err) { log(`generateRequest: ${err.name} ${err.message}`, 'bad'); }
+  };
+  video.onerror = () => log(`video error ${video.error && video.error.code}: ${video.error && video.error.message}`, 'bad');
+  video.onplaying = () => log('playing', 'good');
+  video.src = BASE + clip.file;
+  video.play().catch((err) => log(`play(): ${err.name} ${err.message}`, 'bad'));
+
+  // What is actually on screen: a picture that never decodes, or one that
+  // decodes but drops every frame, reads differently from a licence refusal.
+  clearInterval(window.__svTick);
+  let reported = 0;
+  window.__svTick = setInterval(() => {
+    if (video.paused || !video.currentTime) return;
+    const q = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : {};
+    if (++reported > 6) return;
+    log(`at ${video.currentTime.toFixed(1)}s: ${video.videoWidth}x${video.videoHeight}, ` +
+      `${q.totalVideoFrames || 0} frames, ${q.droppedVideoFrames || 0} dropped`);
+  }, 2000);
+}
+
+document.getElementById('play').addEventListener('click', play);
+play();
+</script>

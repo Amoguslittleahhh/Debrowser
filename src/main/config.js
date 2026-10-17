@@ -75,6 +75,8 @@ const BASE = {
 
   /** How often the governor re-evaluates every tab. */
   tickMs: 2000,
+  /** The tick in battery mode (governor, tickInterval): fewer wakeups, for a ladder that is coarser by seconds. */
+  saverTickMs: 5000,
 
   /**
    * Hard ceiling on how many tabs may hold a renderer process at once.
@@ -125,8 +127,18 @@ const BASE = {
   /**
    * Idle ladder: how long a tab must be hidden before each demotion. A tab
    * becomes WARM the moment it is hidden, so that step needs no threshold.
+   *
+   * COLD comes five seconds after you look away, which is soon, and is soon on
+   * purpose: reaching it costs the renderer nothing at all - no freeze, no CDP
+   * round trip, nothing sent to the page - it only means "this one may be
+   * reclaimed if something needs the memory". Forty-five seconds of pretending
+   * a tab is still warm bought nothing and made the task manager report a tab
+   * as busy for most of a minute after it was abandoned.
+   *
+   * What stops that becoming a reload is `minLifetimeMs` below, not this: a tab
+   * may be marked reclaimable long before it may actually be reclaimed.
    */
-  coldAfterMs: 45_000,
+  coldAfterMs: 5_000,
   freezeAfterMs: 5 * 60_000,
 
   /**
@@ -274,7 +286,7 @@ const BASE = {
    * about 2:1, so a per-process reading alone overstates this by roughly double.
    *
    * On by default, and inert unless the platform can actually do it - which
-   * today means Linux, with `tools/mem-trim` built, CAP_SYS_NICE granted, and
+   * today means Linux, with `native/helpers/mem-trim` built, CAP_SYS_NICE granted, and
    * swap or zram configured. `trimCapability()` reports which of those is
    * missing rather than leaving a silent zero. Unlike page merging, this is not
    * gated behind a warning: KSM shares identical pages *between* processes and
@@ -402,7 +414,7 @@ const PROFILES = {
     memoryBudgetMB: 700,
     tabFloorMB: 35,
     maxLiveTabs: 4,
-    coldAfterMs: 20_000,
+    coldAfterMs: 5_000,
     freezeAfterMs: 90_000,
     discardAfterMs: 3 * 60_000,
     minLifetimeMs: 45_000,
@@ -426,7 +438,7 @@ const PROFILES = {
     memoryBudgetMB: 600,
     tabFloorMB: 30,
     maxLiveTabs: 0,
-    coldAfterMs: 20_000,
+    coldAfterMs: 5_000,
     freezeAfterMs: 90_000,
     discardAfterMs: 5 * 60_000,
     minLifetimeMs: 45_000,

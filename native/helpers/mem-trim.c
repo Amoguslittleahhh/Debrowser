@@ -1,0 +1,560 @@
+/*
+ * mem-trim - push a renderer's cold pages into the OS memory compressor.
+ *
+ * A hidden tab holds its full working set for as long as it stays alive. The
+ * governor's answer to that is usually to discard the renderer outright, but a
+ * tab holding unsubmitted input or live in-page state cannot be discarded
+ * without losing it, so those tabs sit at FROZEN holding everything. This helper
+ * is the lever that works on them: it asks the kernel to reclaim the renderer's
+ * cold anonymous pages, which zram or zswap then holds compressed. The process
+ * stays alive, its state is untouched, and the pages fault back in on resume.
+ *
+ * Measured on this project's fixtures (docs/MEASUREMENTS.md, M4b/M4c): net
+ * system reclaim runs at roughly 29-49% of a renderer's private memory, rising
+ * with size - 10.9MB from a 37MB tab, 146MB from a 303MB one - at a resume cost
+ * of 4-12ms. "Net" is deliberate: pages leaving the process reappear as zram's
+ * own allocation at about 2:1, so the per-process figure alone overstates the
+ * saving by roughly double.
+ *
+ * Linux and Windows. macOS has no public API to force its compressor at all -
+ * memorystatus_control is private and MADV_FREE_REUSABLE only works on your own
+ * memory - so it stays an honest refusal rather than a plausible-looking call
+ * nobody has run; see trimCapability() in src/main/platform.js.
+ *
+ * On Windows the mechanism is SetProcessWorkingSetSizeEx(h, -1, -1), which is
+ * the documented way to empty a process's working set. The pages do not
+ * evaporate: Windows Memory Compression takes the ones it can compress and the
+ * pagefile takes the rest, which is the same shape as Linux with zram and has
+ * the same accounting trap - so this helper answers `avail` as well as `trim`,
+ * and the caller compares the two. It needs PROCESS_SET_QUOTA, which one
+ * process holds over another of the same user with no elevation at all; that is
+ * why this half could be written without a machine to run it on, and it is
+ * still gated by a check that runs on a real Windows runner in CI.
+ *
+ * TWO THINGS THIS MUST GET RIGHT, both learned by getting them wrong:
+ *
+ *   1. Read smaps, not maps. A renderer reserves an enormous amount of address
+ *      space it never touches - V8's heap cages measured 1446.7 GiB in a single
+ *      renderer here - and process_madvise returns at most 0x7FFFF000 bytes per
+ *      call. Feeding it those reservations burns the whole per-call budget on
+ *      untouched ranges and never reaches a resident page. An earlier version
+ *      did exactly that: the syscall returned success every time, having covered
+ *      0 of 281 MiB actually resident, and the feature measured as worthless.
+ *      smaps carries each region's Rss, so only regions with resident pages are
+ *      advised.
+ *
+ *   2. Batch under the per-call cap. Even with reservations excluded, a large
+ *      renderer's resident anonymous memory can exceed 0x7FFFF000 in one call.
+ *
+ * WHAT IS DELIBERATELY LEFT BEHIND. Measured against a live renderer holding a
+ * 120MB fixture heap: 227 MiB private resident, of which this advises 148 MiB
+ * and skips 79 MiB. All 79 MiB is private *file-backed* - the Chromium binary's
+ * own dirtied pages and mapped resources - and none of it is a named anonymous
+ * region ([anon:...] appeared 0 times in that renderer's smaps, so the named-
+ * anon exclusion this filter appears to make is not one it ever performs in
+ * practice). Skipping it is correct: clean file pages are reclaimable by the
+ * kernel without a compressor at all, so advising them spends the per-call
+ * budget to duplicate work the page cache already does. The number is recorded
+ * here because "the helper skips a third of private memory" reads like a bug
+ * until you know what the third is.
+ *
+ * Permissions: process_madvise(2) with MADV_PAGEOUT against another process
+ * needs ptrace-read access (same uid suffices) AND CAP_SYS_NICE. A desktop
+ * launch has the first and not the second, so this needs a one-time
+ *
+ *     sudo setcap cap_sys_nice+ep native/helpers/mem-trim
+ *
+ * exactly as page merging needs a one-time root action. Without it every trim
+ * returns EPERM, which the caller reports as "unavailable" rather than failing.
+ * And with no swap or zram configured the kernel has nowhere to put dirty
+ * anonymous pages, so the call succeeds and reclaims nothing - which is why
+ * compressionStatus() in src/main/memory.js reports the two conditions apart.
+ *
+ * Build:  cc -O2 -Wall -o native/helpers/mem-trim native/helpers/mem-trim.c   (npm run build:memtrim)
+ * Use:    a line protocol on stdin, one long-lived process owned by platform.js.
+ *           trim <pid>   ->  ok <pid> <bytes-advised>
+ *                        ->  err <pid> <errno>
+ *           caps         ->  caps linux <0|1 can-trim>
+ *         Spawned once at startup rather than per trim: a process spawn on every
+ *         tier transition would cost more than the trim it performs saves.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+
+#if defined(_WIN32)
+
+#include <windows.h>
+#include <psapi.h>
+#define MECHANISM "SetProcessWorkingSetSizeEx"
+
+/*
+ * Empty a process's working set, and report what left it.
+ *
+ * `SetProcessWorkingSetSizeEx(h, -1, -1)` is the documented idiom: it is not a
+ * size, it is the flag value that means "trim everything trimmable". The pages
+ * are not freed - the ones that compress go to Windows Memory Compression, the
+ * rest to the pagefile - so the figure returned here is what left *this
+ * process*, never what the machine got back. The caller reads `avail` on both
+ * sides to learn that, for the same reason the Linux half exists beside zram's
+ * own counters.
+ *
+ * Two access masks, in the order mem-probe learned to use them: a Chromium
+ * renderer runs with an Untrusted integrity label and can refuse the full query
+ * right to a caller at medium integrity, while PROCESS_QUERY_LIMITED_INFORMATION
+ * is granted far more widely. PROCESS_SET_QUOTA is the one that actually
+ * authorises the trim and is not negotiable.
+ */
+static long long trim_process(unsigned long pid, int *err) {
+    *err = 0;
+    static const DWORD MASKS[] = {
+        PROCESS_SET_QUOTA | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+        PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+        PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION
+    };
+
+    HANDLE h = NULL;
+    for (size_t i = 0; i < sizeof(MASKS) / sizeof(MASKS[0]) && h == NULL; i++) {
+        h = OpenProcess(MASKS[i], FALSE, (DWORD)pid);
+        if (h == NULL) *err = (int)GetLastError();
+    }
+    if (h == NULL) return -1;
+
+    /* Before and after, from the same counter. A handle that cannot report the
+       working set still trims; it simply cannot say how much, and a zero is a
+       more honest answer there than a guess. */
+    PROCESS_MEMORY_COUNTERS before, after;
+    int measurable = GetProcessMemoryInfo(h, &before, sizeof(before)) != 0;
+
+    if (!SetProcessWorkingSetSizeEx(h, (SIZE_T)-1, (SIZE_T)-1, 0)) {
+        *err = (int)GetLastError();
+        CloseHandle(h);
+        return -1;
+    }
+
+    long long freed = 0;
+    if (measurable && GetProcessMemoryInfo(h, &after, sizeof(after))) {
+        if (before.WorkingSetSize > after.WorkingSetSize) {
+            freed = (long long)(before.WorkingSetSize - after.WorkingSetSize);
+        }
+    }
+    CloseHandle(h);
+    *err = 0;
+    return freed;
+}
+
+/*
+ * Can this build trim at all?
+ *
+ * Trimming ourselves, which on Windows is the same permission path as trimming
+ * anything else of the same user - unlike Linux, where a self-trim skips the
+ * capability check entirely and proves nothing. It says the mechanism is
+ * present and permitted; whether a *particular* renderer can be opened is a
+ * per-pid question that every real trim answers for itself.
+ */
+static int self_test(void) {
+    return SetProcessWorkingSetSizeEx(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1, 0) ? 1 : 0;
+}
+
+/*
+ * Physical memory the machine has spare, and whether there is anywhere for
+ * trimmed pages to go.
+ *
+ * The first figure is the only one that can tell a real reclaim from pages
+ * moving into the compressor: a working set that shrinks by 200MB has proved
+ * nothing until the machine has 200MB more available than it did. The other two
+ * are the Windows answer to /proc/swaps - `ullTotalPageFile` counts physical
+ * memory plus the pagefile, so the difference is the pagefile itself, and
+ * without one a trim of dirty pages has the same nowhere-to-go problem that
+ * Linux has without swap.
+ */
+static void available_bytes(long long *avail, long long *backing_total,
+                            long long *backing_free) {
+    *avail = *backing_total = *backing_free = -1;
+    MEMORYSTATUSEX st;
+    st.dwLength = sizeof(st);
+    if (!GlobalMemoryStatusEx(&st)) return;
+    *avail = (long long)st.ullAvailPhys;
+    /* Commit limit less physical is the pagefile, near enough to say whether
+       one exists; Windows reports no narrower figure without PDH. */
+    *backing_total = st.ullTotalPageFile > st.ullTotalPhys
+        ? (long long)(st.ullTotalPageFile - st.ullTotalPhys) : 0;
+    *backing_free = st.ullAvailPageFile > st.ullAvailPhys
+        ? (long long)(st.ullAvailPageFile - st.ullAvailPhys) : 0;
+}
+
+#else
+
+#define _GNU_SOURCE
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <signal.h>
+#define MECHANISM "process_madvise"
+
+#ifndef MADV_COLD
+#define MADV_COLD 20
+#endif
+#ifndef MADV_PAGEOUT
+#define MADV_PAGEOUT 21
+#endif
+
+/* iovec slots per call. IOV_MAX is 1024 on Linux. */
+#define MAX_IOV 1024
+/* Maximum bytes one process_madvise call will report, so batches stay under it. */
+#define CALL_CAP 0x7ffff000ULL
+
+static int pidfd_open_compat(pid_t pid) {
+    return (int)syscall(SYS_pidfd_open, pid, 0);
+}
+
+static ssize_t process_madvise_compat(int pidfd, const struct iovec *iov,
+                                      size_t n, int advice, unsigned int flags) {
+    return syscall(SYS_process_madvise, pidfd, iov, n, advice, flags);
+}
+
+/*
+ * Advise every resident, private, anonymous region of `pid` with MADV_PAGEOUT.
+ * Returns bytes advised, or -1 with *err set.
+ */
+static long long trim_process(pid_t pid, int *err) {
+    *err = 0;
+
+    int pidfd = pidfd_open_compat(pid);
+    if (pidfd < 0) { *err = errno; return -1; }
+
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/smaps", pid);
+    FILE *f = fopen(path, "r");
+    if (!f) { *err = errno; close(pidfd); return -1; }
+
+    struct iovec iov[MAX_IOV];
+    size_t n = 0;
+    unsigned long long advised = 0, batch = 0;
+    unsigned long start = 0, end = 0;
+    int eligible = 0;
+    char line[512];
+
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long s, e;
+        char perms[8], rest[256];
+        rest[0] = '\0';
+
+        if (sscanf(line, "%lx-%lx %7s %*s %*s %*s %255[^\n]", &s, &e, perms, rest) >= 3
+            && strchr(perms, 'p') != NULL) {
+            /* A region header. Decide eligibility now; Rss follows below. */
+            start = s; end = e;
+            eligible = (perms[3] == 'p') && (e > s);
+            if (eligible && rest[0] != '\0') {
+                /* Private ANONYMOUS only. A named file mapping is reclaimable
+                   without the compressor, and a shared one is not this
+                   process's alone to evict. [heap] and thread stacks are
+                   anonymous despite carrying a label. */
+                char *q = rest;
+                while (*q == ' ') q++;
+                if (*q != '\0' && strcmp(q, "[heap]") != 0 && strncmp(q, "[stack", 6) != 0)
+                    eligible = 0;
+            }
+            continue;
+        }
+
+        if (eligible && strncmp(line, "Rss:", 4) == 0) {
+            unsigned long rss_kb = strtoul(line + 4, NULL, 10);
+            eligible = 0;                       /* one Rss line per region */
+            if (rss_kb == 0) continue;          /* reserved, never touched */
+
+            unsigned long len = end - start;
+            if (n == MAX_IOV || batch + len > CALL_CAP) {
+                ssize_t r = process_madvise_compat(pidfd, iov, n, MADV_PAGEOUT, 0);
+                if (r < 0) { *err = errno; fclose(f); close(pidfd); return -1; }
+                advised += (unsigned long long)r;
+                n = 0; batch = 0;
+            }
+            iov[n].iov_base = (void *)start;
+            iov[n].iov_len = len;
+            batch += len; n++;
+        }
+    }
+
+    if (n > 0) {
+        ssize_t r = process_madvise_compat(pidfd, iov, n, MADV_PAGEOUT, 0);
+        if (r < 0) { *err = errno; fclose(f); close(pidfd); return -1; }
+        advised += (unsigned long long)r;
+    }
+
+    fclose(f);
+    close(pidfd);
+    return (long long)advised;
+}
+
+/*
+ * Can this build trim at all?
+ *
+ * Answered by trimming a *child*, not ourselves. Since Linux 6.13,
+ * process_madvise on your own mm is permitted without CAP_SYS_NICE (the
+ * capability check is skipped when the target mm is the caller's), so a
+ * self-trim succeeds on any modern kernel and proves nothing about the case
+ * that matters - advising another process's pages, which is every real trim
+ * this helper performs. On such a host the old self-test reported "can trim"
+ * with no capability held, and the browser then enabled hibernation, froze
+ * tabs, and collected EPERM on every one of them.
+ *
+ * So: fork, have the child touch a page and wait, trim the child, reap it. Same
+ * syscall, same permission path, a few hundred microseconds, and a real answer.
+ */
+static int self_test(void) {
+    int ready[2];                      /* child -> parent: "my page exists" */
+    if (pipe(ready) < 0) return 0;
+
+    pid_t child = fork();
+    if (child < 0) { close(ready[0]); close(ready[1]); return 0; }
+
+    if (child == 0) {
+        /* Child: hold one dirty anonymous page so there is something resident
+           to advise, say so, then wait to be killed. */
+        close(ready[0]);
+        volatile char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (page != MAP_FAILED) *page = 1;
+        char b = 1;
+        while (write(ready[1], &b, 1) < 0 && errno == EINTR) { }
+        for (;;) pause();
+    }
+
+    close(ready[1]);
+
+    /* Wait for the page to exist before advising it. Without this the child may
+       not have touched anything yet, the advise loop finds no resident region,
+       and the helper reports success having made no syscall at all - the same
+       class of false positive as advising untouched reservations. */
+    char b;
+    ssize_t got;
+    while ((got = read(ready[0], &b, 1)) < 0 && errno == EINTR) { }
+    close(ready[0]);
+
+    int err = 0;
+    long long r = got == 1 ? trim_process(child, &err) : -1;
+
+    kill(child, SIGKILL);
+    while (waitpid(child, NULL, 0) < 0 && errno == EINTR) { }
+
+    /* Zero bytes advised means nothing was actually attempted; that is not a
+       demonstration that trimming works. */
+    return (r > 0 && err == 0) ? 1 : 0;
+}
+
+/* The same question Windows answers with GlobalMemoryStatusEx. MemAvailable
+   rather than MemFree: free memory on Linux is memory nobody has found a use
+   for yet, and comparing two readings of it would measure the page cache.
+   SwapTotal/SwapFree are the "is there anywhere to put it" half. */
+static void available_bytes(long long *avail, long long *backing_total,
+                            long long *backing_free) {
+    *avail = *backing_total = *backing_free = -1;
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "MemAvailable:", 13) == 0) *avail = strtoll(line + 13, NULL, 10) * 1024;
+        else if (strncmp(line, "SwapTotal:", 10) == 0) *backing_total = strtoll(line + 10, NULL, 10) * 1024;
+        else if (strncmp(line, "SwapFree:", 9) == 0) *backing_free = strtoll(line + 9, NULL, 10) * 1024;
+    }
+    fclose(f);
+}
+
+#endif
+
+/* The name the caller matches on; `caps linux 1` is what shipped first and the
+   Linux half must keep saying exactly that. */
+#if defined(_WIN32)
+#define PLATFORM_NAME "windows"
+#define TRIM_PID_T unsigned long
+#else
+#define PLATFORM_NAME "linux"
+#define TRIM_PID_T pid_t
+#endif
+
+/*
+ * eco <pid> <0|1> - efficiency mode for one process, on battery.
+ *
+ * Windows: what Task Manager's "Efficiency mode" sets, both halves - EcoQoS
+ * (PROCESS_POWER_THROTTLING_EXECUTION_SPEED: efficient cores, low clocks) and
+ * the idle priority class. EcoQoS alone was set before, with the governor's
+ * below-normal priority, and Windows did not count that as efficiency mode:
+ * no leaf in Task Manager, and the scheduler still treated the process as
+ * ordinary background work. Off, an idle class goes back to below normal - the
+ * governor's background priority - and any other class (a tab just brought to
+ * the front, set to normal) is left as it is.
+ *
+ * Linux: the nearest things the kernel has, on every thread of the process -
+ * a utilisation clamp (uclamp_max, a quarter of full speed: the hint that keeps
+ * a task on low frequencies and little cores) and idle-class I/O. Nice is
+ * already the lowest, from the governor. Both are allowed on one's own
+ * processes without privilege; a kernel without uclamp just says so.
+ *
+ * Replies `ok <pid> <threads changed>` or `err <pid> <errno>`.
+ */
+#if defined(_WIN32)
+static long set_eco(unsigned long pid, int on, int *err) {
+    HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!h) { *err = (int)GetLastError(); return -1; }
+    PROCESS_POWER_THROTTLING_STATE state;
+    memset(&state, 0, sizeof(state));
+    state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    state.StateMask = on ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+    BOOL ok = SetProcessInformation(h, ProcessPowerThrottling, &state, sizeof(state));
+    if (!ok) *err = (int)GetLastError();
+    if (ok && on) {
+        if (!SetPriorityClass(h, IDLE_PRIORITY_CLASS)) { ok = FALSE; *err = (int)GetLastError(); }
+    } else if (ok && GetPriorityClass(h) == IDLE_PRIORITY_CLASS) {
+        SetPriorityClass(h, BELOW_NORMAL_PRIORITY_CLASS);
+    }
+    CloseHandle(h);
+    return ok ? 1 : -1;
+}
+#else
+#include <dirent.h>
+
+struct eco_sched_attr {
+    unsigned int size, sched_policy;
+    unsigned long long sched_flags;
+    int sched_nice;
+    unsigned int sched_priority;
+    unsigned long long sched_runtime, sched_deadline, sched_period;
+    unsigned int sched_util_min, sched_util_max;
+};
+#define ECO_KEEP_POLICY 0x08
+#define ECO_KEEP_PARAMS 0x10
+#define ECO_UTIL_CLAMP_MAX 0x40
+#define ECO_IOPRIO_WHO_PROCESS 1
+#define ECO_IOPRIO_CLASS_SHIFT 13
+#define ECO_IOPRIO_CLASS_IDLE 3
+
+static long set_eco(pid_t pid, int on, int *err) {
+    char dir[64];
+    snprintf(dir, sizeof(dir), "/proc/%d/task", (int)pid);
+    DIR *d = opendir(dir);
+    if (!d) { *err = errno; return -1; }
+    long changed = 0;
+    int last = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        long tid = strtol(e->d_name, NULL, 10);
+        if (tid <= 0) continue;
+        struct eco_sched_attr a;
+        memset(&a, 0, sizeof(a));
+        a.size = sizeof(a);
+        a.sched_flags = ECO_KEEP_POLICY | ECO_KEEP_PARAMS | ECO_UTIL_CLAMP_MAX;
+        a.sched_util_max = on ? 256 : 1024;   /* of 1024: a quarter, or no clamp */
+        int clamped = syscall(SYS_sched_setattr, (pid_t)tid, &a, 0) == 0;
+        if (!clamped) last = errno;
+        /* Off is class none (0): back to the default every process starts
+           with, which follows its nice value - not a fixed best-effort level. */
+        int io = on ? (ECO_IOPRIO_CLASS_IDLE << ECO_IOPRIO_CLASS_SHIFT) : 0;
+        int quiet = syscall(SYS_ioprio_set, ECO_IOPRIO_WHO_PROCESS, (int)tid, io) == 0;
+        if (!quiet) last = errno;
+        if (clamped || quiet) changed++;
+    }
+    closedir(d);
+    if (changed == 0) { *err = last ? last : ESRCH; return -1; }
+    return changed;
+}
+#endif
+
+#if !defined(_WIN32)
+/*
+ * Whether `pid` belongs to whoever runs this helper. The guide has the helper
+ * given CAP_SYS_NICE, which is exactly what lifts the kernel's own same-owner
+ * check on sched_setattr and ioprio_set - so without this, any local user
+ * could pipe `eco <pid> 1` into it and throttle another user's processes, a
+ * root daemon's included. Real and effective uid both, as the kernel would
+ * have compared before the capability.
+ */
+static int owned(pid_t pid) {
+    char path[64], line[256];
+    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int ok = 0;
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long ruid, euid;
+        if (sscanf(line, "Uid: %lu %lu", &ruid, &euid) == 2) {
+            ok = ruid == (unsigned long)getuid() && euid == (unsigned long)getuid();
+            break;
+        }
+    }
+    fclose(f);
+    return ok;
+}
+#endif
+
+int main(void) {
+    char line[128];
+
+    /*
+     * Unbuffered, not line-buffered.
+     *
+     * `setvbuf(stdout, NULL, _IOLBF, 0)` is the obvious thing to write and it
+     * is wrong on Windows in two separate ways, which is what this helper
+     * shipped with and what made every Windows reply - `caps` and `avail`
+     * alike - read as "the helper did not answer". MSVC requires size between
+     * 2 and INT_MAX when the buffer is NULL, and an invalid parameter invokes
+     * the invalid-parameter handler, which in a release build terminates the
+     * process. And MSVC documents _IOLBF as behaving like full buffering on
+     * Win32 anyway, so surviving it would only have left each reply sitting in
+     * a buffer that never fills.
+     *
+     * _IONBF ignores the size argument and is valid everywhere. For a protocol
+     * that writes one short line and waits, unbuffered is what we want. The
+     * explicit flushes below cost nothing then and keep the replies arriving
+     * if anyone ever reintroduces a buffer. `native/helpers/mem-probe.c` carries the
+     * same note for the same reason.
+     */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
+    while (fgets(line, sizeof(line), stdin)) {
+        if (strncmp(line, "caps", 4) == 0) {
+            printf("caps %s %d\n", PLATFORM_NAME, self_test());
+            fflush(stdout);
+            continue;
+        }
+        if (strncmp(line, "avail", 5) == 0) {
+            long long avail, total, free_;
+            available_bytes(&avail, &total, &free_);
+            printf("avail %lld %lld %lld\n", avail, total, free_);
+            fflush(stdout);
+            continue;
+        }
+        long pid = 0;
+        if (sscanf(line, "trim %ld", &pid) == 1 && pid > 0) {
+            int err = 0;
+#if !defined(_WIN32)
+            if (!owned((pid_t)pid)) { printf("err %ld %d\n", pid, EPERM); fflush(stdout); continue; }
+#endif
+            /* One signature for both halves: the Linux one takes pid_t, the
+               Windows one a DWORD, and both are what an unsigned long converts
+               to cleanly. */
+            long long advised = trim_process((TRIM_PID_T)pid, &err);
+            if (advised < 0) printf("err %ld %d\n", pid, err);
+            else printf("ok %ld %lld\n", pid, advised);
+            continue;
+        }
+        int on = 0;
+        if (sscanf(line, "eco %ld %d", &pid, &on) == 2 && pid > 0) {
+            int err = 0;
+#if !defined(_WIN32)
+            if (!owned((pid_t)pid)) { printf("err %ld %d\n", pid, EPERM); fflush(stdout); continue; }
+#endif
+            long changed = set_eco((TRIM_PID_T)pid, on != 0, &err);
+            if (changed < 0) printf("err %ld %d\n", pid, err);
+            else printf("ok %ld %ld\n", pid, changed);
+            fflush(stdout);
+            continue;
+        }
+        printf("err 0 %d\n", EINVAL);
+    }
+    return 0;
+}

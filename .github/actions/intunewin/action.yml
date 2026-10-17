@@ -1,0 +1,109 @@
+# Wrap a Windows installer into the `.intunewin` bundle Intune deploys.
+#
+# An `.exe` cannot be deployed as an Intune Win32 app at all. The service
+# expects a `.intunewin`: a zip holding the payload encrypted with AES, plus a
+# `Detection.xml` describing it, which the Intune Management Extension decrypts
+# on the device. Only Microsoft's Win32 Content Prep Tool produces that format,
+# so it is downloaded and run here rather than reimplemented - the encryption
+# and the metadata are an undocumented contract with the service, and guessing
+# at them would produce a file that uploads and then fails on a device.
+#
+# In its own action because two workflows need it, and two copies would drift.
+
+name: Package for Intune
+description: Wrap a Windows installer into a .intunewin bundle with Microsoft's Win32 Content Prep Tool.
+
+inputs:
+  installer:
+    description: Path to the .exe to wrap.
+    required: true
+  out:
+    description: Directory to write the .intunewin into.
+    required: false
+    default: dist
+  # Pinned by commit rather than by tag, because a tag can be moved and a commit
+  # cannot, and verified by hash so that even a moved commit cannot change what
+  # runs here. Both values were read from a clone of the upstream repository:
+  # this commit is its v1.8.7 tag, the newest release at the time of writing.
+  #
+  # The version matters. v1.8.5 and v1.8.6 are both crash fixes, and v1.8.7 adds
+  # "refactored logging to prevent crashes" and FIPS-compliant hashing, so the
+  # older releases are not a safe pin merely for being older.
+  tool-ref:
+    description: Commit of Microsoft-Win32-Content-Prep-Tool to fetch the tool from.
+    required: false
+    default: 1d6cfcbdf8c28edc596337031f74df951f38f718
+  tool-sha256:
+    description: Expected SHA-256 of IntuneWinAppUtil.exe. Empty skips the check.
+    required: false
+    default: c1ba45b5cb939e84af064bb7ff4b38fb3dfe33c8dc1078fd9b157672eae671f6
+
+outputs:
+  package:
+    description: Path to the .intunewin that was produced.
+    value: ${{ steps.wrap.outputs.package }}
+
+runs:
+  using: composite
+  steps:
+    - id: wrap
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        $installer = Get-Item '${{ inputs.installer }}'
+        Write-Host "installer: $($installer.Name) ($([math]::Round($installer.Length/1MB,1)) MB)"
+
+        # Stage the installer alone.
+        #
+        # The tool bundles the *entire* source folder, not just the setup file,
+        # so pointing it at dist/ would wrap every other installer and blockmap
+        # in there - several hundred MB of payload, including the per-user build
+        # that must never reach a device this way.
+        $stage = Join-Path $env:RUNNER_TEMP 'intune-payload'
+        if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+        New-Item -ItemType Directory -Path $stage | Out-Null
+        Copy-Item $installer.FullName $stage
+
+        # This binary executes in CI with the repository checked out, so what is
+        # fetched is verified rather than trusted: an unpinned fetch would let
+        # an upstream push change what runs here.
+        $ref  = '${{ inputs.tool-ref }}'
+        $url  = "https://raw.githubusercontent.com/microsoft/Microsoft-Win32-Content-Prep-Tool/$ref/IntuneWinAppUtil.exe"
+        $tool = Join-Path $env:RUNNER_TEMP 'IntuneWinAppUtil.exe'
+        Write-Host "fetching $url"
+        try {
+          Invoke-WebRequest -Uri $url -OutFile $tool -UseBasicParsing
+        } catch {
+          throw "could not fetch the Win32 Content Prep Tool at ref '$ref': $($_.Exception.Message)"
+        }
+
+        # A 404 from raw.githubusercontent.com is an HTML page, and saving it to
+        # a .exe produces a file that fails much later and much less clearly.
+        $sig = [System.Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($tool)[0..1])
+        if ($sig -ne 'MZ') { throw "what was downloaded is not a Windows executable - check the ref '$ref'" }
+
+        $hash = (Get-FileHash $tool -Algorithm SHA256).Hash.ToLower()
+        Write-Host "tool sha256: $hash"
+        $want = '${{ inputs.tool-sha256 }}'.ToLower()
+        if ($want -and $hash -ne $want) {
+          throw "IntuneWinAppUtil.exe does not match the pinned hash`n  expected $want`n  got      $hash`nRefusing to run it."
+        }
+
+        $out = '${{ inputs.out }}'
+        New-Item -ItemType Directory -Path $out -Force | Out-Null
+
+        & $tool -c $stage -s $installer.Name -o $out -q
+        if ($LASTEXITCODE -ne 0) { throw "IntuneWinAppUtil exited $LASTEXITCODE" }
+
+        # The tool has been known to report success having written nothing, so
+        # the artifact is confirmed rather than assumed.
+        $name = [IO.Path]::GetFileNameWithoutExtension($installer.Name) + '.intunewin'
+        $pkg  = Join-Path $out $name
+        if (-not (Test-Path $pkg)) { throw "IntuneWinAppUtil reported success but produced no $name" }
+
+        $pkgItem = Get-Item $pkg
+        if ($pkgItem.Length -lt 1MB) { throw "$name is only $($pkgItem.Length) bytes - the payload is missing" }
+
+        Write-Host "packaged: $name ($([math]::Round($pkgItem.Length/1MB,1)) MB)"
+        "package=$pkg" >> $env:GITHUB_OUTPUT

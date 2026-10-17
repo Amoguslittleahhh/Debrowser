@@ -6,11 +6,53 @@
 
 appId: dev.debrowser.app
 productName: Debrowser
+
+## castLabs' Electron (Electron for Content Security), for Widevine. The
+## version comes from node_modules/electron ("44.1.0+wvcus"); the binaries are
+## on castLabs' releases, not Electron's, so the download is pointed there -
+## the same mirror their own install script uses.
+electronDownload:
+  mirror: https://github.com/castlabs/electron-releases/releases/download/
+
+## Production VMP signing through castLabs EVS, which Netflix, Disney+ and
+## Prime need on Windows and macOS. macOS signs before code signing (the VMP
+## signature lives inside the bundle it seals), Windows after it. Skipped, with
+## a warning, when no EVS account is set up; see build/vmp-sign.js.
+## Linux: the AppStream entry and the apt key for this build. See the file.
+beforePack: build/linux/before-pack.js
+afterPack: build/vmp-after-pack.js
+afterSign: build/vmp-after-sign.js
 copyright: Debrowser
 
 directories:
   output: dist
   buildResources: build
+
+## Electron's fuses: switches burned into the packaged binary.
+##
+## Each one closes a door through which any program running as the user could
+## take over this browser - and read everything a private window holds:
+##
+##   runAsNode                  ELECTRON_RUN_AS_NODE=1 would turn our own signed
+##                              binary into a general Node interpreter.
+##   enableNodeOptions...       NODE_OPTIONS could preload code into the main
+##                              process.
+##   enableNodeCliInspect...    --inspect would attach a debugger to it.
+##   embeddedAsarIntegrity...   The app archive is checked against a hash in the
+##   onlyLoadAppFromAsar        binary, and nothing outside it is loaded, so the
+##                              code cannot be swapped on disk (Windows, macOS).
+##
+## Nothing here needs any of them: the helpers are separate binaries, and no
+## code starts this one as Node (tools/ scripts run the system's Node). Dev and
+## test runs are unpackaged, so fuses do not apply to them. The release
+## workflow reads the fuses back from the packaged Linux build and checks that
+## ELECTRON_RUN_AS_NODE really does nothing.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
 
 ## What goes in the archive.
 ##
@@ -30,19 +72,56 @@ files:
   - src/**/*
   - test/pages/**/*
   - package.json
+  - CHANGELOG.md
   - '!**/*.map'
 
 ## Compression: maximum. The app is mostly Chromium and users download it once.
+##
+## Note this trades against differential updates: heavier compression means a
+## small source change can rewrite more of the compressed stream, so fewer
+## blocks are reusable between versions and a delta is larger than it could be.
+## Kept at maximum anyway, because the first download is the one every user
+## pays and the delta is still a fraction of a full re-download.
 compression: maximum
+
+## Where updates come from.
+##
+## Not decoration: electron-builder writes this into `app-update.yml` inside the
+## package, and that file is the only way the shipped app knows where to look
+## for a new version. Without it the updater has no provider and fails at
+## runtime on a machine nobody is watching - which is the worst place to find
+## out. It can be inferred from `repository` in package.json, but inference that
+## silently produces a broken installed app is worth being explicit about.
+##
+## Publishing is still driven by the CLI (`--publish never` in CI, which uploads
+## nothing); this block only records *where* an installed copy should check.
+publish:
+  provider: github
+  owner: Amoguslittleahhh
+  repo: Debrowser
+
+## Web links, so Debrowser can be the default browser. On macOS this becomes
+## the app's URL types in Info.plist, which is what lets it be chosen; on Linux
+## the desktop entry's handlers, alongside `mimeTypes` below. Windows is
+## registered by the installer instead (build/installer.nsh).
+protocols:
+  - name: Web page
+    schemes: [http, https]
 
 ## ---------------------------------------------------------------------------
 ## Windows
 ## ---------------------------------------------------------------------------
 ##
-## Two artifacts, because they answer different questions. The NSIS installer is
-## what most people want; `portable` is a single .exe that runs from a folder or
-## a USB stick with nothing installed, which also happens to be the easiest way
-## to try a browser you do not yet trust.
+## One artifact: the NSIS installer, installing for the current user with no
+## admin prompt. There was also a portable .exe; it went, because a second
+## Windows file beside the installer was one more thing to choose between on
+## the download page, and the installer already asks nothing and installs in
+## seconds.
+##
+## File names carry the system and not the version - Debrowser-Windows-Setup.exe
+## - so a release lists one obvious file per system, and
+## releases/latest/download/<name> is a link that never goes stale. The
+## version is in the release, the tag and the file's properties.
 ##
 ## Unsigned unless a certificate is supplied through the environment, and the
 ## SmartScreen warning on an unsigned build is correct - nothing vouches for it.
@@ -54,9 +133,50 @@ win:
   target:
     - target: nsis
       arch: [x64]
-    - target: portable
-      arch: [x64]
-  artifactName: ${productName}-${version}-win-${arch}.${ext}
+  artifactName: ${productName}-Windows-Setup.${ext}
+
+  ## The measurement helper, and only on the platforms that need one.
+  ##
+  ## Linux is absent from this on purpose: smaps_rollup already reports a real
+  ## Pss line, read directly and more cheaply than a round trip through a child
+  ## process. Shipping a second path to the same number would be one more thing
+  ## to keep honest.
+  extraResources:
+    # The private window's own icon, for its taskbar button and the jump
+    # list entry that opens one (src/main/private-icon.js). Outside the
+    # archive: the shell reads the file itself.
+    - from: build/icon-private.ico
+      to: icon-private.ico
+    - from: build/icon-private.png
+      to: icon-private.png
+    - from: native/helpers
+      to: tools
+      filter:
+        - mem-probe.exe
+        - mem-probe.c
+        # Hibernation works on Windows too now: SetProcessWorkingSetSizeEx
+        # hands a frozen renderer's pages to Windows Memory Compression, and it
+        # needs PROCESS_SET_QUOTA, which one process holds over another of the
+        # same user with no elevation and no one-time setup at all - unlike the
+        # Linux half, which needs a `setcap`.
+        - mem-trim.exe
+        - mem-trim.c
+        # The passkeys Windows Hello keeps for a site (passkeys.js).
+        - passkeys.exe
+        - passkeys.c
+        # Incognito's egress tripwire and the reaper that deletes its profile
+        # after exit. Every platform ships it: on macOS it is the only runtime
+        # check that nothing went around the proxy.
+        - net-watch.exe
+        - net-watch.c
+    # Tor for private windows, fetched and signature-checked by
+    # tools/fetch-tor.js before packaging. Per platform and architecture.
+    - from: vendor/tor/${platform}-${arch}
+      to: tor
+    # The streaming view: WebView2 for the sites whose DRM needs PlayReady.
+    # Built by tools/build-streamview.js; see src/main/streamview.js.
+    - from: vendor/streamview/${platform}-${arch}
+      to: streamview
 
   ## Signing.
   ##
@@ -85,16 +205,29 @@ win:
     signingHashAlgorithms:
       - sha256
 
+## One click, as Chrome, Edge and Brave install.
+##
+## The assisted wizard was the one part of Debrowser in someone else's style:
+## NSIS draws its pages - install mode, folder, progress, finish - with the
+## system's dialog controls, which no stylesheet reaches, so a browser that
+## draws every pixel of itself opened on a Windows 2000 form. One click has no
+## pages to be out of place: a small progress window, then the browser itself,
+## on its own welcome tour. What it gives up is choosing the folder; it is the
+## per-user Programs folder, as every per-user browser's is.
+##
+## Even that progress window is ours (native/helpers/setup-ui.c, in the browser's own
+## palette), and uninstalling asks in a browser window (src/main/setup/uninstall.js)
+## instead of a message box. build/installer.nsh wires both in.
 nsis:
-  oneClick: false
+  oneClick: true
   perMachine: false           # install per-user, so no UAC prompt
-  allowToChangeInstallationDirectory: true
+  runAfterFinish: true        # straight into the browser, and its welcome tour
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false   # keep the user's session and settings
-
-portable:
-  artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
+  # Incognito's kill switch: a hard link the firewall rule can name, and the
+  # rule. See build/installer.nsh.
+  include: build/installer.nsh
 
 ## ---------------------------------------------------------------------------
 ## macOS
@@ -103,10 +236,17 @@ portable:
 ## Both architectures, because an Intel-only build runs under Rosetta on Apple
 ## silicon and a browser is exactly the wrong place to pay that.
 ##
-## Unsigned and un-notarized, so Gatekeeper will refuse the first launch and the
-## user has to right-click -> Open, or clear the quarantine attribute. That is
-## documented rather than worked around: notarization needs an Apple Developer
-## account, and pretending otherwise would ship something that looks broken.
+## Ad-hoc signed and un-notarized. Notarization needs a paid Apple Developer
+## account; until there is one, Gatekeeper refuses the first launch and the
+## user allows it once in System Settings -> Privacy & Security -> Open Anyway.
+##
+## Ad-hoc ("-") rather than unsigned, and that is not cosmetic. Apple silicon
+## runs no unsigned code at all, and packaging (the app archive, the fuses, the
+## VMP signature) changes the bundle after Electron's own signature was made -
+## left like that, a downloaded copy is reported as "damaged and can't be
+## opened", with no Open Anyway to offer. An ad-hoc signature seals the bundle
+## as it ships, so the user gets the ordinary unidentified-developer prompt.
+## With a Developer ID, replace "-" with nothing and set CSC_LINK instead.
 mac:
   target:
     - target: dmg
@@ -114,15 +254,56 @@ mac:
     - target: zip
       arch: [x64, arm64]
   category: public.app-category.productivity
-  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  # arm64 or x64 in the name: electron-updater picks a Mac's update by finding
+  # "arm64" in it. The .zip is what updates install from; people download the .dmg.
+  artifactName: ${productName}-macOS-${arch}.${ext}
+  ## Ad-hoc; see above. disable-library-validation in the entitlements is what
+  ## lets the hardened runtime load Electron's frameworks under it.
+  identity: '-'
   ## The browser opens network connections and spawns renderers; the hardened
   ## runtime needs to be told so if this is ever signed.
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  ## Same helper, macOS build. `proc_pid_rusage` needs no task port and no
+  ## debugger entitlement, so the hardened runtime above does not block it.
+  extraResources:
+    # The private window's own icon, for its Dock tile (src/main/private-icon.js).
+    - from: build/icon-private.png
+      to: icon-private.png
+    - from: native/helpers
+      to: tools
+      filter:
+        - mem-probe
+        - mem-probe.c
+        - net-watch
+        - net-watch.c
+    - from: vendor/tor/${platform}-${arch}
+      to: tor
+    # The streaming view: WebKit for the sites whose DRM needs FairPlay.
+    - from: vendor/streamview/${platform}-${arch}
+      to: streamview
 
+## The disk image's window, drawn rather than Finder's blank one: the app and
+## the Applications folder side by side on the browser's own background, with
+## the one instruction there is. build/dmg-background.png (and @2x) is made by
+## tools/dmg-background.py from the Ledger palette.
 dmg:
-  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  artifactName: ${productName}-macOS-${arch}.${ext}
+  # No .dmg.blockmap: updates come from the .zip, so it was only clutter.
+  writeUpdateInfo: false
+  background: build/dmg-background.png
+  window:
+    width: 600
+    height: 400
+  iconSize: 96
+  contents:
+    - x: 170
+      y: 190
+    - x: 430
+      y: 190
+      type: link
+      path: /Applications
 
 ## ---------------------------------------------------------------------------
 ## Linux
@@ -150,21 +331,52 @@ linux:
   ## that platform.js will never look for on a platform where trimming is not
   ## implemented.
   extraResources:
-    - from: tools
+    # The private window's own icon, for its window and the menu entry's
+    # "New private window" action (src/main/private-icon.js).
+    - from: build/icon-private.png
+      to: icon-private.png
+    # The key the Linux repositories are signed with (empty without one,
+    # build/linux/before-pack.js). The AppImage offers to install itself as a
+    # system package only when it is there, since only then does a package
+    # get updates (src/main/setup/linux-system.js).
+    - from: build/linux/generated/archive-keyring.asc
+      to: archive-keyring.asc
+    - from: native/helpers
       to: tools
       filter:
         - mem-trim
         - mem-trim.c
+        - net-watch
+        - net-watch.c
+        - netns-launch
+        - netns-launch.c
         - ksm-launch.c
+    - from: vendor/tor/${platform}-${arch}
+      to: tor
+    # The icon for the apps-menu entry Debrowser writes for an AppImage or an
+    # unpacked folder (src/main/setup/install.js); the .deb installs its own.
+    - from: build/icon.png
+      to: icon.png
   target:
     - target: AppImage
       arch: [x64]
     - target: deb
       arch: [x64]
-    - target: tar.gz
+    - target: rpm
       arch: [x64]
+  # Every size the hicolor theme lists, drawn by tools/make-icon.js; from one
+  # 1024 px file only that size was installed, and software centres found none.
+  icon: build/linux/icons
   category: Network;WebBrowser
+  mimeTypes:
+    - text/html
+    - application/pdf
+    - x-scheme-handler/http
+    - x-scheme-handler/https
   synopsis: A memory-adaptive web browser
+  # Shown as the .deb's maintainer; package.json's author name is lowercase.
+  maintainer: Amoguslittleahhh <amoguslittleahhh@users.noreply.github.com>
+  vendor: Amoguslittleahhh
   description: >
     A browser whose resource governor decides, every two seconds, how much
     memory and CPU each tab is allowed to hold - so a tab you are not looking
@@ -178,9 +390,27 @@ linux:
       Name: Debrowser
       Categories: Network;WebBrowser;
       MimeType: text/html;x-scheme-handler/http;x-scheme-handler/https;
-  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  # One per format, named for the system: the AppImage is the one to download
+  # (it runs anywhere, and offers to install the .deb or .rpm where those fit -
+  # src/main/setup/install.js); the packages are what the repositories serve.
+  artifactName: ${productName}-Linux.${ext}
 
 deb:
+  # The default profile plus one entry for the private-window launcher, which
+  # needs to make a network namespace. See build/apparmor-profile.tpl.
+  appArmorProfile: build/apparmor-profile.tpl
+  # electron-builder's own scripts plus the apt repository's source - added on
+  # install, removed with the package. See the end of each file.
+  afterInstall: build/linux/after-install.tpl
+  afterRemove: build/linux/after-remove.tpl
+  # Files outside /opt, written by build/linux/before-pack.js: the AppStream
+  # entry software centres read (name, licence, icon, developer, release date),
+  # once as installed metainfo and once as a catalogue for Ubuntu's App
+  # Center, and the key the apt source is checked against.
+  fpm:
+    - build/linux/generated/debrowser.metainfo.xml=/usr/share/metainfo/dev.debrowser.app.metainfo.xml
+    - build/linux/generated/debrowser.yml=/usr/share/swcatalog/yaml/debrowser.yml
+    - build/linux/generated/archive-keyring.asc=/usr/share/debrowser/archive-keyring.asc
   depends:
     - libgtk-3-0
     - libnotify4
@@ -190,3 +420,16 @@ deb:
     - xdg-utils
     - libatspi2.0-0
     - libsecret-1-0
+
+## Fedora, RHEL and openSUSE: the same files outside /opt as the .deb, and the
+## same scripts with a dnf or zypper repository in place of the apt source.
+## The package is signed in the release job; the repository index is on GitHub
+## Pages (.github/workflows/pages.yml), since dnf wants a repodata/ folder and a
+## release cannot hold one.
+rpm:
+  afterInstall: build/linux/rpm-after-install.tpl
+  afterRemove: build/linux/rpm-after-remove.tpl
+  fpm:
+    - build/linux/generated/debrowser.metainfo.xml=/usr/share/metainfo/dev.debrowser.app.metainfo.xml
+    - build/linux/generated/debrowser.yml=/usr/share/swcatalog/yaml/debrowser.yml
+    - build/linux/generated/archive-keyring.asc=/usr/share/debrowser/archive-keyring.asc

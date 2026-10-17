@@ -1,5 +1,13 @@
 'use strict';
 
+/*
+ * Which of the chrome's views this page is. `strip`: tucked away in a window,
+ * the tab list's own small view under the band (window.js, layStrip), which
+ * shows the list and the find bar and nothing else. `main` everywhere else.
+ */
+const ROLE = new URLSearchParams(location.search).get('role') === 'strip' ? 'strip' : 'main';
+document.body.dataset.role = ROLE;
+
 /**
  * Browser chrome logic.
  *
@@ -12,6 +20,11 @@
  */
 
 const api = window.debrowser;
+
+// Tells the stylesheet how much room the system's window buttons need on the
+// right. Set before first paint rather than on load, so the strip is never laid
+// out once without the gutter and then reflowed with it.
+if (api && api.platform) document.body.dataset.platform = api.platform;
 
 /**
  * How long the pointer must rest on a tab before its renderer is rebuilt
@@ -28,9 +41,577 @@ const el = {
   reload: document.getElementById('reload'),
   url: document.getElementById('url'),
   scheme: document.getElementById('scheme'),
+  site: document.getElementById('site'),
+  zoomBadge: document.getElementById('zoom-badge'),
+  schemePaths: ['scheme-a', 'scheme-b', 'scheme-c'].map((id) => document.getElementById(id)),
   meter: document.getElementById('meter'),
   meterFill: document.getElementById('meter-fill'),
-  meterText: document.getElementById('meter-text')
+  meterText: document.getElementById('meter-text'),
+  menu: document.getElementById('menu'),
+  reloadIcon: document.getElementById('reload-icon'),
+  progress: document.getElementById('progress'),
+  star: document.getElementById('star'),
+  reader: document.getElementById('reader'),
+  privatePill: document.getElementById('private'),
+  onion: document.getElementById('onion'),
+  drm: document.getElementById('drm'),
+  slowJs: document.getElementById('slow-js'),
+  privateText: document.getElementById('private-text'),
+  bookmarks: document.getElementById('bookmarks'),
+  downloads: document.getElementById('downloads'),
+  downloadsRing: document.getElementById('downloads-ring'),
+  pin: document.getElementById('pin'),
+  stripCount: document.getElementById('strip-count'),
+  omnibox: document.getElementById('omnibox'),
+  findbar: document.getElementById('findbar'),
+  findInput: document.getElementById('find-input'),
+  findCount: document.getElementById('find-count'),
+  findPrev: document.getElementById('find-prev'),
+  findNext: document.getElementById('find-next'),
+  findClose: document.getElementById('find-close')
+};
+
+// The whole pill focuses the address bar, not just the text inside it: the
+// padding and the padlock are the pill's, and a click on them that did nothing
+// would read as the address bar ignoring you rather than as a near miss.
+el.omnibox.addEventListener('mousedown', (event) => {
+  if (event.target === el.url) return;      // let the caret land where it was aimed
+  if (event.target.closest('button')) return;   // the padlock, zoom, star, downloads and menu are buttons of their own
+  event.preventDefault();                   // no focus flash on the pill itself
+  el.url.focus();
+  el.url.select();
+});
+
+/**
+ * The site panel hangs from the padlock, a little below the address bar, its
+ * left edge just left of the glyph. The browser opens it here too when a site
+ * asks for something, so the question appears where the answer is kept.
+ */
+function openSite(ask = false) {
+  const pill = el.omnibox.getBoundingClientRect();
+  const lock = el.site.getBoundingClientRect();
+  api.send('open-site', {
+    x: Math.round((lock.width ? lock.left : pill.left + 8) - 4),
+    y: Math.round(pill.bottom + 6),
+    ask
+  });
+}
+el.site.addEventListener('click', () => openSite());
+
+/** Whether the loading line is currently running, so it is only re-armed on a change. */
+let progressRunning = null;
+
+/**
+ * Whether the page in front of the user is bookmarked.
+ *
+ * Asked of the browser rather than tracked here, because the list can change
+ * from Settings - an import or a deletion has to move the star, and a copy kept
+ * in this renderer would go stale the moment it did.
+ */
+let starred = null;
+let starUrl = null;
+let starRevision = null;
+
+async function refreshStar(url) {
+  if (!url) { setStar(false); starUrl = null; return; }
+  if (url === starUrl) return;
+  starUrl = url;
+  const res = await api.request('list-bookmarks');
+  const items = (res && res.items) || [];
+  // Compared against the URL asked for, not the current one: the answer may
+  // arrive after the user has moved on, and applying it then would light the
+  // star for the wrong page.
+  if (starUrl === url) setStar(items.some((b) => b.url === url));
+}
+
+function setStar(on) {
+  // A private window cannot save bookmarks - see renderPrivate.
+  if (document.body.classList.contains('incognito')) {
+    el.star.title = 'Bookmarks can’t be saved from a private window';
+    return;
+  }
+  if (on === starred) return;
+  starred = on;
+  el.star.classList.toggle('on', Boolean(on));
+  el.star.title = on ? 'Remove bookmark' : 'Bookmark this page (Ctrl+D)';
+  el.star.setAttribute('aria-label', 'Bookmark this page');
+  el.star.setAttribute('aria-pressed', String(Boolean(on)));
+}
+
+/* ------------------------------------------------------------------ */
+/* The sliding side strip                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Tell the browser when the pointer is over the strip.
+ *
+ * Unpinned, the strip's *view* is ten pixels wide until the pointer reaches it,
+ * and the whole width once it has - so this is what drives the slide. It has to
+ * come from here because the view is what the pointer enters and leaves, and a
+ * view is the only thing that can be told either.
+ *
+ * Sent on change only. `mouseenter` fires once per entry and `mouseleave` once
+ * per exit, but a page that reloads its own layout can produce a burst of them,
+ * and this is a message to another process.
+ */
+let pointerOver = null;
+
+function reportHover(over) {
+  if (over === pointerOver) return;
+  pointerOver = over;
+  api.send('sidebar-hover', { over });
+}
+
+// In the bar across the top only the edge it starts at brings the strip out:
+// the rest of the bar is a toolbar, used all day. The tab list's own view is
+// the panel, all of it.
+function pointerWantsStrip(event) {
+  if (ROLE === 'strip' || document.body.dataset.band !== 'true') return true;
+  return event.clientX < 10;
+}
+
+// The slide away has finished: the browser hides the view now, rather than on
+// a timer that could cut the last frames off. Whichever element moves - the
+// panel in the strip's own view, the body when detached - reports its
+// transform's end.
+document.addEventListener('transitionend', (event) => {
+  if (event.propertyName !== 'transform' || !document.body.classList.contains('sliding-out')) return;
+  if (event.target !== document.body && !event.target.classList?.contains('tabstrip')) return;
+  api.send('sidebar-slid');
+});
+
+document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event)));
+document.addEventListener('mouseleave', () => reportHover(false));
+// `mousemove` as well, because entering a view the pointer is *already* inside
+// - which is what happens when the strip slides out from under it - does not
+// fire `mouseenter`.
+document.addEventListener('mousemove', (event) => reportHover(pointerWantsStrip(event)));
+
+/*
+ * The wheel over the tab strip moves the strip.
+ *
+ * Across the top the strip scrolls sideways once the tabs stop shrinking, and
+ * a mouse with one wheel has no sideways to give - so a vertical wheel is taken
+ * as horizontal here, which is what every browser does over a tab strip. A
+ * trackpad's horizontal swipe arrives as `deltaX` and is used directly.
+ *
+ * Down the side the strip scrolls vertically and the browser needs no help, so
+ * this stands aside. Ctrl is never touched: that is the zoom gesture, and it
+ * belongs to the page.
+ */
+el.tabs.addEventListener('wheel', (event) => {
+  if (event.ctrlKey) return;
+  if (document.body.dataset.layout === 'left') return;
+  const by = event.deltaX || event.deltaY;
+  if (!by) return;
+  event.preventDefault();
+  // Instant: the strip is `scroll-behavior: smooth`, and adding to a
+  // scrollLeft that is still mid-animation dropped distance on every notch.
+  el.tabs.scrollBy({ left: by, behavior: 'instant' });
+}, { passive: false });
+
+el.pin.addEventListener('click', () => api.send('toggle-sidebar-pin'));
+
+/**
+ * Whether the strip is pinned, and whether it is currently out.
+ *
+ * Both come from the browser: the first is a preference it owns, and the second
+ * is a property of the *window*, since what slides is the view's width. The
+ * strip only draws itself to match.
+ */
+// Whether this view has painted a frame yet; see the strip's open state below.
+let painted = false;
+let sidebarWanted = false;
+let paintWaiters = null;
+function whenPainted(fn) {
+  if (paintWaiters) { paintWaiters.push(fn); return; }
+  paintWaiters = [fn];
+  // The first frame is drawn after the first callback, so the second one
+  // runs once there is a painted "before" to transition from.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    painted = true;
+    for (const waiter of paintWaiters.splice(0)) waiter();
+  }));
+}
+
+function applySidebarOpen(open) {
+  if (document.body.dataset.sidebarOpen === String(open)) return;
+  document.body.dataset.sidebarOpen = String(open);
+  document.body.classList.remove('sliding-out');
+}
+
+function renderSidebar(sidebar) {
+  const side = Boolean(sidebar);
+  if (document.body.dataset.sidebar !== String(side)) {
+    document.body.dataset.sidebar = String(side);
+  }
+  // Across the top none of the side's shapes apply, and a body still marked
+  // detached from the side would hide the strip.
+  if (!side) {
+    document.body.dataset.detached = 'false';
+    document.body.dataset.floating = 'false';
+    document.body.dataset.band = 'false';
+    return;
+  }
+
+  const pinned = sidebar.pinned === true;
+  const wasPinned = document.body.dataset.pinned === 'true';
+  if (document.body.dataset.pinned !== String(pinned)) document.body.dataset.pinned = String(pinned);
+  if (el.pin.getAttribute('aria-pressed') !== String(pinned)) {
+    el.pin.setAttribute('aria-pressed', String(pinned));
+    el.pin.title = pinned ? 'Tuck the tabs away: they come out from the left edge' : 'Keep the tabs beside the page';
+    // The label stays "Keep the tabs beside the page" (chrome.html) and the
+    // pressed state says whether they are: a label that turned into the
+    // opposite action beside aria-pressed announced two contradicting things.
+  }
+  // The contents are faded out rather than removed while the strip is a
+  // ten-pixel edge: at that width they would be a column of clipped glyphs,
+  // and rebuilding them on every slide would be work for something the pointer
+  // opens and closes by accident all day.
+  const open = sidebar.open === true;
+  if (open && !painted) {
+    // Chromium starts no transition in a view that has not painted a frame,
+    // so the first slide out of a strip view shown for the first time just
+    // appeared. It waits for one frame drawn closed, then slides.
+    whenPainted(() => applySidebarOpen(sidebarWanted));
+  } else {
+    applySidebarOpen(open);
+  }
+  sidebarWanted = open;
+
+  // Full screen: the strip is a panel drawn over the page rather than a column
+  // beside it, so it stops filling its view and reports what it comes to
+  // instead. See `reportChromeHeight`.
+  const detached = sidebar.detached === true;
+  if (document.body.dataset.detached !== String(detached)) {
+    document.body.dataset.detached = String(detached);
+  }
+
+  const floating = sidebar.floating === true;
+  if (document.body.dataset.floating !== String(floating)) {
+    // Unpinned with the pointer on the button: the strip is already out, so
+    // it becomes the panel where it stands. Playing the slide in from the
+    // edge made it vanish and come back under the pointer that unpinned it.
+    document.body.classList.toggle('stays', floating && wasPinned);
+    document.body.dataset.floating = String(floating);
+    document.body.classList.remove('sliding-out');
+    reportChromeHeight();
+  }
+
+  const band = detached && !floating && sidebar.band === true;
+  if (document.body.dataset.band !== String(band)) document.body.dataset.band = String(band);
+}
+
+/**
+ * Say how tall the chrome's contents are, for the window to size the panel.
+ *
+ * Only while floating, and only on a change. Every other shape is a rectangle
+ * the window decides on its own, and a message per animation frame to say a
+ * number that has not moved is exactly the kind of idle cost this browser is
+ * supposed to be about.
+ *
+ * The measurement is of what is in the chrome, not of the chrome: the body is
+ * the view, and the view is the thing being sized - asking it would be asking
+ * the answer to the question. So the panel's height is the bottom of its last
+ * visible child, plus whatever padding sits under it.
+ */
+let reportedHeight = 0;
+
+function reportChromeHeight() {
+  if (document.body.dataset.floating !== 'true') return;
+
+  let bottom = 0;
+  for (const child of document.body.children) {
+    if (child.hidden) continue;
+    const box = child.getBoundingClientRect();
+    if (box.height === 0) continue;
+    bottom = Math.max(bottom, box.bottom);
+  }
+  if (!bottom) return;
+
+  const pad = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+  const height = Math.ceil(bottom + pad);
+  // A pixel of hysteresis. The window rounds, the panel is re-measured after it
+  // is resized, and without this the two could trade a pixel back and forth for
+  // as long as the browser is full screen.
+  if (Math.abs(height - reportedHeight) < 2) return;
+  reportedHeight = height;
+  api.send('chrome-size', { height });
+}
+
+if (typeof ResizeObserver === 'function') {
+  const watch = new ResizeObserver(() => reportChromeHeight());
+  for (const child of document.body.children) watch.observe(child);
+}
+
+/* ------------------------------------------------------------------ */
+/* The downloads button                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A count and a fraction, from the state broadcast.
+ *
+ * The list itself never comes through here - the flyout asks for it when it
+ * opens, which is the only moment anyone can read it. See
+ * `DownloadManager#summary`.
+ */
+function renderDownloadsButton(summary) {
+  const count = summary ? summary.count : 0;
+  // Hidden until there is something to show, as Chrome and Edge both do it. A
+  // button that does nothing for the first hour of a session is a button in
+  // the way of the ones that do.
+  const hide = count === 0;
+  if (el.downloads.hidden !== hide) el.downloads.hidden = hide;
+  if (hide) return;
+
+  const active = summary.active > 0;
+  if (el.downloads.dataset.active !== String(active)) {
+    // The last one finishing: the ring closes and the arrow drops into the
+    // tray once, so a glance tells you it is done without opening anything.
+    if (el.downloads.dataset.active === 'true') landDownload();
+    else el.downloads.classList.remove('landed');
+    el.downloads.dataset.active = String(active);
+  }
+
+  // A transform, so a download updating twice a second never lays out the
+  // toolbar. An indeterminate one - no server-declared size - leaves the ring
+  // empty rather than sitting at zero, which would read as stalled.
+  const part = active && typeof summary.progress === 'number' ? summary.progress : 0;
+  el.downloadsRing.style.strokeDasharray = `${(part * 100).toFixed(1)} 100`;
+}
+
+function landDownload() {
+  el.downloads.classList.remove('landed');
+  void el.downloads.offsetWidth; // a second finish replays it
+  el.downloads.classList.add('landed');
+}
+el.downloads.addEventListener('animationend', (e) => {
+  if (e.animationName === 'download-ring-done') el.downloads.classList.remove('landed');
+});
+
+/** The flyout anchors to this button, so the chrome is what measures it. */
+function openDownloads() {
+  if (el.downloads.hidden) {
+    // Nothing to fly out over. The page is still the right answer for someone
+    // who pressed Ctrl+J on purpose.
+    api.send('open-downloads-page');
+    return;
+  }
+  const rect = el.downloads.getBoundingClientRect();
+  // Nothing on screen to hang from - full screen hides the toolbar.
+  if (!rect.width) { api.send('open-downloads-page'); return; }
+  api.send('open-downloads', {
+    x: Math.round(rect.left),
+    y: Math.round(rect.bottom),
+    right: Math.round(rect.right)
+  });
+}
+
+el.downloads.addEventListener('click', openDownloads);
+
+/* ------------------------------------------------------------------ */
+/* The bookmarks bar                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Redrawn when the browser says the list changed, and not otherwise.
+ *
+ * The state broadcast reaches this view on every governor tick, and it carries
+ * a revision number rather than the bookmarks themselves - so the list crosses
+ * the process boundary when the user adds or removes one, not twice a second
+ * for the life of the window.
+ */
+let bookmarksRevision = null;
+
+/**
+ * Where a clicked bookmark goes.
+ *
+ * Kept on the bar itself rather than in a variable here, because the bar is
+ * only redrawn when the bookmarks change while this preference can change at
+ * any time - so the click handler reads it at the click, from the one place
+ * that is always current, and the bar's state is visible in the inspector
+ * beside the buttons it governs.
+ */
+function bookmarkOpensIn() {
+  return el.bookmarks.dataset.opensIn === 'current-tab' ? 'current-tab' : 'new-tab';
+}
+
+/** Titles are trimmed to a few words: a bar is a row of labels, not a list. */
+const BOOKMARK_LABEL_MAX = 22;
+
+async function refreshBookmarks(revision) {
+  if (revision === bookmarksRevision) return;
+  bookmarksRevision = revision;
+  const res = await api.request('list-bookmarks');
+  // Only if nothing has changed again while we were asking.
+  if (revision === bookmarksRevision) renderBookmarks((res && res.items) || []);
+}
+
+function renderBookmarks(items) {
+  const bar = document.createDocumentFragment();
+
+  for (const item of items) {
+    const button = document.createElement('button');
+    button.className = 'bookmark';
+    button.type = 'button';
+    button.dataset.id = item.id;
+    button.title = `${item.title || item.url}\n${item.url}`;
+
+    // The site's own logo over its letter, through the browser's icon route -
+    // never fetched by this page, which would send this session's cookies to
+    // every bookmarked site every time the window opened. See `siteChip`.
+    const host = siteOf(item.url);
+    const chip = siteChip(item.url,
+      { icon: item.icon, chipClass: 'bookmark-chip', iconClass: 'bookmark-icon' });
+
+    const label = document.createElement('span');
+    label.className = 'bookmark-label';
+    const text = item.title || host;
+    label.textContent = text.length > BOOKMARK_LABEL_MAX
+      ? `${text.slice(0, BOOKMARK_LABEL_MAX - 1).trimEnd()}…`
+      : text;
+
+    button.append(chip, label);
+
+    // Same three gestures a bookmark has in any browser. A plain click follows
+    // the preference - a new tab unless the user asked for the other - while
+    // Ctrl-click and the middle button always mean a new tab, because those two
+    // mean that in every browser and a preference should not redefine them.
+    //
+    // The preference is read here, at the click, rather than captured when the
+    // bar was drawn: the bar is only redrawn when the bookmarks themselves
+    // change, so a captured value would go on opening tabs the old way until
+    // the next time the user saved one.
+    button.addEventListener('click', (event) => {
+      const newTab = event.ctrlKey || event.metaKey || bookmarkOpensIn() !== 'current-tab';
+      api.send(newTab ? 'new-tab' : 'navigate', { url: item.url });
+    });
+    // Middle-click opens it in the background, beside this tab, as a link would.
+    button.addEventListener('auxclick', (event) => {
+      if (event.button === 1) api.send('open-link-tab', { url: item.url, fromBar: true });
+    });
+    button.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      api.send('bookmark-menu', { id: item.id, x: Math.round(event.clientX), y: Math.round(event.clientY) });
+    });
+
+    bar.append(button);
+  }
+
+  // The chevron lives at the end and only appears when something did not fit.
+  // Built here rather than in the markup so the bar is one list either way.
+  const more = document.createElement('button');
+  more.className = 'bookmark bookmark-more';
+  more.type = 'button';
+  more.hidden = true;
+  more.title = 'More bookmarks';
+  more.setAttribute('aria-label', more.title);
+  // A drawn double chevron, where a typed » used to sit off-centre.
+  const chevrons = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  chevrons.setAttribute('viewBox', '0 0 16 16');
+  chevrons.setAttribute('aria-hidden', 'true');
+  for (const d of ['M4 4.5L7.5 8 4 11.5', 'M8.5 4.5L12 8l-3.5 3.5']) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    chevrons.append(path);
+  }
+  more.append(chevrons);
+  more.addEventListener('click', () => {
+    const box = more.getBoundingClientRect();
+    api.send('bookmarks-overflow', {
+      ids: hiddenBookmarkIds(),
+      x: Math.round(box.left),
+      y: Math.round(box.bottom),
+      right: Math.round(box.right)
+    });
+  });
+  bar.append(more);
+
+  el.bookmarks.replaceChildren(bar);
+  el.bookmarks.classList.toggle('empty', items.length === 0);
+  fitBookmarks();
+}
+
+/**
+ * The bookmarks that did not fit, by id.
+ *
+ * Read back off the buttons rather than kept in a second list beside them: the
+ * id is on the element that was hidden, so the two cannot disagree about which
+ * ones those were. The browser turns the ids back into a menu - the bar holds
+ * no addresses of its own.
+ */
+function hiddenBookmarkIds() {
+  return [...el.bookmarks.querySelectorAll('.bookmark[data-id][hidden]')]
+    .map((b) => b.dataset.id);
+}
+
+/**
+ * Show what fits, and hand the rest to the chevron.
+ *
+ * The bar is one row and it does not wrap, so without this the last bookmark
+ * was cut in half by the window edge and everything past it was simply gone -
+ * no scroll, no menu, no sign that it existed. Chrome puts the remainder behind
+ * a chevron and so does this.
+ *
+ * Measured against the bar's own width rather than the window's: in the side
+ * layout the bar is inside a 240px column, and the window is not the thing
+ * doing the clipping.
+ */
+function fitBookmarks() {
+  // The bar itself, not a wrapper inside it: `replaceChildren` is given a
+  // fragment, so the buttons end up as children of `#bookmarks` directly. The
+  // first version of this read `firstElementChild` and searched inside it,
+  // which is the first *bookmark*, found nothing, and silently did nothing.
+  const bar = el.bookmarks;
+  const more = bar.querySelector('.bookmark-more');
+  const buttons = [...bar.querySelectorAll('.bookmark[data-id]')];
+  if (!more || !buttons.length) return;
+
+  // Everything visible first, so the measurement is of the real widths rather
+  // than of whatever the last pass left hidden.
+  for (const button of buttons) button.hidden = false;
+  more.hidden = true;
+
+  const room = bar.clientWidth - BOOKMARK_BAR_PADDING;
+  let used = 0;
+  let cut = -1;
+  for (let i = 0; i < buttons.length; i++) {
+    used += buttons[i].offsetWidth + BOOKMARK_GAP;
+    if (used > room) { cut = i; break; }
+  }
+  if (cut === -1) return;              // everything fits; no chevron
+  // `used` still counts the button that overflowed, which is going anyway.
+  used -= buttons[cut].offsetWidth + BOOKMARK_GAP;
+
+  // The chevron needs room too, so one more may have to go to make space for
+  // the thing that says the rest are there.
+  more.hidden = false;
+  const chevron = more.offsetWidth + BOOKMARK_GAP;
+  while (cut > 0 && used + chevron > room) {
+    cut -= 1;
+    used -= buttons[cut].offsetWidth + BOOKMARK_GAP;
+  }
+  for (let i = cut; i < buttons.length; i++) buttons[i].hidden = true;
+}
+
+/** The bar's own padding and the gap between buttons, from chrome.css. */
+const BOOKMARK_BAR_PADDING = 12;
+const BOOKMARK_GAP = 2;
+
+// The window changes width far more often than the bookmarks change, and a
+// resize is the other way the bar overflows.
+window.addEventListener('resize', fitBookmarks);
+
+/**
+ * The reload button's two glyphs, as path data.
+ *
+ * Swapping `d` rather than the button's text, which is what this used to do:
+ * the button holds an SVG now, and writing `textContent` on it would delete the
+ * icon and leave a bare character behind for the rest of the session.
+ */
+const RELOAD_PATHS = {
+  reload: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
+  stop: ['M4.5 4.5l7 7', 'M11.5 4.5l-7 7']
 };
 
 /** Keyed tab elements, so an update never rebuilds the strip. */
@@ -39,68 +620,339 @@ const tabEls = new Map();
 /** True while the user is editing the address bar; we must not overwrite it. */
 let urlFocused = false;
 let lastActiveId = null;
+/** What the reload button currently shows, so it is only rewritten on a change. */
+let reloadShows = null;
 
 /* ------------------------------------------------------------------ */
 /* Rendering                                                           */
 /* ------------------------------------------------------------------ */
 
-function renderTabs(tabs) {
-  const seen = new Set();
+function renderTabs(tabs, groups = null) {
+  // Gone tabs leave first. Left in place until after the ordering pass, a
+  // closed tab sat at its old index and every tab after it was re-inserted
+  // around it - and moving a node restarts its CSS animation, so closing one
+  // tab replayed the opening animation on every tab to its right.
+  const live = new Set(tabs.map((tab) => tab.id));
+  for (const [id, node] of tabEls) {
+    if (!live.has(id)) {
+      closeTabElement(node.root);
+      tabEls.delete(id);
+    }
+  }
+  // A tab opened while the widths are pinned has to get its share.
+  if (tabs.some((tab) => !tabEls.has(tab.id))) releaseTabWidths();
 
-  tabs.forEach((tab, index) => {
-    seen.add(tab.id);
+  // A drop on screen that the browser has not caught up with yet: the old
+  // order must not be put back in the meantime, and neither may any order
+  // while a tab is under the pointer.
+  if (heldOrder && (Date.now() > heldOrder.until ||
+      tabs.findIndex((tab) => tab.id === heldOrder.id) === heldOrder.index)) heldOrder = null;
+  const keepOrder = Boolean(heldOrder || tabDrag?.active);
+  const before = keepOrder ? null : tabPlaces(tabs);
+
+  // Keep DOM order in sync with tab order without touching untouched nodes.
+  // A cursor walks the strip, stepping over tabs still collapsing on their
+  // way out: they hold their place until they are gone.
+  let cursor = el.tabs.firstElementChild;
+  const fresh = [];
+  const skipClosing = () => {
+    while (cursor && cursor.classList.contains('closing')) cursor = cursor.nextElementSibling;
+  };
+  tabs.forEach((tab, i) => {
     let node = tabEls.get(tab.id);
 
     if (!node) {
       node = createTabElement(tab.id);
       tabEls.set(tab.id, node);
+      fresh.push(node.root);
     }
 
-    // Keep DOM order in sync with tab order without touching untouched nodes.
-    const current = el.tabs.children[index];
-    if (current !== node.root) el.tabs.insertBefore(node.root, current || null);
+    skipClosing();
+    if (cursor === node.root) {
+      cursor = cursor.nextElementSibling;
+    } else if (!keepOrder || !node.root.isConnected) {
+      el.tabs.insertBefore(node.root, cursor);
+    }
 
     updateTabElement(node, tab);
+    const group = groups && tab.groupId ? groups[tab.groupId] : null;
+    updateGroup(node, tab, group, Boolean(group) && tabs[i - 1]?.groupId !== tab.groupId);
   });
+  // The first render, or a window's worth restored at once, just appears.
+  if (tabsRendered && fresh.length <= 3) fresh.forEach(openTabElement);
+  if (before && !fresh.length) slideToPlaces(before);
+  tabsRendered = true;
+  updateStripFades();
+}
+let tabsRendered = false;
 
-  for (const [id, node] of tabEls) {
-    if (!seen.has(id)) {
-      node.root.remove();
-      tabEls.delete(id);
-    }
+/*
+ * A tab that changes place without being dragged - pinned, unpinned, moved
+ * from the menu or the keyboard, gathered into a group - slides there, and so
+ * do the tabs it passes. Jumping, it left the eye to hunt for where it went.
+ *
+ * Where every tab stood, read only when the order is about to change, so the
+ * usual render (a title, a favicon, a load finishing) measures nothing.
+ */
+function tabPlaces(tabs) {
+  if (!tabsRendered || stillTabs()) return null;
+  const order = [];
+  for (const child of el.tabs.children) {
+    if (!child.classList.contains('closing') && child.dataset.id) order.push(Number(child.dataset.id));
+  }
+  const next = tabs.map((tab) => tab.id).filter((id) => tabEls.has(id));
+  if (order.length === next.length && order.every((id, i) => id === next[i])) return null;
+  const places = new Map();
+  for (const id of order) places.set(id, tabEls.get(id).root.getBoundingClientRect());
+  return places;
+}
+
+/** Then each tab starts from where it stood and glides to where it is now. */
+function slideToPlaces(before) {
+  for (const [id, was] of before) {
+    const root = tabEls.get(id)?.root;
+    if (!root || !root.isConnected) continue;
+    const now = root.getBoundingClientRect();
+    const dx = was.left - now.left;
+    const dy = was.top - now.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    root.animate(
+      [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
+      { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
+    );
   }
 }
+
+/**
+ * The strip fades out at an edge with more tabs beyond it. It used to stop
+ * cleanly at a tab boundary, so six tabs scrolled off to the left looked like
+ * no tabs at all.
+ */
+function updateStripFades() {
+  const t = el.tabs;
+  const side = document.body.dataset.layout === 'left';
+  const pos = side ? t.scrollTop : t.scrollLeft;
+  const room = side ? t.scrollHeight - t.clientHeight : t.scrollWidth - t.clientWidth;
+  const start = pos > 1 ? '24px' : '0px';
+  const end = room - pos > 1 ? '24px' : '0px';
+  if (t.style.getPropertyValue('--fade-start') !== start) t.style.setProperty('--fade-start', start);
+  if (t.style.getPropertyValue('--fade-end') !== end) t.style.setProperty('--fade-end', end);
+}
+el.tabs.addEventListener('scroll', () => { updateStripFades(); hoverCardHide(); }, { passive: true });
+window.addEventListener('resize', updateStripFades);
+
+/**
+ * A closed tab folds away rather than vanishing: its width (its height, down
+ * the side) and its opacity go to nothing, so the tabs beside it slide over
+ * instead of jumping. Straight out with reduced motion.
+ */
+function closeTabElement(root) {
+  if (root.classList.contains('closing')) return;
+  root.classList.add('closing');
+  if (stillTabs() || !root.isConnected) { root.remove(); return; }
+  const [full, none] = tabFold(root);
+  // Eased at both ends: a front-loaded curve took a third of the width in
+  // its first frame, and the tabs beside it lurched rather than slid.
+  const fold = root.animate([full, none], { duration: 180, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+  fold.onfinish = () => root.remove();
+  fold.oncancel = () => root.remove();
+}
+
+/**
+ * The same fold the other way: a new tab grows out of nothing, so the tabs
+ * beside it - and the + after them - make room over a few frames instead of
+ * jumping to their new places in one.
+ */
+function openTabElement(root) {
+  if (stillTabs() || !root.isConnected) return;
+  const [full, none] = tabFold(root);
+  delete none.opacity; // the entrance (tab-in) fades it
+  root.animate([none, full], { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' });
+}
+
+function stillTabs() {
+  return document.body.classList.contains('calm') ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** A tab at its size now, and folded flat: the two ends of opening and closing. */
+function tabFold(root) {
+  const vertical = document.body.dataset.layout === 'left';
+  const size = vertical ? root.offsetHeight : root.offsetWidth;
+  return vertical
+    ? [{ height: `${size}px`, minHeight: `${size}px`, opacity: 1 },
+       { height: '0px', minHeight: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 }]
+    : [{ flexBasis: `${size}px`, minWidth: `${size}px`, maxWidth: `${size}px`, opacity: 1 },
+       { flexBasis: '0px', minWidth: '0px', maxWidth: '0px', paddingLeft: '0px', paddingRight: '0px', opacity: 0 }];
+}
+
+/*
+ * Closing tabs in a row, the way Chrome does it.
+ *
+ * With every tab flexing, a close widens the rest and the next tab's x lands
+ * somewhere other than under the pointer, so closing five tabs means chasing
+ * five buttons. A close from the pointer pins each tab at the width it has
+ * now; the strip gives the room back once the pointer leaves it.
+ */
+let tabWidthsFrozen = false;
+
+function freezeTabWidths() {
+  if (document.body.dataset.layout === 'left') return;
+  // Every width read before any is written: interleaved, each write forced a
+  // fresh layout of the strip for the next read.
+  const nodes = [...tabEls.values()];
+  const widths = nodes.map((node) => node.root.getBoundingClientRect().width);
+  nodes.forEach((node, i) => { node.root.style.flex = `0 0 ${widths[i]}px`; });
+  tabWidthsFrozen = true;
+}
+
+function releaseTabWidths() {
+  if (!tabWidthsFrozen) return;
+  tabWidthsFrozen = false;
+  for (const node of tabEls.values()) node.root.style.flex = '';
+}
+
+// The whole strip, not only the tabs: moving onto the + beside the last tab
+// is still closing tabs in a row, and releasing there made the + jump.
+document.getElementById('tabstrip').addEventListener('mouseleave', releaseTabWidths);
 
 function createTabElement(id) {
   const root = document.createElement('div');
   root.className = 'tab';
+  root.setAttribute('role', 'tab');
+  root.setAttribute('aria-selected', 'false');
+  root.tabIndex = -1;
+  // Its entrance plays once. Moved in the DOM - a drag dropping it somewhere
+  // new - the animation would start again and the tab blink out and back.
+  root.addEventListener('animationend', (e) => {
+    if (e.animationName === 'tab-in') root.classList.add('entered');
+  }, { once: true });
+  root.dataset.id = String(id);
 
   const tier = document.createElement('span');
   tier.className = 'tier';
+  tier.addEventListener('pointerenter', () => {
+    const node = tabEls.get(id);
+    if (node?.tab) tier.title = tierLabel(node.tab);
+  });
 
   const favicon = document.createElement('img');
   favicon.className = 'tab-favicon';
   favicon.alt = '';
   favicon.hidden = true;
+  // Decoded off the main thread. The strip is the one renderer that must stay
+  // responsive while a page is busy, and a synchronous decode of a 128px PNG in
+  // the middle of a tab switch is exactly the kind of hitch that shows.
+  favicon.decoding = 'async';
 
+  // Shown until a favicon arrives, and for good on the many sites that never
+  // send one. Both elements exist for the life of the tab and one of them is
+  // hidden: swapping which element is in the DOM would relayout the strip every
+  // time an icon loaded.
+  const chip = document.createElement('span');
+  chip.className = 'tab-chip';
+  chip.setAttribute('aria-hidden', 'true');
+
+  // One 15px box holding both, stacked rather than side by side: the letter is
+  // underneath until an icon replaces it, and the spinner replaces both while
+  // the page loads. Laying them out in a row instead would move the title every
+  // time an icon arrived.
+  const icon = document.createElement('span');
+  icon.className = 'tab-icon';
+  icon.append(chip, favicon);
+
+  // Which icon addresses are tried, and the letter it falls back to, live in
+  // `showIcon` in theme.js - shared with the bookmarks bar, history and the
+  // new tab page. `has-icon` on the holder retires the letter once one loads.
+
+  // A button, not a decoration: the thing you want when a tab starts talking is
+  // to silence *that* tab, and the mark saying which one it is should be what
+  // you press. Chrome does the same.
   const audio = document.createElement('span');
   audio.className = 'audio-dot';
-  audio.textContent = '▶';
+  audio.type = 'button';
+  audio.textContent = '\u25b6';
+  audio.title = 'Mute this tab';
+  audio.setAttribute('aria-label', audio.title);
   audio.hidden = true;
 
   const title = document.createElement('span');
   title.className = 'tab-title';
+  // The tab's accessible name is its title.
+  title.id = `tab-title-${id}`;
+  root.setAttribute('aria-labelledby', title.id);
 
-  const close = document.createElement('button');
+  const close = document.createElement('span');
   close.className = 'tab-close';
-  close.textContent = '×';
+  close.append(crossIcon());
   close.setAttribute('aria-label', 'Close tab');
 
-  root.append(tier, favicon, title, audio, close);
+  // A tab group's label (a Lab), on the group's first tab only: its name
+  // and colour, a click to fold, a double-click to rename, a right-click for
+  // the group's own menu. Part of the tab rather than a node of its own, so
+  // the strip's order and a drag's index stay a list of tabs.
+  const group = document.createElement('span');
+  group.className = 'tab-group';
+  group.id = `tab-group-${id}`;
+  group.type = 'button';
+  group.hidden = true;
+  const groupId = () => tabEls.get(id)?.state.groupId;
+  group.addEventListener('mousedown', (event) => event.stopPropagation());
+  group.addEventListener('pointerdown', (event) => event.stopPropagation());
+  group.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (event.detail < 2) api.send('toggle-group', { groupId: groupId() });
+  });
+  group.addEventListener('dblclick', (event) => {
+    event.stopPropagation();
+    renameGroup(group, groupId());
+  });
+  group.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    api.send('group-menu', { groupId: groupId(), x: Math.round(event.clientX), y: Math.round(event.clientY) });
+  });
+
+  const bar = document.createElement('span');
+  bar.className = 'tab-group-bar';
+
+  // A tab is one control to a screen reader and the keyboard: what is inside
+  // it - close, mute, the group label - is for the pointer, with Delete and the
+  // tab's menu as the keyboard's way to the same things.
+  // Plain elements rather than buttons: a control nested in a tab is two
+  // controls in one to a screen reader, which ARIA does not allow. The group
+  // label is not hidden as the other two are: on its group's first tab it is
+  // part of the tab's name (updateGroup), as it is part of what the tab shows.
+  for (const inner of [audio, close]) inner.setAttribute('aria-hidden', 'true');
+
+  // The space keeps the group's name and the title two words where they are
+  // read together (the name above); in the tab's flex row it takes no room.
+  root.append(group, ' ', tier, icon, title, audio, close, bar);
 
   root.addEventListener('mousedown', (event) => {
-    if (event.button === 1) { api.send('close-tab', { id }); return; }
+    if (event.button === 1) { freezeTabWidths(); api.send('close-tab', { id }); return; }
     if (event.button === 0) api.send('activate-tab', { id });
+  });
+  root.addEventListener('pointerdown', (event) => armTabDrag(event, id, root));
+
+  // Right-click: close the other twelve, duplicate this one, silence whichever
+  // tab is making that noise. The menu is built by the browser - the strip
+  // names a tab and nothing else - and drawn in the sheet the page menu uses.
+  root.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    api.send('tab-menu', {
+      id, x: Math.round(event.clientX), y: Math.round(event.clientY)
+    });
+  });
+
+  // The speaker mark mutes, without first switching to the tab to find out what
+  // is making the sound. `mousedown` stopped for the same reason the close
+  // button stops it: the root activates on mousedown, and a discarded tab would
+  // be rebuilt purely to be silenced.
+  audio.addEventListener('mousedown', (event) => event.stopPropagation());
+  audio.addEventListener('click', (event) => {
+    event.stopPropagation();
+    api.send('mute-tab', { id });
   });
 
   // Start restoring a discarded tab while the pointer is still on its way to
@@ -113,16 +965,521 @@ function createTabElement(id) {
   root.addEventListener('pointerenter', () => {
     cancelDwell();
     dwell = setTimeout(() => api.send('prefetch-tab', { id }), HOVER_DWELL_MS);
+    hoverCardEnter(id, root);
   });
-  root.addEventListener('pointerleave', cancelDwell);
+  root.addEventListener('pointerleave', () => { cancelDwell(); hoverCardLeave(); });
   // A click has already asked for the real thing; the speculation is redundant.
-  root.addEventListener('mousedown', cancelDwell);
+  root.addEventListener('mousedown', () => { cancelDwell(); hoverCardHide(); });
+  // Stopped on `mousedown`, not only on `click`.
+  //
+  // The tab root listens on mousedown, which fires first - so pressing x sent
+  // `activate-tab` before `close-tab` ever ran. On a discarded tab that rebuilt
+  // the renderer and started a page load purely so it could be torn down a
+  // moment later, which is the exact opposite of what this browser is for.
+  // Middle-click still closes: the button stops only the press that would
+  // activate the tab, and on a narrow active tab the button is all there is
+  // to middle-click.
+  close.addEventListener('mousedown', (event) => {
+    if (event.button === 1) return;
+    event.stopPropagation();
+  });
   close.addEventListener('click', (event) => {
     event.stopPropagation();
+    // `detail` is 0 for a keyboard press, which has no pointer to keep in place.
+    if (event.detail > 0) freezeTabWidths();
     api.send('close-tab', { id });
   });
 
-  return { root, tier, favicon, title, audio, close, state: {} };
+  return { root, group, tier, icon, favicon, chip, title, audio, close, state: {} };
+}
+
+/*
+ * Hover cards: rest on a tab and a card under it says what the strip has no
+ * room for - the whole title, the site, and what the tab is costing or gave
+ * back. Half a second the first time, so it does not flicker up on the way
+ * across the strip; then, while one is up, the next tab's card at once, as in
+ * Chrome. Drawn by the browser in a view of its own over the page (the chrome
+ * is only as tall as the toolbar).
+ */
+const HOVER_CARD_DELAY_MS = 500;
+const HOVER_CARD_WARM_MS = 600;
+let hoverCardTimer = null;
+let hoverCardShownAt = 0;
+let hoverCardId = null;
+
+function hoverCardEnter(id, root) {
+  clearTimeout(hoverCardTimer);
+  if (tabDrag?.active || document.body.dataset.hoverCards === 'off') return;
+  const warm = hoverCardId !== null || Date.now() - hoverCardShownAt < HOVER_CARD_WARM_MS;
+  hoverCardTimer = setTimeout(() => showHoverCard(id, root), warm ? 0 : HOVER_CARD_DELAY_MS);
+}
+
+function hoverCardLeave() {
+  clearTimeout(hoverCardTimer);
+  // A moment's grace, so sliding to the next tab keeps the card warm rather
+  // than hiding it and showing it again.
+  hoverCardTimer = setTimeout(hoverCardHide, 80);
+}
+
+function hoverCardHide() {
+  clearTimeout(hoverCardTimer);
+  if (hoverCardId === null) return;
+  hoverCardId = null;
+  hoverCardShownAt = Date.now();
+  api.send('tab-hover-card', { hide: true });
+}
+
+function showHoverCard(id, root) {
+  const tab = tabEls.get(id)?.tab;
+  if (!tab || !root.isConnected) return;
+  const box = root.getBoundingClientRect();
+  const vertical = document.body.dataset.layout === 'left';
+  let host = '';
+  try {
+    const u = new URL(tab.url);
+    host = u.protocol === 'debrowser:' ? 'Debrowser' : u.protocol === 'file:' ? 'File on this computer' : u.hostname.replace(/^www\./, '');
+  } catch { /* none */ }
+  hoverCardId = id;
+  api.send('tab-hover-card', {
+    title: tab.title || 'New tab', host, note: hoverCardNote(tab),
+    asleep: ['frozen', 'hibernated', 'discarded'].includes(tab.tier),
+    x: Math.round(vertical ? box.right + 6 : box.left),
+    y: Math.round(vertical ? box.top : box.bottom + 6)
+  });
+}
+
+/** One plain line about what the tab costs, or why it costs nothing. */
+function hoverCardNote(tab) {
+  if (tab.muted) return 'Muted';
+  if (tab.audible) return 'Playing sound';
+  if (tab.tier === 'active') return '';
+  return tierLabel(tab);
+}
+
+/** The label becomes a field for its new name; Enter keeps it, Escape does not. */
+function renameGroup(label, groupId) {
+  if (!groupId || label.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.className = 'tab-group-name';
+  input.value = label.textContent;
+  input.maxLength = 30;
+  input.setAttribute('aria-label', 'Group name');
+  label.replaceChildren(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (keep) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    label.textContent = keep && name ? name : label.dataset.name || '';
+    if (keep && name) api.send('rename-group', { groupId, name });
+  };
+  input.addEventListener('keydown', (event) => {
+    event.stopPropagation();
+    if (event.key === 'Enter') finish(true);
+    if (event.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+  for (const type of ['mousedown', 'pointerdown', 'click', 'dblclick']) {
+    input.addEventListener(type, (event) => event.stopPropagation());
+  }
+}
+
+/**
+ * Where each tab stands in its group: the first of a run shows the label, and
+ * a folded group's tabs fold away - except the one in front, which stays.
+ */
+function updateGroup(node, tab, group, first) {
+  const prev = node.state;
+  prev.groupId = group ? group.id : null;
+  const label = first && group ? group.name : '';
+  if (!node.group.querySelector('input') && node.group.dataset.name !== label) {
+    node.group.textContent = label;
+    node.group.dataset.name = label;
+  }
+  node.group.hidden = !label;
+  // The tab that shows its group's name is called by it too: folded, the name
+  // is all of it there is to see.
+  // Written only when it changes: this runs on every redraw of the strip, and
+  // each write is a change to the page that the accessibility tree follows.
+  const labelledBy = label ? `${node.group.id} ${node.title.id}` : node.title.id;
+  if (node.root.getAttribute('aria-labelledby') !== labelledBy) node.root.setAttribute('aria-labelledby', labelledBy);
+  node.group.title = group ? (group.collapsed ? 'Unfold group' : 'Fold group') : '';
+  node.group.classList.toggle('folded', Boolean(group && group.collapsed));
+  node.root.classList.toggle('grouped', Boolean(group));
+  node.root.classList.toggle('group-start', Boolean(group && first));
+  const folded = Boolean(group && group.collapsed && !tab.visible);
+  foldIntoGroup(node.root, folded && !first);
+  // The first tab of a folded group is only its label.
+  node.root.classList.toggle('group-head-folded', folded && first);
+  const color = group ? group.color : '';
+  if (prev.groupColor !== color) {
+    if (color) node.root.style.setProperty('--group', color);
+    else node.root.style.removeProperty('--group');
+    prev.groupColor = color;
+  }
+}
+
+/*
+ * Folding a group takes its tabs away the way closing them would, and
+ * unfolding grows them back, so the label is seen to gather them rather than
+ * the strip losing a run of tabs in one frame.
+ */
+function foldIntoGroup(root, folded) {
+  const was = root.classList.contains('group-folded');
+  if (was === folded) {
+    // Unfolded again before the fold finished: stay.
+    if (!folded && root.folding) { root.folding.cancel(); root.folding = null; }
+    return;
+  }
+  if (!folded) {
+    root.folding?.cancel();
+    root.folding = null;
+    root.classList.remove('group-folded');
+    openTabElement(root);
+    return;
+  }
+  if (root.folding) return;
+  if (stillTabs() || !root.isConnected) { root.classList.add('group-folded'); return; }
+  const [full, none] = tabFold(root);
+  // Held at its end until the class takes over, so it never shows full size
+  // for the frame in between.
+  const fold = root.animate([full, none], { duration: 180, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' });
+  root.folding = fold;
+  fold.onfinish = () => { root.classList.add('group-folded'); fold.cancel(); };
+  fold.oncancel = () => { root.folding = null; };
+}
+
+/* ------------------------------------------------------------------ */
+/* Dragging a tab to a new place                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Pressing a tab still activates it at once, as it always did; a drag only
+ * begins once the pointer has travelled a few pixels, so a click that wobbles
+ * is still a click.
+ *
+ * While dragging nothing in the DOM moves. The tab follows the pointer by a
+ * transform, along the strip's own axis, and the tabs it passes slide the
+ * other way by one tab's size - transforms only, so a drag across thirty tabs
+ * never lays out the strip. On release the DOM is put in the new order, every
+ * transform is dropped, and the dragged tab alone is animated from where it
+ * was let go into its slot. The browser is told the new index, and until its
+ * state says the same, a broadcast still carrying the old order is not
+ * allowed to undo the drop on screen.
+ */
+const DRAG_THRESHOLD = 4;
+/**
+ * How far past the strip's edge a tab is pulled before it comes out of the
+ * strip - to go into a window of its own, or another window's, where it is
+ * let go (`tear-tab`). Back within it, and it is an ordinary drag again.
+ */
+const TEAR_DISTANCE = 28;
+let tabDrag = null;
+/** A drop the browser has not confirmed yet: {id, index, until}. */
+let heldOrder = null;
+
+function armTabDrag(event, id, root) {
+  // The close button included, as in Chrome: a press that moves is a drag, one
+  // that does not is still a close. A narrow active tab is all close button -
+  // at the strip's minimum width there is no room for the icon beside it - and
+  // without this the tab you were on could not be moved once the strip filled.
+  const button = event.target.closest('button');
+  if (event.button !== 0 || (button && !button.classList.contains('tab-close'))) return;
+  const vertical = document.body.dataset.layout === 'left';
+  const box = root.getBoundingClientRect();
+  tabDrag = { id, root, vertical, pointer: event.pointerId,
+    start: vertical ? event.clientY : event.clientX,
+    cross: vertical ? event.clientX : event.clientY,
+    // Where on the tab it was taken, so a window made from it opens with the
+    // tab under the pointer as it was.
+    grabX: event.clientX - box.left, grabY: event.clientY - box.top,
+    active: false, torn: false };
+}
+
+function beginTabDrag() {
+  const d = tabDrag;
+  const nodes = [...el.tabs.children].filter((n) => !n.classList.contains('closing'));
+  d.from = nodes.indexOf(d.root);
+  // A lone tab has nowhere to go in the strip, but can still be pulled out of
+  // it - into another window, or taking its own window along.
+  if (d.from === -1) { tabDrag = null; return false; }
+  const edge = (r) => (d.vertical ? [r.top, r.bottom] : [r.left, r.right]);
+  d.nodes = nodes;
+  d.slots = nodes.map((n) => edge(n.getBoundingClientRect()));
+  const [a, b] = d.slots[d.from];
+  d.size = b - a;
+  // The space between two tabs, so the ones that slide land exactly where
+  // their neighbour was.
+  const next = d.slots[d.from + 1] || d.slots[d.from - 1];
+  const gap = next ? Math.max(0, next[0] > a ? next[0] - b : a - next[1]) : 0;
+  d.shift = d.size + gap;
+  d.min = d.slots[0][0] - a;
+  d.max = d.slots[d.slots.length - 1][1] - b;
+  d.to = d.from;
+  // A pinned tab moves among the pinned, any other among the rest, as the
+  // browser will insist on anyway.
+  const pinned = nodes.filter((n) => n.classList.contains('pinned')).length;
+  const isPinned = d.root.classList.contains('pinned');
+  d.lo = isPinned ? 0 : pinned;
+  d.hi = isPinned ? pinned - 1 : nodes.length - 1;
+  d.min = d.slots[d.lo][0] - a;
+  d.max = d.slots[d.hi][1] - b;
+  d.active = true;
+  try { d.root.setPointerCapture(d.pointer); } catch { /* the pointer is already gone */ }
+  d.root.classList.add('dragging');
+  document.body.classList.add('tab-dragging');
+  // Down the side, the panel stays out until the drag ends, wherever the
+  // pointer goes meanwhile.
+  api.send('sidebar-dragging', { dragging: true });
+  return true;
+}
+
+function moveTabDrag(delta) {
+  const d = tabDrag;
+  const offset = Math.max(d.min, Math.min(d.max, delta));
+  const axis = d.vertical ? 'Y' : 'X';
+  d.root.style.transform = `translate${axis}(${offset}px)`;
+  const [a, b] = d.slots[d.from];
+  const centre = (a + b) / 2 + offset;
+  let to = d.from;
+  // At or past a slot's middle takes the slot. Strictly past never reached the
+  // end slots: the offset is clamped so the dragged tab's middle can at most
+  // meet theirs, and a drag to either end stopped one short.
+  for (let i = d.from + 1; i <= d.hi; i++) {
+    if (centre >= (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
+  }
+  for (let i = d.from - 1; i >= d.lo; i--) {
+    if (centre <= (d.slots[i][0] + d.slots[i][1]) / 2) to = i;
+  }
+  if (to === d.to) return;
+  d.to = to;
+  d.nodes.forEach((node, i) => {
+    if (node === d.root) return;
+    const moved = d.from < to ? (i > d.from && i <= to ? -d.shift : 0)
+      : (i >= to && i < d.from ? d.shift : 0);
+    node.style.transform = moved ? `translate${axis}(${moved}px)` : '';
+  });
+}
+
+function endTabDrag(cancelled) {
+  const d = tabDrag;
+  tabDrag = null;
+  if (!d || !d.active) return;
+  api.send('sidebar-dragging', { dragging: false });
+  if (d.torn) {
+    d.root.classList.remove('torn');
+    document.body.classList.remove('tab-tearing');
+    api.send('tear-preview', { hide: true });
+  }
+  // A drag that began on the close button ends in that button's click, which
+  // must not close the tab just moved.
+  const swallow = (event) => { event.stopPropagation(); event.preventDefault(); };
+  window.addEventListener('click', swallow, { capture: true, once: true });
+  setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 0);
+  const to = cancelled ? d.from : d.to;
+  const before = d.root.getBoundingClientRect();
+  // Final order in the DOM, every transform gone, with no transition, so the
+  // tabs that slid aside are already standing where they now belong.
+  document.body.classList.remove('tab-dragging');
+  for (const node of d.nodes) node.style.transform = '';
+  if (to !== d.from) {
+    const rest = d.nodes.filter((n) => n !== d.root);
+    el.tabs.insertBefore(d.root, rest[to] || null);
+  }
+  // Then the dragged one glides from where it was let go.
+  const after = d.root.getBoundingClientRect();
+  const offset = d.vertical ? before.top - after.top : before.left - after.left;
+  d.root.style.transform = `translate${d.vertical ? 'Y' : 'X'}(${offset}px)`;
+  d.root.getBoundingClientRect();
+  d.root.classList.add('settling');
+  d.root.style.transform = '';
+  const done = () => d.root.classList.remove('dragging', 'settling');
+  d.root.addEventListener('transitionend', done, { once: true });
+  setTimeout(done, 400);
+  if (to !== d.from) {
+    heldOrder = { id: d.id, index: to, until: Date.now() + 1500 };
+    api.send('move-tab', { id: d.id, index: to });
+  }
+}
+
+/**
+ * Out of the strip, or back into it. Out, the tab stays where it was, dimmed,
+ * the others close the gap they had opened, and a picture of the page follows
+ * the pointer (the browser draws it: this view ends at its own edge).
+ */
+function setTorn(d, torn, event) {
+  let card = null;
+  if (torn && !d.torn) card = titleCard(d);
+  if (d.torn !== torn) {
+    d.torn = torn;
+    d.root.classList.toggle('torn', torn);
+    document.body.classList.toggle('tab-tearing', torn);
+    if (torn) {
+      d.root.style.transform = '';
+      for (const node of d.nodes) if (node !== d.root) node.style.transform = '';
+      d.to = d.from;
+    }
+  }
+  api.send('tear-preview', torn
+    ? { id: d.id, screenX: event.screenX, screenY: event.screenY, ...(card ? { card, scale: window.devicePixelRatio } : {}) }
+    : { hide: true });
+}
+
+/**
+ * The top of the picture that follows a tab out of the strip: its title, in
+ * this window's face and colours, drawn here because this is where both are
+ * (the browser puts it over the page's picture: tear-preview.js). Sizes are
+ * the preview's own, in points.
+ */
+function titleCard(d) {
+  try {
+    const W = 260;
+    const H = 34;
+    const scale = window.devicePixelRatio || 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(W * scale);
+    canvas.height = Math.round(H * scale);
+    const g = canvas.getContext('2d');
+    g.scale(scale, scale);
+    const css = getComputedStyle(document.body);
+    const value = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+    g.fillStyle = value('--bg-raised', '#24272a');
+    g.fillRect(0, 0, W, H);
+    // The card's edge: round three sides here, the picture's three below.
+    g.strokeStyle = value('--border', '#3a3f43');
+    g.lineWidth = 1;
+    g.strokeRect(0.5, 0.5, W - 1, H);
+    g.fillStyle = value('--text', '#e9ecea');
+    g.font = `13px ${value('--font-ui', 'system-ui, sans-serif')}`;
+    g.textBaseline = 'middle';
+    const title = d.root.querySelector('.tab-title')?.textContent || 'New tab';
+    let text = title;
+    const room = W - 24;
+    if (g.measureText(text).width > room) {
+      while (text.length > 1 && g.measureText(`${text}…`).width > room) text = text.slice(0, -1);
+      text = `${text.trimEnd()}…`;
+    }
+    g.fillText(text, 12, H / 2 + 0.5);
+    return canvas.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the pointer has left the strip by more than `TEAR_DISTANCE` - or
+ * left this view at all, which is leaving the window: up out of a window
+ * whose strip is its top edge, onto another window's strip just above.
+ */
+function pulledOut(d, event) {
+  if (event.clientX < 0 || event.clientY < 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight) return true;
+  const box = el.tabs.getBoundingClientRect();
+  return d.vertical
+    ? event.clientX > box.right + TEAR_DISTANCE || event.clientX < box.left - TEAR_DISTANCE
+    : event.clientY > box.bottom + TEAR_DISTANCE || event.clientY < box.top - TEAR_DISTANCE;
+}
+
+// On the whole view, not the strip: a quick pull down out of it is past the
+// strip's edge by its first move - the strip is 40 pixels tall and a flick
+// covers that between two of them - and the strip, listening for its own
+// moves, never heard the one that should have begun the drag; the tab just
+// stayed where it was. The pointer is the view's while the button is down.
+document.addEventListener('pointermove', (event) => {
+  const d = tabDrag;
+  if (!d || event.pointerId !== d.pointer) return;
+  const delta = (d.vertical ? event.clientY : event.clientX) - d.start;
+  const across = (d.vertical ? event.clientX : event.clientY) - d.cross;
+  // Either way counts as a drag: pulled straight out of the strip is one too.
+  d.lastScreen = { screenX: event.screenX, screenY: event.screenY };
+  if (!d.active && ((Math.abs(delta) < DRAG_THRESHOLD && Math.abs(across) < DRAG_THRESHOLD) || !beginTabDrag())) return;
+  if (pulledOut(d, event)) { setTorn(d, true, event); return; }
+  if (d.torn) setTorn(d, false, event);
+  moveTabDrag(delta);
+});
+el.tabs.addEventListener('pointerup', (event) => dropTabDrag(event));
+
+/**
+ * Let go: in the strip, the tab takes its new place; out of it, the browser
+ * decides where it goes. `at` is where - the release itself, or the last
+ * place the pointer was seen when the release happened somewhere this view
+ * did not hear of (`pointer-released`).
+ */
+function dropTabDrag(at) {
+  const d = tabDrag;
+  if (d && d.active && d.torn) {
+    endTabDrag(true);
+    api.send('tear-tab', { id: d.id, screenX: at?.screenX, screenY: at?.screenY,
+      offsetX: tearOffset(d).x, offsetY: tearOffset(d).y });
+    return;
+  }
+  endTabDrag(false);
+}
+el.tabs.addEventListener('pointercancel', () => endTabDrag(true));
+
+/**
+ * A tab dragged here from another window and let go at (x, y) in this view:
+ * the tab it goes before, as the strip lays them out now, or null for after
+ * the last. Along the strip's own axis only, so a drop on the toolbar below
+ * a tab still lands beside that tab. Asked by the browser (window.js).
+ */
+window.debrowserDropBefore = (x, y) => {
+  const vertical = document.body.dataset.layout === 'left';
+  const at = vertical ? y : x;
+  for (const node of el.tabs.children) {
+    if (node.classList.contains('closing') || !node.dataset.id) continue;
+    const box = node.getBoundingClientRect();
+    if (at < (vertical ? box.top + box.bottom : box.left + box.right) / 2) return Number(node.dataset.id);
+  }
+  return null;
+};
+
+/**
+ * Whether (x, y) in this view is on the tab strip - the tabs, the gap around
+ * them, the new tab button - where a tab from another window let go joins
+ * this one's. Anywhere else it gets a window of its own. Asked by the browser
+ * (window.js, overStrip).
+ */
+window.debrowserOverStrip = (x, y) => {
+  const box = document.getElementById('tabstrip').getBoundingClientRect();
+  const slack = 8;
+  return box.width > 0 && box.height > 0 &&
+    x >= box.left - slack && x <= box.right + slack && y >= box.top - slack && y <= box.bottom + slack;
+};
+
+/**
+ * Where the pointer should be in a window opened from this tab: over the tab,
+ * which there is the first in the strip, at the spot it was taken by.
+ */
+function tearOffset(d) {
+  const first = el.tabs.firstElementChild ? el.tabs.firstElementChild.getBoundingClientRect() : { left: 0, top: 0 };
+  return { x: Math.round(first.left + d.grabX), y: Math.round(first.top + d.grabY) };
+}
+// A press that has not become a drag yet does not hold the pointer, so its
+// release can land on the page, which this view never hears of; the browser
+// does, and says so (`pointer-released`). Not read from the pointer here:
+// `buttons` and `pointerleave` both misreport on Windows under test input,
+// and cancelled every drag there.
+window.addEventListener('pointerup', () => { if (tabDrag && !tabDrag.active) tabDrag = null; });
+// Esc puts it back where it came from.
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && tabDrag?.active) { event.preventDefault(); endTabDrag(true); }
+});
+
+/** The tab's sound mark, drawn in the same 16px, 1.5-stroke set as the rest. */
+function speakerIcon(muted) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const paths = ['M2.5 6.2h2.3L8 3.5v9L4.8 9.8H2.5z',
+    ...(muted ? ['M10.8 6.3l3.2 3.4', 'M14 6.3l-3.2 3.4'] : ['M10.6 5.8a3 3 0 0 1 0 4.4', 'M12.4 4.2a5.2 5.2 0 0 1 0 7.6'])];
+  for (const d of paths) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
 }
 
 /** Write only what changed - the cheapest update is the one we skip. */
@@ -131,25 +1488,81 @@ function updateTabElement(node, tab) {
 
   if (prev.title !== tab.title) {
     node.title.textContent = tab.title || 'New tab';
-    node.root.title = `${tab.title || ''}\n${tab.url || ''}`;
     prev.title = tab.title;
   }
+  // Its own check: the address changes on navigations that keep the title.
+  // A sleeping tab says so, and what that means, under its address: the
+  // dot alone left you to guess why it took a moment to come back.
+  const asleep = tab.tier === 'frozen' || tab.tier === 'hibernated' || tab.tier === 'discarded';
+  const tip = `${tab.title || ''}\n${tab.url || ''}${asleep ? `\n${tierLabel(tab)}` : ''}`;
+  if (prev.tip !== tip) {
+    // Read out, not shown: the hover card shows it, and a system tooltip
+    // landing on top of the card would say it twice.
+    node.root.setAttribute('aria-description', tip);
+    prev.tip = tip;
+  }
 
-  if (prev.favicon !== tab.favicon) {
-    if (tab.favicon) { node.favicon.src = tab.favicon; node.favicon.hidden = false; }
-    else node.favicon.hidden = true;
+  // The icon is re-armed when the reported address changes *or* when the site
+  // does, because the fallbacks are derived from the page's own origin: a tab
+  // moving from a site with no icon to another with none would otherwise keep
+  // trying the first site's addresses.
+  const site = siteOf(tab.url);
+  if (prev.favicon !== tab.favicon || prev.iconSite !== site) {
+    // Back to the letter until one decodes. Without the reset a tab that
+    // navigates from a site with an icon to one without keeps showing the old
+    // site's chip state, which is the previous page's identity on this page.
+    node.icon.classList.remove('has-icon');
+    // Through the browser's icon route, never at the site: see `iconSrc`. Every
+    // address the icon might be at is tried before the letter wins - the
+    // reported one, then the two default paths. See `showIcon`.
+    showIcon(node.favicon, tab.url, tab.favicon, {
+      onLoad: () => node.icon.classList.add('has-icon'),
+      onFail: () => node.icon.classList.remove('has-icon')
+    });
     prev.favicon = tab.favicon;
+    prev.iconSite = site;
+  }
+
+  // The chip only changes when the site does, which is far less often than the
+  // URL: a page moving between paths on one host keeps its letter and colour,
+  // and rewriting them on every navigation would be work for no visible change.
+  if (prev.host !== site) {
+    node.chip.classList.remove('own');
+    // The letter is drawn by the stylesheet from data-letter, not written as
+    // text: screen readers skip the chip either way, but a checker - and some
+    // voice control - counts any text a tab shows as part of what it is
+    // called, and the tab is called by its title alone.
+    node.chip.textContent = '';
+    node.chip.dataset.letter = site === 'debrowser' ? '' : (site.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+    if (site === 'debrowser') ownMark(node.chip);
+    node.chip.style.setProperty('--hue', String(siteHue(site)));
+    prev.host = site;
   }
 
   if (prev.tier !== tab.tier) {
     node.tier.dataset.tier = tab.tier;
-    node.tier.title = tierLabel(tab);
     prev.tier = tab.tier;
   }
+  // The dot's tooltip carries a live figure, so it is written when the pointer
+  // arrives rather than rebuilt for every tab on every tick.
+  node.tab = tab;
 
   if (prev.active !== tab.visible) {
     node.root.classList.toggle('active', tab.visible);
+    // The tab in front is the strip's one stop in the Tab order (the arrow
+    // keys walk the rest), and what a screen reader calls selected.
+    node.root.setAttribute('aria-selected', String(tab.visible));
+    node.root.tabIndex = tab.visible ? 0 : -1;
     prev.active = tab.visible;
+    // Now that the strip scrolls, the tab you switched to can be off the end of
+    // it - Ctrl+Tab through thirty tabs and the highlight walks out of the
+    // window. `nearest` so a tab already on screen does not move the strip.
+    if (tab.visible) node.root.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  if (prev.pinned !== tab.pinned) {
+    node.root.classList.toggle('pinned', Boolean(tab.pinned));
+    prev.pinned = tab.pinned;
   }
 
   if (prev.boosted !== tab.boosted) {
@@ -157,20 +1570,47 @@ function updateTabElement(node, tab) {
     prev.boosted = tab.boosted;
   }
 
-  if (prev.audible !== tab.audible) {
-    node.audio.hidden = !tab.audible;
-    prev.audible = tab.audible;
+  // Shown while a tab is making sound *or* while it is muted: a muted tab with
+  // no mark is a tab you cannot unmute without guessing which one you silenced.
+  const sound = tab.audible || tab.muted;
+  if (prev.sound !== sound || prev.muted !== tab.muted) {
+    node.audio.hidden = !sound;
+    node.audio.classList.toggle('muted', tab.muted === true);
+    // A speaker, struck through when muted. The muted mark was a ✕, which
+    // on a hovered tab sat beside the close ✕ and looked just like it.
+    node.audio.replaceChildren(speakerIcon(tab.muted === true));
+    node.audio.title = tab.muted ? 'Unmute this tab' : 'Mute this tab';
+    node.audio.setAttribute('aria-label', node.audio.title);
+    prev.sound = sound;
+    prev.muted = tab.muted;
+  }
+
+  // The spinner is Chrome's, and it belongs in the tab rather than only in the
+  // line under the toolbar: with twenty tabs open and three of them loading, a
+  // single bar at the top says that *something* is loading and not which.
+  if (prev.loading !== tab.loading) {
+    node.root.dataset.loading = tab.loading ? 'on' : 'off';
+    prev.loading = tab.loading;
+  }
+
+  // A tab whose page crashed fades, so it can be found without opening each.
+  if (prev.crashed !== tab.crashed) {
+    node.root.dataset.crashed = tab.crashed ? 'on' : 'off';
+    prev.crashed = tab.crashed;
   }
 }
 
 function tierLabel(tab) {
+  const mb = `${tab.memNowMB ?? tab.rssMB} MB`;
   switch (tab.tier) {
-    case 'active': return tab.boosted ? 'Active - boosted for animation' : 'Active';
-    case 'warm': return `Background - ${tab.rssMB}MB`;
-    case 'cold': return `Idle, may be discarded to save memory - ${tab.rssMB}MB`;
-    case 'frozen': return `Frozen - no CPU, ${tab.rssMB}MB retained`;
-    case 'hibernated': return 'Hibernated - memory compressed, opens instantly';
-    case 'discarded': return 'Discarded - reloads when opened';
+    case 'active': return tab.boosted ? 'Open now, kept smooth for its animation' : 'Open now';
+    case 'warm': return `Running in the background · ${mb}`;
+    case 'cold': return `Quiet · ${mb}. It sleeps if memory runs short`;
+    case 'frozen': return `Asleep · paused, using no processor`;
+    case 'hibernated': return 'Asleep · memory squeezed down, wakes instantly';
+    case 'discarded': return tab.gaveBackMB > 0
+      ? `Asleep · gave back ${tab.gaveBackMB} MB, reloads when you open it`
+      : 'Asleep · memory given back, reloads when you open it';
     default: return tab.tier;
   }
 }
@@ -178,40 +1618,188 @@ function tierLabel(tab) {
 function renderToolbar(state) {
   const active = state.tabs.find((tab) => tab.visible);
 
-  if (active && !urlFocused && active.url !== el.url.value) {
-    // Only rewrite the address when the tab actually changed or navigated,
-    // never mid-edit.
-    if (active.id !== lastActiveId || document.activeElement !== el.url) {
-      setAddress(active.url);
-    }
+  // Rewritten when the page or the tab changed, or when the field holds
+  // nothing of the user's - never while they are in it. Compared with what
+  // was last *shown* rather than with the field: after typing a full address
+  // the field already holds the new URL, and comparing against it skipped the
+  // padlock. And not keyed to `activeElement`, which stays on the field after
+  // the chrome loses focus to the page - the bar stopped following navigation.
+  const failed = Boolean(active?.failed);
+  if (active && !urlFocused) {
+    const moved = active.id !== lastActiveId || active.url !== shownAddress || failed !== shownFailed;
+    if (moved || (!urlEdited && el.url.value !== addressText(active.url))) setAddress(active.url, failed);
   }
   if (active) lastActiveId = active.id;
+  el.drm.hidden = !active?.drm;
+  // In reader view the same button is the way back, and shows as pressed.
+  const reading = /^debrowser:\/\/reader/.test(active?.url || '');
+  el.reader.hidden = !(active?.readerable || reading);
+  el.reader.classList.toggle('on', reading);
+  el.reader.setAttribute('aria-pressed', String(reading));
 
-  el.reload.textContent = active?.loading ? '×' : '⟳';
-  el.reload.title = active?.loading ? 'Stop' : 'Reload';
-}
+  // A website away from the default size says so, and one press puts it back.
+  // Not for our own pages: Settings opens a notch larger on purpose.
+  const usual = Math.round((Number(state.prefs?.defaultZoom) || 1) * 100);
+  const zoomed = active && /^https?:/.test(active.url) && active.zoom && active.zoom !== usual ? active.zoom : 0;
+  if (zoomed !== zoomShown) {
+    zoomShown = zoomed;
+    el.zoomBadge.hidden = !zoomed;
+    el.zoomBadge.textContent = zoomed ? `${zoomed}%` : '';
+    el.zoomBadge.setAttribute('aria-label', zoomed ? `Zoom ${zoomed}%, press to reset` : '');
+  }
 
-function setAddress(url) {
-  try {
-    const parsed = new URL(url);
-    el.scheme.textContent = parsed.protocol === 'https:' ? '\u{1F512}' : '';
-    el.url.value = url;
-  } catch {
-    el.scheme.textContent = '';
-    el.url.value = url || '';
+  el.back.disabled = !active?.canGoBack;
+  el.forward.disabled = !active?.canGoForward;
+
+  // Only touched when it actually changes. This runs on every state broadcast,
+  // twice a second, and restarting a CSS animation on each one would keep the
+  // line pinned at its first frame forever - which is a bar that never moves,
+  // the one thing worse than no bar.
+  const loading = Boolean(active?.loading);
+  if (loading !== progressRunning) {
+    progressRunning = loading;
+    if (loading) {
+      // Rewind before re-arming. Removing and re-adding a class in the same
+      // frame is coalesced away, so without forcing a reflow between them a
+      // second navigation would resume the first one's animation part-way.
+      el.progress.classList.remove('loading', 'done');
+      void el.progress.offsetWidth;
+      el.progress.classList.add('loading');
+    } else {
+      el.progress.classList.remove('loading');
+      el.progress.classList.add('done');
+    }
+  }
+
+  refreshStar(active && !active.internal ? active.url : null);
+
+  const shows = active?.loading ? 'stop' : 'reload';
+  if (shows !== reloadShows) {
+    const paths = el.reloadIcon.querySelectorAll('path');
+    RELOAD_PATHS[shows].forEach((d, i) => paths[i].setAttribute('d', d));
+    el.reload.title = shows === 'stop' ? 'Stop' : 'Reload (Ctrl+R)';
+    // The label too: a screen reader went on announcing "Reload" for a
+    // button that stops the load.
+    el.reload.setAttribute('aria-label', shows === 'stop' ? 'Stop' : 'Reload');
+    reloadShows = shows;
   }
 }
 
+
+/**
+ * What the padlock says, as path data.
+ *
+ * Three slots because the widest glyph needs three; a shorter one leaves the
+ * rest empty rather than adding and removing elements on every navigation.
+ */
+const SCHEME_GLYPHS = {
+  secure: ['M4.6 7.4h6.8v5.1H4.6z', 'M6.2 7.4V5.9a1.8 1.8 0 0 1 3.6 0v1.5', ''],
+  insecure: ['M8 2.9a5.1 5.1 0 1 0 0 10.2 5.1 5.1 0 0 0 0-10.2z', 'M8 5.3v3.5', 'M8 10.7h.01']
+};
+
+/** What the indicator currently shows, so it is only rewritten on a change. */
+let schemeShows = null;
+
+/*
+ * Shown and hidden by `data-kind`, never by the `hidden` property.
+ *
+ * This is an <svg>, and `hidden` is defined on HTMLElement - SVGElement does
+ * not have it. Measured: `'hidden' in svg` is false, so `svg.hidden = false`
+ * silently defines an expando and never touches the attribute, and Chromium's
+ * UA `[hidden] { display: none }` rule does not apply to SVG either, so the
+ * attribute that *was* in the markup did nothing.
+ *
+ * Both halves of that cancelled out into a real fault: the indicator could be
+ * set but never cleared, so a padlock drawn on the last website stayed on
+ * screen when the user moved to `debrowser://settings` - an encrypted-
+ * connection claim on a page that has no connection at all. A security
+ * indicator that can lie in the reassuring direction is worse than none.
+ *
+ * So the paths are cleared as well as the element hidden. Either alone would
+ * do it; both, because this is the one element in the browser where being
+ * wrong is not a cosmetic bug.
+ */
+function setScheme(kind) {
+  if (kind === schemeShows) return;
+  schemeShows = kind;
+
+  if (!kind) {
+    delete el.scheme.dataset.kind;
+    el.scheme.removeAttribute('aria-label');
+    for (const path of el.schemePaths) path.removeAttribute('d');
+    return;
+  }
+
+  el.scheme.dataset.kind = kind;
+  SCHEME_GLYPHS[kind].forEach((d, i) => {
+    if (d) el.schemePaths[i].setAttribute('d', d);
+    else el.schemePaths[i].removeAttribute('d');
+  });
+  el.scheme.setAttribute('aria-label',
+    kind === 'secure' ? 'Connection is encrypted' : 'Connection isn’t encrypted');
+}
+
+/** The zoom the badge shows, 0 when hidden. */
+let zoomShown = 0;
+el.zoomBadge.addEventListener('click', () => api.send('zoom', { direction: 'reset' }));
+
+/** The address the bar last displayed for a tab, padlock included. */
+let shownAddress = null;
+let shownFailed = false;
+
+/** What the field shows for an address: nothing at all for the new tab page. */
+function addressText(url) {
+  return /^debrowser:\/\/newtab\/?$/.test(url || '') ? '' : (url || '');
+}
+
+/**
+ * @param {string} url
+ * @param {boolean} failed - the page did not load. No padlock then: a lock
+ *   beside an https address that failed its handshake claimed a secure
+ *   connection that never happened.
+ */
+function setAddress(url, failed = false) {
+  shownAddress = url;
+  shownFailed = failed;
+  urlEdited = false;
+  el.url.value = addressText(url);
+  try {
+    const parsed = new URL(url);
+    // Nothing at all for the browser's own pages: they are not a connection,
+    // and a padlock on Settings would be claiming something that has no
+    // meaning there.
+    if (failed) setScheme(null);
+    else if (parsed.protocol === 'https:') setScheme('secure');
+    else if (parsed.protocol === 'http:') setScheme('insecure');
+    else setScheme(null);
+  } catch {
+    setScheme(null);
+  }
+}
+
+let meterRatio = -1;
 function renderMeter(state) {
-  const ratio = state.budgetMB ? state.totalMB / state.budgetMB : 0;
-  el.meterFill.style.transform = `scaleX(${Math.min(1, Math.max(0, ratio))})`;
-  el.meter.dataset.pressure = state.pressure;
-  el.meterText.textContent = `${state.totalMB} MB`;
-  el.meter.title =
-    `${state.totalMB} MB of ${state.budgetMB} MB budget\n` +
-    `${state.liveTabs}${state.maxLiveTabs ? `/${state.maxLiveTabs}` : ''} tabs holding a renderer ` +
+  // Moved only when the change can be seen. Under half a percent is under half
+  // a pixel of the bar, and each move is a transition to composite: on every
+  // governor tick, that was most of what an idle chrome spent.
+  const shownMB = state.totalNowMB ?? state.totalMB;
+  const ratio = Math.min(1, Math.max(0, state.budgetMB ? shownMB / state.budgetMB : 0));
+  if (Math.abs(ratio - meterRatio) >= 0.005 || (ratio === 0) !== (meterRatio === 0)) {
+    meterRatio = ratio;
+    el.meterFill.style.transform = `scaleX(${ratio})`;
+  }
+  if (el.meter.dataset.pressure !== state.pressure) el.meter.dataset.pressure = state.pressure;
+  const text = `${shownMB} MB`;
+  if (el.meterText.textContent !== text) el.meterText.textContent = text;
+  // An SVG element has no `hidden` property to set; the attribute itself.
+  document.getElementById('meter-leaf').toggleAttribute('hidden', !state.saver);
+  const showExtensions = Number(state.extensionCount) > 0;
+  if (extensionsBtn.hidden === showExtensions) extensionsBtn.hidden = !showExtensions;
+  el.meter.title = (state.saver ? 'Battery mode: tabs sleep sooner to save power\n' : '') +
+    `${shownMB} MB of ${state.budgetMB} MB budget\n` +
+    `${state.liveTabs} tabs holding a renderer ` +
     `(${state.rendererCount} process(es)), ${state.tabs.length} tab(s) open\n` +
-    `Pressure: ${state.pressure} - click for the task manager`;
+    `Pressure: ${state.pressure} – click for the task manager`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,40 +1807,581 @@ function renderMeter(state) {
 /* ------------------------------------------------------------------ */
 
 el.newTab.addEventListener('click', () => api.send('new-tab'));
+
+/*
+ * Start the renderer while the pointer is still on its way.
+ *
+ * Measured: a new tab page costs 79ms when no page of the browser's own is
+ * live, and 46ms when the renderer is already up - and every page the browser
+ * serves itself shares one, so warming it on the way to the + also covers
+ * Settings and History from the menu. The same dwell as the tab strip's
+ * speculation, and for the same reason: sweeping the pointer across the
+ * toolbar must not start a renderer.
+ */
+for (const button of [el.newTab, el.menu]) {
+  let dwell = null;
+  const cancel = () => { clearTimeout(dwell); dwell = null; };
+  button.addEventListener('pointerenter', () => {
+    cancel();
+    dwell = setTimeout(() => api.send('prefetch-new-tab'), HOVER_DWELL_MS);
+  });
+  button.addEventListener('pointerleave', cancel);
+  // The click has asked for the real thing; the guess is redundant now.
+  button.addEventListener('mousedown', cancel);
+}
 el.back.addEventListener('click', () => api.send('back'));
 el.forward.addEventListener('click', () => api.send('forward'));
-el.reload.addEventListener('click', () => api.send(el.reload.textContent === '×' ? 'stop' : 'reload'));
-el.meter.addEventListener('click', () => api.send('toggle-panel'));
+el.reload.addEventListener('click', () => api.send(reloadShows === 'stop' ? 'stop' : 'reload'));
 
-el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); });
-el.url.addEventListener('blur', () => { urlFocused = false; });
+el.reader.addEventListener('click', () => api.send('reader-view'));
+
+const spaceChip = document.getElementById('space-chip');
+/** The chip at the head of the strip, for when there is more than one space. */
+function renderSpace(spaces) {
+  const active = spaces && spaces.list.find((sp) => sp.id === spaces.activeId);
+  spaceChip.hidden = !spaces || spaces.list.length < 2 || !active;
+  if (spaceChip.hidden) { document.body.style.removeProperty('--space-color'); return; }
+  document.getElementById('space-name').textContent = active.name;
+  document.body.style.setProperty('--space-color', active.color);
+  spaceChip.setAttribute('aria-label', `Space: ${active.name}${active.container ? ', its own cookies' : ''}`);
+}
+spaceChip.addEventListener('click', () => {
+  const r = spaceChip.getBoundingClientRect();
+  api.send('space-menu', { x: Math.round(r.left), y: Math.round(r.bottom + 4) });
+});
+el.star.addEventListener('click', async () => {
+  const res = await api.request('toggle-bookmark');
+  if (!res) return;
+  // The browser decides, and says so. Toggling optimistically here would light
+  // the star for a page that cannot be bookmarked at all - the store refuses
+  // anything that is not http, https or one of our own pages.
+  setStar(Boolean(res.bookmarked));
+});
+el.meter.addEventListener('click', () => api.send('toggle-panel'));
+// Extensions (a Lab): the list, and each one's popup, hang off this button.
+const extensionsBtn = document.getElementById('extensions');
+extensionsBtn.addEventListener('click', () => {
+  const box = extensionsBtn.getBoundingClientRect();
+  api.send('extensions-menu', { x: Math.round(box.left), y: Math.round(box.bottom), right: Math.round(box.right) });
+});
+
+// The menu is drawn in a view of its own, which cannot see where the button is.
+// Both edges are sent: the menu is eight times the button's width and hangs off
+// its *right* edge, so the left one alone would put it out past the window.
+el.menu.addEventListener('click', () => {
+  const box = el.menu.getBoundingClientRect();
+  api.send('open-menu', {
+    x: Math.round(box.left),
+    y: Math.round(box.bottom),
+    right: Math.round(box.right)
+  });
+});
+
+/*
+ * Keep the centred address bar clear of what is beside it.
+ *
+ * Centred on the window (chrome.css), it is sized from an allowance for the
+ * controls either side - and the right side is not a fixed width: a private
+ * window's pill says "Private · site refuses Tor" or less, and the onion and
+ * Slow page? buttons come and go. Photographed, the onion button sat entirely
+ * under the bar in Grid and half under it everywhere else. So the real
+ * clearance is measured whenever anything in the row changes size, and the
+ * bar takes the larger of the two.
+ */
+function fitOmnibox() {
+  const bar = el.omnibox;
+  const toolbar = bar && bar.parentElement;
+  if (!toolbar) return;
+  if (getComputedStyle(bar).position !== 'absolute') {
+    bar.style.removeProperty('--omni-fit');
+    return;
+  }
+  const gap = 12;
+  let left = 0;
+  let right = window.innerWidth;
+  for (const child of toolbar.children) {
+    if (child === bar || child.hidden) continue;
+    // Controls in the row only: a progress line or an overlay laid across the
+    // whole toolbar is not something beside the bar.
+    const position = getComputedStyle(child).position;
+    if (position === 'absolute' || position === 'fixed') continue;
+    const box = child.getBoundingClientRect();
+    if (!box.width || box.width > window.innerWidth / 2) continue;
+    // Before the bar's centre is its left side's; after, its right side's.
+    if (box.left + box.width / 2 < window.innerWidth / 2) left = Math.max(left, box.right);
+    else right = Math.min(right, box.left);
+  }
+  const side = Math.ceil(Math.max(left, window.innerWidth - right) + gap);
+  const value = `${side}px`;
+  if (bar.style.getPropertyValue('--omni-fit') !== value) bar.style.setProperty('--omni-fit', value);
+}
+if (el.omnibox && typeof ResizeObserver === 'function') {
+  const fit = new ResizeObserver(() => requestAnimationFrame(fitOmnibox));
+  fit.observe(el.omnibox.parentElement);
+  for (const child of el.omnibox.parentElement.children) if (child !== el.omnibox) fit.observe(child);
+}
+
+el.url.addEventListener('focus', () => { urlFocused = true; el.url.select(); api.send('sidebar-typing', { typing: true }); });
+el.url.addEventListener('blur', () => { urlFocused = false; api.send('sidebar-typing', { typing: false }); });
+
+// The strip has settled once its first state has drawn and a moment has
+// passed: from then on a tab changing tier is something happening in front of
+// the user, and its dot shows it (chrome.css, "A tab going to sleep").
+setTimeout(() => document.body.classList.add('settled'), 2000);
+
+/** Preferences the strip reads for itself, from the preload's first copy and then each broadcast. */
+let chromePrefs = {};
+function applyChromePrefs(next) {
+  if (!next) return;
+  chromePrefs = next;
+  const closeButton = next.tabCloseButton || 'hover';
+  if (document.body.dataset.closeButton !== closeButton) document.body.dataset.closeButton = closeButton;
+}
+applyChromePrefs(api.prefs);
+
+/*
+ * Finish the address as it is being typed.
+ *
+ * Two letters and Enter is how anyone reaches a site they visit daily, and
+ * without this every one of those was an address typed out in full. The rest of
+ * the match is inserted and left selected, so carrying on typing replaces it
+ * and Enter takes the completed address.
+ *
+ * Only while adding characters. Completing after a backspace is the classic way
+ * to make a field impossible to clear: you delete a letter, the browser puts it
+ * straight back, and the caret has not moved.
+ *
+ * Answers are dropped unless what is in the field is still what was asked
+ * about - the reply crosses a process boundary, and typing does not stop while
+ * it is in flight.
+ */
+let completing = false;
+
+/*
+ * The list under the bar: open tabs, bookmarks, history and a search, for what
+ * has been typed. Drawn by the browser in a view of its own (see
+ * src/main/suggest.js and suggest.html); the keyboard stays here, so the
+ * highlight is moved here and only reported. `typed` is what the user wrote,
+ * kept apart from the field because highlighting a row puts that row's address
+ * in the field, and Escape or ArrowUp past the top has to put it back.
+ */
+let typed = '';
+/** The field as inline completion left it, and the full address that completes to. */
+let completed = null;
+let completedUrl = null;
+/** The user has changed the field since the page's address was put in it. */
+let urlEdited = false;
+let suggestions = [];
+let selected = -1;
+let asked = 0;
+/** A question sent that has not been answered yet: the list may be up. */
+let pendingAsk = false;
+let listOpen = false;
+
+function anchor() {
+  const r = el.omnibox.getBoundingClientRect();
+  return { x: r.left, y: r.bottom, width: r.width };
+}
+
+function closeList() {
+  // An answer still in flight is stale either way. The main process shows
+  // the list when it answers, not when this side accepts the answer, so a
+  // question asked and not yet answered still has to be told to hide: Enter
+  // or Escape before the reply left the list over the new page.
+  asked += 1;
+  if (!listOpen && !suggestions.length && !pendingAsk) return;
+  pendingAsk = false;
+  listOpen = false;
+  suggestions = [];
+  selected = -1;
+  api.send('suggest-hide');
+}
+
+el.url.addEventListener('beforeinput', (event) => {
+  // `insertText` is typing; every other input type is a deletion, a paste or a
+  // composition, none of which should complete.
+  completing = event.inputType === 'insertText';
+});
+
+el.url.addEventListener('input', async () => {
+  typed = el.url.value;
+  urlEdited = true;
+  completed = null;
+  completedUrl = null;
+  selected = -1;
+  if (!typed.trim()) { closeList(); return; }
+
+  const ask = ++asked;
+  pendingAsk = true;
+  // Whether this keystroke will be completed in place, so the list marks as
+  // Enter's the row Enter will really take.
+  const complete = completing && chromePrefs.inlineAutocomplete !== false && typed.length >= 2;
+  const res = await api.request('suggest', { text: typed, anchor: anchor(), complete });
+  if (ask === asked) pendingAsk = false;
+  // Dropped unless the field still says what was asked about: the answer
+  // crosses a process boundary, and typing does not stop while it is in flight.
+  if (ask !== asked || el.url.value !== typed || !res) return;
+  suggestions = res.items || [];
+  listOpen = suggestions.length > 0;
+
+  if (!complete) return;
+  const stem = res.inline;
+  if (!stem || !stem.toLowerCase().startsWith(typed.toLowerCase()) || stem.length <= typed.length) return;
+  // What the user typed, with their own capitalisation, plus the rest of the
+  // match - and the rest selected, so the next keystroke overwrites it.
+  el.url.value = typed + stem.slice(typed.length);
+  el.url.setSelectionRange(typed.length, el.url.value.length);
+  completed = el.url.value;
+  // Enter on a completion goes where the history row went - http included.
+  // The stem has no scheme, and guessing one sent http-only sites to https.
+  completedUrl = res.inlineUrl || null;
+});
+
+/** What the bar shows while a row is highlighted: that row's address, or the search. */
+const shown = (item) => (item.kind === 'search' || item.kind === 'go' ? item.title : item.url);
+
+/*
+ * The address bar's right-click menu: the clipboard set, and Paste and go -
+ * a copied link opened in one click instead of paste, then Enter. Drawn by the
+ * browser in the sheet every other menu uses; the edits come back here
+ * (`address-edit`), since the field and its selection live in this page.
+ */
+let addressSelection = null;
+el.url.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  addressSelection = [el.url.selectionStart, el.url.selectionEnd];
+  api.send('address-menu', {
+    x: Math.round(event.clientX), y: Math.round(event.clientY),
+    selected: el.url.selectionStart !== el.url.selectionEnd
+  });
+});
+
+function editAddress({ op, text }) {
+  el.url.focus();
+  if (addressSelection) el.url.setSelectionRange(addressSelection[0], addressSelection[1]);
+  addressSelection = null;
+  if (op === 'select-all') { el.url.select(); return; }
+  if (op === 'copy' || op === 'cut') { document.execCommand(op); return; }
+  if (op === 'paste' && typeof text === 'string') {
+    // As typing it would: the list of suggestions follows.
+    el.url.setRangeText(text.replace(/\s*\n\s*/g, ' '), el.url.selectionStart, el.url.selectionEnd, 'end');
+    el.url.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
 
 el.url.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    api.send('navigate', { url: el.url.value });
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && listOpen) {
+    event.preventDefault();
+    const n = suggestions.length;
+    // -1 is the typed text itself: moving up past the first row returns to it.
+    selected = event.key === 'ArrowDown'
+      ? (selected + 1 >= n ? -1 : selected + 1)
+      : (selected - 1 < -1 ? n - 1 : selected - 1);
+    el.url.value = selected === -1 ? (completed || typed) : shown(suggestions[selected]);
+    el.url.setSelectionRange(el.url.value.length, el.url.value.length);
+    api.send('suggest-select', { index: selected });
+  } else if (event.key === 'Enter') {
+    // The list's first row is what Enter does when nothing is highlighted -
+    // it says so - and when that row is a page rather than the typed text,
+    // it is taken as a row: an open tab is switched to, not loaded twice.
+    const lead = suggestions[0];
+    const leadIsPage = listOpen && lead && lead.isDefault && lead.kind !== 'go' && lead.kind !== 'search' &&
+      (el.url.value === completed || el.url.value === typed);
+    if (listOpen && selected >= 0) {
+      api.send('suggest-pick', { index: selected, newTab: event.altKey });
+    } else if (leadIsPage) {
+      api.send('suggest-pick', { index: 0, newTab: event.altKey });
+    } else if (completed && completedUrl && el.url.value === completed) {
+      api.send('navigate', { url: completedUrl });
+    } else {
+      api.send('navigate', { url: el.url.value });
+    }
+    urlEdited = false;
+    closeList();
     el.url.blur();
   } else if (event.key === 'Escape') {
-    el.url.blur();
+    event.preventDefault();
+    // First Escape: take back the list, and anything a highlight put in the
+    // field. Second: put back the page's own address, selected, as every
+    // browser does. Third: leave the bar.
+    if (listOpen) {
+      if (el.url.value !== typed) el.url.value = typed;
+      closeList();
+    } else if (urlEdited && shownAddress !== null) {
+      el.url.value = addressText(shownAddress);
+      urlEdited = false;
+      el.url.select();
+    } else {
+      el.url.blur();
+    }
   }
 });
 
-window.addEventListener('keydown', (event) => {
-  const mod = event.ctrlKey || event.metaKey;
-  if (!mod) return;
+// Hidden on the way out, a moment late: a press on a row blurs this field
+// first, and the row has to still be there to be taken.
+el.url.addEventListener('blur', () => setTimeout(() => { if (!urlFocused) closeList(); }, 120));
 
-  switch (event.key.toLowerCase()) {
-    case 't': api.send('new-tab'); break;
-    case 'w': api.send('close-tab'); break;
-    case 'r': api.send('reload'); break;
-    case 'l': el.url.focus(); break;
-    case 'm': api.send('toggle-panel'); break;
-    default: return;
+/* ------------------------------------------------------------------ */
+/* Find in page                                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The bar is drawn here; the searching is done by the page's own renderer,
+ * which only the browser process can reach. So this sends what was typed and
+ * renders what came back, and holds no state about the search itself - the
+ * browser has to own that anyway, because F3 works while the page has focus
+ * and the page's renderer has never seen what was typed into this bar.
+ */
+function showFind(open) {
+  el.findbar.hidden = !open;
+  if (!open) {
+    el.findInput.value = '';
+    el.findCount.textContent = '';
+    return;
   }
-  event.preventDefault();
+  el.findInput.focus();
+  el.findInput.select();
+}
+
+function renderFindResult({ matches = 0, active = 0 }) {
+  const query = el.findInput.value;
+  // Nothing at all rather than "0/0" for an empty field: the count is an answer
+  // to a question, and no question has been asked yet.
+  el.findCount.textContent = !query ? '' : matches ? `${active}/${matches}` : 'No matches';
+  el.findbar.classList.toggle('none', Boolean(query) && matches === 0);
+}
+
+el.findInput.addEventListener('input', () => {
+  api.send('find-query', { query: el.findInput.value });
+  if (!el.findInput.value) renderFindResult({});
 });
+
+el.findInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    api.send(event.shiftKey ? 'find-prev' : 'find-next', { query: el.findInput.value });
+    event.preventDefault();
+  } else if (event.key === 'Escape') {
+    api.send('find-close');
+    event.preventDefault();
+  }
+});
+
+el.findPrev.addEventListener('click', () => api.send('find-prev', { query: el.findInput.value }));
+el.findNext.addEventListener('click', () => api.send('find-next', { query: el.findInput.value }));
+el.findClose.addEventListener('click', () => api.send('find-close'));
+
+/* ------------------------------------------------------------------ */
+
+/*
+ * Messages from the browser that are not state.
+ *
+ * The keyboard table used to live in this file, which is why the address bar
+ * could not be focused from the keyboard: a page holds the keyboard nearly all
+ * the time, and a binding in this renderer never saw the keystroke. The table
+ * is in the browser process now, so what arrives here is the *effect* - focus
+ * this, open that - rather than the key that caused it.
+ */
+// The tab list's own view hears what the chrome hears, and answers only what is
+// about the tabs, the find bar or its own shape: a second answer to "open the
+// site panel" or "focus the address bar" would be a second panel, or a stolen
+// keyboard.
+const STRIP_KINDS = new Set(['sidebar', 'sidebar-slide', 'find-focus', 'find-closed', 'find-result',
+  'overlay', 'pointer-released']);
+
+api.onMessage((message) => {
+  if (ROLE === 'strip' && !STRIP_KINDS.has(message.kind)) return;
+  switch (message.kind) {
+    case 'site-ask':
+      openSite(true);
+      break;
+    case 'open-downloads':
+      openDownloads();
+      break;
+    // The list's selection moved under the pointer; the field keeps what was
+    // typed, and Enter takes the row pointed at.
+    // It is shown in the field too, as the arrow keys do, so Enter never takes
+    // a row the field is not showing.
+    case 'suggest-hover':
+      if (!listOpen || !suggestions[message.index]) break;
+      selected = message.index;
+      el.url.value = shown(suggestions[selected]);
+      el.url.setSelectionRange(el.url.value.length, el.url.value.length);
+      break;
+    case 'address-edit':
+      editAddress(message);
+      break;
+    // The reading list hangs under the menu button, as the menu does.
+    case 'open-reading-list': {
+      const box = el.menu.getBoundingClientRect();
+      api.send('open-reading-list', { x: Math.round(box.left), y: Math.round(box.bottom), right: Math.round(box.right) });
+      break;
+    }
+    // Let go over the page. Where the system does not keep the pointer for
+    // the view it was pressed in (Wayland), a drag under way never heard its
+    // own release, and stayed half done - the tab faded out, the strip stuck.
+    case 'pointer-released':
+      if (tabDrag && !tabDrag.active) tabDrag = null;
+      else if (tabDrag) dropTabDrag(tabDrag.lastScreen);
+      break;
+    case 'suggest-done':
+      closeList();
+      el.url.blur();
+      break;
+    case 'focus-address':
+      el.url.focus();
+      if (typeof message.text === 'string') {
+        // Tab search: the scope typed in, and the list opened on it at once.
+        el.url.value = message.text;
+        el.url.setSelectionRange(message.text.length, message.text.length);
+        el.url.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        el.url.select();
+      }
+      break;
+    // A detached panel slides away before the window takes it back to the
+    // edge (BrowserShell#setSidebarOpen), or comes back if the pointer does.
+    case 'sidebar-slide':
+      document.body.classList.toggle('sliding-out', message.out === true);
+      break;
+    // A menu or the suggestions lie over the chrome: see
+    // BrowserShell#syncOverlay.
+    case 'overlay':
+      document.body.dataset.overlay = String(message.open === true);
+      break;
+    case 'find-focus':
+      showFind(true);
+      break;
+    case 'find-closed':
+      showFind(false);
+      break;
+    case 'find-result':
+      renderFindResult(message);
+      break;
+    // Ctrl+D and the context menu both bookmark through the command channel,
+    // which returns nothing - so the browser says what it decided, and the star
+    // follows that rather than guessing.
+    // Full screen changed the strip's shape. Sent directly rather than waited
+    // for on the governor's next tick, which is up to half a second of a
+    // full-height strip drawn over a full-screen page.
+    case 'sidebar':
+      renderSidebar(message.sidebar);
+      break;
+
+    case 'bookmarked':
+      if (message.url === starUrl) setStar(Boolean(message.bookmarked));
+      break;
+    default:
+      break;
+  }
+});
+
+/**
+ * A private window says so, and says whether its connection is up.
+ *
+ * The star is dimmed rather than removed: it is where people look to bookmark,
+ * and finding it gone would read as a bug. Its tooltip says why it does nothing.
+ */
+const PRIVATE_LABELS = {
+  ready: 'Private',
+  bootstrapping: 'Private · connecting',
+  starting: 'Private · connecting',
+  failed: 'Private · offline',
+  stopped: 'Private · offline'
+};
+function renderPrivate(incognito) {
+  document.body.classList.toggle('incognito', Boolean(incognito));
+  el.privatePill.hidden = !incognito;
+  if (!incognito) { el.onion.hidden = true; el.slowJs.hidden = true; return; }
+  const tor = incognito.tor || {};
+  el.privatePill.dataset.state = tor.state || 'starting';
+  el.privateText.textContent = PRIVATE_LABELS[tor.state] || 'Private';
+  el.privatePill.title = tor.state === 'ready'
+    ? 'Private window – every page goes through Tor. Click for details.'
+    : `Private window – ${tor.summary || 'connecting to Tor'} (${tor.progress || 0}%). Nothing loads until it is connected.`;
+  el.star.title = 'Bookmarks can’t be saved from a private window';
+  el.onion.hidden = !incognito.onion;
+  el.slowJs.hidden = !incognito.slowJs;
+  // Tried from several exits and refused by every one: said, not looped.
+  if (tor.state === 'ready' && incognito.refused) {
+    el.privatePill.dataset.state = 'refused';
+    el.privateText.textContent = 'Private · site refuses Tor';
+    el.privatePill.title = 'This site refused every Tor exit it was tried from. Ctrl+Shift+L tries another.';
+  }
+}
+
+/*
+ * The strip from the keyboard, as a tab list works everywhere else: the arrow
+ * keys move between tabs (up and down when they run down the side), Home and
+ * End go to the ends, Enter or Space brings one forward, Delete closes it.
+ */
+el.tabs.addEventListener('keydown', (event) => {
+  const here = event.target.closest && event.target.closest('.tab');
+  if (!here) return;
+  const all = [...el.tabs.querySelectorAll('.tab:not(.closing):not(.group-folded)')];
+  const at = all.indexOf(here);
+  const side = document.body.dataset.layout === 'left';
+  const next = { [side ? 'ArrowDown' : 'ArrowRight']: at + 1, [side ? 'ArrowUp' : 'ArrowLeft']: at - 1,
+    Home: 0, End: all.length - 1 }[event.key];
+  if (next !== undefined) {
+    event.preventDefault();
+    const to = all[Math.max(0, Math.min(all.length - 1, next))];
+    if (to) { for (const t of all) t.tabIndex = t === to ? 0 : -1; to.focus(); }
+    return;
+  }
+  const id = Number(here.dataset.id);
+  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); api.send('activate-tab', { id }); }
+  else if (event.key === 'Delete') { event.preventDefault(); api.send('close-tab', { id }); }
+});
+
+el.onion.addEventListener('click', () => api.send('open-onion'));
+el.drm.addEventListener('click', () => api.send('open-drm-elsewhere'));
+el.slowJs.addEventListener('click', () => api.send('dismiss-slow-js'));
+el.privatePill.addEventListener('click', () => api.send('navigate', { url: 'debrowser://tor' }));
 
 api.onState((state) => {
-  renderTabs(state.tabs);
+  applyThemePrefs(state.prefs);
+  applyChromePrefs(state.prefs);
+  // Pinned widths are a top-strip idea; down the side `flex` is a height.
+  if (document.body.dataset.layout === 'left') releaseTabWidths();
+  if (state.prefs) el.bookmarks.dataset.opensIn = state.prefs.bookmarkOpensIn || 'new-tab';
+  // Only the space in front: the others' tabs are kept, out of sight.
+  const spaces = state.spaces;
+  const shown = spaces ? state.tabs.filter((tab) => (tab.spaceId || 'home') === spaces.activeId) : state.tabs;
+  renderTabs(shown, state.groups || null);
+  renderSpace(spaces);
+  // The two tabs side by side are marked as a pair.
+  const pair = state.split ? [state.split.left, state.split.right] : [];
+  for (const [id, node] of tabEls) node.root.classList.toggle('in-split', pair.includes(id));
+  el.stripCount.textContent = `${state.tabs.length} tab${state.tabs.length === 1 ? '' : 's'}`;
+  // With more than one window open, each wears its colour (main.js, windowName).
+  const several = state.windowCount > 1 && typeof state.windowColor === 'string';
+  document.body.dataset.windows = several ? 'several' : 'one';
+  if (several) {
+    document.body.style.setProperty('--window', state.windowColor);
+    document.body.dataset.windowName = state.windowName || '';
+  }
+  // Bookmarks changed somewhere else - Settings, an import - so the star's
+  // cached answer for this page is no longer one.
+  if (state.bookmarksRevision !== starRevision) {
+    starRevision = state.bookmarksRevision;
+    starUrl = null;
+  }
   renderToolbar(state);
   renderMeter(state);
+  // An update waiting for a restart marks the menu, where Restart to update is.
+  const updateReady = String(state.updates?.state === 'ready');
+  const menuBtn = document.getElementById('menu');
+  if (menuBtn && menuBtn.dataset.update !== updateReady) {
+    menuBtn.dataset.update = updateReady;
+    menuBtn.title = updateReady === 'true' ? 'Customise and control Debrowser – an update is ready' : 'Customise and control Debrowser';
+  }
+
+  // The bar is hidden rather than emptied when it is off or when the strip runs
+  // down the side: the window has already given its 34px back to the page, and
+  // a bar drawn into space nobody reserved would sit over the top of it.
+  renderDownloadsButton(state.downloads);
+  renderPrivate(state.incognito);
+  renderSidebar(state.sidebar);
+  document.body.classList.toggle('with-bookmarks', state.bookmarksBar !== false);
+  if (state.bookmarksBar !== false) refreshBookmarks(state.bookmarksRevision);
 });

@@ -154,7 +154,7 @@ Restore is lazy: a discarded tab costs nothing until it is clicked.
 
 ## Page merging, and why it is not a default
 
-`tools/ksm-launch.c` calls `prctl(PR_SET_MEMORY_MERGE)` and execs the browser.
+`native/helpers/ksm-launch.c` calls `prctl(PR_SET_MEMORY_MERGE)` and execs the browser.
 The flag is inherited across fork and exec, so the whole renderer pool enters the
 kernel's same-page-merging scope without patching Chromium — which matters,
 because KSM is otherwise opted into per-region with `madvise(MADV_MERGEABLE)`,
@@ -283,7 +283,7 @@ they say.
 ## Memory compression as a side channel
 
 The `HIBERNATED` tier hands a renderer's cold pages to the kernel's compressor.
-That is a weaker exposure than the page merging in `tools/ksm-launch.c`, and the
+That is a weaker exposure than the page merging in `native/helpers/ksm-launch.c`, and the
 difference is worth stating because the two are easy to lump together.
 
 KSM finds byte-identical pages **across** processes and collapses them onto one
@@ -307,3 +307,95 @@ well is that site's own data.
 This is why hibernation is on by default where available while page merging is
 not, and the reasoning belongs written down rather than re-derived the next time
 someone compares them.
+
+## Private windows
+
+An ordinary private window protects you from the next person at your
+computer: it writes no history. Every request still leaves in the open, and
+the router and the ISP read which sites you visit from DNS, from the TLS
+handshake's server name, and from the addresses you connect to. Debrowser's
+private windows are built against that observer instead, with GrapheneOS's
+habit of enforcing a rule in more than one place and checking that it holds.
+
+### Threat model
+
+| Adversary | What they learn | How |
+|---|---|---|
+| Your router, your ISP | That you are online, when, and how much. Not which sites, not what you do on them. By default not that it is Tor either, by protocol - bridges; a bridge of your own also hides it from lists of known bridges. | Every request goes through the bundled Tor, behind obfs4, WebTunnel or Snowflake bridges |
+| A website | A Tor exit address, and a fingerprint shared by every private window on the same OS | Tor; the fingerprint layer; a circuit per tab |
+| A malicious exit relay | Nothing it can change or read unnoticed on HTTPS; plain HTTP only when you allowed it for that site | HTTPS-only, with an explanation page; certificate errors are fatal |
+| Someone at this computer afterwards | Nothing from the window: no history, cookies, cache or crash dumps. Tor's guard, sealed by the OS keystore, unless you turn that off. Files you chose to download. | A per-run profile in a private temp directory, deleted on exit and swept after a crash |
+
+The rule the design is held to: nothing that can reach the internet may carry
+anything about you or this computer; what stays on the device is out of
+scope. Against that, what remains is said on the connection page: anything you
+sign in to knows who you are; traffic timing can still hint at a site -
+camouflage lowers the odds, not to zero; and on Windows and macOS, where no
+application can choose which fonts it sees, the installed fonts stay readable.
+Malware running as you can read the process, which is local and only the OS
+could prevent. Where someone's safety depends on it, the answer
+is Tor Browser or Tails.
+
+### How the pieces fit
+
+```
+normal browser ──Ctrl+Shift+N──► netns-launch (Linux) / Debrowser-Incognito.exe (Windows)
+                                   │
+          ┌────────────────────────┴───────────────────────────┐
+          │ Tor  (outside the namespace; unix sockets on Linux) │
+          └────────────────────────▲───────────────────────────┘
+                                   │ 24 SOCKS ports = 24 isolated circuits
+   private browser process ────────┘  (only loopback exists in its namespace)
+   ├── a partition per tab, each on its own port
+   ├── the icon circuit, the decoy circuit
+   ├── net-watch: the tripwire, and the reaper that deletes the profile after exit
+   └── renderers: V8 without its optimising compilers (Balanced), sandboxed
+```
+
+It is a second process, because the switches that matter - the proxy, the
+resolver rules, the JavaScript flags - are process-wide, and because the two
+kinds of window then share no memory. `src/main/incognito/` holds it:
+
+- `mode.js` - the private profile, the switches, and the per-session proxy.
+- `tor.js`, `bridges.js`, `torstate.js` - running Tor, reaching it through
+  bridges, and keeping its guard sealed between sessions.
+- `relay.js`, `native/helpers/netns-launch.c` - the Linux kill switch: the browser in a
+  network namespace with nothing but loopback, Tor outside it, and a relay
+  from a loopback port to Tor's Unix socket. On Windows the installer adds a
+  firewall rule for a hard-linked copy of the executable instead.
+- `tripwire.js`, `native/helpers/net-watch.c` - every socket every private process
+  holds, checked four times a second against the proxy ports; one that goes
+  anywhere else closes the window. The only runtime protection on macOS.
+- `policy.js` - no loopback or LAN destinations, HTTPS or an explanation,
+  Onion-Location, and the block-page classifier.
+- `circuits.js` - a partition and a SOCKS port per tab, new circuit, and
+  moving a blocked tab to another exit.
+- `fingerprint.js` - the user agent, time zone, language, cores and screen
+  every private window reports, applied through the DevTools protocol before a
+  tab loads anything, and the self-check that reads them back.
+- `scrub.js` - what a page could read about the computer itself: removed,
+  fixed or blurred by a script run in the page, every frame and every worker
+  before their own code, with each worker held paused until it is covered.
+- `fonts.js` - on Linux, a fontconfig file admitting only common families, put
+  in the private browser's environment by whoever starts it.
+- `sanitise.js` - image metadata stripped from uploads, whether picked,
+  dropped or pasted; flat, picture-only safe copies of PDFs.
+- `camouflage.js` - the opt-in decoy loads.
+
+### Enforced twice, and checked
+
+No rule rests on one mechanism. The proxy is set on the command line and on
+every session; the resolver refuses every local lookup, so a request that
+somehow went direct could not even resolve a name; on Linux and Windows the OS
+refuses a direct connection outright; and the tripwire watches for one anyway.
+The fingerprint overrides are re-applied when the debugger carrying them is
+replaced, and a tab that cannot have them stops rather than loading without
+them.
+
+`test/incognito-leak.js` holds all of it to account on every CI run, against a
+stand-in for Tor that records which port every name arrived on: every request
+by name through the proxy and nothing else, a netlog with no direct socket, a
+canary that must be caught, the OS wall refusing a direct connection, a
+circuit per tab, the fingerprint read from pages and workers, uploads without
+GPS, a PDF without its script, and a profile that is gone after exit. The
+measurements behind each decision are in docs/MEASUREMENTS.md.

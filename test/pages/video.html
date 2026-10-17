@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Video</title>
+</head>
+<body>
+  <!--
+    A playing video with sound, made in the page: a canvas drawn every frame
+    and a quiet tone, as one stream. For automatic picture-in-picture.
+  -->
+  <video id="v" width="320" height="180" playsinline></video>
+  <script>
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 180;
+    const g = canvas.getContext('2d');
+    let n = 0;
+    (function draw() {
+      g.fillStyle = `hsl(${(n += 3) % 360} 60% 50%)`;
+      g.fillRect(0, 0, 320, 180);
+      requestAnimationFrame(draw);
+    })();
+    const audio = new AudioContext();
+    const tone = audio.createOscillator();
+    const quiet = audio.createGain();
+    quiet.gain.value = 0.01;
+    const out = audio.createMediaStreamDestination();
+    tone.connect(quiet).connect(out);
+    tone.start();
+    const video = document.getElementById('v');
+    video.srcObject = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...out.stream.getAudioTracks()]);
+    video.play().then(() => { window.playing = true; }, (e) => { window.playing = String(e); });
+  </script>
+</body>
+</html>

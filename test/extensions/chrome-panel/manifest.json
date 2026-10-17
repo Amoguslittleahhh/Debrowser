@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Debrowser test: side panel",
+  "version": "1.0",
+  "description": "Built like Claude: a module worker, no popup, a strict page policy; a click opens its side panel, whose page drives the tab through the debugger and signs in.",
+  "permissions": ["sidePanel", "debugger", "identity", "tabs", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_title": "Open the test panel" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://example.invalid"
+  }
+}

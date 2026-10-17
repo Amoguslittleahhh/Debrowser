@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Notice</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="toast.css">
+</head>
+<body>
+  <!--
+    One line at the foot of the window, with at most one button: "Closed 4
+    tabs  Undo". It goes by itself, and waits while the pointer is on it.
+    Its own small view (window.js, showToast); the view is transparent, so
+    only the card is drawn.
+  -->
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+    <span class="text" id="text"></span>
+    <button class="action" id="action" type="button" hidden></button>
+    <button class="dismiss" id="dismiss" type="button" aria-label="Dismiss">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>
+    </button>
+  </div>
+  <script src="theme.js"></script>
+  <script src="toast.js"></script>
+</body>
+</html>

@@ -1,0 +1,717 @@
+'use strict';
+
+/**
+ * User preferences, on disk.
+ *
+ * Kept deliberately small and boring. Every key has a default, an explicit
+ * validator, and survives a file that has been hand-edited into nonsense - a
+ * browser that refuses to start because its settings file has a stray comma is
+ * a browser nobody can recover without a terminal.
+ *
+ * Lives in `userData`, which is the one directory an update does not touch. That
+ * is the whole reason settings, session and (later) saved credentials go here
+ * rather than beside the app: installing a new version replaces the program and
+ * leaves this alone.
+ */
+
+const fs = require('fs');
+const { readJson } = require('./data/store-file');
+const { DEFAULT_SHORTCUTS_TEXT } = require('./site-shortcuts');
+const path = require('path');
+const { app } = require('electron');
+
+/**
+ * Every setting, with its default and what counts as a valid value.
+ *
+ * The validator is not decoration. These values reach the governor and the
+ * Chromium command line, so "a number the user typed into a JSON file" is
+ * untrusted input: a budget of `-1` or a string where a boolean belongs would
+ * either crash a tick or silently disable a protection.
+ */
+/**
+ * Tab strip colours that were offered once and are not any more, and what each
+ * one became.
+ *
+ * Mapped rather than reset: someone who chose Plum wanted a purple strip, and
+ * the honest answer is the purple that exists now, not the default. They are
+ * still valid hex, so nothing else would have caught them - the swatch would
+ * simply have shown nothing as chosen while the strip stayed the old colour.
+ */
+const RETIRED_STRIP_COLOURS = {
+  '#1b2430': '#1b1f22',   // Slate  -> Graphite
+  '#241c2e': '#1d1c22',   // Plum   -> Aubergine
+  '#1a2622': '#171f1c',   // Pine
+  '#2b2119': '#221c16',   // Umber
+  '#2a1c22': '#231a1a'    // Wine   -> Oxblood
+};
+
+/** The choices for when an unused tab sleeps: automatic, at once, or after so many minutes. */
+const TAB_SLEEP = ['auto', 'instant', '1', '5', '10', '15', '30', '60', '120'];
+
+/** The zoom ladder, shared with main.js so a saved default is always a step. */
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+/** The range a saved budget may take; the task manager's slider clamps to it. */
+const BUDGET_MB = { min: 256, max: 65536 };
+
+const SCHEMA = {
+  /* --- Personalisation ------------------------------------------- */
+  theme:        { def: 'system', ok: (v) => ['system', 'dark', 'light'].includes(v) },
+
+  /**
+   * The look: shapes, neutrals and type. Colour stays the user's - the accent,
+   * the strip colour and its translucency apply on top of every design, and
+   * `theme` still picks light or dark within it.
+   *
+   * 'legacy' is how the browser looked up to 1.7, kept because a look someone
+   * is used to is not something an update should take away.
+   */
+  design:       { def: 'ledger', ok: (v) => ['ledger', 'paper', 'grid', 'legacy'].includes(v) },
+  // "Continue with these tabs" under the new tab page's search. Its own menu
+  // turns it off; Settings turns it back on. Never shown in a private window,
+  // which keeps no history for it to come from.
+  continueCard: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Sites whose new tab tile the user took away. History forgets itself; a
+  // bookmark does not, so without this a forgotten tile filled back in from
+  // the bookmarks on the next new tab.
+  hiddenTiles:  { def: [], ok: (v) => Array.isArray(v) && v.length <= 200 &&
+                  v.every((o) => typeof o === 'string' && o.length < 300) },
+  accent:       { def: '#2f857b', ok: (v) => /^#[0-9a-f]{6}$/i.test(v) },
+  // Take the accent from the system (Windows, macOS) and follow it when it changes.
+  accentFromSystem: { def: false, ok: (v) => typeof v === 'boolean' },
+  tabWidth:     { def: 'roomy',  ok: (v) => ['roomy', 'compact'].includes(v) },
+
+  /**
+   * The tab strip's colour, kept separate from the accent on purpose: the strip
+   * is the largest painted area in the chrome, and the colour that works as a
+   * 3px focus ring is rarely the one you want across the top of the window.
+   * 'mirror' follows the accent for anyone who would rather not choose twice.
+   */
+  tabBarColor:  { def: 'default', ok: (v) => v === 'default' || v === 'mirror' || /^#[0-9a-f]{6}$/i.test(v) },
+
+  /**
+   * How opaque the tab strip is. The strip, and nothing else.
+   *
+   * It was `setOpacity` on the window once, and that comment outlived the
+   * mechanism by several versions: fading the window fades the page text with
+   * it, so a translucent browser was an unreadable one. The alpha is applied to
+   * the one surface the user asked to see through - see `--strip-alpha` in
+   * chrome.css - and pages stay fully opaque.
+   *
+   * Down to 40%, which is as far as the strip can go before the tab titles
+   * stop being legible against a bright window behind them.
+   */
+  windowOpacity: { def: 1, ok: (v) => Number.isFinite(v) && v >= 0.4 && v <= 1 },
+
+
+  /**
+   * Where the tab strip lives.
+   *
+   * 'left' is the Arc/Zen shape: a column down the side, where a tab's title
+   * has room to be read and thirty tabs do not shrink each other to a favicon.
+   * It costs horizontal space, which is why it is not the default - most pages
+   * are laid out for width, and most windows are wider than they are tall.
+   */
+  tabBarPosition: { def: 'top', ok: (v) => v === 'top' || v === 'left' },
+
+  /**
+   * Whether the side strip stays out, or slides away when the pointer leaves.
+   *
+   * On by default, as Zen starts: a column beside the page, toolbar and tabs
+   * together. Off is Zen's compact mode - the page gets the whole window and
+   * the strip, toolbar and all, floats over it from the left edge. The button
+   * that switches sits at the bottom of the strip.
+   *
+   * Only meaningful with `tabBarPosition: 'left'`. Across the top there is
+   * nothing to slide.
+   */
+  sidebarPinned: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /**
+   * Windows 11 only: let the OS paint its own blurred material behind the
+   * window. Cheaper than doing it ourselves, because the compositor is already
+   * blurring what is behind every other window on the system.
+   */
+  backgroundMaterial: { def: 'none', ok: (v) => ['none', 'acrylic', 'mica', 'tabbed'].includes(v) },
+  /**
+   * Stillness, on request. The OS setting is honoured regardless; this is for
+   * anyone whose machine is not set that way but who wants nothing moving here.
+   */
+  reduceMotion: { def: false,    ok: (v) => typeof v === 'boolean' },
+
+  showMemoryMeter: { def: true,  ok: (v) => typeof v === 'boolean' },
+  showTierDots: { def: true,     ok: (v) => typeof v === 'boolean' },
+  /** A video playing with sound pops out when you switch away from its tab. */
+  autoPip:      { def: true,     ok: (v) => typeof v === 'boolean' },
+  /** A card under the tab the pointer rests on: its title, site and memory. */
+  hoverCards:   { def: true,     ok: (v) => typeof v === 'boolean' },
+
+  /* --- Browsing --------------------------------------------------- */
+  searchEngine: { def: 'google', ok: (v) => Object.hasOwn(SEARCH_ENGINES, v) },
+  /** Site search shortcuts, one per line: `yt  YouTube  https://…%s` (site-shortcuts.js). */
+  siteShortcuts: { def: DEFAULT_SHORTCUTS_TEXT, ok: (v) => typeof v === 'string' && v.length <= 20_000 },
+  homepage:     { def: '',       ok: (v) => typeof v === 'string' && v.length < 2048 },
+
+  /**
+   * Whether visited pages are written to the history list.
+   *
+   * On, because a browser that cannot answer "what was that page yesterday" is
+   * missing something people rely on daily. Off stops recording immediately -
+   * it is read on every visit rather than captured at startup - and leaves
+   * whatever is already stored alone, because deleting the user's data is a
+   * separate decision from not adding to it. The history page has the button
+   * for that.
+   */
+  saveHistory:  { def: true,     ok: (v) => typeof v === 'boolean' },
+
+  /**
+   * Whether the tabs you had open come back when the browser starts.
+   *
+   * Off, as the owner asked: a browser that opens on whatever you were looking
+   * at yesterday shows it to anyone at the screen. On, they come back
+   * unrealised - a row in the strip and a saved address - so a restored
+   * session costs about what one tab costs until you touch them.
+   *
+   * What comes back is the page, not the scroll position or anything typed into
+   * it. That state is never written to disk on purpose; see session.js.
+   *
+   * Named afresh rather than `restoreSession` with a new default: every profile
+   * saves every value, so an old profile would have kept its saved "on".
+   */
+  restoreTabs: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
+   * Sites opened at every start, one address per line - the day's usual
+   * places, there before you reach for them. They open asleep (startup.js),
+   * so ten of them cost about what one new tab does until one is clicked.
+   * Not with restoreTabs on, where last time's tabs are the start.
+   */
+  startupSites: { def: '', ok: (v) => typeof v === 'string' && v.length <= 20_000 },
+
+  /**
+   * Which way Ctrl+Tab goes: to the tab used last, as Alt+Tab does between
+   * windows, or to the next one along the strip. Ctrl+PageDown always goes
+   * along the strip.
+   */
+  tabCycleOrder: { def: 'recent', ok: (v) => v === 'recent' || v === 'strip' },
+
+  /**
+   * Whether the welcome tour has been through, or skipped. A new profile
+   * starts on it; a profile from before it existed counts as done (see load),
+   * since someone who has used the browser for months does not need greeting.
+   */
+  welcomeDone: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
+   * Where a bookmark opens when it is clicked.
+   *
+   * A new tab by default. Replacing the page in front of you is the other
+   * reasonable answer - it is what a bookmarks bar did for twenty years - but
+   * it throws away what you were reading, and the one thing you cannot get
+   * back by clicking again is the page you just lost. Ctrl-click and the
+   * middle button still mean "new tab" whichever way this is set, because
+   * those two gestures mean that everywhere.
+   */
+  bookmarkOpensIn: { def: 'new-tab', ok: (v) => ['new-tab', 'current-tab'].includes(v) },
+
+  // On wipes the list as the browser closes, which is the private-window
+  // habit for someone who wants recording without a record of last week.
+  clearHistoryOnExit: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // A completion that is wrong more often than right for someone's habits is
+  // worse than none: Enter takes the suggestion, not what was typed.
+  inlineAutocomplete: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /*
+   * The page zoom a new page starts at, and where "reset zoom" returns to.
+   * One of the steps the zoom shortcuts move between (`stepZoom` in main.js),
+   * so the first Ctrl+plus lands on a step rather than between two.
+   */
+  defaultZoom: { def: 1, ok: (v) => ZOOM_STEPS.includes(v) },
+
+  // Settings shows one section at a time, picked from the list beside it, as
+  // Chrome's does; 'scroll' is every section on one long page.
+  settingsLayout: { def: 'pages', ok: (v) => v === 'pages' || v === 'scroll' },
+
+  /* --- Tabs and windows ------------------------------------------- */
+
+  // 'quit' is what every browser does; 'new-tab' keeps the window for
+  // someone who closes tabs faster than they mean to close the browser.
+  lastTabCloses: { def: 'quit', ok: (v) => ['quit', 'new-tab'].includes(v) },
+
+  // The "Tab closed - Undo" note. Off for someone who closes tabs on purpose
+  // and finds it in the way; Ctrl+Shift+T reopens them either way.
+  closedTabToast: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // On by default now that tabs are not reopened by default: closing a window
+  // of twenty tabs by accident would otherwise lose all twenty.
+  confirmCloseTabs: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Labs (Settings → Labs): experiments, off until turned on. Each graduates
+  // to an ordinary setting, or goes, in a later release.
+  labTabGroups: { def: false, ok: (v) => typeof v === 'boolean' },
+  labQuickWindow: { def: false, ok: (v) => typeof v === 'boolean' },
+  // Chrome and Firefox extensions (extensions.js). Off: none are loaded.
+  labExtensions: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // Where a tab opened from a link lands. 'after-current' keeps a page's
+  // spawned tabs beside it rather than at the far end of a long strip.
+  newTabPosition: { def: 'after-current', ok: (v) => ['end', 'after-current'].includes(v) },
+
+  // Links opened in a new tab stay behind the page you are reading by default,
+  // which is also what keeps them unrealised and free until visited.
+  linkTabsInBackground: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // 'hover' keeps a narrow strip clean; 'always' is for anyone who aims for
+  // the cross before the pointer is on the tab.
+  tabCloseButton: { def: 'hover', ok: (v) => ['hover', 'always'].includes(v) },
+
+  // Speculative realisation on a hover dwell costs a renderer the user may not
+  // want, on a machine where memory is the point.
+  hoverPrefetch: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Fetching the page behind a link the pointer rests on; see speculation.js.
+  // Never in a private window, whatever this says.
+  preloadPages: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // The built-in blocker (blocker.js): ads and trackers, and cookie notices.
+  // Per-site exceptions live in site-prefs.json, not here.
+  // DNS over HTTPS (main.js applySecureDns): 'automatic' upgrades the
+  // system's own DNS where its provider offers it, as Chrome does; a named
+  // provider is used for every lookup; 'off' leaves DNS as the system has it.
+  secureDns: { def: 'automatic', ok: (v) => ['automatic', 'cloudflare', 'quad9', 'google', 'mullvad', 'off'].includes(v) },
+  // Plain-HTTP addresses are tried over HTTPS first (https-first.js):
+  // 'upgrade' falls back quietly, 'strict' asks first, 'off' does neither.
+  httpsMode: { def: 'upgrade', ok: (v) => v === 'upgrade' || v === 'strict' || v === 'off' },
+  // The space links from other apps open in: 'current', or a space's id.
+  externalLinksSpace: { def: 'current', ok: (v) => typeof v === 'string' && /^(current|[a-z0-9-]{1,24})$/.test(v) },
+  // The version last started, so an update is noticed once (whats-new.js).
+  seenVersion: { def: '', ok: (v) => typeof v === 'string' && v.length <= 32 },
+  // The version whose "Move to Applications" / "Add to your apps" was answered
+  // Not now (install.js): asked once per version, never every launch.
+  installAskedVersion: { def: '', ok: (v) => typeof v === 'string' && v.length <= 32 },
+  // Tabs unopened this many days go to the archive (archive.js); 0 is never.
+  autoArchiveDays: { def: 0, ok: (v) => [0, 1, 7, 30].includes(v) },
+  // Battery mode: tabs sleep sooner to save power - 'auto' on battery only.
+  batteryMode: { def: 'auto', ok: (v) => v === 'auto' || v === 'always' || v === 'off' },
+  // When a tab you are not using is put to sleep - its page let go of, and
+  // loaded again when you come back (governor, runIdleLadder): 'auto' as time
+  // and memory call for, 'instant' as soon as you switch away, or after that
+  // many minutes out of sight. The tabs the governor protects stay protected.
+  tabSleep: { def: 'auto', ok: (v) => typeof v === 'string' && TAB_SLEEP.includes(v) },
+  // JavaScript hardening for the ordinary browser, at the next start:
+  // 'full' leaves the engine as it is; 'balanced' and 'maximum' are the
+  // private window's levels (incognito/mode.js JS_LEVELS).
+  hardenJavaScript: { def: 'full', ok: (v) => v === 'full' || v === 'balanced' || v === 'maximum' },
+  // A warning before known phishing and malware sites, and look-alikes of
+  // sites the user visits (threats.js).
+  warnDangerousSites: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Tracking parameters and redirect hops taken out of links (link-cleaner.js).
+  cleanLinks: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Other sites' cookies, refused on every page (third-party.js).
+  blockThirdPartyCookies: { def: true, ok: (v) => typeof v === 'boolean' },
+  blockAds: { def: true, ok: (v) => typeof v === 'boolean' },
+  hideCookieBanners: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // Size, position and maximised state, put back on the next launch.
+  rememberWindowBounds: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /* --- Resources -------------------------------------------------- */
+  // Null means "size this to the machine", which is different from any number
+  // the user could pick, so it needs to be representable. It matters most for
+  // the tab cap, where 0 is itself a meaningful choice: it removes the cap.
+  memoryBudgetMB: { def: null,   ok: (v) => v === null || (Number.isFinite(v) && v >= BUDGET_MB.min && v <= BUDGET_MB.max) },
+  maxLiveTabs:  { def: null,     ok: (v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 200) },
+
+  /**
+   * Whether the task manager explains itself.
+   *
+   * Off by default. The panel is a live instrument - what each tab is holding
+   * and why - and a wall of explanation beside a number you are trying to read
+   * is noise. The explanations did not deserve deleting either, so they moved
+   * here and appear on request.
+   */
+  showMemoryDetail: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /**
+   * Hardware acceleration. Off is a real diagnostic setting: a bad GPU driver
+   * shows up as flicker, blank views or a crash on launch, and this is the
+   * first thing to try. It cannot be applied live - Chromium decides at startup
+   * - so the settings page says a restart is needed rather than pretending.
+   */
+  hardwareAcceleration: { def: true, ok: (v) => typeof v === 'boolean' },
+  /**
+   * Use the graphics adapter even where Chromium does not trust it - often
+   * the case in a virtual machine, where pages are otherwise drawn by the
+   * processor (graphics.js). Needs a restart; turned off by itself if the
+   * graphics process crashes with it on (`gpuOverrideFailed` says so once).
+   */
+  gpuIgnoreBlocklist: { def: false, ok: (v) => typeof v === 'boolean' },
+  gpuOverrideFailed: { def: false, ok: (v) => typeof v === 'boolean' },
+  /**
+   * A virtual machine's graphics adapter - VMware's, VirtualBox's, QEMU's
+   * virtio-gpu (graphics.js): 'auto' draws with it in such a guest, 'off'
+   * never does. `vmGpuFailed` is a try that did not work - no 3D, or crashes
+   * - so it is not tried every start; choosing 'auto' again clears it.
+   * `vmGpuState` is what the last try found, or 'unsupported' for an adapter
+   * that has no 3D at all, for Settings and to say each once.
+   */
+  vmGpu: { def: 'auto', ok: (v) => v === 'auto' || v === 'off' },
+  vmGpuFailed: { def: false, ok: (v) => typeof v === 'boolean' },
+  vmGpuState: { def: '', ok: (v) => ['', 'pending', 'working', 'no-3d', 'crashed', 'unsupported'].includes(v) },
+  /** The one-time note that pages are drawn by the processor has been shown. */
+  graphicsNoteShown: { def: false, ok: (v) => typeof v === 'boolean' },
+  /**
+   * Light graphics (graphics.js): 'auto' turns it on where the machine has no
+   * graphics card doing the work, or is a virtual machine drawing through its
+   * own display; 'light' and 'full' decide for it.
+   */
+  graphicsMode: { def: 'auto', ok: (v) => v === 'auto' || v === 'light' || v === 'full' },
+  /** What the last check found, so the next start can set its switches before it can look again. */
+  graphicsDetected: { def: null, ok: (v) => v === null || (typeof v === 'object' && !Array.isArray(v)) },
+  /** Settings changed by hand while light graphics was on: it no longer decides those. */
+  lightChosen: { def: [], ok: (v) => Array.isArray(v) && v.length <= 20 && v.every((k) => typeof k === 'string') },
+
+  /**
+   * Fill a saved password automatically when a page loads and exactly one
+   * saved sign-in matches its origin.
+   *
+   * Passwords only, and that asymmetry is deliberate rather than unfinished:
+   * a password is bound to an origin the user can see in the address bar, and
+   * card numbers are bound to nothing, so a page can place a hidden payment
+   * field and harvest whatever arrives in it. Payment details are filled only
+   * on a click, always.
+   */
+  fillPasswords: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /* --- Downloads -------------------------------------------------- */
+
+  /**
+   * How many connections a download may open at once.
+   *
+   * The IDM idea: ask for byte ranges in parallel rather than pulling one
+   * stream end to end. It helps where a single connection is not the
+   * bottleneck - a server shaping per-connection, a long fat path one TCP flow
+   * never fills - and does nothing where it is. 1 turns it off.
+   *
+   * Four rather than eight or sixteen because past a handful the gain flattens
+   * while the cost to the server does not, and a browser that opens sixteen
+   * sockets per file is a browser that gets rate-limited.
+   */
+  downloadConnections: { def: 4, ok: (v) => Number.isInteger(v) && v >= 1 && v <= 16 },
+
+  // Empty means the system's Downloads folder. Absolute only: a relative path
+  // would resolve against wherever the browser happened to be launched from.
+  downloadDir: { def: '', ok: (v) => typeof v === 'string' && v.length < 1024 &&
+                                      (v === '' || path.isAbsolute(v)) },
+
+  // Ask with a save dialog for every file instead of writing straight into
+  // the folder above.
+  askWhereToSave: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  /* --- Updates ---------------------------------------------------- */
+  // Off means the browser never reaches the network to look for a version,
+  // which is a privacy choice as much as a bandwidth one.
+  autoUpdate:   { def: true,     ok: (v) => typeof v === 'boolean' },
+  // 'beta' also takes releases published as prereleases, a few weeks early.
+  updateChannel: { def: 'stable', ok: (v) => v === 'stable' || v === 'beta' },
+
+  /* --- Developer tools -------------------------------------------- */
+  // Where the inspector goes. `right` and `bottom` host it in a view of the
+  // browser's own, beside or under the page; `window` hands it to Chromium to
+  // put in a window of its own, which is what it used to do unconditionally.
+  devToolsDock: { def: 'right',  ok: (v) => ['right', 'bottom', 'window'].includes(v) },
+  // How much of the page's room a docked inspector takes, as the edge between
+  // them was last dragged to.
+  devToolsShare: { def: 0.42, ok: (v) => Number.isFinite(v) && v >= 0.1 && v <= 0.9 },
+
+  /* --- Bookmarks --------------------------------------------------- */
+  // The strip of saved sites under the toolbar. On by default, because a
+  // bookmark you cannot see is a bookmark you will not use - and it costs the
+  // content area 34px only while it is showing.
+  showBookmarksBar: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  /* --- Private windows --------------------------------------------- */
+  // Set here, in the ordinary browser, and read by the private window, which
+  // never writes a preference itself. See src/main/incognito/.
+
+  // Which of V8's compilers run. `balanced` drops only the optimising tiers,
+  // which is where most V8 exploits land; `maximum` is the interpreter alone,
+  // as GrapheneOS's browser does. Takes effect when a private window opens.
+  incognitoJsLevel: { def: 'balanced', ok: (v) => ['maximum', 'balanced', 'full'].includes(v) },
+
+  // How Tor connects: through built-in bridges, through your own, or plain.
+  incognitoBridges: { def: 'auto', ok: (v) => ['auto', 'obfs4', 'custom', 'none'].includes(v) },
+  incognitoBridgeLines: { def: '', ok: (v) => typeof v === 'string' && v.length <= 20_000 },
+
+  // Keep Tor's entry guard and its copy of the network between sessions,
+  // encrypted with the OS keystore. On: the same guard every time, as Tor is
+  // designed to use, and a connection in seconds. Off: nothing about Tor is
+  // left on this computer, at the cost of a new guard and a slower start.
+  incognitoKeepTorState: { def: true, ok: (v) => typeof v === 'boolean' },
+
+  // Go to a site's onion address whenever it advertises one.
+  incognitoPreferOnion: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // Load a decoy page alongside every real one, to blur what traffic analysis
+  // can learn from timing and size. Costs about double the bandwidth.
+  incognitoCamouflage: { def: false, ok: (v) => typeof v === 'boolean' },
+
+  // Close every private window after this many minutes with no input. 0 is never.
+  incognitoIdleWipeMinutes: { def: 0, ok: (v) => Number.isInteger(v) && v >= 0 && v <= 240 },
+  incognitoKeepWarm: { def: false, ok: (v) => typeof v === 'boolean' },
+  // Its own engine, and not Google's by default: a private window that sends
+  // every search to the company that most wants to link them to you undoes
+  // part of what Tor is for, and Google answers most Tor exits with a captcha.
+  incognitoSearchEngine: { def: 'duckduckgo', ok: (v) => Object.hasOwn(SEARCH_ENGINES, v) }
+
+  // Still nothing here for the resource profile: it decides Chromium switches
+  // applied before the app starts, so it cannot take effect without a restart.
+  // A settings page whose controls do nothing is worse than one that is short.
+};
+
+/**
+ * What light graphics changes, where the setting is still at its default:
+ * the browser's own motion stilled, and no pages loaded ahead on a guess -
+ * both work a processor without a graphics card does instead of drawing.
+ * Background tabs also sleep sooner (battery mode's pace, main.js), and
+ * YouTube is asked for H.264 (probe-preload.js); those are not settings.
+ */
+const LIGHT_GRAPHICS = { reduceMotion: true, preloadPages: false, hoverPrefetch: false };
+
+/** Search engines, as query templates. `%s` is the URL-encoded term. */
+const SEARCH_ENGINES = {
+  google:     { name: 'Google',     url: 'https://www.google.com/search?q=%s' },
+  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s' },
+  bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=%s' },
+  // One of the few engines with an index of its own rather than a reseller of
+  // Google's or Bing's. Thinner on obscure queries, and that is the trade.
+  mojeek:     { name: 'Mojeek',     url: 'https://www.mojeek.com/search?q=%s' },
+  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/sp/search?query=%s' }
+};
+
+class Prefs {
+  /**
+   * @param {Function} log
+   * @param {object} [options]
+   * @param {string} [options.file]      - another profile's file, for incognito
+   * @param {boolean} [options.readOnly] - changes last for this process only
+   */
+  constructor(log = () => {}, { file = null, readOnly = false, darkUnlessLight = false } = {}) {
+    this.log = log;
+    this.file = file || path.join(app.getPath('userData'), 'preferences.json');
+    this.readOnly = readOnly;
+    /**
+     * A private window's: the theme reads as dark unless Light was chosen
+     * outright. Following a light system theme filled a window opened for
+     * privacy - often at night - with white, and made it look like any
+     * other window. Websites are not told: a private page always reports
+     * light (incognito/scrub.js), so the page's own colours do not change.
+     */
+    this.darkUnlessLight = darkUnlessLight;
+    this.values = this.load();
+  }
+
+  /** Defaults, overlaid with whatever of the file is valid. */
+  load() {
+    const values = {};
+    for (const [key, spec] of Object.entries(SCHEMA)) values[key] = spec.def;
+
+    let raw;
+    try {
+      raw = readJson(this.file);
+    } catch (err) {
+      // A missing file is the ordinary first run. Anything else is worth one
+      // line in the log, and then the defaults - never a failure to start.
+      if (err.code !== 'ENOENT') this.log(`preferences unreadable, using defaults: ${err.message}`);
+      return values;
+    }
+
+    if (!raw || typeof raw !== 'object') return values;
+    // A profile from before the tour: already set up, so not greeted.
+    if (!Object.hasOwn(raw, 'welcomeDone')) values.welcomeDone = true;
+
+    for (const [key, value] of Object.entries(raw)) {
+      const spec = Object.hasOwn(SCHEMA, key) ? SCHEMA[key] : null;
+      if (!spec) continue;                       // a key from a newer version
+      // The palette moved, and a saved colour outlives it.
+      //
+      // `save()` writes every value, so any profile that has ever changed a
+      // setting carries the old default on disk - and the old default is still
+      // a valid `#rrggbb`, so it loads cleanly and the browser comes up in warm
+      // neutral surfaces under a cornflower blue that is no longer offered in
+      // Settings, with no swatch showing as chosen. A value the user picked
+      // deliberately is left alone; only the ones that *were* our defaults move.
+      // `String(value)`, because this runs over whatever is in the file. A
+      // hand-edited `"accent": 12` would have thrown out of the constructor on
+      // `.toLowerCase()`, and the constructor runs before the window exists -
+      // so the browser would not start at all, which is the one outcome this
+      // whole file is written to avoid.
+      if (key === 'accent' && String(value).toLowerCase() === '#5b8cff') {
+        this.log('accent was the old default; moving to the new one');
+        continue;
+      }
+      if (key === 'tabBarColor' && RETIRED_STRIP_COLOURS[String(value).toLowerCase()]) {
+        values[key] = RETIRED_STRIP_COLOURS[String(value).toLowerCase()];
+        this.log(`tab strip colour ${value} was retired; using its replacement`);
+        continue;
+      }
+      if (key === 'searchEngine' && value === 'brave') {
+        // Brave was replaced by Mojeek. Without this the validator rejects the
+        // stored value and silently resets the user to Google - their setting
+        // changed on their behalf, explained only in a log line nobody reads.
+        values[key] = 'mojeek';
+        this.log('search engine "brave" is no longer offered; using Mojeek');
+        continue;
+      }
+      if (!spec.ok(value)) {
+        this.log(`preference "${key}" is not valid (${JSON.stringify(value)}); using the default`);
+        continue;
+      }
+      values[key] = value;
+    }
+    return values;
+  }
+
+  get(key) {
+    if (key === 'theme' && this.darkUnlessLight && this.values.theme === 'system') return 'dark';
+    if (this.light && this.lightApplies(key)) return LIGHT_GRAPHICS[key];
+    return this.values[key];
+  }
+  all() {
+    const all = { ...this.values };
+    if (this.darkUnlessLight && all.theme === 'system') all.theme = 'dark';
+    if (this.light) for (const key of Object.keys(LIGHT_GRAPHICS)) if (this.lightApplies(key)) all[key] = LIGHT_GRAPHICS[key];
+    all.lightGraphics = this.light === true;
+    return all;
+  }
+
+  /**
+   * Light graphics decides a setting still at its default, and never one set
+   * by hand while it was on - otherwise switching it back would not stick,
+   * the default being exactly what it overrides.
+   */
+  lightApplies(key) {
+    return Object.hasOwn(LIGHT_GRAPHICS, key) && this.values[key] === SCHEMA[key].def &&
+      !(this.values.lightChosen || []).includes(key);
+  }
+
+  /** Light graphics on or off (graphics.js, decided in main.js). Not saved: it is found again each start. */
+  setLight(on) { this.light = on === true; }
+
+  /**
+   * Set one preference. Returns whether it was accepted, so the UI can tell
+   * "rejected" from "applied and happened to look the same".
+   */
+  set(key, value) {
+    const spec = Object.hasOwn(SCHEMA, key) ? SCHEMA[key] : null;
+    if (!spec || !spec.ok(value)) {
+      this.log(`refusing preference "${key}" = ${JSON.stringify(value)}`);
+      return false;
+    }
+    // Chosen by hand while light graphics was deciding it: from now on, the
+    // choice stands (see `lightApplies`).
+    if (this.light && Object.hasOwn(LIGHT_GRAPHICS, key) && !(this.values.lightChosen || []).includes(key)) {
+      this.values.lightChosen = [...(this.values.lightChosen || []), key];
+      if (this.values[key] === value) { this.save(); return true; }
+    }
+    if (this.values[key] === value) return true;
+    this.values[key] = value;
+    this.save();
+    return true;
+  }
+
+  /** Write atomically: a crash mid-write must not leave a truncated file. */
+  save() {
+    // Incognito reads the normal profile's settings and must never write to
+    // it: a setting changed there lasts until the window closes.
+    if (this.readOnly) return;
+    const tmp = `${this.file}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.writeFileSync(tmp, JSON.stringify(this.values, null, 2));
+      fs.renameSync(tmp, this.file);
+    } catch (err) {
+      this.log(`could not save preferences: ${err.message}`);
+      try { fs.unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    }
+  }
+
+  /**
+   * The chosen engine's query template, for whoever decides that a piece of
+   * omnibox input is a search.
+   *
+   * Deliberately *not* a resolveQuery() that also decides URL-vs-search:
+   * `normaliseUrl` in main.js already makes that call, and it is the kind of
+   * judgement that must be made in exactly one place or the address bar starts
+   * disagreeing with itself about what a bare hostname means.
+   */
+  /**
+   * The engines the settings page offers, by id and display name.
+   *
+   * Sent rather than hard-coded in the renderer so that adding an engine is one
+   * entry in SEARCH_ENGINES above, and so a label can never end up attached to
+   * a different engine's URL than the one it names.
+   */
+  engines() {
+    return Object.entries(SEARCH_ENGINES).map(([id, { name }]) => ({ id, name }));
+  }
+
+  /** The engine this window searches with: a private window has its own. */
+  engine() {
+    const id = this.readOnly ? this.values.incognitoSearchEngine : this.values.searchEngine;
+    return SEARCH_ENGINES[id] || SEARCH_ENGINES.google;
+  }
+
+  searchTemplate() {
+    return this.engine().url;
+  }
+
+  /**
+   * The chosen engine's name, for the one place a menu has to say it.
+   *
+   * "Search Google for …" is a promise about where the text is going, so it
+   * comes from the same table the query template does rather than from a label
+   * written beside it.
+   */
+  engineName() {
+    return this.engine().name;
+  }
+}
+
+module.exports = { Prefs, SCHEMA, SEARCH_ENGINES, ZOOM_STEPS, BUDGET_MB };
+
+/**
+ * Fold saved preferences into the runtime config.
+ *
+ * Three sources want to set the same two numbers, and the order matters:
+ *
+ *   1. a command-line flag, which wins outright - someone who launched with
+ *      `--budget=1200` meant it for this run, and a stored preference quietly
+ *      overriding it would make the flag look broken
+ *   2. a saved preference
+ *   3. the automatic value, sized to this machine
+ *
+ * `null` is the third case, and it must survive a round trip: clearing the field
+ * in Settings has to go back to the machine-sized number, not leave whatever was
+ * there before. That is why the automatic values are kept on `cfg` rather than
+ * computed once at startup and forgotten - this runs again on every change.
+ */
+function applyPrefs(cfg, prefs, log = () => {}) {
+  const pinned = cfg.pinned || {};
+  const budget = prefs.get('memoryBudgetMB');
+  const liveTabs = prefs.get('maxLiveTabs');
+
+  if (!pinned.memoryBudgetMB) {
+    cfg.memoryBudgetMB = budget != null ? budget : cfg.autoBudgetMB;
+  }
+  if (!pinned.maxLiveTabs) {
+    cfg.maxLiveTabs = liveTabs != null ? liveTabs : cfg.autoLiveTabs;
+  }
+  // When an unused tab sleeps: null is the governor's own timing.
+  const sleep = prefs.get('tabSleep');
+  cfg.sleepAfterMs = sleep === 'instant' ? 0 : /^\d+$/.test(sleep) ? Number(sleep) * 60_000 : null;
+
+  log('prefs', `budget=${cfg.memoryBudgetMB}MB liveTabs=${cfg.maxLiveTabs} ` +
+               `theme=${prefs.get('theme')} search=${prefs.get('searchEngine')}`);
+}
+
+module.exports.applyPrefs = applyPrefs;

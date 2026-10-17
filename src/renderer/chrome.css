@@ -9,43 +9,25 @@
  * compositor and never triggers layout.
  */
 
-:root {
-  --bg: #16181d;
-  --bg-raised: #1e2128;
-  --bg-input: #24272f;
-  --border: #2c303a;
-  --text: #e6e8ee;
-  --text-dim: #9aa1b1;
-  --accent: #5b8cff;
-  --ok: #49c17d;
-  --warn: #e0a33e;
-  --crit: #e2564a;
-  --radius: 7px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f2f3f6;
-    --bg-raised: #ffffff;
-    --bg-input: #ffffff;
-    --border: #d8dbe2;
-    --text: #1a1d24;
-    --text-dim: #626a7a;
-  }
-}
-
-* { box-sizing: border-box; }
+/* Palette, theme switching and the base reset are in theme.css, which every
+   view the browser draws for itself links first. */
 
 html, body {
-  margin: 0;
   height: 100%;
-  overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
-  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
-  user-select: none;
-  cursor: default;
+  /* Clipped, not hidden: `hidden` is still a scroll container, and focusing a
+     field scrolled it - which slid the whole tucked-away band up by the
+     difference between its layout and its 40px view, out of line with the
+     window buttons beside it. Nothing here is ever meant to scroll. */
+  overflow: clip;
 }
+
+/*
+ * The chrome's own page is transparent where nothing is painted, so a
+ * translucent strip shows the window's backdrop rather than the body colour
+ * sitting immediately behind it. Only while translucency is asked for: opaque
+ * is the cheaper surface to composite, and it is what the default build gets.
+ */
+body[data-translucent="on"] { background: transparent; }
 
 /* ---------------------------------------------------------------- */
 /* Tab strip                                                         */
@@ -54,44 +36,272 @@ html, body {
 .tabstrip {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
   height: 40px;
-  padding: 6px 8px 0;
-  background: var(--bg);
+  /*
+   * Translucency lives here and nowhere else.
+   *
+   * It used to be `window.setOpacity()`, which fades every pixel of the window
+   * including page text - so a translucent browser was an unreadable one, with
+   * whatever sat behind it showing through unblurred. Mica and Acrylic fade
+   * only the backdrop; this matches that by putting the alpha on the one
+   * surface the user asked to see through, and leaving pages fully opaque.
+   *
+   * `--strip-alpha` is 1 unless set, so the default build paints exactly as
+   * before and the mix is a no-op.
+   *
+   * The colour carries the alpha, because a translucent strip painted with an
+   * opaque colour is an opaque strip.
+   */
+  /* One flat colour, the same one the system's window buttons are given: a
+     gradient here left those buttons sitting in a visibly different box. */
+  background: color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent);
+  /* Empty strip drags the window, because the strip *is* the title bar now. */
   -webkit-app-region: drag;
+
+  /*
+   * Keep clear of the system's window buttons.
+   *
+   * With `titleBarOverlay` the platform draws minimise/maximise/close *over*
+   * this strip, and Electron reports where through these env() values -
+   * left-inset on macOS, where the traffic lights are, and right-inset on
+   * Windows and Linux. Hard-coding either would put a tab under the close
+   * button on one platform and leave a gap on the other. The fallbacks make it
+   * behave when there is no overlay at all.
+   */
+  padding: 6px 0 0;
+  padding-left: calc(env(titlebar-area-x, 0px) + 8px);
+  /*
+   * `max()`, because env() alone was not reserving anything here.
+   *
+   * The Window Controls Overlay variables are exposed to a *window's top-level
+   * document*. This chrome is a WebContentsView inside a BaseWindow, so there
+   * is no top-level document for them to attach to and they resolve to their
+   * fallbacks - at which point this calc collapses to 8px and the strip is free
+   * to grow under the buttons. Past roughly eight tabs at 1400px, or four at
+   * 700px, that is exactly what happened: the tabs expanded into the gutter and
+   * carried the + underneath minimise/maximise/close, where it could not be
+   * clicked.
+   *
+   * So the floor below is the mechanism, not the backup, and env() is kept for
+   * the case where a future Electron does attach it - whichever reserves more
+   * wins, which is the safe direction to be wrong in.
+   */
+  padding-right: max(
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px),
+    var(--caption-right, 0px)
+  );
 }
 
+/*
+ * Width of the system's window buttons, reserved at the right of the strip.
+ *
+ * Windows 11 draws three 46px buttons; Linux under `titleBarOverlay` is close
+ * enough that the same figure holds. macOS puts its traffic lights on the
+ * *left*, where `titlebar-area-x` already accounts for them, so the right
+ * gutter there is zero and the padding-left above does the work.
+ */
+body[data-platform="win32"],
+body[data-platform="linux"] { --caption-right: 146px; }
+
+/*
+ * Tabs hug their own width instead of filling the strip.
+ *
+ * This is what puts the + immediately after the last tab and slides it along as
+ * tabs open and close, the way Chrome does. The old rule was `flex: 1`, which
+ * made the container claim the whole strip and stranded the + against the far
+ * right edge with a gulf of empty space in between - the thing that made the
+ * chrome look unlike any browser the user has used.
+ *
+ * Overflow is handed back by shrinking, not by a `max-width` - an earlier
+ * version of this comment described one and there has never been such a rule.
+ * `flex: 0 1 auto` with `min-width: 0` lets this container give up width, and
+ * `overflow: hidden` clips what will not fit, so the + keeps its place after
+ * the last tab. That only holds while the strip's own padding reserves the
+ * window buttons' gutter; when it did not, this container grew under them and
+ * took the + with it.
+ */
 .tabs {
   display: flex;
   gap: 3px;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
+  /*
+   * Past a certain count the tabs stop shrinking - 52px is the floor - and the
+   * strip overflows. It was `overflow: hidden`, so those tabs were not narrow,
+   * they were *gone*: no scroll, no chevron, nothing to say the window was
+   * holding more than it showed. The same defect the bookmarks bar had, and
+   * the same answer every browser gives: the strip scrolls sideways.
+   *
+   * No scrollbar. A 12px trough under a 34px strip would cost a third of the
+   * height of the thing it is scrolling, and the wheel handler in chrome.js is
+   * what makes it reachable without one.
+   */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
   -webkit-app-region: no-drag;
 }
+.tabs::-webkit-scrollbar { display: none; }
+
+/* Takes the leftover width so the strip's drag region reaches the controls. */
+.strip-filler { flex: 1 1 auto; min-width: 0; }
 
 .tab {
+  position: relative;          /* for the separator below */
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 44px;
-  max-width: 220px;
-  flex: 1 1 180px;
+  gap: 8px;
+  min-width: 52px;
+  max-width: 256px;
+  /*
+   * The basis is the maximum, so tabs sit at their full width until there are
+   * enough of them to force shrinking - which is what Chrome does and what the
+   * strip was missing. At 200 the container, which hugs its content, stopped
+   * short of the width available and left a few hundred pixels of empty strip
+   * after the + on a window with five tabs open.
+   */
+  flex: 1 1 256px;
   height: 34px;
-  padding: 0 8px 0 10px;
+  padding: 0 8px 0 11px;
   border-radius: var(--radius) var(--radius) 0 0;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-bottom: none;
-  opacity: 0.62;
-  transition: opacity 120ms ease, background-color 120ms ease;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  /* The strip's own tab widths can depend on nothing inside a tab, so each is
+     a size container - which is what lets a narrow tab drop its title
+     instead of showing the first two letters of it. See the end of this
+     section. */
+  container: tab / inline-size;
+  /* Containment zeroes a tab's intrinsic width, and the strip hugs its tabs'
+     intrinsic widths - so without this every tab collapsed to the floor. It
+     is the width the basis above asks for. */
+  contain-intrinsic-inline-size: 256px;
+  transition: background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+  animation: tab-in var(--slow) var(--ease-out);
+}
+/* The fade at an edge with more tabs past it; see updateStripFades. */
+.tabs {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-start, 0px),
+    #000 calc(100% - var(--fade-end, 0px)), transparent 100%);
+}
+body[data-layout="left"] .tabs {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-start, 0px),
+    #000 calc(100% - var(--fade-end, 0px)), transparent 100%);
 }
 
-.tab:hover { opacity: 0.85; }
+/* Folding away (see closeTabElement): nothing inside may hold it open, and
+   nothing on it can be pressed any more. */
+.tab.closing { overflow: hidden; pointer-events: none; }
 
+/* On quickly, off slowly: a sweep across the strip leaves a short trail
+   rather than strobing each tab it crosses. */
+.tab:hover { transition-duration: var(--instant); }
+
+/* In place: a tab moved by a drag is re-inserted, which would replay this. */
+.tab.entered { animation: none; }
+
+@keyframes tab-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Inactive tabs are flat against the strip, as in Chrome; only hover and the
+   active tab get a surface. Borders on every tab made the strip look like a
+   spreadsheet. */
+.tab:hover { background: var(--wash-soft); color: var(--text); }
+
+/*
+ * A hairline between inactive tabs, which is what Chrome draws and what this
+ * strip was missing.
+ *
+ * Tabs are equal width, so a short title leaves empty space inside its own tab -
+ * and with no surface and no separator, five tabs read as five captions
+ * floating at intervals rather than as five tabs. The line is drawn on the
+ * *left* of a tab and suppressed next to the active one and on hover, because
+ * a separator beside a raised surface is a seam.
+ */
+.tab + .tab::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 9px;
+  bottom: 9px;
+  width: 1px;
+  background: var(--border);
+}
+.tab:hover::after,
+.tab.active::after,
+.tab.active + .tab::after,
+.tab:hover + .tab::after { opacity: 0; }
+
+/*
+ * The active tab is the same colour as the toolbar, on purpose.
+ *
+ * That is the shape every browser draws and the reason the tab has rounded top
+ * corners and square bottom ones: the tab and the toolbar are one surface, and
+ * the strip is the background it sits in front of. With a different colour -
+ * and worse, with a gradient of its own - the tab reads as a button parked
+ * above a bar, and the seam between them is the giveaway.
+ *
+ * So the surface does the work, and a 2px bar in the accent along the top edge
+ * says which one it is at a glance across twenty tabs. Not bold: Calibri has no
+ * weight between regular and bold, so emphasis by weight here would be full
+ * bold on every active tab, and Chrome does not bold it either. Full-contrast
+ * text against dimmed text is the difference, which is what the eye reads
+ * first anyway.
+ *
+ * `::before` rather than a border, because a border changes the box and would
+ * move the label by 2px whenever a tab became active.
+ */
 .tab.active {
-  opacity: 1;
-  background: var(--bg-input);
+  background: var(--tint-2);
+  color: var(--text);
+}
+
+.tab.active::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 0;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--accent);
+}
+
+/*
+ * Ink that suits the strip rather than the palette.
+ *
+ * A chosen strip colour can be the opposite way round from the theme - every
+ * preset is dark - and the tabs sitting on it, and the bookmarks bar painted
+ * from it, inherited the theme's text. The active tab is exempt: it is the
+ * toolbar's colour, not the strip's.
+ */
+body[data-strip-tone="dark"] .tab:not(.active),
+body[data-strip-tone="dark"] .new-tab,
+body[data-strip-tone="dark"] .bookmarks,
+body[data-strip-tone="dark"] .pin,
+body[data-strip-tone="dark"][data-layout="left"] .toolbar > :is(.nav, .icon-btn, .meter) {
+  --text: #eae7e0;
+  --text-dim: #aaa69c;
+  --border: #3a3a34;
+}
+body[data-strip-tone="light"] .tab:not(.active),
+body[data-strip-tone="light"] .new-tab,
+body[data-strip-tone="light"] .bookmarks,
+body[data-strip-tone="light"] .pin,
+/* Down the side the toolbar sits on the strip too, not on the palette: its
+   buttons and meter were the theme's dim ink on a dark strip, barely there. */
+body[data-strip-tone="light"][data-layout="left"] .toolbar > :is(.nav, .icon-btn, .meter) {
+  --text: #201f1c;
+  --text-dim: #4f4a41;
+  --border: #cfc9bd;
+}
+
+body[data-tabs="compact"] .tab {
+  flex-basis: 150px; max-width: 170px; gap: 6px;
+  contain-intrinsic-inline-size: 150px;
 }
 
 .tab-title {
@@ -102,33 +312,193 @@ html, body {
   white-space: nowrap;
 }
 
-.tab-favicon {
+/*
+ * The icon holder: one 15px box with the letter, the favicon and the loading
+ * spinner stacked in it.
+ *
+ * Stacked rather than laid out in a row, so the title never moves. A site's
+ * icon arrives some hundreds of milliseconds after its page, and a strip whose
+ * labels all shuffle right when the icons land is a strip that looks broken
+ * while it is merely loading.
+ */
+.tab-icon {
+  position: relative;
   width: 15px;
   height: 15px;
   flex: none;
+}
+
+.tab-favicon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border-radius: 3px;
   object-fit: contain;
 }
+
+/*
+ * What a tab shows before its favicon arrives, and for the many sites that
+ * never send one: the site's initial on a colour derived from its hostname.
+ *
+ * This is most of what stopped the strip reading as one long grey bar. A
+ * favicon takes a network round trip and is often 404, so a strip of tabs
+ * opened at once was previously twenty identical grey rows for as long as that
+ * took - and permanently, for any site without an icon. The colour comes from
+ * `siteHue` in theme.js, which the history page uses as well, so a site is the
+ * same colour in both.
+ */
+.tab-chip {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  text-transform: uppercase;
+  color: hsl(var(--hue, 220) var(--chip-fg-s) var(--chip-fg-l));
+  background: hsl(var(--hue, 220) var(--chip-bg-s) var(--chip-bg-l));
+}
+
+
+/*
+ * The loading spinner, in the tab, where Chrome puts it.
+ *
+ * One element, one rotation, and it exists only while a tab is actually
+ * loading - `data-loading` is written by the renderer on a change, not on every
+ * state broadcast. A `border-top-color` ring costs no image and no second
+ * element, and the rotation is a transform, so it stays on the compositor and
+ * never touches layout.
+ */
+/*
+ * Once the site's own logo is on screen the chip stops painting entirely.
+ *
+ * It is a stand-in, not a backdrop. Most favicons are transparent, so leaving
+ * the tile behind one puts every logo in the browser on a coloured square with
+ * a letter showing through it.
+ */
+.tab-chip:not(.own)::before { content: attr(data-letter); }
+.tab-icon.has-icon .tab-chip { display: none; }
+
+.tab[data-loading="on"] .tab-chip,
+.tab[data-loading="on"] .tab-favicon { opacity: 0; }
+
+.tab[data-loading="on"] .tab-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  animation: tab-spin 700ms linear infinite;
+}
+/* On the dark palette the teal arc sank into its track: a brighter arc, a
+   lighter track. */
+body[data-theme="dark"] .tab[data-loading="on"] .tab-icon::after {
+  border-color: color-mix(in srgb, var(--text) 18%, transparent);
+  border-top-color: color-mix(in srgb, var(--accent) 70%, #fff);
+}
+
+@keyframes tab-spin { to { transform: rotate(360deg); } }
+
+/* Stillness means stillness: the ring stays, and stops. It still reads as "this
+   tab is busy" because it is a ring where an icon usually is. */
+body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
+
+/*
+ * Dragging a tab. The one under the pointer follows it exactly - no
+ * transition on its transform, or it would trail behind the hand - and is
+ * drawn over its neighbours, which slide aside. On release it settles into its
+ * slot; the others are already there.
+ */
+.tab.dragging { z-index: 2; }
+body.tab-dragging .tab:not(.dragging) {
+  transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+}
+.tab.settling {
+  transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+}
+/* Pulled out of the strip: it stays in its place, faded, while its picture
+   follows the pointer outside - letting go there takes it to a window. */
+.tab.torn {
+  opacity: 0.4;
+  transition: opacity var(--fast) var(--ease);
+}
+
+/*
+ * A pinned tab: its site's icon and nothing else, at the start of the strip,
+ * as in every browser. Down the side there is room for its title, so it keeps
+ * the row and only loses the close button - a pinned tab is one you meant to
+ * keep.
+ */
+body:not([data-layout="left"]) .tab.pinned {
+  flex: 0 0 40px;
+  min-width: 40px;
+  max-width: 40px;
+  contain-intrinsic-inline-size: 40px;
+  padding: 0;
+  justify-content: center;
+}
+body:not([data-layout="left"]) .tab.pinned .tab-title,
+body:not([data-layout="left"]) .tab.pinned .tier,
+.tab.pinned .tab-close { display: none; }
+
+/* A crashed page: the tab fades until it is reloaded. */
+.tab[data-crashed="on"] .tab-icon,
+.tab[data-crashed="on"] .tab-title { opacity: 0.5; }
 
 /*
  * Tier badge. The whole point of this browser is that it is constantly moving
  * tabs between resource states, so it says so rather than doing it invisibly:
  * the user can always see which tabs are asleep and why one took a moment to
  * come back.
+ *
+ * Only asleep is marked. A dot in a different colour on every tab - green,
+ * paler green, grey - put a status light in front of each title for states
+ * that change nothing you see, and read as a debug view rather than a tab
+ * strip. Awake, the dot's place stays (so nothing moves when a tab falls
+ * asleep) and is empty; asleep, it is the accent, and the title quietens.
  */
 .tier {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--ok);
+  background: transparent;
 }
 
-.tier[data-tier="warm"]      { background: var(--ok); opacity: 0.7; }
-.tier[data-tier="cold"]      { background: var(--warn); opacity: 0.8; }
 .tier[data-tier="frozen"]    { background: var(--accent); }
 .tier[data-tier="hibernated"] { background: var(--accent); opacity: 0.55; }
-.tier[data-tier="discarded"] { background: var(--text-dim); opacity: 0.5; }
+.tier[data-tier="discarded"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-dim); opacity: 0.7; }
+.tab:has(.tier:is([data-tier="frozen"], [data-tier="hibernated"], [data-tier="discarded"])):not(.active) .tab-title {
+  color: var(--text-dim);
+}
+
+/*
+ * A tab going to sleep, seen happening.
+ *
+ * The browser's whole claim is that it gives memory back, and the moment it
+ * does was a dot changing colour between two frames - easy to miss, so the
+ * claim was easy to doubt. Now the dot breathes out: a small swell and a ring
+ * that spreads and fades, as the tab lets go. Waking has no ceremony: the dot
+ * simply goes.
+ *
+ * Only once the strip has settled (chrome.js): on launch every restored tab
+ * arrives asleep, and a row of dots all exhaling at once is noise.
+ */
+.tier {
+  transition: background-color var(--slow) var(--ease), opacity var(--slow) var(--ease);
+}
+body.settled .tier:is([data-tier="frozen"], [data-tier="hibernated"], [data-tier="discarded"]) {
+  animation: tier-exhale 1100ms var(--ease-out);
+}
+@keyframes tier-exhale {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+  30%  { transform: scale(1.35); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 7px transparent; }
+}
 
 .tab.boosted .tier {
   background: var(--accent);
@@ -137,27 +507,64 @@ html, body {
 
 .tab-close {
   flex: none;
+  display: grid;
+  place-items: center;
   width: 18px;
   height: 18px;
-  line-height: 16px;
-  text-align: center;
   border: none;
-  border-radius: 4px;
+  /* Round, like the + and the window's own buttons beside it. */
+  border-radius: 50%;
   background: transparent;
   color: var(--text-dim);
-  font-size: 15px;
   cursor: default;
   opacity: 0;
+  transition: opacity var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
+.tab-close .x-icon { width: 11px; height: 11px; stroke-width: 1.6; }
 
 .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
-.tab-close:hover { background: var(--border); color: var(--text); }
+body[data-close-button="always"] .tab-close { opacity: 1; }
+/* `background-color`, not the `background` shorthand: the shorthand resets
+   `background-clip`, which is what keeps the hover square the size of the
+   cross rather than the size of the target. See "Hit targets" below. */
+.tab-close:hover { background-color: var(--border); color: var(--text); }
+.tab-close:active { background-color: color-mix(in srgb, var(--text) 22%, transparent); }
+
+/* Down the side, a hidden close button gives its room back to the title,
+   which was cut a button's width early on every tab but the one hovered. */
+body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: none; }
 
 .audio-dot {
   flex: none;
-  font-size: 10px;
+  /* A control now rather than a mark, so it needs a target rather than a
+     glyph's worth of room - grown by its padding and given the space back with
+     a negative margin, which leaves the strip's layout exactly where it was. */
+  padding: 5.5px;
+  margin: -5.5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-micro);
+  line-height: 1;
+  cursor: default;
 }
+.audio-dot:hover { background: var(--wash); color: var(--text); }
+.audio-dot svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.audio-dot:active { background: color-mix(in srgb, var(--text) 16%, transparent); }
+/* Muted reads as off rather than as another kind of sound: dimmer than the
+   playing mark, and the speaker struck through. */
+.audio-dot.muted { color: var(--text-dim); opacity: 0.75; }
 
 /* ---------------------------------------------------------------- */
 /* Toolbar                                                           */
@@ -166,54 +573,208 @@ html, body {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 44px;
-  padding: 0 10px;
-  background: var(--bg-input);
+  padding: 0 8px;
+  /* The same tint as the strip, a shade further along, so the toolbar reads as
+     the next band of one surface rather than as a different panel. */
+  background: var(--tint-2);
   border-bottom: 1px solid var(--border);
 }
 
-.nav { display: flex; gap: 2px; }
+.nav { display: flex; gap: 0; }
 
 .icon-btn {
-  width: 30px;
-  height: 30px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  /* None of the button's own: its 6px a side left the 26px buttons in the
+     address bar 14px for a 16px icon, which hung a pixel right of centre -
+     under the downloads ring, which centres on the whole button, plainly so. */
+  padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 50%;
   background: transparent;
   color: var(--text-dim);
-  font-size: 16px;
   cursor: default;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
 }
 
-.icon-btn:hover { background: var(--border); color: var(--text); }
-.icon-btn:disabled { opacity: 0.3; }
-.new-tab { -webkit-app-region: no-drag; font-size: 18px; }
+/* Hover is the accent at low strength, here and on every other control in the
+   chrome. A grey hover on a grey button is the state you have to look for. */
+.icon-btn:hover { background: var(--wash); color: var(--text); }
+/* A press that moves is the cheapest possible confirmation that it registered. */
+.icon-btn:active:not(:disabled),
+.new-tab:active { transform: var(--press); }
+.icon-btn:disabled { opacity: 0.32; }
+.icon-btn:disabled:hover { background: transparent; color: var(--text-dim); }
+
+/* One stroke weight for every glyph in the toolbar, so the row reads as a set
+   rather than as icons collected from different places. */
+.icon-btn svg, .new-tab svg {
+  width: var(--icon);
+  height: var(--icon);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-btn svg.dots { fill: currentColor; stroke: none; }
+
+/* The + rides with the tabs rather than sitting at the window edge. */
+.new-tab {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  font: inherit;
+  margin: 0 0 3px 4px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: default;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
+}
+.new-tab:hover { background: var(--wash); color: var(--accent-text); }
 
 .omnibox {
   display: flex;
   align-items: center;
   flex: 1;
   min-width: 0;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 15px;
+  height: 34px;
+  margin: 0 var(--s1);
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
   background: var(--bg);
+  /* A real edge at rest, not a transparent placeholder held for the focus
+     state. The pill is `--bg` on a `--tint-2` toolbar, and those two are close
+     enough that an unbordered pill reads as a smudge rather than as a field -
+     which is what it looked like photographed. */
   border: 1px solid var(--border);
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease),
+              box-shadow var(--fast) var(--ease);
 }
 
-.omnibox:focus-within { border-color: var(--accent); }
+.omnibox:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); }
+
+/* The star, downloads and menu, at the end of the field. Smaller than the
+   toolbar's buttons so they sit inside its height, and the last one pulled
+   toward the rounded end so the field keeps an even margin. */
+.omnibox .icon-btn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+}
+.omnibox .icon-btn:last-of-type { margin-right: -8px; }
+/* The menu is the last thing in the toolbar, after the meter. */
+.toolbar > #menu { order: 99; flex: none; }
+/* An update downloaded and waiting: a dot on the menu, where Restart to update is. */
+#menu { position: relative; }
+#menu[data-update="true"]::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.omnibox:has(#url:focus) {
+  border-color: var(--accent);
+  background: var(--bg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* No connection to describe - one of our own pages - means no indicator. See
+   setScheme in chrome.js for why this is an attribute rather than `hidden`. */
+.scheme:not([data-kind]) { display: none; }
+
+/* The padlock opens the site panel. A round target a little larger than the
+   glyph, placed so the glyph sits exactly where it did before it was a button. */
+.site-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0 3px 0 -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: default;
+  transition: background-color var(--fast) var(--ease);
+}
+.site-btn:hover { background: var(--wash-soft); }
+.site-btn:active { background: var(--wash); }
+.site-btn:has(> .scheme:not([data-kind])) { display: none; }
 
 .scheme {
   flex: none;
-  margin-right: 6px;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
   color: var(--text-dim);
-  font-size: 11px;
 }
+
+/* An unencrypted connection is worth a colour, and the warning colour is the
+   one the meter already uses for "you should look at this". It is not red:
+   plain http is a caution, not a failure, and spending the critical colour on
+   it would leave nothing louder for something that actually is. */
+.scheme[data-kind="insecure"] { color: var(--warn); }
+
+/* The zoom badge: quiet, and only there when the page is not at its usual size. */
+.zoom-badge {
+  flex: none;
+  height: 22px;
+  margin: 0 -8px 0 var(--s2);
+  padding: 0 var(--s2);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--wash-soft);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.zoom-badge:hover { background: var(--wash); color: var(--text); }
+.zoom-badge:active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* The pill draws the focus ring for this field - see `.omnibox:focus-within` -
+   so the field must not draw a second one inside it. */
+#url:focus-visible { box-shadow: none; }
 
 #url {
   flex: 1;
   min-width: 0;
+  /* A long address ends in an ellipsis at rest rather than a letter sliced in
+     half against the star; while editing, the field scrolls as fields do. */
+  text-overflow: ellipsis;
+  /* Fills the pill rather than sitting as a 20px line inside it. Centred text
+     looked the same either way; the difference is that a click 8px below the
+     baseline now lands on the field instead of on its container. */
+  align-self: stretch;
   border: none;
   background: transparent;
   color: var(--text);
@@ -232,9 +793,9 @@ html, body {
   align-items: center;
   gap: 7px;
   height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 15px;
+  padding: 0 11px;
+  border: none;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-dim);
   font: inherit;
@@ -242,7 +803,51 @@ html, body {
   cursor: default;
 }
 
-.meter:hover { background: var(--bg-raised); color: var(--text); }
+.meter:hover { background: var(--wash); color: var(--text); }
+
+/* Private windows: the pill, and a tint on the toolbar so the window is
+   recognisable at a glance from across the room, not only up close. */
+.private-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 11px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--private) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--private) 14%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: default;
+}
+.private-pill:hover { background: color-mix(in srgb, var(--private) 22%, transparent); }
+.private-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--warn);
+}
+.private-pill[data-state="ready"] .private-dot { background: var(--ok); }
+.private-pill[data-state="failed"] .private-dot,
+.private-pill[data-state="stopped"] .private-dot { background: var(--crit); }
+.private-pill[data-state="refused"] .private-dot { background: var(--warn); }
+.onion-btn {
+  height: 26px;
+  padding: 0 11px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--private) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+}
+.onion-btn:hover { background: color-mix(in srgb, var(--private) 18%, transparent); }
+body.incognito .toolbar { background: color-mix(in srgb, var(--private) 7%, transparent); }
+body.incognito .star { opacity: 0.35; }
+body[data-meter="off"] .meter { display: none; }
+body[data-dots="off"] .tier { display: none; }
 
 .meter-bar {
   width: 46px;
@@ -252,10 +857,18 @@ html, body {
   overflow: hidden;
 }
 
+/*
+ * The fill is full width and scaled down, not zero width and scaled up.
+ *
+ * It was `width: 0`, and the renderer animates this with `scaleX` - so the
+ * meter has never painted a single pixel of fill in any build. Zero times any
+ * factor is zero. What shipped was a grey pill beside a figure, which reads as
+ * a broken control rather than as a gauge at 6%.
+ */
 .meter-fill {
   display: block;
   height: 100%;
-  width: 0;
+  width: 100%;
   border-radius: 3px;
   background: var(--ok);
   /* Transform-only so the meter never causes layout on the governor tick. */
@@ -267,4 +880,1609 @@ html, body {
 .meter[data-pressure="high"]     .meter-fill { background: var(--warn); }
 .meter[data-pressure="critical"] .meter-fill { background: var(--crit); }
 
-.meter-text { font-size: 11px; }
+.meter-text { font-size: var(--fs-small); color: color-mix(in srgb, var(--text) 78%, var(--bg)); }
+
+/* ---------------------------------------------------------------- */
+/* Loading line                                                      */
+/* ---------------------------------------------------------------- */
+
+/*
+ * Sits on the toolbar's bottom edge, which is the boundary between the browser
+ * and the page - so it reads as the page arriving rather than as a widget.
+ *
+ * `scaleX` on a positioned element, so it never touches layout and never
+ * repaints the toolbar around it. `will-change` is deliberately absent: it
+ * would keep a compositor layer alive for the whole life of the window to save
+ * a promotion that happens once per navigation.
+ */
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  /* One flat colour: the line's movement is what says it is going somewhere. */
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toolbar { position: relative; }
+
+/*
+ * The creep. Fast at first, then slower and slower, never quite arriving -
+ * because arriving before the page has would be a lie, and stopping dead looks
+ * like a hang. 12s to reach 92%, which no real page outlasts.
+ */
+.progress.loading {
+  opacity: 1;
+  animation: progress-creep 12s cubic-bezier(0, 0.6, 0.2, 1) forwards;
+}
+
+/*
+ * Done: snap to full, then fade. The width transition is quick because the
+ * page is already on screen by now - this is an acknowledgement, not a wait.
+ */
+.progress.done {
+  opacity: 0;
+  transform: scaleX(1);
+  transition: transform 120ms ease-out, opacity 220ms ease-out 120ms;
+}
+
+@keyframes progress-creep {
+  0%   { transform: scaleX(0); }
+  20%  { transform: scaleX(0.35); }
+  50%  { transform: scaleX(0.65); }
+  100% { transform: scaleX(0.92); }
+}
+
+/* Reduced motion keeps the information and drops the movement: the line is
+   there while loading, gone when not, with no creep and no fade. */
+body.calm .progress.loading { animation: none; transform: scaleX(0.5); }
+body.calm .progress.done { transition: none; }
+
+/* ---------------------------------------------------------------- */
+/* Sidebar layout                                                    */
+/* ---------------------------------------------------------------- */
+
+/*
+ * The tab strip down the side, Arc/Zen style.
+ *
+ * The main process gives this view a tall narrow rectangle instead of a short
+ * wide one; everything below is the stylesheet turning the same markup to face
+ * the other way. No elements are added or removed, so there is one tab strip
+ * with one set of behaviours, not two that drift.
+ *
+ * Why anyone would want it: a horizontal strip divides a fixed width by the
+ * number of tabs, so the twentieth tab is a favicon and a sliver. A column
+ * divides height instead, and windows have height to spare - thirty tabs still
+ * show their titles. It costs horizontal space, which is why `top` stays the
+ * default: most pages are laid out for width.
+ */
+body[data-layout="left"] {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * The toolbar goes above the tabs and wraps, so the address bar gets the
+ * column's full width rather than a third of it next to the nav buttons.
+ */
+body[data-layout="left"] .toolbar {
+  order: 1;
+  flex-wrap: wrap;
+  height: auto;
+  padding: 8px;
+  row-gap: 8px;
+  border-bottom: none;
+  background: transparent;
+  /* Clear of the window buttons, which the system draws at the top of the
+     window - in this layout that is above the sidebar's own top corner. */
+  padding-top: calc(env(titlebar-area-y, 0px) + 8px);
+}
+
+/* Last, and on a line of its own: `flex-basis: 100%` is what wraps it, and the
+   order puts it after every control above rather than between two of them. */
+/*
+ * The address bar needs its own surface here, not a recess.
+ *
+ * `.omnibox` is `--bg` on a `--tint-2` toolbar: darker than what it sits on, so
+ * it reads as a well cut into the bar. In this layout the toolbar is
+ * transparent over the strip, which is *also* `--bg` - so the pill was exactly
+ * the colour of its own background and the most important control in the
+ * browser rendered as a line of text with a padlock beside it. Photographed,
+ * because it is invisible in the sense that there is nothing there to notice.
+ */
+body[data-layout="left"] .omnibox {
+  /* Last on its own line, under the meter. Two children sharing an order value
+     fall back to document order, which would have put the address bar above the
+     memory bar - so this moves with the meter whenever either changes. */
+  order: 6;
+  flex: 1 0 100%;
+  margin: 0;
+  background: var(--bg-input);
+}
+body[data-layout="left"] .omnibox:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-input));
+}
+
+/*
+ * Every control in this row needs an explicit order, including the ones whose
+ * order happens to match the markup.
+ *
+ * The star had none, so it fell to 0 and jumped ahead of the back button - the
+ * bookmark control was the first thing in the sidebar, before the navigation
+ * it belongs beside. An unset `order` is 0, which sorts *before* 1, and that is
+ * the trap: leaving a flex child out of the ordering does not leave it where it
+ * was, it moves it to the front.
+ */
+body[data-layout="left"] .nav { order: 1; }
+/* And the private window's own controls fell into it a third time: the Private
+   pill and ".onion" sat above the back button. They go under the address bar,
+   which is what they describe. */
+body[data-layout="left"] :is(.private-pill, #onion, #slow-js) { order: 7; }
+
+/*
+ * The meter gets the column's full width here, rather than being squeezed onto
+ * the end of the button row and wrapping.
+ *
+ * A 240px column cannot hold four controls and a memory reading on one line, so
+ * something has to give; the meter is the one that gains from the space. Across
+ * the top it is a 46px sliver beside the address bar, and down the side it is a
+ * bar the width of the sidebar with the figure at the end of it - the same
+ * instrument, reading properly at the size it has been given.
+ */
+body[data-layout="left"] .meter {
+  order: 5;
+  flex: 1 0 100%;
+  justify-content: space-between;
+  padding: 0 6px;
+}
+body[data-layout="left"] .meter-bar { flex: 1; width: auto; }
+
+/* The strip becomes the column: tabs stacked, + beneath them, filler last so
+   the empty space below is still draggable. */
+body[data-layout="left"] .tabstrip {
+  /* Third, because the find bar takes the place between the toolbar and the
+     tabs when it is up - see the find bar rules at the foot of this file. */
+  order: 3;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  min-height: 0;
+  padding: 0 8px 8px;
+}
+
+/* A column scrolls rather than shrinking its children. Thirty tabs at full
+   height is the point of this layout, so they keep their height and the
+   overflow becomes a scrollbar. */
+body[data-layout="left"] .tabs {
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Full width, fixed height, square-ish corners: a row in a list rather than a
+   folder tab, because nothing sits underneath it to be a tab *of*. */
+body[data-layout="left"] .tab {
+  flex: none;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 32px;
+  border-radius: var(--radius);
+}
+
+/* Full width too, so it reads as the next row in the list - which is where the
+   eye already is after the last tab - and labelled, because a + centred in a
+   240px column is a glyph with nothing to belong to. */
+body[data-layout="left"] .new-tab {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  margin: 4px 0 0;
+  padding: 0 11px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+
+body[data-layout="left"] .new-tab-label { display: block; }
+body[data-layout="left"] .new-tab:hover { color: var(--text); }
+
+/* Never across the top: there the button is a 28px square beside the tabs. */
+.new-tab-label {
+  display: none;
+  font-size: var(--fs-small);
+}
+
+body[data-layout="left"] .strip-filler { flex: 1 1 auto; }
+
+/*
+ * The strip's colour down the side too: flat, like the top.
+ */
+body[data-layout="left"] .tabstrip {
+  background: color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent);
+}
+
+/* A row in a list is marked down its leading edge, not along its top: that is
+   where the eye tracks a column, and it is what Arc and Zen both do. */
+body[data-layout="left"] .tab.active::before {
+  left: 0;
+  right: auto;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  height: auto;
+  border-radius: 0 2px 2px 0;
+}
+
+body[data-layout="left"] .tab.active { background: var(--bg-input); }
+
+/*
+ * The tucked-away panel in a tone of its own, set off from the page under it.
+ *
+ * It was the theme's `--bg`, and so - on most of our own pages - was the
+ * page it slides out over, the tabs floating on it with nothing to say where
+ * the panel ended. It steps away from the page: deeper in a light theme, and in a dark
+ * one lighter than Legacy's pages or darker than the designs', so the panel
+ * reads as laid over the page either way.
+ *
+ * Only the default strip, and only the panel that slides out when the tabs
+ * are tucked away: a colour chosen in Settings is used as it is, and the
+ * column pinned beside the page, the band across the top and the window
+ * round the page keep the theme's surface.
+ *
+ * What sat on the old surface is moved with it: secondary text is inked
+ * darker, to keep 7:1 on the deeper tone, and the address bar and the open
+ * tab are raised clear of it - in a dark theme `--bg-input` was within a
+ * shade of the new column, and both all but vanished into it.
+ */
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
+  --side: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, var(--text) 7%, var(--bg)));
+  --side-dim: color-mix(in srgb, var(--text) 35%, var(--text-dim));
+  --side-raised: light-dark(var(--bg-raised), color-mix(in srgb, var(--text) 15%, var(--bg)));
+}
+/* The designs' own pages sit on the raised `--bg-input` (newtab.css), which in
+   a dark theme is the lighter way, so there the side steps down instead; and
+   Grid's light page is grey, not white, so its side goes a step deeper. */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
+  --side: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
+  --side-raised: light-dark(var(--bg-raised), var(--bg-input));
+}
+body[data-design="grid"][data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
+  --side: light-dark(color-mix(in srgb, var(--text) 16%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
+}
+/* Only the panel takes it. Floating free, the whole view is the panel; under
+   the band across the top it is the tabs and the card behind them, and the
+   band itself - the address bar's row - stays the theme's own surface. */
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) { --strip: var(--side); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"][data-band="true"] :is(.tabstrip, .findbar) { --strip: var(--side); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"][data-band="true"]::before { background: var(--side); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) :is(.toolbar, .tabstrip, .findbar),
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"][data-band="true"] :is(.tabstrip, .findbar) { --text-dim: var(--side-dim); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) .omnibox { background: var(--side-raised); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) .omnibox:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--side-raised));
+}
+/* Paper marks the open tab with a rule and Grid inverts it; neither has a
+   surface to raise. */
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-design="paper"]):not([data-design="grid"]) .tab.active {
+  background: var(--side-raised);
+}
+
+/* ---------------------------------------------------------------- */
+/* Bookmark star                                                     */
+/* ---------------------------------------------------------------- */
+
+/*
+ * Outline until it is saved, filled after - the convention every browser uses,
+ * so it needs no explaining. The fill is the accent rather than a yellow,
+ * because this chrome has one accent and a second highlight colour would be a
+ * second thing to theme.
+ */
+.star svg { fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linejoin: round; }
+.star.on { color: var(--accent-text); }
+.star.on svg { fill: currentColor; }
+.reader-btn.on { color: var(--accent-text); }
+
+/* A saved bookmark is worth one beat of acknowledgement and no more. */
+.star.on svg { animation: star-pop var(--slow) var(--ease); }
+@keyframes star-pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+body.calm .star.on svg { animation: none; }
+
+/* ---------------------------------------------------------------- */
+/* Hit targets                                                       */
+/* ---------------------------------------------------------------- */
+
+/*
+ * Some controls are drawn smaller than they can comfortably be hit.
+ *
+ * The close cross is 18px because a bigger cross would dominate the tab, and
+ * the answer is not to draw it larger but to make the *target* larger than the
+ * paint. Three declarations do that without moving a pixel of the design:
+ * padding grows the box the pointer has to find, the matching negative margin
+ * hands the space back to the layout, and `background-clip` keeps the hover
+ * square on the cross. 18px painted, 26px clickable, which clears the 24px
+ * minimum.
+ *
+ * Not a transparent `::after`, which is the usual trick and does not work
+ * here: Chromium hit-tests a <button> as one box and never consults generated
+ * content overflowing it, so the pseudo-element is painted and unclickable.
+ * Measured - `elementFromPoint` one pixel outside the border box returned the
+ * container, not the button.
+ */
+.tab-close {
+  padding: 4px;
+  margin: -4px;
+  box-sizing: content-box;
+  background-clip: content-box;
+}
+
+/* ------------------------------------------------------------------ */
+/* The bookmarks bar                                                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A 34px band under the toolbar, and the window reserves exactly that much -
+ * see BOOKMARKS_BAR_HEIGHT in window.js. The two numbers have to agree: the
+ * chrome is a view clipped to the height the shell gives it, so a bar taller
+ * than the reservation is a bar with its bottom row cut off, and a shorter one
+ * leaves a strip of chrome background above the page.
+ *
+ * Hidden rather than empty when it is switched off or when the tab strip runs
+ * down the side, because in both cases the shell has given that space back to
+ * the page.
+ */
+.bookmarks {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  height: 34px;
+  padding: 0 6px;
+  overflow: hidden;
+  background: var(--tint-1);
+  border-bottom: 1px solid var(--border);
+}
+
+body.with-bookmarks .bookmarks { display: flex; }
+
+/* Nothing saved yet: no band at all. It used to stay, empty, so the page below
+   would not jump the first time a bookmark was added - which meant 34px of
+   nothing under the toolbar of every page for as long as you had no bookmarks.
+   The jump happens once, when you save your first; the empty band was there
+   every day until then. The window is what actually reserves the room, so the
+   decision is `bookmarksBarVisible()` in window.js and this class follows it. */
+
+.bookmark {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 190px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: default;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.bookmark:hover { background: var(--wash-soft); }
+.bookmark:active { background: var(--wash); }
+
+.bookmark-label {
+  /* Or the ellipsis never applies: a flex item will not shrink below its
+     content, and a wide-glyph title ran on into the next bookmark. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The same stand-in letter the tab strip and the history list use, from the
+   same `siteHue`, so a site is one colour everywhere in the browser. */
+.bookmark-chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  text-transform: uppercase;
+  color: hsl(var(--hue, 220) var(--chip-fg-s) var(--chip-fg-l));
+  background: hsl(var(--hue, 220) var(--chip-bg-s) var(--chip-bg-l));
+}
+
+
+/* And it stops painting once the site's own logo is up, rather than showing
+   through it. `body` is in the selector only to out-specify the variants above. */
+body .bookmark-chip.has-icon {
+  background: none;
+  color: transparent;
+}
+
+.bookmark-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+}
+
+/* ------------------------------------------------------------------ */
+/* The downloads button                                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Appears when there is something to show and not before - see
+ * `renderDownloadsButton`. The ring underneath fills while a file is arriving,
+ * so the toolbar answers "is it done yet" without the panel being opened.
+ *
+ * `position: relative` so the ring has something to sit in; `overflow: hidden`
+ * so it is clipped to the button's rounded corners rather than drawing a bar
+ * across the toolbar.
+ */
+.icon-btn.downloads { position: relative; }
+
+.icon-btn .downloads-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.downloads-ring circle { fill: none; stroke-width: 1.5; }
+.downloads-ring .ring-track { stroke: color-mix(in srgb, var(--accent) 18%, transparent); }
+.downloads-ring .ring-fill {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-dasharray: 0 100;
+  /* Drawn by the dash, so a download updating twice a second repaints one
+     small circle and never lays out the toolbar. */
+  transition: stroke-dasharray 200ms linear;
+}
+
+/* A finished download leaves the button in place - you may still want the
+   panel - but nothing about it should keep asking for attention. */
+.icon-btn.downloads[data-active="false"] .downloads-ring { opacity: 0; }
+
+/* Finished: the ring is drawn closed and fades, and the arrow drops into the
+   tray. Once, and not again until the next download finishes. */
+.icon-btn.downloads.landed .downloads-ring { animation: download-ring-done 700ms var(--ease) forwards; }
+.icon-btn.downloads.landed .ring-fill { stroke-dasharray: 100 100; transition: none; }
+.icon-btn.downloads.landed > svg:first-child { animation: download-drop 360ms var(--ease-out); }
+@keyframes download-ring-done {
+  0%, 45% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes download-drop {
+  0% { transform: translateY(-3px); }
+  60% { transform: translateY(1.5px); }
+  100% { transform: none; }
+}
+body.calm .icon-btn.downloads.landed :is(.downloads-ring, svg) { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.downloads.landed :is(.downloads-ring, svg) { animation: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/* The sliding side strip                                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Zen's shape: the strip is out of the way until the pointer reaches the
+ * window's left edge, and the page keeps the whole window either way.
+ *
+ * The slide itself is the *view's* width, changed by the browser process - a
+ * view cannot be animated from inside its own page, and it is the view that has
+ * to narrow or the page underneath stays covered. What this file does is make
+ * the collapsed state look like an edge rather than a clipped sidebar, and
+ * bring the contents back without a flash of half-drawn layout.
+ */
+
+/*
+ * The collapsed edge is painted by the *body*, not by the tab strip.
+ *
+ * It was the strip, and that is the bug: the strip is one child of a column
+ * that also holds the toolbar, so the edge was a vertical slice through the
+ * chrome's own layout - the toolbar's share at the top showing plain body
+ * colour, the strip's share below showing the accent hairline, and a hard seam
+ * where they met about a third of the way down. Photographed off the
+ * recording: `#161614` above the seam, `#2a4030` below it, at the same x.
+ *
+ * Painting the body means the whole ten pixels are one colour whatever the
+ * column happens to contain, so there is nothing to line up and nothing to
+ * come apart.
+ */
+body[data-sidebar="true"][data-sidebar-open="false"] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--strip));
+}
+
+body[data-sidebar="true"][data-sidebar-open="false"] .tabstrip { background: none; }
+
+/*
+ * And everything inside stops painting, rather than only fading.
+ *
+ * `opacity: 0` leaves an element composited, so a fade interrupted by the
+ * view's own resize can leave a tab row half-painted in the slit - a stray
+ * lighter block a third of the way down the edge, which is the other artefact
+ * in that recording. `visibility` is delayed by the length of the fade so the
+ * fade still runs, and then the elements are genuinely not drawn.
+ */
+body[data-sidebar="true"][data-sidebar-open="false"] .tabs,
+body[data-sidebar="true"][data-sidebar-open="false"] .new-tab,
+body[data-sidebar="true"][data-sidebar-open="false"] .toolbar,
+body[data-sidebar="true"][data-sidebar-open="false"] .bookmarks,
+body[data-sidebar="true"][data-sidebar-open="false"] .findbar,
+body[data-sidebar="true"][data-sidebar-open="false"] .pin {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 90ms ease, visibility 0s linear 90ms;
+}
+
+body[data-sidebar="true"][data-sidebar-open="true"] .tabs,
+body[data-sidebar="true"][data-sidebar-open="true"] .new-tab,
+body[data-sidebar="true"][data-sidebar-open="true"] .toolbar,
+body[data-sidebar="true"][data-sidebar-open="true"] .bookmarks,
+body[data-sidebar="true"][data-sidebar-open="true"] .findbar,
+body[data-sidebar="true"][data-sidebar-open="true"] .pin {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 140ms ease 40ms, visibility 0s;
+}
+
+
+/*
+ * The pin, at the foot of the strip.
+ *
+ * Bottom left, where it was asked for, and drawn only in sidebar mode - across
+ * the top nothing slides, so there is nothing to hold open. `margin-top: auto`
+ * is what puts it at the foot: the strip is a column, and this is the last
+ * thing in it.
+ */
+.pin {
+  display: none;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 0 10px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: default;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease),
+              opacity 140ms ease;
+}
+
+body[data-layout="left"] .pin { display: grid; }
+
+.pin:hover { background: var(--wash-soft); color: var(--text); }
+
+/* Pinned reads as pressed. A toggle that looks identical in both states is a
+   toggle nobody trusts. */
+.pin[aria-pressed="true"] {
+  background: var(--wash);
+  color: var(--accent-text);
+}
+
+.pin svg {
+  width: var(--icon);
+  height: var(--icon);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--fast) var(--ease);
+}
+
+/* ------------------------------------------------------------------ */
+/* Find in page                                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A strip of chrome, not a card floating over the page.
+ *
+ * Chrome's find bar hangs over the top right corner of the content, which on a
+ * page of search results covers the first result and on a document covers the
+ * heading. This browser already owns the mechanism for a band that takes its
+ * room from the page rather than borrowing it - the bookmarks bar - so the find
+ * bar is one too, and the window adds its 38px to the chrome while it is up.
+ */
+/* The find bar and the downloads button fade in rather than appearing in one
+   frame. An animation plays again every time `hidden` comes off. */
+.findbar,
+.icon-btn.downloads { animation: appear var(--fast) var(--ease-out); }
+@keyframes appear { from { opacity: 0; } }
+
+.findbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 38px;
+  padding: 0 var(--s2) 0 var(--s3);
+  background: var(--tint-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.find-icon {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  color: var(--text-dim);
+}
+
+#find-input {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+/* The bar is the field's frame; theme.css's focus ring drew a hard rectangle
+   inside it, touching its top and bottom edges. */
+#find-input:focus-visible { box-shadow: none; }
+
+/* The count sits between the field and the steppers, which is where every
+   browser puts it - and it is tabular, because it changes on every keystroke
+   and digits of different widths make it twitch. */
+.find-count {
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Nothing matched. The field is what went wrong, so the field is what says so -
+   a red count beside a normal-looking box reads as a decoration. */
+.findbar.none #find-input { color: var(--crit); }
+.findbar.none .find-count { color: var(--crit); }
+
+.find-step svg { stroke-width: var(--icon-stroke); }
+
+/* A divider between the steppers and the close button: they do different
+   things, and at 28px apart with no rule between them they read as one group
+   of three. */
+/* Set apart by space alone. A border on the button itself pushed its icon off
+   centre and gave it a half-square hover beside round neighbours. */
+#find-close { margin-left: var(--s2); }
+
+/*
+ * The find bar, down the side.
+ *
+ * Two things differ from the horizontal layout, and both follow from the column
+ * being 240px wide. It sits directly under the toolbar - which is where the
+ * address bar is, and where the eye already is - rather than at the foot of the
+ * tab list; and the row that fits comfortably across a 1280px toolbar wraps
+ * into two here, the field on its own line with the count and the three buttons
+ * under it.
+ *
+ * A body child in a column, so `flex-basis: 100%` would mean the full *height*.
+ * It takes the height it needs and no more.
+ */
+body[data-layout="left"] .findbar {
+  order: 2;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  height: auto;
+  margin: 0 8px 4px;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+
+body[data-layout="left"] .find-icon { order: 0; }
+body[data-layout="left"] #find-input { order: 1; flex: 1 1 60%; height: 22px; }
+/* The count shares the second line with the buttons rather than taking one of
+   its own: three lines for a find bar is a third of the tab list gone. */
+body[data-layout="left"] .find-count { order: 2; flex: 1 1 auto; }
+body[data-layout="left"] .find-step,
+body[data-layout="left"] #find-close { order: 3; }
+
+/* ------------------------------------------------------------------ */
+/* Full screen, down the side: the strip as a floating panel           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The page has the whole screen and the strip sits on top of it.
+ *
+ * That is the shape of the layout in full screen, and it is what makes the
+ * strip *shorter* rather than narrower: it stops filling a full-height column
+ * and becomes a panel as tall as its own rows. The window sizes the view to the
+ * height this measures itself at - see `reportChromeHeight` in chrome.js - so
+ * everything here has to size to its content rather than to the view.
+ */
+body[data-floating="true"] {
+  justify-content: flex-start;
+  padding-bottom: 8px;
+  border-radius: 14px;   /* window.js FLOAT_RADIUS, the curve the view is clipped to */
+  /* An edge, because the panel is now over a page rather than against the
+     window's own border, and without one a dark strip on a dark site has no
+     boundary at all. */
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  overflow: hidden;
+}
+
+/*
+ * The tab list stops stretching.
+ *
+ * `flex: 1 1 auto` is what makes the column fill the window in the docked
+ * shape, and it is exactly wrong here: a panel that is as tall as its contents
+ * cannot have a child claiming whatever height is left. It still scrolls, so
+ * forty tabs are a scrolling panel rather than a panel taller than the screen -
+ * the window clamps the height it was told to the room there is.
+ */
+body[data-floating="true"] .tabstrip {
+  flex: 0 1 auto;
+}
+
+/* Nothing is reserved for the window buttons: full screen has none. */
+body[data-floating="true"] .toolbar {
+  padding-top: 8px;
+}
+
+/*
+ * The overflow chevron, at the end of the bookmarks bar.
+ *
+ * A bar that does not wrap and does not scroll has to say when it is holding
+ * more than it shows; without this the last bookmark was cut in half by the
+ * window edge and the rest were simply gone. Styled as a bookmark rather than
+ * as an icon button so it sits on the same baseline as the row it ends.
+ */
+.bookmark-more {
+  flex: none;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 6px;
+  color: var(--text-dim);
+}
+.bookmark-more svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bookmark-more:hover { color: var(--text); }
+
+/* ---------------------------------------------------------------- */
+/* Narrow tabs                                                       */
+/* ---------------------------------------------------------------- */
+
+/*
+ * What a tab keeps as it narrows, in the order Chrome gives things up.
+ *
+ * Past the floor of a readable title the strip used to go on drawing one -
+ * two letters and a clipped third, or on a loading tab a lone stroke of a
+ * glyph beside the spinner. Below that width a tab is its icon, centred; the
+ * active one trades the icon for its close button, since that is the one
+ * thing you can still do to it; and a background tab stops offering a close
+ * button a stray click could hit.
+ */
+/* Measured against the tab's content box, which is 19px narrower than the tab
+   (its 11px and 8px padding): these are tab widths of 96px and 64px. Written
+   as 96 and 64, titles disappeared from 115px tabs and icons from 83px ones. */
+@container tab (max-width: 77px) {
+  .tab-title, .tier { display: none; }
+  .tab-icon { margin-inline: auto; }
+  .tab:not(.active) .tab-close { display: none; }
+}
+@container tab (max-width: 45px) {
+  /* Not a pinned tab: it has no close button to show instead, and hiding its
+     icon left the active one an empty slot. */
+  .tab.active:not(.pinned) .tab-icon { display: none; }
+  .tab.active .tab-close { margin-inline: auto; }
+}
+
+/* ---------------------------------------------------------------- */
+/* Designs                                                           */
+/* ---------------------------------------------------------------- */
+
+/*
+ * What each design changes about the strip and the address bar. Colours are
+ * not here: the neutrals come from theme.css and the accent, strip colour and
+ * translucency from the user, so every rule below is shape only. Legacy is the
+ * rules above, untouched.
+ */
+
+/* Ledger: the tab in front is a soft chip; no separators, no accent bar. */
+body[data-design="ledger"] .tab { border-radius: var(--radius); }
+body[data-design="ledger"] .tab::after,
+body[data-design="ledger"] .tab.active::before { display: none; }
+body[data-design="ledger"] .tab.active { background: var(--bg-raised); }
+body[data-design="ledger"] .omnibox { border-radius: var(--radius); }
+
+/* Paper: tabs are words. The one in front is underlined in the accent, a
+   sleeping one is dimmed. The address bar is a ruled line. */
+body[data-design="paper"] .tab { border-radius: 0; }
+body[data-design="paper"] .tab::after { display: none; }
+body[data-design="paper"] .tab:hover,
+body[data-design="paper"] .tab.active { background: transparent; }
+body[data-design="paper"] .tab.active::before {
+  top: auto; bottom: 5px; left: 11px; right: 11px; height: 1.5px; border-radius: 0;
+}
+body[data-design="paper"][data-layout="left"] .tab.active::before {
+  top: 9px; bottom: 9px; left: 0; right: auto; width: 1.5px; height: auto;
+}
+/* A sleeping tab is dimmed, in the same face as the rest: a serif italic among
+   sans titles read as a font that failed to load, not as a state. */
+/* Asleep: set in italic rather than faded - faded, the title fell below
+   what can be read, and the hollow dot already says which tabs are asleep. */
+body[data-design="paper"] .tab:has(.tier[data-tier="discarded"]) .tab-title { color: var(--text-dim); font-style: italic; }
+/* A field with an edge all round, in Paper's near-square corners: a bare rule
+   under the text did not read as somewhere to type. */
+body[data-design="paper"] .omnibox,
+body[data-design="paper"] .omnibox:hover,
+body[data-design="paper"] .omnibox:has(#url:focus) {
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 26%, transparent);
+  background: transparent;
+  box-shadow: none;
+}
+body[data-design="paper"] .omnibox:has(#url:focus) { border-color: var(--accent); }
+
+/* Grid: square cells with a rule between them; the tab in front is inverted. */
+body[data-design="grid"] .tab { border-radius: 0; border-right: 1px solid var(--border-soft); }
+body[data-design="grid"] .tab::after,
+body[data-design="grid"] .tab.active::before { display: none; }
+body[data-design="grid"] .tab.active { background: var(--text); color: var(--bg); }
+body[data-design="grid"] .tab.active .tab-close { color: var(--bg); }
+body[data-design="grid"] .tab.active .tab-close:hover {
+  background-color: color-mix(in srgb, var(--bg) 22%, transparent);
+  color: var(--bg);
+}
+body[data-design="grid"] .omnibox { border: 1px solid color-mix(in srgb, var(--text) 26%, transparent); background: var(--bg-input); }
+body[data-design="grid"] .omnibox:has(#url:focus) { border-color: var(--accent); }
+body[data-design="grid"] .omnibox:has(#url:focus) { box-shadow: none; }
+
+/* ---------------------------------------------------------------- */
+/* Detached strip                                                    */
+/* ---------------------------------------------------------------- */
+
+/* The strip's foot, where the pin sits. */
+.strip-foot { display: flex; flex: none; }
+
+/*
+ * Detached and away: nothing is drawn. The view is a clear ten-pixel edge over
+ * the page (the window leaves it transparent), there to be pointed at, not
+ * seen - a painted stripe read as a stray line down the side of every page.
+ */
+/* Not draggable either: on Windows a drag region never receives the hover
+   that brings the strip out. */
+body[data-detached="true"][data-floating="false"] { background: transparent; }
+body[data-detached="true"][data-floating="false"] .tabstrip { -webkit-app-region: no-drag; }
+body[data-detached="true"][data-floating="false"][data-sidebar-open="false"] > * { visibility: hidden; }
+
+/*
+ * The strip's slide, one motion for every way it comes out. Measured frame by
+ * frame: the old 140ms curve covered half the distance in its first frame and
+ * settled in four more, which reads as a jump, not a slide. easeOutCubic over
+ * 200ms moves each frame a little less than the one before (55, 50, 40, 30px
+ * … at 60Hz) across twelve. Away is quicker and accelerates, as things leaving
+ * do; the browser hides the view only when it has finished (sidebar-slid).
+ */
+:root {
+  --strip-in: 160ms;
+  --strip-in-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --strip-out: 150ms;
+  --strip-out-ease: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Detached and out: a rounded panel over the page, the height of the window
+   less its margins - the window clips the view to the same corners. It
+   slides in from the edge and back out to it; with reduced motion it is
+   simply there, and simply gone. */
+body[data-detached="true"][data-floating="true"] {
+  box-shadow: none;
+  border-radius: 14px;
+  /* Out decelerating evenly: each frame a little shorter a step than the
+     last (easeOutCubic), so the first frame is not already half the way. */
+  animation: detached-in var(--strip-in) var(--strip-in-ease);
+  /* The panel's surface is a layer inside the body rather than the body's own
+     background: a body's background is painted across the whole view whatever
+     transform the body has, so sliding it left a dark block where the panel
+     had not arrived yet. The layer moves with the body. */
+  background: transparent;
+  border-color: transparent;
+}
+body[data-detached="true"][data-floating="true"]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  /* The curve the window clips the view to (window.js FLOAT_RADIUS): with the
+     design's own radius the border was cut off at the corners, or a sliver of
+     page showed inside them. */
+  border-radius: 14px;
+  background: var(--strip);
+  /* A border you can see: the panel lies over a page that is often the same
+     dark, and a hairline in a tint of the accent vanished into it. */
+  border: 1px solid color-mix(in srgb, var(--text) 22%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent);
+}
+body[data-detached="true"][data-floating="true"] .tabstrip { flex: 1 1 auto; }
+body[data-detached="true"]:not([data-band="true"]).sliding-out {
+  transform: translateX(calc(-100% - 12px));
+  opacity: 0.4;
+  transition: transform var(--strip-out) var(--strip-out-ease), opacity var(--strip-out) ease-in;
+}
+@keyframes detached-in {
+  from { transform: translateX(calc(-100% - 12px)); opacity: 0.4; }
+  to   { transform: none; opacity: 1; }
+}
+body.stays[data-detached="true"][data-floating="true"],
+body.calm[data-detached="true"][data-floating="true"],
+body.calm[data-detached="true"].sliding-out { animation: none; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-detached="true"][data-floating="true"],
+  body[data-detached="true"]:not([data-band="true"]).sliding-out { animation: none; transition: none; }
+}
+
+/* Grid numbers its tabs, as its mockup does: the number is the tab's place in
+   the strip, set in the mono face before its title. */
+body[data-design="grid"] .tabs { counter-reset: tab; }
+body[data-design="grid"] .tab { counter-increment: tab; }
+body[data-design="grid"] .tab-title::before {
+  content: counter(tab);
+  margin-right: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+body[data-design="grid"] .tab.active .tab-title::before {
+  color: color-mix(in srgb, var(--bg) 55%, var(--text));
+}
+
+/*
+ * Translucent, down the side: the window behind is tinted with the strip's own
+ * colour and translucency (window.js), so the strip stops painting its own on
+ * top of it - a second coat made the column denser than the band beside it.
+ */
+body[data-layout="left"][data-translucent="on"],
+body[data-layout="left"][data-translucent="on"] .tabstrip { background: transparent; }
+
+/*
+ * Designs, down the side: the strip each design was drawn with, not Legacy's
+ * column in new colours. The navigation row stays on top and the address bar
+ * under it; the memory figure goes to the foot, beside the pin, where the
+ * mockups keep it out of the way of the tabs.
+ */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"] .meter {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  flex: none;
+  width: auto;
+  padding: 0;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"] .meter-bar { flex: none; width: 56px; }
+/* Not in the band across the top, which is a toolbar the meter belongs on,
+   out or in: hiding it there made the task manager blink with the panel. */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"][data-sidebar-open="false"]:not([data-pinned="true"]):not([data-band="true"]) .meter { visibility: hidden; }
+
+/* Ledger: chips on a sage column, the open tab raised like a card. */
+body[data-design="ledger"][data-layout="left"] .toolbar { padding: calc(env(titlebar-area-y, 0px) + 12px) 10px 10px; row-gap: 12px; }
+body[data-design="ledger"][data-layout="left"] .omnibox { height: 36px; border-radius: 10px; }
+body[data-design="ledger"][data-layout="left"] .tabstrip { padding: 0 10px 10px; }
+body[data-design="ledger"][data-layout="left"] .tab { height: 36px; padding: 0 12px; border-radius: var(--radius); }
+body[data-design="ledger"][data-layout="left"] .tab.active { background: var(--bg-raised); font-weight: 500; }
+body[data-design="ledger"][data-layout="left"] .new-tab { height: 36px; padding: 0 12px; }
+
+/* Paper: words in a margin, the open one marked by a rule in the accent. */
+body[data-design="paper"][data-layout="left"] .toolbar { padding: calc(env(titlebar-area-y, 0px) + 12px) 12px 14px 14px; row-gap: 14px; }
+body[data-design="paper"][data-layout="left"] .tabstrip { padding: 0 12px 12px 14px; }
+body[data-design="paper"][data-layout="left"] .tab { height: 34px; padding: 0 10px 0 12px; }
+body[data-design="paper"][data-layout="left"] .tab:not(.active) { color: var(--text-dim); }
+body[data-design="paper"][data-layout="left"] .tab.active { background: transparent; }
+body[data-design="paper"][data-layout="left"] .new-tab { height: 34px; padding: 0 12px; }
+
+/* Grid: a column of 48px cells, rules between them, numbers down the side. */
+body[data-design="grid"][data-layout="left"] .tabstrip { padding: 0; border-right: 1px solid var(--border); }
+body[data-design="grid"][data-layout="left"] .toolbar {
+  padding: env(titlebar-area-y, 0px) 0 0;
+  row-gap: 0;
+  border-right: 1px solid var(--border);
+}
+body[data-design="grid"][data-layout="left"] .toolbar .icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 0;
+}
+body[data-design="grid"][data-layout="left"] .nav .icon-btn { border-right: 1px solid var(--border-soft); }
+body[data-design="grid"][data-layout="left"] .omnibox {
+  height: 40px;
+  border-radius: 0;
+}
+body[data-design="grid"][data-layout="left"] .tabs { gap: 0; }
+body[data-design="grid"][data-layout="left"] .tab {
+  height: 44px;
+  padding: 0 14px;
+  border-right: 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+}
+body[data-design="grid"][data-layout="left"] .new-tab { height: 44px; margin: 0; padding: 0 14px; border-radius: 0; }
+body[data-design="grid"][data-layout="left"] .meter { font-family: var(--font-mono); text-transform: uppercase; }
+
+/* ------------------------------------------------------------------ */
+/* Designs, across the top: Chrome's shape, each design's own hand      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The foundation is the one everyone reads without thinking: a strip of tabs
+ * on the window colour, the open tab lifted into the toolbar's colour and run
+ * straight into it - curving out at its feet - and the toolbar and the
+ * bookmarks bar one surface below it. The designs then differ in the details
+ * Chrome leaves alone: the tab's corners, how the open one is marked, the
+ * type. Legacy keeps its own rules above.
+ */
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) {
+  --bar: var(--tint-2);
+  --foot: 8px;
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .bookmarks {
+  background: var(--bar);
+}
+/* One surface, one edge: with the bookmarks bar showing, the toolbar's own
+   bottom line went across the middle of it and the window read as three
+   stacked strips. The bar's line under both is the only one, as Safari draws
+   its favourites bar as part of the toolbar. */
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]).with-bookmarks .toolbar {
+  border-bottom-color: transparent;
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab {
+  height: 34px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab:hover:not(.active) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab.active {
+  background: var(--bar);
+  color: var(--text);
+  font-weight: 500;
+}
+/* The separators come back: without them equal-width tabs read as captions
+   floating at intervals. */
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab + .tab::after {
+  display: block;
+}
+/* The feet: the open tab curving out into the toolbar on both sides. */
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::before,
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: auto;
+  bottom: 0;
+  width: var(--foot);
+  height: var(--foot);
+  border-radius: 0;
+  opacity: 1;
+}
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::before {
+  left: calc(var(--foot) * -1);
+  right: auto;
+  background: radial-gradient(circle at 0 0, transparent calc(var(--foot) - 0.5px), var(--bar) var(--foot));
+}
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tab.active::after {
+  left: auto;
+  right: calc(var(--foot) * -1);
+  background: radial-gradient(circle at 100% 0, transparent calc(var(--foot) - 0.5px), var(--bar) var(--foot));
+}
+
+/* Ledger: soft, generous corners, and a sage wash on the tab you point at. */
+body[data-design="ledger"]:not([data-layout="left"]) { --foot: 10px; }
+body[data-design="ledger"]:not([data-layout="left"]) .tab { border-radius: 12px 12px 0 0; }
+body[data-design="ledger"]:not([data-layout="left"]) .tab:hover:not(.active) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: 10px;
+}
+
+/* Paper: an index card - barely rounded, a rule in the accent along its top
+   edge where Chrome has nothing, and titles set in the serif. */
+body[data-design="paper"]:not([data-layout="left"]) { --foot: 4px; }
+body[data-design="paper"]:not([data-layout="left"]) .tab { border-radius: 4px 4px 0 0; }
+body[data-design="paper"]:not([data-layout="left"]) .tab-title { font-family: var(--font-display); font-size: 14px; }
+body[data-design="paper"]:not([data-layout="left"]) .tab.active {
+  box-shadow: inset 0 1.5px 0 var(--accent);
+  font-weight: 400;
+}
+
+/* Grid: square cells ruled off from each other, no curves anywhere; the open
+   one carries a full-width bar in the text colour, and keeps its number. */
+body[data-design="grid"]:not([data-layout="left"]) .tab {
+  height: 40px;
+  border-radius: 0;
+  border-right: 0;
+}
+body[data-design="grid"]:not([data-layout="left"]) .tab + .tab::after { top: 0; bottom: 0; opacity: 1; }
+body[data-design="grid"]:not([data-layout="left"]) .tab.active {
+  background: var(--bar);
+  color: var(--text);
+  box-shadow: inset 0 3px 0 var(--text);
+}
+body[data-design="grid"]:not([data-layout="left"]) .tab.active .tab-close { color: var(--text-dim); }
+/* Room for the feet at the ends of the row: the list scrolls, so it clips
+   whatever reaches past its first and last tab, and a curve cut off on one
+   side is a notch. */
+:is(body[data-design="ledger"], body[data-design="paper"]):not([data-layout="left"]) .tabs { padding: 0 var(--foot); }
+
+/*
+ * Paper, across the top: folder tabs, not Ledger's lifted chips. Drawn in ink
+ * rather than filled: a ruled line runs along the top of the toolbar, and the
+ * open tab is a sheet with slanted sides outlined in the same hairline, open at
+ * the bottom where it stands on the rule - with the accent along its top edge.
+ * The others are titles only, dimmed. No feet: a folder tab has corners, not curves.
+ */
+body[data-design="paper"]:not([data-layout="left"]) .toolbar { border-top: 1px solid var(--border); }
+body[data-design="paper"]:not([data-layout="left"]) .tab {
+  isolation: isolate;
+  height: 36px;
+  margin-bottom: -1px;          /* over the rule, so the open sheet can break it */
+  padding: 0 10px 0 12px;       /* the room goes to the title */
+  gap: 6px;
+  border-radius: 0;
+  background: transparent;
+}
+body[data-design="paper"]:not([data-layout="left"]) .tab:hover:not(.active) { background: transparent; }
+body[data-design="paper"]:not([data-layout="left"]) .tab:not(.active) .tab-title { color: var(--text-dim); }
+body[data-design="paper"]:not([data-layout="left"]) .tab:hover:not(.active) .tab-title { color: var(--text); }
+body[data-design="paper"]:not([data-layout="left"]) .tab.active {
+  background: transparent;
+  box-shadow: none;
+}
+body[data-design="paper"]:not([data-layout="left"]) .tab.active::before {
+  content: '';
+  display: block;
+  position: absolute;
+  inset: 0 0 0 0;
+  /* Past the tab's own edges, so the slant takes its room from the gap
+     beside the tab rather than from the title: at the tab's width the top
+     was pinched and the title sat cramped inside it. */
+  left: -6px;
+  right: -6px;
+  width: auto;
+  height: auto;
+  z-index: -1;
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  background: var(--bar);
+  transform: perspective(64px) rotateX(3deg);
+  transform-origin: 50% 100%;
+}
+body[data-design="paper"]:not([data-layout="left"]) .tab.active::after { display: none; }
+body[data-design="paper"]:not([data-layout="left"]) .tabs { padding: 0 6px; }
+body[data-design="paper"]:not([data-layout="left"]) .tab + .tab::after { top: 11px; bottom: 11px; }
+
+/* While a menu or the suggestions lie over the chrome, nothing in it drags the
+   window: Windows hit-tests drag regions whatever view is on top, so the menu
+   over the side strip took no clicks at all (window.js, syncOverlay). */
+body[data-overlay="true"],
+body[data-overlay="true"] * { -webkit-app-region: no-drag !important; }
+
+/*
+ * Tucked away in a window, the toolbar is a slim bar across the top.
+ *
+ * The window buttons are drawn over the top-right corner of the window, and
+ * with the page run up to the top that corner was the page's - its account
+ * menu under the close button. The page starts below this bar instead, and the
+ * bar holds what the strip would otherwise have to be brought out for: back,
+ * forward, reload, the address, the star and the menu. The left edge brings
+ * the tabs out.
+ */
+.strip-count { display: none; }
+body[data-band="true"][data-layout="left"] .strip-count {
+  display: block;
+  flex: none;
+  padding: 2px 10px 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The view is clear: the band paints itself, and whatever else the view
+   covers - the whole window while the tabs are out - shows the page. A body
+   painted here showed as a dark window for the frame between the view growing
+   and the chrome hearing why. */
+body[data-band="true"][data-layout="left"] { background: transparent; }
+body[data-band="true"][data-layout="left"] .bookmarks { display: none; }
+body[data-band="true"][data-layout="left"] .toolbar {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity var(--fast) var(--ease);
+  flex-wrap: nowrap;
+  height: 40px;
+  row-gap: 0;
+  padding: 0;
+  padding-left: calc(env(titlebar-area-x, 0px) + 4px);
+  padding-right: max(
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 8px),
+    var(--caption-right, 0px)
+  );
+  border: none;
+  background: transparent;
+  -webkit-app-region: drag;
+}
+body[data-band="true"][data-layout="left"] .toolbar > * {
+  -webkit-app-region: no-drag;
+}
+body[data-band="true"][data-layout="left"] .toolbar .icon-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+}
+body[data-band="true"][data-layout="left"] .omnibox {
+  --omni-side: 320px;       /* the window buttons, the meter and a pill beside them */
+  order: 2;
+  /* What is left of the row, and no more. The rule for the pinned side panel
+     above makes it a line of its own (`1 0 100%`), and in a band that does not
+     wrap that was a bar the whole window wide: below 900px - a window snapped
+     to half the screen - it ran under the window buttons and pushed the meter
+     and the menu out of the window. */
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  border-width: 1px;
+  border-radius: var(--radius-pill);
+}
+body[data-band="true"][data-layout="left"] .toolbar .meter {
+  order: 5;
+  position: static;
+  visibility: visible;
+  width: auto;
+  flex: none;
+  height: 28px;
+  justify-content: flex-start;
+  padding: 0 10px;
+}
+body[data-band="true"][data-layout="left"] .toolbar .meter-bar { flex: none; width: 46px; }
+body[data-band="true"][data-layout="left"] :is(.private-pill, #onion, #slow-js) { order: 4; }
+
+/* Band buttons inside the address bar stay the address bar's size. */
+body[data-band="true"][data-layout="left"] .omnibox .icon-btn { width: 24px; height: 24px; }
+
+/*
+ * Tucked away in a window and brought out: the band stays across the top and
+ * the tabs are a panel under it, over the page's left edge, the page card's
+ * height. The view is the whole window then (window.js, layout) and clear
+ * everywhere else, so the page shows through round the panel.
+ *
+ * Laid out the same way in and out, the panel only moved and hidden, so the
+ * slide is a transform and nothing else - no layout on its first frame - and a
+ * transition rather than an animation, so a pointer that comes back halfway
+ * through turns it round from where it is.
+ */
+body[data-band="true"][data-layout="left"] {
+  display: grid;
+  grid-template-columns: 16px 224px 1fr;
+  /* The same rows in and out: nothing is laid out as the panel starts to move,
+     only transformed. Away, the view is the band's 40px and the rest is
+     clipped - the body cannot scroll (overflow: clip above), so the band
+     stays in line with the window buttons. */
+  grid-template-rows: 48px auto minmax(0, 1fr) 16px;
+}
+body[data-band="true"][data-layout="left"] .toolbar { grid-area: 1 / 1 / 2 / -1; align-self: start; background: var(--strip); }
+/* Translucent, the window behind is tinted with the strip's colour and
+   translucency (window.js), as down the side pinned: a coat of its own here
+   made the band solid while the margins beside it were glass. */
+body[data-band="true"][data-layout="left"][data-translucent="on"] .toolbar { background: transparent; }
+/* A hairline between the band and the page under it: with both the same dark,
+   the address bar sat on the page with nothing to say where one ended. Inset,
+   so it takes no height from the band. */
+body[data-role="main"][data-band="true"][data-layout="left"] .toolbar {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+body[data-band="true"][data-layout="left"] .findbar { grid-area: 2 / 2; margin: 8px 8px 0; }
+body[data-band="true"][data-layout="left"] .tabstrip { grid-area: 3 / 2; padding-top: 10px; }
+body[data-band="true"][data-layout="left"]::before {
+  content: '';
+  position: fixed;
+  top: 48px;
+  left: 16px;
+  bottom: 16px;
+  width: 224px;
+  z-index: -1;
+  /* A card of its own, as Zen's is: clear of the window's edges and of the
+     band, a shade lighter than the page it lies on, with a rim of light and a
+     shadow under it. The strip's colour, flush with the band and the window's
+     edge, read as one dark block fused with the bezel. */
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 5%, var(--bg-raised));
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 7%, transparent),
+              0 12px 32px rgb(0 0 0 / 0.38), 0 2px 6px rgb(0 0 0 / 0.22);
+}
+/* Away, or going: off to the left and not drawn. Accelerating out. */
+body[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
+body[data-band="true"][data-layout="left"]::before {
+  transform: translateX(calc(-100% - 20px));
+  opacity: 0;
+  visibility: hidden;
+  will-change: transform;
+  transition: transform var(--strip-out) var(--strip-out-ease), opacity var(--strip-out) ease-in,
+              visibility 0s linear var(--strip-out);
+}
+/* Out: in place, decelerating in - quick to arrive, gentle to settle. */
+body[data-band="true"][data-layout="left"][data-sidebar-open="true"]:not(.sliding-out) :is(.tabstrip, .findbar),
+body[data-band="true"][data-layout="left"][data-sidebar-open="true"]:not(.sliding-out)::before {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  transition: transform var(--strip-in) var(--strip-in-ease), opacity 120ms ease-out,
+              visibility 0s;
+}
+body.calm[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
+body.calm[data-band="true"][data-layout="left"]::before { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  body[data-band="true"][data-layout="left"] :is(.tabstrip, .findbar),
+  body[data-band="true"][data-layout="left"]::before { transition: none !important; }
+}
+
+/*
+ * The address bar is centred on the window, not on what is left between the
+ * buttons either side of it - those are never the same width, so a bar that
+ * filled the gap sat visibly off to one side. It keeps clear of both sides by
+ * `--omni-side`, and below a width where that would leave it too narrow it goes
+ * back to filling the gap.
+ */
+body:not([data-layout="left"]) .omnibox { --omni-side: 240px; }
+body.incognito .omnibox { --omni-side-extra: 110px; }
+@media (min-width: 900px) {
+  body:not([data-layout="left"]) .omnibox,
+  body[data-band="true"][data-layout="left"] .omnibox {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    /* The allowance, or what is really beside it if that is wider - measured
+       by `fitOmnibox` in chrome.js, because the right side holds a private
+       pill whose words change and buttons that come and go. A constant alone
+       let the onion button slide under the bar in a private window. */
+    width: min(760px, calc(100vw - 2 * max(var(--omni-side) + var(--omni-side-extra, 0px), var(--omni-fit, 0px))));
+    margin: 0;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@media (min-width: 900px) {
+  /* Everything after the back, forward and reload goes to the right end, now
+     the address bar no longer fills the row between them. */
+  body:not([data-layout="left"]) .toolbar .nav,
+  body[data-band="true"][data-layout="left"] .toolbar .nav { margin-right: auto; }
+}
+
+/* The Protected video button, in the address bar with the page's other actions. */
+.omnibox .onion-btn {
+  /* 24px: the smallest target there is, and in Grid, which sets its controls
+     edge to edge, there is no spacing to make up for less. */
+  height: 24px;
+  margin-right: 4px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+/* Pinned down the side, the menu stays on the first row, at its end. */
+body[data-layout="left"]:not([data-band="true"]) .toolbar > #menu { order: 2; margin-left: auto; }
+
+/*
+ * Tucked away in a window, the chrome is two views (window.js, layStrip): the
+ * band, 40px across the top, and the tab list's own view under it at the left.
+ * The band draws no panel; the list's view draws the panel and no band.
+ */
+body[data-role="main"][data-band="true"][data-layout="left"] :is(.tabstrip, .findbar) { display: none; }
+body[data-role="main"][data-band="true"][data-layout="left"]::before { display: none; }
+body[data-role="strip"][data-band="true"][data-layout="left"] {
+  grid-template-rows: 8px auto minmax(0, 1fr) 16px;
+}
+body[data-role="strip"][data-band="true"][data-layout="left"] :is(.toolbar, .bookmarks) { display: none; }
+body[data-role="strip"][data-band="true"][data-layout="left"]::before { top: 8px; }
+
+/* Battery mode's leaf, before the bar. */
+.meter-leaf {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The space chip, at the head of the strip (spaces.js). */
+.space-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  max-width: 160px;
+  margin: 0 6px 6px 8px;
+  padding: 0 10px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--space-color, var(--accent)) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--space-color, var(--accent)) 12%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: var(--fw-bold);
+  cursor: default;
+  transition: background-color var(--fast) var(--ease);
+}
+.space-chip:hover { background: color-mix(in srgb, var(--space-color, var(--accent)) 22%, transparent); }
+.space-chip:active { transform: var(--press); }
+.space-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--space-color, var(--accent)); }
+.space-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+body[data-layout="left"] .space-chip { align-self: stretch; max-width: none; margin: 4px 8px 8px; height: 30px; }
+
+/* Two tabs side by side: a small two-pane mark before each title. */
+.tab.in-split .tab-title::before {
+  content: '';
+  display: inline-block;
+  width: 11px;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: -0.5px;
+  border: 1.4px solid currentColor;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent 44%, currentColor 44% 56%, transparent 56%);
+  opacity: 0.7;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tab groups (a Lab: tab-groups.js)                                   */
+/* ------------------------------------------------------------------ */
+
+/* The group's colour runs under its tabs, so which tabs belong is seen at a
+   glance, and its label heads the first of them. */
+.tab-group-bar { display: none; }
+.tab.grouped .tab-group-bar {
+  display: block;
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--group);
+  pointer-events: none;
+}
+.tab-group {
+  flex: none;
+  max-width: 120px;
+  height: 24px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 12px;
+  /* Darkened a little, so white text passes 4.5:1 on every group colour. */
+  background: color-mix(in oklab, var(--group) 82%, #000);
+  color: #fff;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 24px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
+  transition: filter var(--fast) var(--ease);
+}
+.tab-group:hover { filter: brightness(1.08); }
+.tab-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tab-group.folded::after {
+  /* Drawn, not a › glyph, which every font puts at a different height. */
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin: 0 1px 1px 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.tab-group-name {
+  width: 96px;
+  height: 18px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font: inherit;
+  outline: none;
+}
+
+/* Folded: the group is its label and nothing else, and its tabs are out of
+   the strip until it opens again. The tab in front always stays. */
+.tab.group-folded { display: none; }
+.tab.group-head-folded { flex: 0 0 auto; min-width: 0; padding: 0 6px; }
+.tab.group-head-folded > :not(.tab-group) { display: none !important; }
+
+
+/* Down the side the label heads its group like a section. */
+body[data-layout="left"] .tab.group-start { flex-wrap: wrap; height: auto; padding-top: 6px; }
+body[data-layout="left"] .tab.group-start .tab-group { flex-basis: 100%; max-width: none; margin-bottom: 4px; text-align: left; }
+body[data-layout="left"] .tab.grouped .tab-group-bar { left: 0; right: auto; top: 6px; bottom: 6px; width: 2px; height: auto; }
+
+/* Windows High Contrast (see theme.css): what the strip says with colour and
+   shadow alone - which tab is in front, how full the memory meter is, a tab's
+   tier - said with the system's colours instead. */
+@media (forced-colors: active) {
+  .tab.active { outline: 2px solid Highlight; outline-offset: -2px; }
+  .meter-fill { forced-color-adjust: none; background: Highlight; }
+  .meter-bar { forced-color-adjust: none; border: 1px solid CanvasText; background: Canvas; }
+  .tier { forced-color-adjust: none; background: CanvasText; }
+  .tier[data-tier="discarded"] { background: Canvas; box-shadow: none; border: 1px solid CanvasText; }
+  .tab-group { border: 1px solid CanvasText; }
+}
+
+/*
+ * Several windows open: each wears its colour (main.js, windowName) as a band
+ * across its top edge, the same colour as the swatch beside its name when a
+ * tab is sent to it from the tab menu. One window alone looks as it always
+ * has. Over everything, and never in the pointer's way.
+ */
+body[data-role="main"][data-windows="several"]::after {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--window);
+  z-index: 1000;
+  pointer-events: none;
+}
+/* Down the side, the tab count says which window this is too. */
+body[data-windows="several"] .strip-count::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--window);
+  vertical-align: 0;
+}

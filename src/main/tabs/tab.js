@@ -18,11 +18,41 @@ const { Tier, isStopped } = require('../config');
 const { CdpSession } = require('../cdp');
 
 const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload.js');
+// The browser's own pages need the command bridge the chrome uses; a web page
+// must never get it. Which one a tab loads is decided by `internal` below.
+const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
+const pages = require('../pages');
+const errorPage = require('../error-page');
+const palette = require('../palette');
+const { INCOGNITO } = require('../incognito/mode');
+const fingerprint = require('../incognito/fingerprint');
+
+/**
+ * How much larger Settings opens than the rest of the browser.
+ *
+ * A value from the zoom ladder in main.js rather than a number of its own, so
+ * the first press of ctrl+minus lands on a step the ladder knows and not
+ * somewhere between two of them.
+ */
+const SETTINGS_ZOOM = 1.1;
 
 let nextTabId = 1;
 
-/** Matches the chrome's surface colour, so an unpainted view is not white. */
-const SURFACE_COLOUR = '#16181d';
+/**
+ * Failures that mean "this site does not do https here": a TLS handshake that
+ * could not happen, or nothing listening on 443. Not certificate errors - a
+ * site that answers https with a bad certificate is exactly what must not be
+ * quietly retried in the clear.
+ */
+const HTTPS_ONLY_FAILURES = new Set([
+  -107, // SSL_PROTOCOL_ERROR
+  -113, // SSL_VERSION_OR_CIPHER_MISMATCH
+  -102, // CONNECTION_REFUSED
+  -100, // CONNECTION_CLOSED
+  -101, // CONNECTION_RESET
+  -118  // CONNECTION_TIMED_OUT
+]);
+
 
 /**
  * Thumbnails are shown behind a loading page for a few hundred milliseconds, so
@@ -33,8 +63,32 @@ const SURFACE_COLOUR = '#16181d';
 const THUMB_WIDTH = 480;
 const THUMB_QUALITY = 55;
 
-/** Under the OS temp directory: see the privacy note on captureThumbnail. */
-const thumbnailDir = () => path.join(app.getPath('temp'), 'debrowser-thumbs');
+/**
+ * Under a temporary directory only this user can enter: see the privacy note
+ * on captureThumbnail. On Linux the OS temp directory is /tmp, shared by every
+ * account, and a folder of page screenshots there was readable by all of them
+ * - or, made first by someone else, theirs. So there, the per-user runtime
+ * directory (in RAM, 0700) where the session has one; elsewhere, and as the
+ * fallback, a folder named for this user that `privateThumbDir` checks before
+ * anything is written to it. Windows' and macOS's temp directories are the
+ * user's own already.
+ */
+const thumbnailDir = () => {
+  const runtime = process.platform === 'linux' ? process.env.XDG_RUNTIME_DIR : null;
+  if (runtime) return path.join(runtime, 'debrowser-thumbs');
+  const uid = typeof process.getuid === 'function' ? `-${process.getuid()}` : '';
+  return path.join(app.getPath('temp'), `debrowser-thumbs${uid}`);
+};
+
+/** The thumbnail folder, made private to this user - or null if it is not ours. */
+async function privateThumbDir() {
+  const dir = thumbnailDir();
+  await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+  if (typeof process.getuid !== 'function') return dir;
+  const st = await fs.promises.lstat(dir);
+  if (!st.isDirectory() || st.isSymbolicLink() || st.uid !== process.getuid() || (st.mode & 0o077)) return null;
+  return dir;
+}
 
 /**
  * Delete every thumbnail left behind by a previous run.
@@ -50,6 +104,65 @@ async function sweepThumbnails() {
 }
 
 /**
+ * The view a tab's page lives in, built the one way every tab's is: the
+ * preload its page gets, the sandbox, the session, and the colour it shows
+ * before the page paints. Shared with the spare new tab page (prewarm.js),
+ * which is built ahead of time and handed to a tab - so that it is exactly the
+ * view the tab would have built for itself.
+ */
+/**
+ * Light graphics (graphics.js): pages built from now on are told, and their
+ * preload asks YouTube for H.264 - the format a processor decodes cheapest,
+ * where VP9 and AV1 cost several times as much without a graphics card.
+ */
+let lightVideo = false;
+function setLightVideo(on) { lightVideo = on === true; }
+
+function createTabView({ session, url }) {
+  const view = new WebContentsView({
+    webPreferences: {
+      session,
+      preload: pages.isInternal(url) ? PAGE_PRELOAD : PROBE_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      // Private windows only: the preload also runs in iframes, where it
+      // installs the dropped-file cleaner and nothing else (probe-preload.js).
+      // Sandboxed, so this gives a frame no Node, only the preload.
+      nodeIntegrationInSubFrames: INCOGNITO && !pages.isInternal(url),
+      // Chromium's own background throttling stays on; the governor layers
+      // its harder tiers on top rather than replacing it.
+      backgroundThrottling: true,
+      transparent: false,
+      // A new spellchecker fetches its dictionary on its own; in incognito
+      // that is a request no page asked for.
+      spellcheck: !INCOGNITO,
+      // WebGL hands a page the graphics card's name and quirks; a private
+      // window gives it none. See incognito/fingerprint.js for WebGPU.
+      webgl: !INCOGNITO,
+      // Chromium's PDF viewer, which is what `plugins` switches on - there is
+      // no other plugin left. Off, a PDF link downloaded the file instead of
+      // showing it. On in private windows too: the viewer draws the file
+      // locally, inside the sandboxed tab, where the alternative was saving it
+      // and opening it in some other program.
+      plugins: true,
+      // Tells the page preload it is in a private window: see the end of
+      // probe-preload.js, where dropped and pasted files are cleaned.
+      additionalArguments: INCOGNITO ? ['--debrowser-private'] : lightVideo ? ['--debrowser-light-video'] : []
+      // No `zoomFactor` here: Chromium records it against the site the page
+      // loads, so a default applied this way pinned every site. The zoom is
+      // set per document instead, by the tab - see zoom.js.
+    }
+  });
+
+  // What shows before the page paints, and wherever it paints nothing: the
+  // view's own background, which the webPreferences above do not govern -
+  // an earlier comment there claimed they did. See palette.surfaceFor.
+  view.setBackgroundColor(palette.surfaceFor(url));
+  return view;
+}
+
+/**
  * The same sweep, synchronously, for `before-quit`.
  *
  * Quit does not wait for promises, so the async version would be abandoned
@@ -62,24 +175,64 @@ function sweepThumbnailsSync() {
   } catch { /* nothing there, or not ours to remove */ }
 }
 
+/** Origin and path of an address: the page a captured state belongs to. */
+function pageOf(url) {
+  try { const p = new URL(url); return p.origin + p.pathname; } catch { return null; }
+}
+
 class Tab {
   /**
    * @param {object} options
    * @param {Electron.Session} options.session
    * @param {string} options.url
    * @param {(tab: Tab, event: string, payload?: any) => void} options.onEvent
+   * @param {(wc: Electron.WebContents) => void} options.applyZoom - sets a new
+   *   document's zoom; see zoom.js
    * @param {(...args:any[]) => void} options.log
    */
-  constructor({ session, url = 'about:blank', onEvent = () => {}, log = () => {} }) {
+  constructor({ session, url = 'about:blank', onEvent = () => {}, applyZoom = () => {},
+                log = () => {} }) {
     this.id = nextTabId++;
     this.session = session;
     this.onEvent = onEvent;
+    this.applyZoom = applyZoom;
     this.log = log;
+    /** Set by the manager once the tab has left the strip for good. */
+    this.closed = false;
 
     this.url = url;
-    this.title = url;
+    /**
+     * One of the browser's own pages, served under `debrowser://`.
+     *
+     * Decided from the URL rather than passed in, so it survives a discard and
+     * restore, and so nothing a page does can turn itself into one. It governs
+     * two things that must never disagree: which preload the renderer gets, and
+     * whether the governor is allowed to touch this tab.
+     */
+    this.internal = pages.isInternal(url);
+    /**
+     * Which page this renderer was *built* for.
+     *
+     * Distinct from `internal`, which follows the current URL. A tab that
+     * started on the new tab page and was then navigated to a site keeps the
+     * preload it was realised with until the renderer is rebuilt - so privilege
+     * must never be decided from this. It exists so the governor and the UI can
+     * tell what a renderer is carrying.
+     */
+    this.realisedInternal = this.internal;
+
+    /**
+     * The webContents hosting this tab's inspector, when the browser is showing
+     * it in a view of its own rather than letting Chromium put it in a window.
+     * Set and cleared by BrowserShell; see `devToolsOpen` below.
+     * @type {Electron.WebContents|null}
+     */
+    this.devToolsHost = null;
+    this.title = this.internal ? pages.titleFor(url) : url;
     this.favicon = null;
     this.pinned = false;
+    /** The tab a link opened this one from, so its siblings can queue up beside it. */
+    this.openerId = null;
 
     /** @type {Electron.WebContentsView|null} */
     this.view = null;
@@ -87,11 +240,19 @@ class Tab {
     this.wc = null;
     /** @type {CdpSession|null} */
     this.cdp = null;
-    this.pid = null;
 
     this.tier = Tier.DISCARDED; // becomes ACTIVE/WARM once realised
     this.visible = false;
     this.audible = false;
+    /**
+     * Silenced by the user.
+     *
+     * Kept on the tab rather than only on the renderer, because a discarded tab
+     * has no renderer to hold it: mute a noisy tab, leave it long enough to be
+     * reclaimed, come back, and it would start talking again. Re-applied on
+     * every realisation for that reason.
+     */
+    this.muted = false;
     this.loading = false;
     this.crashed = false;
 
@@ -166,8 +327,54 @@ class Tab {
     return Boolean(this.wc && !this.wc.isDestroyed());
   }
 
+  /**
+   * The process this tab's page is in *right now*.
+   *
+   * Read live rather than cached, because a cached one goes stale in the most
+   * ordinary way there is: with site isolation on, navigating from one site to
+   * another moves the page into a different renderer. This used to be assigned
+   * in a `once('did-finish-load')`, so it held whichever process the tab was
+   * realised in - and every tab that had navigated anywhere attributed its
+   * memory to a process it no longer used.
+   *
+   * What that looked like: in a six-tab session, only the browser's own pages
+   * reported any memory at all, because they are the only tabs that never leave
+   * the process they started in. Every website read 0 MB, including the one in
+   * front of the user.
+   *
+   * `getOSProcessId()` is a plain accessor, so this is cheap enough for the
+   * governor to ask once per tab per tick.
+   */
+  get pid() {
+    return this.isLive ? safePid(this.wc) : null;
+  }
+
   get isDiscarded() {
     return this.tier === Tier.DISCARDED;
+  }
+
+  /**
+   * Whether an inspector is attached to this page.
+   *
+   * Asked of the renderer rather than tracked as a flag here, because DevTools
+   * can be closed from its own window - by its close button, or by the user
+   * closing it as a window - and nothing tells us when that happens. A flag
+   * would go stale in the direction that matters: a tab held out of the reclaim
+   * ladder forever by tools that are no longer open.
+   */
+  get devToolsOpen() {
+    if (!this.isLive) return false;
+    // An inspector hosted in one of the browser's own views does not count as
+    // opened by this measure - `isDevToolsOpened()` returns false for exactly
+    // that arrangement, measured - so the host is the only signal there is.
+    // It is still not a flag anyone sets by hand: the shell clears it from
+    // `devtools-closed`, which is what the inspector's own close button fires.
+    if (this.devToolsHost && !this.devToolsHost.isDestroyed()) return true;
+    try {
+      return this.wc.isDevToolsOpened();
+    } catch {
+      return false;
+    }
   }
 
   /** Milliseconds since the user last had this tab in front of them. */
@@ -175,49 +382,150 @@ class Tab {
     return this.visible ? 0 : now - this.lastActiveAt;
   }
 
+  /**
+   * Keep a privileged page from becoming a privileged web page.
+   *
+   * An internal tab's renderer has the command bridge in its preload. If a link
+   * in Settings could navigate that same renderer to a site, the site's own
+   * JavaScript would inherit it - a complete escape from the sandbox this
+   * browser otherwise keeps pages inside. So an internal tab is confined: any
+   * navigation away from `debrowser://` is cancelled and handed to a normal tab
+   * instead, which is also the behaviour a user wants from a link in Settings.
+   */
+  confineToInternalPages() {
+    this.wc.on('will-navigate', (event, url) => {
+      // Only while this tab is actually showing one of our pages.
+      //
+      // The handler is installed once, when the renderer is realised, and every
+      // tab is realised on the new tab page - so without this test it went on
+      // cancelling navigations for the rest of the tab's life. Every link click
+      // and every GET form submission on every website was hijacked into a new
+      // tab. It survived the tests because they navigate with `loadURL`, which
+      // does not fire `will-navigate` at all.
+      if (!this.internal) return;
+      if (pages.isInternal(url)) return;
+      event.preventDefault();
+      this.onEvent(this, 'open-tab', { url });
+    });
+    // New windows are already opened as tabs by the handler `wireEvents`
+    // installs, for every tab; a second one here was replaced by it unseen.
+  }
+
   /* ---------------------------------------------------------------- */
   /* Realisation and teardown                                          */
   /* ---------------------------------------------------------------- */
 
   /**
+   * Load `url` in a new renderer built for it.
+   *
+   * For a tab whose renderer was made for one of our pages - every tab starts
+   * on the new tab page - and is now asked for a website. The preload is fixed
+   * when a renderer is built, so loading the site into the same one left the
+   * page bridge in it: `window.debrowser` visible to the site (its commands
+   * refused, since privilege is decided from the live URL, but there), and
+   * the page probe that makes Ctrl+wheel zoom work missing. The new tab page
+   * has no history worth keeping, so nothing is lost by starting clean.
+   */
+  rebuildFor(url) {
+    // Where it came from, in case nothing commits - a download link typed
+    // into the new tab page leaves the new renderer with no page at all.
+    this.rebuiltFrom = this.internal ? this.url : null;
+    this.insecureReturn = null;
+    this.emit('rebuild');
+    this.teardownView();
+    this.suspendedState = null;
+    this.url = url;
+    this.internal = pages.isInternal(url);
+    this.realise();
+  }
+
+  /**
    * Create the renderer for this tab. Called on first open and again on every
    * restore-from-discard.
    */
-  realise() {
+  /**
+   * Become live on a view that has already loaded the new tab page - the
+   * spare, built ahead of time (prewarm.js) - instead of building one and
+   * waiting for it. Everything `realise` does but the load.
+   *
+   * Measured: shown, a spare draws its next frame in about 6 ms, where a new
+   * tab page built on Ctrl+T took about 55 ms to its first paint.
+   */
+  adopt(view) {
     if (this.isLive) return;
-
-    this.view = new WebContentsView({
-      webPreferences: {
-        session: this.session,
-        preload: PROBE_PRELOAD,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        // Chromium's own background throttling stays on; the governor layers
-        // its harder tiers on top rather than replacing it.
-        backgroundThrottling: true,
-        transparent: false
-      }
-    });
-
-    // Avoid a white flash on restore. The webPreferences above do not do this -
-    // an earlier comment there claimed they did - because the flash comes from
-    // the view compositing its own default white before the page paints, and
-    // only the view's background colour governs that.
-    this.view.setBackgroundColor(SURFACE_COLOUR);
-
+    this.realisedInternal = true;
+    this.view = view;
+    this.view.setBackgroundColor(palette.surfaceFor(this.url));
     this.wc = this.view.webContents;
     this.cdp = new CdpSession(this.wc, this.log);
     this.crashed = false;
+    this.confineToInternalPages();
+    this.wireEvents();
+    // What the page has already said about itself, which the events above
+    // were not there to hear.
+    this.url = this.wc.getURL() || this.url;
+    this.title = this.wc.getTitle() || this.title;
+    this.loading = this.wc.isLoading();
+    this.tier = this.visible ? Tier.ACTIVE : Tier.WARM;
+    this.emit('realised');
+    this.emit('updated');
+  }
+
+  /**
+   * Build the renderer. `navigateTo` is an address typed into a tab that had
+   * none: it is loaded by the same path the tab's own page would be, after
+   * the private window's shield is up, rather than by the caller straight
+   * after this returns - which loaded the site before its overrides existed,
+   * and then had this load the old address over it.
+   */
+  realise({ navigateTo = null } = {}) {
+    if (this.isLive) return;
+    if (navigateTo) this.url = navigateTo;
+    this.realisedInternal = this.internal;
+    this.view = createTabView({ session: this.session, url: this.url });
+
+    this.wc = this.view.webContents;
+    // WebRTC gathers ICE candidates over UDP, which does not go through a SOCKS
+    // proxy - so it would reveal this machine's addresses to any page that asks.
+    // Set per view as well as by the command-line switch in incognito.
+    if (INCOGNITO) this.wc.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+    this.cdp = new CdpSession(this.wc, this.log);
+    this.crashed = false;
+
+    if (this.internal) this.confineToInternalPages();
 
     this.wireEvents();
 
-    const restored = this.restoreNavigation();
-    if (!restored) {
-      // A rejection here usually just means the navigation was superseded -
-      // by our own error page, or by the user typing somewhere else - so it is
-      // logged, briefly, rather than surfaced.
-      this.wc.loadURL(this.url).catch((err) => this.log(`load failed: ${brief(err.message)}`));
+    // Captured now: in a private window a blank page loads first (see below),
+    // and the tab's own navigation tracking would record it as the address.
+    const target = this.url;
+    const load = () => {
+      this.url = target;
+      // Back still leads where it led: the history comes back first, and the
+      // new address is loaded on top of it.
+      const restored = this.restoreNavigation();
+      if (!restored || navigateTo) {
+        // A rejection here usually just means the navigation was superseded -
+        // by our own error page, or by the user typing somewhere else - so it
+        // is logged, briefly, rather than surfaced.
+        this.wc.loadURL(target)
+          .then(() => {
+            // The blank page the overrides went on is not somewhere Back
+            // should go. Cleared once the real page has committed.
+            if (INCOGNITO && this.wc && !this.wc.isDestroyed()) this.wc.navigationHistory.clear();
+          })
+          .catch((err) => this.log(`load failed: ${brief(err.message)}`));
+      }
+    };
+    // A private tab loads nothing until the page cannot read the real
+    // timezone, locale, core count or screen. See incognito/fingerprint.js.
+    // The browser's own pages too: the self-check is one of them, and a page
+    // that reads the real values would report a problem that is not there.
+    if (INCOGNITO) {
+      if (this.bounds) fingerprint.setScreen(this, this.bounds);
+      fingerprint.shield(this, load).catch((err) => this.log(`fingerprint shield failed: ${err.message}`));
+    } else {
+      load();
     }
 
     this.tier = this.visible ? Tier.ACTIVE : Tier.WARM;
@@ -227,34 +535,135 @@ class Tab {
   wireEvents() {
     const wc = this.wc;
 
+    // What the page says about itself, as one event.
+    //
+    // Separate from 'updated', which also fires for loading and audio changes.
+    // The history store answers this one by searching its list for the URL, and
+    // doing that on every state change would be a scan of ten thousand entries
+    // several times per page load.
+    const described = () => this.emit('described', {
+      url: this.url, title: this.title, favicon: this.favicon
+    });
+
     wc.on('page-title-updated', (_e, title) => {
       this.title = title;
+      described();
       this.emit('updated');
     });
 
     wc.on('page-favicon-updated', (_e, icons) => {
       this.favicon = icons?.[0] || null;
+      described();
       this.emit('updated');
     });
 
-    wc.on('did-start-loading', () => { this.loading = true; this.emit('updated'); });
-    wc.on('did-stop-loading', () => { this.loading = false; this.emit('updated'); });
+    // A new document has not been probed yet, so nothing is known about it.
+    //
+    // `hasSensitiveFields` is the gate that stops a page with a password field
+    // being photographed, and it was left at the previous document's answer
+    // until the new one's first probe arrived. Navigating from a safe page to a
+    // sign-in page and switching tabs inside that window wrote a thumbnail of
+    // the login page to disk - the exact thing the gate exists to prevent.
+    // Assumed sensitive until a probe says otherwise, because the failure has
+    // to be a missing thumbnail rather than a leaked one.
+    wc.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
+      if (!isMainFrame || isInPlace) return;
+      this.capturing = false;               // camera/microphone ends with the page
+      // White behind a website, our surface behind our own pages.
+      try { this.view?.setBackgroundColor(palette.surfaceFor(url)); } catch { /* view going away */ }
+      this.hasSensitiveFields = true;
+      this.lastProbeAt = 0;
+    });
+    wc.on('did-start-loading', () => {
+      this.loading = true;
+      // A crashed renderer that is loading again has been brought back, by a
+      // reload or anything else - whether or not the page then loads.
+      this.crashed = false;
+      this.emit('updated');
+    });
+    wc.on('did-stop-loading', () => {
+      this.loading = false;
+      // What is actually showing. A navigation that was stopped, or refused by
+      // the page's "Leave this page?", never commits - and the address it was
+      // going to stayed in the bar, where the star and the site panel acted on
+      // a page that was not there.
+      this.reconcileUrl();
+      // A reload keeps the entry's title, so Chromium never reports it again,
+      // and the reset at commit (below) would leave the address standing in
+      // for it. Taken back here - unless what the engine has is itself only
+      // the address, which is what it answers for a page with no <title>.
+      const title = wc.getTitle();
+      if (this.title === this.url && title && title !== this.url && !this.url.endsWith(title)) this.title = title;
+      this.emit('updated');
+    });
 
     wc.on('did-navigate', (_e, url) => {
       this.url = url;
+      // A new document has asked for no protected video yet.
+      this.drmNeeded = false;
+      this.httpFallback = null;
+      this.failed = false;
+      this.rebuiltFrom = null;
+      // At commit, before the new document paints.
+      try { this.applyZoom(wc); } catch { /* the view is going away */ }
+      /*
+       * A new document does not inherit the last one's name or its icon.
+       *
+       * Both were left standing until the new page announced its own, which is
+       * some hundreds of milliseconds later at best - and the history entry is
+       * written *here*, from `visited`, so a row was recorded under the title
+       * of the page the user came from. The icon was worse: the store keeps an
+       * address only when it differs from the default, so the previous site's
+       * custom icon looked exactly like a custom icon for this one and was
+       * persisted as such.
+       *
+       * Cleared at commit rather than at `did-start-navigation`, so the strip
+       * keeps showing the old page while the new one is still loading - which
+       * is what every browser does, and the reason the reset belongs on this
+       * event and not the earlier one.
+       */
+      // The browser's own pages get their name rather than their address.
+      //
+      // Clearing to the raw URL is right for a website - it is what the strip
+      // shows until the page announces a title - but `debrowser://newtab/` is
+      // not a title anybody wants to read, and the new tab page's own <title>
+      // may never arrive before the user looks. The constructor already uses
+      // `titleFor` for exactly this; the reset had to as well, or navigating to
+      // the new tab page left its address in the strip and in the task manager.
+      this.title = pages.isInternal(url) ? pages.titleFor(url) : url;
+      this.favicon = null;
+      // `internal` follows the *current* URL, always.
+      //
+      // Every tab now opens on debrowser://newtab, and typing in its search box
+      // navigates that same tab to a website. Deciding this once in the
+      // constructor left every tab in the browser permanently marked internal -
+      // exempt from the governor, so nothing was ever frozen or discarded, and
+      // treated as privileged for the rest of its life. Privilege is never
+      // decided from this field either; see the sender checks in main.js, which
+      // read the live URL.
+      this.internal = pages.isInternal(url);
       // A new document means new load-time garbage, and the previous page's
       // heap estimates no longer describe anything.
       this.resetHeapState();
+      this.emit('visited', { url });
       this.emit('updated');
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
-      if (isMainFrame) { this.url = url; this.emit('updated'); }
+      // Recorded like any other navigation. A single-page application changes
+      // the address bar and the document without a load, and a history that
+      // held only the entry point would have one row for a site the user spent
+      // an hour moving around inside.
+      if (isMainFrame) { this.url = url; this.emit('visited', { url }); this.emit('updated'); }
     });
 
     // Audible tabs are protected from freezing and discarding: silencing a
     // user's music to save memory is never the right call.
-    wc.on('audio-state-changed', (_e, state) => {
-      this.audible = typeof state === 'object' ? state.audible : state;
+    // Asked of the webContents rather than read off the event: the event's
+    // shape changed under us (Electron 44 passes only the event, with
+    // `audible` on it), and reading the old second argument left every tab
+    // silent - no speaker mark, and a playing tab left open to discarding.
+    wc.on('audio-state-changed', () => {
+      this.audible = !wc.isDestroyed() && wc.isCurrentlyAudible();
       this.emit('updated');
     });
 
@@ -263,77 +672,207 @@ class Tab {
       // iframe is not. `ERR_ABORTED` means a navigation was superseded by
       // another one, which is normal and must not replace the page.
       if (!isMainFrame || errorCode === -3) return;
-      // Never render an error page for a failed error page.
-      if (String(validatedURL).startsWith('data:')) return;
-      this.showError(validatedURL, errorDescription || `error ${errorCode}`);
+      // Incognito upgraded this from plain HTTP and the secure version is not
+      // there. Say so, and let the user decide, rather than fail blankly or
+      // quietly fall back to a page an exit relay can read.
+      if (INCOGNITO) {
+        const plain = require('../incognito/policy').upgradeFailed(validatedURL, errorCode);
+        if (plain) {
+          // In a renderer of its own: this one was built for the website and
+          // has no `window.debrowser`, so the page's Continue and Go back did
+          // nothing at all. Go back returns to what this renderer last showed.
+          let before = '';
+          try { before = this.wc.getURL(); } catch { /* going */ }
+          const page = `${pages.INSECURE_URL}?url=${encodeURIComponent(plain)}`;
+          setImmediate(() => {
+            if (this.closed) return;
+            this.rebuildFor(page);
+            this.insecureReturn = before && !pages.isInternal(before) ? before : null;
+          });
+          return;
+        }
+      } else {
+        // Stopped as a dangerous or look-alike site (threats.js): the warning,
+        // in a renderer of its own, with Go back returning to what was here.
+        const verdict = errorCode === -20 && require('../protection/threats').Threats.current?.takeStopped(validatedURL);
+        if (verdict) {
+          let before = '';
+          try { before = this.wc.getURL(); } catch { /* going */ }
+          const page = `${pages.DANGER_URL}?url=${encodeURIComponent(validatedURL)}&kind=${verdict.kind}` +
+            (verdict.like ? `&like=${encodeURIComponent(verdict.like)}` : '');
+          setImmediate(() => {
+            if (this.closed) return;
+            this.rebuildFor(page);
+            this.insecureReturn = before && !pages.isInternal(before) ? before : null;
+          });
+          return;
+        }
+        // The ordinary browser tried HTTPS first and the site has none: load
+        // the plain page, or - in strict mode - say so and let the user choose.
+        const httpsFirst = require('../protection/https-first').HttpsFirst.current;
+        const plain = httpsFirst && httpsFirst.failed(validatedURL, errorCode);
+        if (plain) {
+          if (httpsFirst.mode() !== 'strict') {
+            httpsFirst.allow(plain);
+            setImmediate(() => { if (!this.closed && this.isLive) this.wc.loadURL(plain).catch(() => {}); });
+            return;
+          }
+          let before = '';
+          try { before = this.wc.getURL(); } catch { /* going */ }
+          const page = `${pages.INSECURE_URL}?url=${encodeURIComponent(plain)}&secure=first`;
+          setImmediate(() => {
+            if (this.closed) return;
+            this.rebuildFor(page);
+            this.insecureReturn = before && !pages.isInternal(before) ? before : null;
+          });
+          return;
+        }
+      }
+      // An https address the browser guessed, on a site that has none: the
+      // same address over http, once, instead of an error page.
+      const guessed = this.httpFallback;
+      this.httpFallback = null;
+      if (guessed && HTTPS_ONLY_FAILURES.has(errorCode) &&
+          String(validatedURL).replace(/\/$/, '') === guessed.replace(/\/$/, '')) {
+        this.wc.loadURL(guessed.replace(/^https:/, 'http:')).catch(() => {});
+        return;
+      }
+      // The error entry sits at the address that failed, and no `did-navigate`
+      // reports it: without this the bar keeps the previous page's address.
+      this.url = validatedURL;
+      this.showError(validatedURL, errorCode, errorDescription);
     });
 
     wc.on('render-process-gone', (_e, details) => {
       this.log(`tab ${this.id} renderer gone: ${details.reason} exitCode=${details.exitCode}`);
-      this.pid = null;
       // An out-of-memory kill is not a crash the user should have to see: fall
       // back to the discard path, which restores cleanly on next activation.
       if (details.reason === 'oom' || details.reason === 'killed') {
         this.captureNavigation();
         this.teardownView();
         this.tier = Tier.DISCARDED;
+        // The tab in front comes straight back. Left discarded it showed bare
+        // window background, and Reload - which needs a live page - did
+        // nothing; only clicking the tab in the strip rebuilt it.
+        if (this.visible) setImmediate(() => { if (!this.closed && !this.isLive) this.realise(); });
       } else {
         this.crashed = true;
       }
       this.emit('updated');
     });
 
-    wc.once('did-finish-load', () => {
-      this.pid = safePid(wc);
-      this.applySuspendedPageState();
+    // Until the page the state was captured on has loaded - not the private
+    // window's blank first page, which finishes loading before it.
+    const onLoaded = () => {
+      if (this.applySuspendedPageState() !== 'wait') wc.off('did-finish-load', onLoaded);
       this.emit('updated');
+    };
+    wc.on('did-finish-load', onLoaded);
+
+    /*
+     * Settings opens a notch larger than everything else.
+     *
+     * It is the one page here that is read rather than glanced at - rows of
+     * labels with a hint under each - and it is where somebody goes when
+     * something is hard to see, which is a poor moment to be squinting. The
+     * rest of the browser's pages stay at 1.0, because the new tab page and the
+     * tab strip beside it should not disagree about how big text is.
+     *
+     * After the document exists, not before the load: a zoom factor set on a
+     * view that has not navigated yet is discarded by the navigation. Measured -
+     * it read 1x - and it is why this is not three lines up in `realise`.
+     *
+     * `once`, so a zoom the user sets themselves survives whatever the page
+     * does next, and set on the view rather than as a stylesheet scale, so
+     * ctrl+wheel and the zoom shortcuts move from here rather than fighting it.
+     */
+    // A muted tab stays muted through a discard and its rebuild.
+    if (this.muted) {
+      try { wc.setAudioMuted(true); } catch { /* the view is going away */ }
+    }
+
+    wc.once('dom-ready', () => {
+      if (pages.pageName(this.url) !== 'settings') return;
+      try { wc.setZoomFactor(SETTINGS_ZOOM); } catch { /* the view is going away */ }
     });
 
+    // Every load, not just the first. `once` above restores suspended state,
+    // which must happen exactly once per renderer; this is the opposite - it
+    // fires for each document, which is what anything reacting to "a page
+    // finished loading" needs. A saved sign-in is never on a renderer's first
+    // document, so hanging the fill off the `once` meant it never ran at all.
+    wc.on('did-finish-load', () => this.emit('loaded'));
+    // Each document, as soon as it is parsed: when a site's own style goes in (site-styles.js).
+    wc.on('dom-ready', () => this.emit('dom-ready'));
+
     // New windows open as tabs rather than popups.
-    wc.setWindowOpenHandler(({ url }) => {
-      this.emit('open-tab', { url });
+    // A shift-click, or a page's own pop-up, asks for a new window: that is a
+    // Peek (window.js) - a card over the page - rather than a tab. Everything
+    // else is a tab, as before.
+    wc.setWindowOpenHandler(({ url, disposition }) => {
+      this.emit(disposition === 'new-window' && /^https?:/i.test(url) ? 'peek' : 'open-tab', { url });
       return { action: 'deny' };
     });
   }
 
   /**
-   * Render a failed navigation in the tab itself.
-   *
-   * Loaded as a data URL so it needs no network, no file access and no
-   * privileges: the error page is just a document, and gets no more trust than
-   * any other. The failing URL is inserted as text content by script rather
-   * than interpolated into the markup, so a hostile URL cannot inject into it.
+   * Back or Forward by `delta`. From a renderer built for one of our pages
+   * into a website, the site gets a renderer of its own instead: history does
+   * not fire `will-navigate`, so the confinement never saw it, and a restored
+   * Settings tab whose history held a site went back to that site with
+   * `window.debrowser` in the page.
    */
-  showError(url, description) {
-    this.title = 'Problem loading page';
-    const payload = JSON.stringify({ url: String(url || ''), description: String(description || '') });
-    const html = `<!doctype html><meta charset="utf-8">
-<title>Problem loading page</title>
-<style>
-  :root { color-scheme: dark light; }
-  body { margin: 0; display: grid; place-items: center; min-height: 100vh;
-         background: #16181d; color: #e6e8ee;
-         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  @media (prefers-color-scheme: light) { body { background: #f2f3f6; color: #1a1d24; } }
-  main { max-width: 27rem; padding: 1.5rem; text-align: center; }
-  h1 { font-size: 1.1rem; margin: 0 0 .5rem; }
-  p { margin: .35rem 0; color: #9aa1b1; }
-  code { word-break: break-all; font-size: .85em; }
-</style>
-<main>
-  <h1>This page could not be loaded</h1>
-  <p id="d"></p>
-  <p><code id="u"></code></p>
-</main>
-<script>
-  var e = ${payload};
-  document.getElementById('d').textContent = e.description;
-  document.getElementById('u').textContent = e.url;
-</script>`;
+  goInHistory(delta) {
+    if (!this.isLive) return;
+    const nav = this.wc.navigationHistory;
+    const can = delta < 0 ? nav.canGoBack() : nav.canGoForward();
+    if (!can) return;
+    const entry = nav.getEntryAtIndex(nav.getActiveIndex() + delta);
+    const url = entry && entry.url;
+    if (this.realisedInternal && url && !pages.isInternal(url) && !/^(about|data|blob):/i.test(url)) {
+      this.rebuildFor(url);
+      return;
+    }
+    if (delta < 0) nav.goBack(); else nav.goForward();
+  }
 
-    this.wc.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-      .catch(() => { /* nothing further we can do */ });
-    this.emit('updated');
+  /** Bring `url` back to the committed address, if a navigation left it elsewhere. */
+  reconcileUrl() {
+    if (!this.isLive) return;
+    const committed = this.wc.getURL();
+    if (!committed && this.rebuiltFrom) {
+      const back = this.rebuiltFrom;
+      this.rebuiltFrom = null;
+      setImmediate(() => { if (!this.closed) this.rebuildFor(back); });
+      return;
+    }
+    if (committed && committed !== this.url) {
+      this.url = committed;
+      this.emit('updated');
+    }
+  }
+
+  /** Draw the error page again - in a new palette, after a theme change. */
+  redrawError() {
+    if (this.failed && this.errorArgs && this.isLive) {
+      errorPage.show(this.wc, this.errorArgs).catch(() => {});
+    }
+  }
+
+  /**
+   * Say, in the tab, why the page did not load. See error-page.js: drawn into
+   * the error entry Chromium committed at the failed address, so the address
+   * bar, Reload and Back all keep meaning what they did.
+   */
+  showError(url, code, description) {
+    this.failed = true;
+    // At the zoom the site would have had: an error page does not commit the
+    // way a page does, so the navigation's zoom never reached it.
+    try { this.applyZoom(this.wc); } catch { /* the view is going away */ }
+    this.errorArgs = { url, code, description };
+    // The last page's icon is not this one's.
+    this.favicon = null;
+    errorPage.show(this.wc, { url, code, description }).then(() => this.emit('updated'));
   }
 
   /**
@@ -360,8 +899,9 @@ class Tab {
   }
 
   teardownView() {
+    if (INCOGNITO && this.wc) fingerprint.release(this.wc);
     if (this.cdp) {
-      this.cdp.detach();
+      this.cdp.detach({ force: true });
       this.cdp = null;
     }
     if (this.view) {
@@ -372,7 +912,8 @@ class Tab {
     }
     this.view = null;
     this.wc = null;
-    this.pid = null;
+    // `pid` needs no clearing: it is read from the webContents, which has just
+    // gone, so it already answers null.
     this.rssMB = 0;
     this.cpu = 0;
     this.jsHeapMB = 0;
@@ -420,8 +961,15 @@ class Tab {
     // moment a tab is hidden, before it can reach a state where it cannot.
     // A stopped page cannot run the script that answers, frozen or hibernated.
     if (!this.isLive || isStopped(this.tier)) return Promise.resolve(null);
+    const capturedOn = this.wc.getURL();
     return ipcHub.request(this.wc, timeoutMs).then((state) => {
+      // No answer: whatever was captured earlier belongs to an earlier page
+      // unless this is still that page.
+      if (!state && this.suspendedState?.state && this.suspendedState.state.page !== pageOf(capturedOn)) {
+        this.suspendedState.state = null;
+      }
       if (state) {
+        state.page = pageOf(capturedOn);
         this.hasDirtyInput = Boolean(state.dirty);
         this.hasSensitiveFields = Boolean(state.sensitive);
         this.suspendedState = { ...(this.suspendedState || {}), state, url: this.url };
@@ -462,6 +1010,8 @@ class Tab {
    * replaces.
    */
   async captureThumbnail() {
+    // Incognito writes nothing to disk, and a thumbnail is a picture of a page.
+    if (INCOGNITO) return null;
     if (!this.isLive || !this.visible) return null;
 
     if (this.hasSensitiveFields) {
@@ -487,11 +1037,22 @@ class Tab {
       const buffer = image.resize({ width: THUMB_WIDTH }).toJPEG(THUMB_QUALITY);
       if (!buffer || !buffer.length) return null;
 
-      const dir = thumbnailDir();
-      await fs.promises.mkdir(dir, { recursive: true });
+      const dir = await privateThumbDir();
+      if (!dir) return null;
       const file = path.join(dir, `tab-${this.id}.jpg`);
-      await fs.promises.writeFile(file, buffer);
+      await fs.promises.writeFile(file, buffer, { mode: 0o600 });
       this.thumbPath = file;
+
+      // Asked again after the awaits. The tab may have closed meanwhile - its
+      // `discardThumbnail` already ran, so a path recorded now would never be
+      // deleted - or the page may have reported a password field, whose
+      // picture must not stay on disk. Either way the file just written goes.
+      // Closed, not merely discarded: a discarded tab is what the picture is
+      // for, shown while it comes back.
+      if (this.closed || this.hasSensitiveFields) {
+        this.discardThumbnail();
+        return null;
+      }
       return file;
     } catch (err) {
       // A renderer that went away mid-capture, a full disk, a page that cannot
@@ -507,6 +1068,20 @@ class Tab {
     this.thumbPath = null;
     if (!file) return;
     fs.promises.unlink(file).catch(() => { /* already gone */ });
+  }
+
+  /**
+   * Silence this tab, or let it speak again.
+   *
+   * Applied to the renderer when there is one and remembered either way, so the
+   * answer survives the tab being discarded and rebuilt.
+   */
+  setMuted(muted) {
+    this.muted = Boolean(muted);
+    if (this.isLive) {
+      try { this.wc.setAudioMuted(this.muted); } catch { /* gone */ }
+    }
+    return this.muted;
   }
 
   /** Replay stored navigation history into a freshly realised renderer. */
@@ -532,14 +1107,28 @@ class Tab {
     return false;
   }
 
-  /** Push scroll/form state back into the page once it has loaded. */
+  /**
+   * Push scroll/form state back into the page once it has loaded - only into
+   * the page it came from. A restore that lands somewhere else (an expired
+   * session redirected to a sign-in page on another site) must not hand that
+   * site what was typed into the first one. 'wait' while a blank page loads
+   * ahead of the real one.
+   */
   applySuspendedPageState() {
     const state = this.suspendedState?.state;
-    if (!state || !this.isLive) return;
+    if (!state || !this.isLive) return 'done';
+    let here;
+    try { here = new URL(this.wc.getURL()); } catch { return 'wait'; }
+    if (here.protocol === 'about:' || here.href === 'debrowser://blank/' || here.href === 'debrowser://blank') return 'wait';
+    if (!state.page || pageOf(here.href) !== state.page) {
+      this.suspendedState.state = null;
+      return 'done';
+    }
     this.sendToPage('debrowser:restore-state', state);
     // Consumed: keep navigation history, drop the one-shot page state.
     if (this.suspendedState) this.suspendedState.state = null;
     this.hasDirtyInput = false;
+    return 'done';
   }
 
   /* ---------------------------------------------------------------- */
@@ -557,6 +1146,10 @@ class Tab {
       // stale "heavy" report from holding a boost on a tab nobody can see.
       this.reportedDemand = 'idle';
       this.demand = 'idle';
+      // Idle from the moment it was left, not from when it was opened: a tab
+      // read for twenty minutes was otherwise "idle twenty minutes" the instant
+      // you switched away, and discarded on the next tick.
+      if (this.everVisible) this.lastActiveAt = Date.now();
     }
     if (this.view) this.view.setVisible(visible);
   }
@@ -587,6 +1180,8 @@ class Tab {
   setBounds(bounds) {
     this.bounds = bounds;
     if (this.view) this.view.setBounds(bounds);
+    // The screen a private page reports is its own letterboxed size.
+    if (INCOGNITO && this.wc) fingerprint.setScreen(this, bounds);
   }
 
   emit(event, payload) {
@@ -604,16 +1199,42 @@ class Tab {
       visible: this.visible,
       everVisible: this.everVisible,
       audible: this.audible,
+      muted: this.muted,
+      // Which space it belongs to (spaces.js).
+      spaceId: this.spaceId || 'home',
+      // Its tab group, if any (tab-groups.js).
+      groupId: this.groupId || null,
+      // The page has an article reader view can show (reader.js).
+      readerable: this.readerable === true,
       loading: this.loading,
       crashed: this.crashed,
+      // The page asked for DRM video this browser cannot play; see probe-preload.js.
+      drm: Boolean(this.drmNeeded),
+      // The page did not load: no padlock, whatever the scheme says.
+      failed: Boolean(this.failed),
       pinned: this.pinned,
       boosted: this.boosted,
       demand: this.demand,
       rssMB: Math.round(this.rssMB),
+      // What it held when it was put to sleep (tiers.js), 0 once awake.
+      gaveBackMB: this.gaveBackMB || 0,
       cpu: Math.round((this.cpu || 0) * 10) / 10,
+      // As measured this tick, for the task manager: memory, and CPU as a
+      // share of the whole machine, as the system's own task manager shows it.
+      memNowMB: Math.round(this.memNowMB ?? this.rssMB ?? 0),
+      cpuNow: Math.round((this.cpuNow ?? this.cpu ?? 0) * 10) / 10,
       sharesProcess: this.sharesProcess,
       idleMs: this.idleMs(),
-      hasDirtyInput: this.hasDirtyInput
+      hasDirtyInput: this.hasDirtyInput,
+      // So the toolbar can grey out back/forward rather than offering buttons
+      // that do nothing. A tab with no renderer has no live history to ask, and
+      // reports both as unavailable - which is honest: it cannot navigate
+      // anywhere until it is restored, and activating it is what restores it.
+      canGoBack: this.isLive ? this.wc.navigationHistory.canGoBack() : false,
+      canGoForward: this.isLive ? this.wc.navigationHistory.canGoForward() : false,
+      // For the badge in the address bar, which shows when a site is not at
+      // the default size.
+      zoom: this.isLive ? Math.round(this.wc.getZoomFactor() * 100) : 100
     };
   }
 }
@@ -632,4 +1253,5 @@ function safePid(wc) {
   }
 }
 
-module.exports = { Tab, sweepThumbnails, sweepThumbnailsSync };
+module.exports = {
+  createTabView, Tab, sweepThumbnails, sweepThumbnailsSync, thumbnailDir, setLightVideo };

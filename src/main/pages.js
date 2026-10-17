@@ -1,0 +1,326 @@
+'use strict';
+
+/**
+ * The browser's own pages, served under `debrowser://`.
+ *
+ * Settings used to be a view laid over the content area. That was wrong in a way
+ * worth recording, because it produced a bug that looked like a freeze: the
+ * overlay covered every tab, nothing dismissed it, and switching tabs appeared
+ * to do nothing at all. The browser was fine - it was drawing the page behind a
+ * lid nobody had a handle for.
+ *
+ * The fix is not a dismiss call in more places. It is to stop pretending: a page
+ * the user navigates to is a page, so it gets a URL, a tab, a title, a history
+ * entry, and back and forward that work. Then there is no lid, because there is
+ * no overlay.
+ *
+ * These pages are privileged - their preload can issue browser commands - so two
+ * rules hold absolutely, and both are enforced rather than documented:
+ *
+ *   1. Only files that exist in the pages directory are served. The path is
+ *      resolved and checked to be inside it, so `debrowser://settings/../../..`
+ *      cannot walk out into the filesystem.
+ *   2. An internal tab can never navigate to a web page. Without that, a link
+ *      would carry a privileged preload to a site's own JavaScript.
+ */
+
+const path = require('path');
+const fs = require('fs');
+const { protocol, session } = require('electron');
+const icons = require('./icons');
+
+const SCHEME = 'debrowser';
+// The renderer directory itself, flat.
+//
+// A `pages/` subdirectory was tried and rejected: the shared palette lives in
+// theme.css beside the chrome and the task manager, and a separate root meant
+// either copying it - the drift this project already removed once - or a
+// traversal out of the root, which is the one thing the handler must refuse.
+// Everything here is our own UI; none of it is secret, and serving it grants
+// nothing, because privilege comes from the preload rather than the protocol.
+const PAGES_DIR = path.join(__dirname, '..', 'renderer');
+
+/** The pages that exist, and the file each one is. */
+const PAGES = {
+  newtab: 'newtab.html',
+  settings: 'settings.html',
+  history: 'history.html',
+  downloads: 'downloads.html',
+  // Saved sign-ins and cards, behind the passcode or Windows Hello / Touch ID.
+  passwords: 'passwords.html',
+  // The first-run tour, and again from Settings.
+  welcome: 'welcome.html',
+  // Incognito only: connecting to Tor, and what the connection does and does
+  // not hide. Served to the normal browser too, where it has nothing to say.
+  tor: 'tor.html',
+  // Incognito only: a page asked for plain HTTP and HTTPS was not available.
+  insecure: 'insecure.html',
+  // A site on the dangerous-sites lists, or one letter from a site you use.
+  danger: 'danger.html',
+  // Every protection in one place, and what needs attention.
+  safety: 'safety.html',
+  // What the browser saved and stopped, day by day, for a week.
+  receipt: 'receipt.html',
+  // This version's notes, after an update (whats-new.js).
+  'whats-new': 'whats-new.html',
+  // Reader view: a page's article in the browser's own type.
+  reader: 'reader.html',
+  // Your own style sheet for one site (site-styles.js).
+  style: 'style.html',
+  // Incognito only: the fingerprint self-check - what sites can read.
+  fingerprint: 'fingerprint.html',
+  // Incognito only: the empty page a private tab starts on, while its
+  // protections go on. Ours rather than about:blank because it is a secure
+  // context, where the engine's real client-hint brands can be read.
+  blank: 'blank.html'
+};
+
+/** Where a new tab goes when the user has not chosen a homepage. */
+const NEW_TAB_URL = `${SCHEME}://newtab`;
+const SETTINGS_URL = `${SCHEME}://settings`;
+const HISTORY_URL = `${SCHEME}://history`;
+const DOWNLOADS_URL = `${SCHEME}://downloads`;
+const PASSWORDS_URL = `${SCHEME}://passwords`;
+const TOR_URL = `${SCHEME}://tor`;
+const WELCOME_URL = `${SCHEME}://welcome`;
+const INSECURE_URL = `${SCHEME}://insecure`;
+const DANGER_URL = `${SCHEME}://danger`;
+const SAFETY_URL = `${SCHEME}://safety`;
+const RECEIPT_URL = `${SCHEME}://receipt`;
+const WHATS_NEW_URL = `${SCHEME}://whats-new`;
+const READER_URL = `${SCHEME}://reader`;
+const STYLE_URL = `${SCHEME}://style`;
+const FINGERPRINT_URL = `${SCHEME}://fingerprint`;
+const BLANK_URL = `${SCHEME}://blank`;
+
+/**
+ * Must run before `app.whenReady()`.
+ *
+ * `standard` gives the scheme an origin, without which it has no localStorage,
+ * no fetch, and a null origin that fails every same-origin check. `secure`
+ * places it in a secure context, so it is not treated as mixed content.
+ */
+function registerScheme() {
+  protocol.registerSchemesAsPrivileged([{
+    scheme: SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  }]);
+}
+
+/**
+ * Answer with the file's bytes, read here rather than fetched.
+ *
+ * This used to be `net.fetch(pathToFileURL(full))`, which sends every request
+ * for our own UI out through the network service and back. Measured, opening
+ * three of the browser's own pages: **997.5ms in the handler against 7.6ms**
+ * after this change - 2-6ms per sub-resource once warm and 60-270ms on the
+ * first touch of each file, five requests per page, on the most-opened page in
+ * the browser. A cold new tab page went from 1758ms to 131ms.
+ *
+ * An in-memory cache was built on top of this and then deleted, because it was
+ * measured too: reading a page's five files costs **0.040ms**, and a Map lookup
+ * 0.0003ms. Saving four hundredths of a millisecond is not worth 47KB per page
+ * held for the life of the browser, nor the staleness that comes with it. The
+ * win was never the cache; it was not using the network stack to read a file
+ * off the local disk.
+ *
+ * `readFileSync`, not its async twin: these are tens of kilobytes from the page
+ * cache or from inside the asar, the handler is already off the renderer's
+ * critical path, and an async read here would add a promise tick to save
+ * nothing measurable.
+ */
+function respond(full, log) {
+  let body;
+  try {
+    body = fs.readFileSync(full);
+  } catch (err) {
+    // ENOENT is the ordinary case - a page asking for something that is not
+    // there - and anything else is worth a line, because a permission error on
+    // our own UI is a broken install rather than a 404.
+    if (err.code !== 'ENOENT') log('pages', `could not read ${full}: ${err.message}`);
+    return new Response('Not found', { status: 404 });
+  }
+  return new Response(body, { headers: { 'content-type': contentType(full) } });
+}
+
+/** What to call a file, from its extension. Chromium sniffs nothing here. */
+const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.woff2': 'font/woff2',
+  '.json': 'application/json'
+};
+
+function contentType(file) {
+  return TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream';
+}
+
+/**
+ * Serve the pages, on every session that needs them.
+ *
+ * `protocol.handle` registers on the *default* session only. Tabs run in the
+ * `persist:debrowser` partition, which has a protocol registry of its own and
+ * inherits nothing - so registering once left every internal page failing with
+ * ERR_FAILED inside a tab while working perfectly in a default-session window,
+ * which is exactly how this was nearly missed: the standalone render harness
+ * used a default session and showed both pages correctly.
+ *
+ * @param {string[]} partitions - extra partitions to register on
+ */
+/** The one handler, built once and registered on every session that needs it. */
+let handler = null;
+
+function serve(log = () => {}, partitions = []) {
+  const registries = [protocol, ...partitions.map((p) => session.fromPartition(p).protocol)];
+  handler = async (request) => {
+    const url = new URL(request.url);
+
+    // Site icons are served rather than read from disk: they come off the
+    // network, without cookies, and only for addresses this browser has been
+    // told about. See icons.js - including the measurement showing that a
+    // website can reach this handler, which is why there is an allowlist.
+    if (url.hostname === 'icon') return icons.serve(request, log);
+    // Extensions' calls to the browser (extensions.js `bridge`), each carrying
+    // its extension's token: nothing is answered without a known one.
+    if (url.hostname === 'ext-bridge') return answerBridge(url, request);
+    // The host names the page; the path names a file belonging to it, so
+    // `debrowser://settings/settings.css` works without a second registration.
+    // `hasOwn`, because a bare index reaches the prototype chain:
+    // `debrowser://__proto__` and `debrowser://constructor` both resolved to
+    // something truthy, sailed past the `!file` guard below, and made
+    // `path.resolve` throw out of an async handler instead of returning 404.
+    const file = url.pathname === '/' || url.pathname === ''
+      ? (Object.hasOwn(PAGES, url.hostname) ? PAGES[url.hostname] : null)
+      : url.pathname.slice(1);
+
+    if (!file) return new Response('Not found', { status: 404 });
+
+    // Resolve first, then check containment. Checking the unresolved string
+    // would pass `..` straight through.
+    const full = path.resolve(PAGES_DIR, file);
+    if (full !== PAGES_DIR && !full.startsWith(PAGES_DIR + path.sep)) {
+      log('pages', `refused a path outside the pages directory: ${file}`);
+      return new Response('Forbidden', { status: 403 });
+    }
+    return respond(full, log);
+  };
+
+  for (const registry of registries) {
+    try {
+      registry.handle(SCHEME, handler);
+    } catch (err) {
+      // Already registered on this session is harmless; anything else is not.
+      log('pages', `could not register ${SCHEME}: ${err.message}`);
+    }
+  }
+}
+
+/** The extensions store's bridge, set once extensions exist (main.js). */
+let bridge = null;
+function setBridge(fn) { bridge = fn; }
+
+async function answerBridge(url, request) {
+  const headers = { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
+  if (!bridge) return new Response(JSON.stringify({ error: 'extensions are off' }), { status: 503, headers });
+  let args = null;
+  // Large arguments - thousands of request rules at once - come as the body,
+  // since an address that long is refused before it gets here.
+  let raw = url.searchParams.get('a');
+  if (request && request.method === 'POST') {
+    try { raw = await request.text(); } catch { raw = null; }
+  }
+  try { args = JSON.parse(raw || 'null'); } catch { /* none */ }
+  try {
+    const value = await bridge(url.searchParams.get('t'), String(url.searchParams.get('op') || ''), args);
+    return new Response(JSON.stringify({ value: value === undefined ? null : value }), { headers });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: String(err && err.message || err) }), { status: 400, headers });
+  }
+}
+
+/**
+ * Register our pages on a session made after startup - incognito makes one per
+ * tab - so a private tab can open the new tab page like any other.
+ */
+function serveSession(ses, log = () => {}) {
+  if (!handler) return;
+  try {
+    ses.protocol.handle(SCHEME, handler);
+  } catch (err) {
+    log('pages', `could not register ${SCHEME}: ${err.message}`);
+  }
+}
+
+/**
+ * Whether a request for one of our pages' files came from a website.
+ *
+ * Any page can name a `debrowser://` address in an `<img>`, a fetch or a
+ * frame, and whether it loads tells the site this is Debrowser - in a private
+ * window, a mark that sets the user apart from every other Tor user. The
+ * handler cannot tell who asked: measured, the request reaches it with no
+ * Referer, Origin or Sec-Fetch header at all, from our pages and a website
+ * alike. The network hooks can, from the frame that made the request, which a
+ * page has no way to set. Our own pages are `debrowser:` and the browser's
+ * chrome is `file:`; nothing else asks for these files.
+ *
+ * A navigation of the whole tab is not judged here: typing an address is the
+ * user's to do, and links from websites are refused before they get this far.
+ */
+function fromWebPage(details) {
+  if (!isInternal(details.url) || details.resourceType === 'mainFrame') return false;
+  let from = '';
+  try {
+    const frame = details.frame;
+    from = (details.resourceType === 'subFrame' ? frame?.parent?.url : frame?.url) || '';
+    if (!from && details.webContents && !details.webContents.isDestroyed()) from = details.webContents.getURL();
+  } catch {
+    from = '';
+  }
+  // An extension's own pages may reach the bridge, and nothing else of ours.
+  if (/^chrome-extension:/.test(from) && pageName(details.url) === 'ext-bridge') return false;
+  return Boolean(from) && !/^(debrowser|file|devtools):/.test(from);
+}
+
+/** Is this one of ours? */
+function isInternal(url) {
+  return typeof url === 'string' && url.startsWith(`${SCHEME}://`);
+}
+
+/** The page name in a `debrowser://` URL, or null. */
+function pageName(url) {
+  if (!isInternal(url)) return null;
+  try {
+    return new URL(url).hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the tab strip should call it. */
+function titleFor(url) {
+  switch (pageName(url)) {
+    case 'settings': return 'Settings';
+    case 'newtab': return 'New tab';
+    case 'history': return 'History';
+    case 'downloads': return 'Downloads';
+    case 'passwords': return 'Passwords';
+    case 'tor': return 'Private connection';
+    case 'insecure': return 'Not private';
+    case 'danger': return 'Warning';
+    case 'safety': return 'Safety check';
+    case 'receipt': return 'This week';
+    case 'whats-new': return 'Release Notes';
+    case 'reader': return 'Reader view';
+    case 'style': return 'Site style';
+    case 'fingerprint': return 'What sites can see';
+    default: return 'Debrowser';
+  }
+}
+
+module.exports = {
+  SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
+  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor, fromWebPage, setBridge
+};

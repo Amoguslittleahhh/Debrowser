@@ -1,42 +1,32 @@
 /* Task manager panel. Same cost discipline as the chrome: no images, no
    filters, keyed updates, and nothing that animates while idle. */
 
-:root {
-  --bg: #16181d;
-  --bg-raised: #1e2128;
-  --border: #2c303a;
-  --text: #e6e8ee;
-  --text-dim: #9aa1b1;
-  --accent: #5b8cff;
-  --ok: #49c17d;
-  --warn: #e0a33e;
-  --crit: #e2564a;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f7f8fa;
-    --bg-raised: #ffffff;
-    --border: #d8dbe2;
-    --text: #1a1d24;
-    --text-dim: #626a7a;
-  }
-}
-
-* { box-sizing: border-box; }
+/* Palette and base reset: theme.css, linked first. */
 
 body {
-  margin: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--bg);
   color: var(--text);
-  font: 12px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  /* Denser than the rest of the browser, and only here. The panel is an
+     instrument: twenty rows of live figures in a 360px column, read by
+     scanning rather than by reading. The family and everything else still come
+     from theme.css - this used to redeclare the whole `font` shorthand, which
+     quietly opted the panel out of the browser's typeface. */
+  font-size: var(--fs-small);
   border-left: 1px solid var(--border);
   user-select: none;
   cursor: default;
 }
+
+/* The column takes its room from the page in one step - growing it would lay
+   the page out again every frame - so its contents arrive instead, from the
+   side it opened on. Once per opening; nothing moves after that. */
+body > * { animation: panel-in var(--slow) var(--ease-out); }
+@keyframes panel-in { from { opacity: 0; transform: translateX(10px); } }
+body.calm > * { animation: none; }
+@media (prefers-reduced-motion: reduce) { body > * { animation: none; } }
 
 header {
   display: flex;
@@ -45,39 +35,57 @@ header {
   padding: 12px 14px 8px;
 }
 
-h1 { margin: 0; font-size: 13px; font-weight: 600; }
+h1 { margin: 0; font-size: var(--fs-body); font-weight: var(--fw-bold); letter-spacing: var(--ls-title); }
 
 .ghost {
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: none;
   background: transparent;
   color: var(--text-dim);
   font-size: 17px;
   cursor: default;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   width: 24px;
   height: 24px;
 }
 .ghost:hover { background: var(--border); color: var(--text); }
+.ghost:active { transform: var(--press); }
+.ghost .x-icon { width: 14px; height: 14px; }
 
+/*
+ * Three figures in a row, set as type: the total large, the other two at body
+ * size, each with its word under it, divided by hairlines. They were three
+ * bordered cards of equal weight - the stat-tile grid every generated
+ * dashboard opens with - which gave "Live tabs: 6" the same billing as the
+ * memory the panel exists to show.
+ */
 .summary {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 0 14px 10px;
+  display: flex;
+  align-items: flex-end;
+  padding: 2px 14px 12px;
 }
 
 .stat {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 8px 10px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  min-width: 0;
+  padding: 0 14px;
+  border-left: 1px solid var(--border-soft);
 }
+.stat:first-child { padding-left: 0; border-left: 0; flex: 1; }
 
-.stat-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.stat-value { font-size: var(--fs-body); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+.stat:first-child .stat-value { font-size: 26px; font-weight: var(--fw-bold); letter-spacing: -0.01em; line-height: 1.1; }
+.stat-label {
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .budget-row {
   display: flex;
@@ -86,20 +94,26 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
   padding: 0 14px 8px;
   color: var(--text-dim);
 }
-.budget-row input { flex: 1; accent-color: var(--accent); }
+/* Vertical padding, not height: the slider draws the same thin track and the
+   pointer gets a 32px band to find it in. `content-box` keeps `flex: 1` sizing
+   the track rather than the track plus its padding. */
+.budget-row input {
+  flex: 1;
+  accent-color: var(--accent);
+  padding: 8px 0;
+  box-sizing: content-box;
+}
 .budget-row output { font-variant-numeric: tabular-nums; min-width: 54px; text-align: right; }
 
+/* A sentence, not a callout box: it is usually "under budget", which needs no
+   frame round it. It takes a colour only when there is something to say. */
 .pressure {
   margin: 0 14px 10px;
-  padding: 6px 9px;
-  border-radius: 6px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-small);
 }
-.pressure[data-pressure="high"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
-.pressure[data-pressure="critical"] { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--border)); }
+.pressure[data-pressure="high"] { color: var(--warn); }
+.pressure[data-pressure="critical"] { color: var(--crit); }
 
 .tabs {
   flex: 1;
@@ -111,11 +125,11 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
 
 .row {
   display: grid;
-  grid-template-columns: 8px 1fr auto auto;
+  grid-template-columns: 8px 18px 1fr auto auto;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .row:hover { background: var(--bg-raised); }
 
@@ -127,29 +141,86 @@ h1 { margin: 0; font-size: 13px; font-weight: 600; }
 
 .row-main { min-width: 0; }
 .row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-sub { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-sub { color: var(--text-dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .row-mem { font-variant-numeric: tabular-nums; color: var(--text-dim); }
-.row-mem.boosted { color: var(--accent); }
+.row-mem.boosted { color: var(--accent-text); }
 
 .row-action {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   padding: 2px 7px;
   font: inherit;
-  font-size: 10px;
+  font-size: var(--fs-micro);
   cursor: default;
   opacity: 0;
 }
-.row:hover .row-action { opacity: 1; }
+.row:hover .row-action, .row:focus-within .row-action { opacity: 1; }
 .row-action:hover { color: var(--text); border-color: var(--text-dim); }
+.row-action:active { transform: var(--press); }
 .row-action:disabled { opacity: 0 !important; }
 
 footer {
   padding: 8px 14px 12px;
   border-top: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: var(--fs-micro);
 }
+
+/*
+ * The site chip: its initial on a colour from its hostname, with the real
+ * favicon over the top once it loads.
+ *
+ * The same two elements the tab strip uses, at the same sizes, from the same
+ * `siteHue` - so a site is one colour everywhere in the browser rather than a
+ * different one in each view that draws it.
+ */
+.row-chip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  font-size: 9.5px;
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  text-transform: uppercase;
+  color: hsl(var(--hue, 220) var(--chip-fg-s) var(--chip-fg-l));
+  background: hsl(var(--hue, 220) var(--chip-bg-s) var(--chip-bg-l));
+}
+
+
+.row-icon {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+}
+
+/*
+ * The chip stops painting once the site's own logo is up.
+ *
+ * `body` is in the selector only to out-specify the theme variants above, which
+ * qualify `.row-chip` with `body[data-theme=…]` and would otherwise keep
+ * repainting the tile under every transparent favicon.
+ */
+body .row-chip.has-icon {
+  background: none;
+  color: transparent;
+}
+
+/*
+ * A figure that is known to run high says so in its own colour.
+ *
+ * The label reads "summed" rather than "resident" when the platform offers no
+ * proportional measure, and the tooltip explains it - but a word alone is easy
+ * to skim past on a number that can be twice what the browser is really
+ * holding. Warn, not critical: it is an over-count, not a fault.
+ */
+.stat-label.inexact { color: var(--warn); }

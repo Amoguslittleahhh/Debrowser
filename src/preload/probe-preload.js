@@ -21,10 +21,24 @@
  *    from renderer CPU and from the page's own script/layout timings, and the
  *    two signals are fused there. See governor/boost.js.
  *  - It must never interfere with the page: all listeners are passive, and
- *    nothing on `window` or the DOM is modified.
+ *    nothing on `window` or the DOM is modified. The one exception is at the
+ *    end of the file: private windows only, files dropped or pasted in.
  */
 
-const { ipcRenderer, contextBridge } = require('electron');
+const { ipcRenderer } = require('electron');
+
+/*
+ * In an iframe. A private window loads this preload into its subframes too
+ * (tab.js, nodeIntegrationInSubFrames) for one reason: a file dropped or
+ * pasted into an embedded upload widget is that frame's event, out of reach of
+ * the top frame's listener, and would reach the page with its metadata. The
+ * cleaner is installed and nothing else - the rest of this file is about the
+ * page as a whole and runs once, in the top frame.
+ */
+if (!process.isMainFrame) {
+  if (process.argv.includes('--debrowser-private')) installFileCleaner();
+  return;
+}
 
 /**
  * Sampling interval. Chromium throttles this to roughly once a minute once the
@@ -56,6 +70,67 @@ const now = () => Date.now();
 
 function markInteraction() { lastInteractionAt = now(); }
 function markScroll() { lastScrollAt = now(); }
+
+/**
+ * Ctrl and the wheel: zoom, as it does in every other browser.
+ *
+ * Chromium does not do this for an embedded view - measured, a real
+ * ctrl+wheel neither changes the zoom nor raises `zoom-changed` - so the
+ * gesture has to be noticed here, in the one script that runs inside every
+ * page, and applied by the browser process.
+ *
+ * Capturing and non-passive on purpose. Capture so a page that handles the
+ * wheel itself does not swallow it first; non-passive so the default - which
+ * is scrolling the page under the pointer - can be cancelled. A ctrl+wheel
+ * that both zooms and scrolls is worse than one that does neither.
+ *
+ * Rate-limited, because one notch of a wheel arrives as several events on a
+ * trackpad and each one is a message to another process.
+ */
+let lastZoomAt = 0;
+
+window.addEventListener('wheel', (event) => {
+  if (!event.ctrlKey || event.deltaY === 0) return;
+  event.preventDefault();
+  const at = now();
+  if (at - lastZoomAt < 60) return;
+  lastZoomAt = at;
+  ipcRenderer.send('debrowser:zoom-gesture', { direction: event.deltaY < 0 ? 'in' : 'out' });
+}, { passive: false, capture: true });
+
+/*
+ * Ctrl+S and Ctrl+/ reach the page first (see `awaitPageKey` in main.js): an
+ * editor saves its document or toggles a comment, and the browser acts only
+ * if the page did not. Checked after the event has been through the page's
+ * own handlers, which is when `defaultPrevented` says whether it used the key,
+ * and answered either way - silence is what tells the browser this frame
+ * could not see the key.
+ *
+ * A key typed into a frame of the same site never reaches this window, so
+ * such a frame is listened to as well once focus goes into it.
+ */
+const PAGE_FIRST = { s: 'save-page', '/': 'show-shortcuts' };
+function pageFirstKey(event) {
+  const mac = process.platform === 'darwin';
+  const mod = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  const command = PAGE_FIRST[String(event.key).toLowerCase()];
+  if (!command || !mod || event.shiftKey || event.altKey || event.repeat) return;
+  setTimeout(() => ipcRenderer.send('debrowser:page-key', command, event.defaultPrevented), 0);
+}
+window.addEventListener('keydown', pageFirstKey, true);
+const watchedFrames = new WeakSet();
+window.addEventListener('blur', () => {
+  setTimeout(() => {
+    const frame = document.activeElement;
+    if (!frame || frame.tagName !== 'IFRAME') return;
+    try {
+      const inner = frame.contentWindow;
+      if (!inner || watchedFrames.has(inner)) return;
+      inner.addEventListener('keydown', pageFirstKey, true);   // throws for another site's frame
+      watchedFrames.add(inner);
+    } catch { /* another site's frame: the browser's fallback covers it */ }
+  }, 0);
+});
 
 const passive = { passive: true, capture: true };
 window.addEventListener('scroll', markScroll, passive);
@@ -148,10 +223,47 @@ function sample() {
  * page to a sign-in form without any navigation the main process would see, and
  * a stale `false` here would authorise a screenshot of the login page.
  */
+/**
+ * Is this one element a credential or payment field?
+ *
+ * The single definition, used by both the screenshot gate and the session
+ * snapshot. They had drifted into two: one matched the `autocomplete`
+ * *attribute* with an exact selector, the other the IDL property with `===`,
+ * and neither handled a token list - `autocomplete="cc-number webauthn"` is
+ * valid and matched nothing, so such a field would have been read into the
+ * session store and its page photographed.
+ *
+ * `autocomplete` is a space-separated token list by specification, so it is
+ * tokenised rather than compared. Payment tokens beyond the card number are
+ * included: a CVC or an expiry date is not less sensitive than the number.
+ */
+const PAYMENT_TOKENS = new Set([
+  'cc-number', 'cc-csc', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-name', 'cc-type'
+]);
+
+function isSensitiveField(el) {
+  try {
+    if ((el.getAttribute('type') || '').toLowerCase() === 'password') return true;
+    const tokens = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/);
+    return tokens.some((t) => PAYMENT_TOKENS.has(t));
+  } catch {
+    return true;    // fail closed
+  }
+}
+
+/**
+ * Does this page show one right now?
+ *
+ * Re-queried rather than cached: a single-page app can route from a product
+ * page to a sign-in form without any navigation the main process would see, and
+ * a stale `false` here would authorise a screenshot of the login page.
+ */
 function hasSensitiveField() {
   try {
-    return document.querySelector(
-      'input[type="password"], input[autocomplete="cc-number"]') !== null;
+    for (const el of document.querySelectorAll('input')) {
+      if (isSensitiveField(el)) return true;
+    }
+    return false;
   } catch {
     // Fail closed: if the page cannot be inspected, treat it as sensitive.
     return true;
@@ -203,6 +315,35 @@ start();
 /* ------------------------------------------------------------------ */
 
 /**
+ * Editable regions the user has actually typed into. A contenteditable has no
+ * `defaultValue` to compare against, and treating any content as unsubmitted
+ * input made every rich-text page - most of which ship with content in their
+ * editors - permanently undiscardable. Held in a WeakSet rather than marked on
+ * the element so the page's DOM is left untouched.
+ */
+const editedHosts = new WeakSet();
+document.addEventListener('input', (event) => {
+  for (let node = event.target; node && node.isContentEditable; node = node.parentElement) {
+    editedHosts.add(node);
+  }
+}, { capture: true, passive: true });
+
+/**
+ * Whether a select differs from what the markup chose. A single select with
+ * no `selected` attribute defaults to its first enabled option, so comparing
+ * against `option[selected]` alone - undefined there - reported every such
+ * select as changed.
+ */
+function selectIsDirty(el) {
+  const options = [...el.options];
+  if (el.multiple) return options.some((o) => o.selected !== o.defaultSelected);
+  let initial = -1;
+  for (const o of options) if (o.defaultSelected) initial = o.index; // the last one wins
+  if (initial === -1 && el.size <= 1) initial = options.findIndex((o) => !o.disabled);
+  return el.selectedIndex !== initial;
+}
+
+/**
  * Snapshot the parts of a page that navigation history alone does not carry:
  * where the user had scrolled to, and anything they had typed.
  *
@@ -229,10 +370,13 @@ function captureState() {
     for (const el of fields) {
       index += 1;
       const type = (el.getAttribute('type') || '').toLowerCase();
+
       // Never read back credentials or payment fields, even into our own
       // in-memory session store. Their *presence* is still worth reporting:
       // a page with a password box is one we should not screenshot either.
-      if (type === 'password' || el.autocomplete === 'cc-number') {
+      // Saving one is a separate, explicit act - see credentials.js - and does
+      // not come through here.
+      if (isSensitiveField(el)) {
         state.sensitive = true;
         continue;
       }
@@ -241,12 +385,11 @@ function captureState() {
       let value = null;
 
       if (el.isContentEditable) {
-        if (el.innerHTML !== (el.dataset.debrowserInitial ?? el.innerHTML)) state.dirty = true;
         value = el.innerHTML;
-        if (value) state.dirty = true;
+        if (editedHosts.has(el)) state.dirty = true;
       } else if (el.tagName === 'SELECT') {
         value = el.value;
-        if (el.selectedIndex !== el.querySelector('option[selected]')?.index) state.dirty = true;
+        if (selectIsDirty(el)) state.dirty = true;
       } else if (type === 'checkbox' || type === 'radio') {
         value = el.checked;
         if (el.checked !== el.defaultChecked) state.dirty = true;
@@ -269,14 +412,20 @@ ipcRenderer.on('debrowser:capture', (_event, requestId) => {
 });
 
 ipcRenderer.on('debrowser:restore-state', (_event, state) => {
-  if (!state) return;
+  // Only on the page it was captured from (tab.js checks too).
+  if (!state || state.page !== location.origin + location.pathname) return;
   const apply = () => {
     try {
       for (const field of state.fields || []) {
         if (!field.path.startsWith('#')) continue; // index paths are not stable across a reload
         const el = document.querySelector(field.path);
         if (!el) continue;
-        if (field.kind === 'html') el.innerHTML = field.value;
+        if (field.kind === 'html') {
+          el.innerHTML = field.value;
+          // Restored input is still the user's unsubmitted input, exactly as a
+          // restored text field's value still differs from its default.
+          editedHosts.add(el);
+        }
         else if (field.type === 'checkbox' || field.type === 'radio') el.checked = Boolean(field.value);
         else el.value = field.value;
       }
@@ -289,4 +438,557 @@ ipcRenderer.on('debrowser:restore-state', (_event, state) => {
 
 // Expose nothing to the page itself; the bridge exists only so that
 // contextIsolation stays on with no main-world surface area.
-contextBridge.exposeInMainWorld('__debrowser', Object.freeze({ version: 1 }));
+/* ------------------------------------------------------------------ */
+/* Saved sign-ins                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Offer to remember a sign-in, when the user submits one.
+ *
+ * Reads a password only at the moment the user has deliberately submitted it,
+ * and only to ask whether to keep it. Nothing is stored unless they say yes;
+ * the answer is taken in the browser process, not here, so a page cannot
+ * fabricate consent.
+ *
+ * This does not weaken the rule above. The session snapshot still never reads
+ * these fields, and a page carrying one is still never photographed - both are
+ * automatic mechanisms the user did not ask for, which is exactly why they must
+ * not touch credentials. This is the opposite kind of thing.
+ */
+function offerToSave(form) {
+  try {
+    const password = form.querySelector('input[type="password"]');
+    if (!password || !password.value) return;
+
+    // The username is whatever text-like field precedes the password, which is
+    // what every sign-in form looks like. Guessing wrong costs a wrong label on
+    // a row the user can edit; guessing at the password would be unforgivable,
+    // so that is never inferred.
+    let username = '';
+    const candidates = form.querySelectorAll('input');
+    for (const el of candidates) {
+      if (el === password) break;
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (['text', 'email', 'tel'].includes(type) && el.value) username = el.value;
+    }
+
+    ipcRenderer.send('debrowser:credential-offer', {
+      origin: location.origin,
+      username,
+      password: password.value
+    });
+  } catch { /* a page that cannot be inspected simply gets no offer */ }
+}
+
+window.addEventListener('submit', (event) => {
+  if (event.target instanceof HTMLFormElement) offerToSave(event.target);
+}, true);
+
+/**
+ * Fill a saved sign-in.
+ *
+ * Driven from the browser process, never from the page: a page cannot ask to be
+ * filled, it can only receive a fill the user's browser decided to perform.
+ *
+ * Synthetic `input` and `change` events are dispatched after setting the value.
+ * Without them a field set this way looks empty to every framework that tracks
+ * state outside the DOM - React, Vue, Angular - so the form would submit blank
+ * while appearing filled, which is worse than not filling it at all.
+ */
+ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
+  try {
+    if (!record || location.origin !== record.origin) return;   // never cross-origin
+    const password = document.querySelector('input[type="password"]');
+    if (!password) return;
+
+    const setValue = (el, value) => {
+      const proto = Object.getPrototypeOf(el);
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (setter) setter.call(el, value); else el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    if (record.username) {
+      const form = password.form || document;
+      let user = null;
+      for (const el of form.querySelectorAll('input')) {
+        if (el === password) break;
+        const type = (el.getAttribute('type') || 'text').toLowerCase();
+        if (['text', 'email', 'tel'].includes(type)) user = el;
+      }
+      if (user) setValue(user, record.username);
+    }
+    setValue(password, record.password);
+  } catch { /* nothing fillable here */ }
+});
+
+/**
+ * Fill payment details, on a click the user made in the browser's own UI.
+ *
+ * Never on load. A page can place a payment field off-screen or at zero size
+ * and harvest whatever an autofill puts in it, and unlike a password there is
+ * no origin binding to make that safe - a card number is equally valid
+ * everywhere. So this only ever arrives because the user asked for it while
+ * looking at the page.
+ */
+ipcRenderer.on('debrowser:payment-fill', (_event, record) => {
+  try {
+    if (!record) return;
+    const pick = (token, fallback) =>
+      document.querySelector(`input[autocomplete~="${token}"]`) ||
+      (fallback ? document.querySelector(fallback) : null);
+
+    const setValue = (el, value) => {
+      if (!el || !value) return;
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+      if (setter) setter.call(el, value); else el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    setValue(pick('cc-number'), record.number);
+    setValue(pick('cc-name'), record.holder);
+    setValue(pick('cc-exp'), record.expiry);
+  } catch { /* nothing fillable here */ }
+});
+
+/* ------------------------------------------------------------------ */
+/* Private windows: files dropped or pasted into a page                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The one place this file does interfere with the page, and only in a private
+ * window: a file the page would receive by drag and drop or by paste does not
+ * pass through the file picker, where uploads are cleaned (see
+ * incognito/sanitise.js), so it is caught here instead. The original event is
+ * stopped before any of the page's listeners see it - this listener is on the
+ * window, in the capture phase, added before any page script ran - and the
+ * same event is sent again with clean files: images without their Exif, GPS,
+ * XMP or comments, and every file with its timestamp reset, because when a
+ * photo was taken or a document last edited is metadata too.
+ *
+ * If cleaning fails the drop is dropped. A file that reached the page with
+ * its metadata would be the failure this exists to prevent.
+ */
+function installFileCleaner() {
+  /* global DataTransfer, File, DragEvent, ClipboardEvent -- page-side constructors */
+  const IMAGE = /\.(jpe?g|png|webp)$/i;
+  const ours = new WeakSet();
+
+  const cleanFiles = async (list) => {
+    const files = [...list];
+    const images = files.map((f, i) => (IMAGE.test(f.name) || /^image\/(jpeg|png|webp)$/.test(f.type) ? i : -1))
+      .filter((i) => i >= 0);
+    let cleaned = [];
+    if (images.length) {
+      const payload = await Promise.all(images.map(async (i) => ({
+        name: files[i].name, type: files[i].type, bytes: new Uint8Array(await files[i].arrayBuffer())
+      })));
+      cleaned = await ipcRenderer.invoke('debrowser:clean-files', payload);
+      if (!Array.isArray(cleaned) || cleaned.length !== images.length) throw new Error('not cleaned');
+    }
+    const now = Date.now();
+    const out = new DataTransfer();
+    files.forEach((f, i) => {
+      const k = images.indexOf(i);
+      const body = k >= 0 ? cleaned[k].bytes : f;
+      out.items.add(new File([body], f.name, { type: f.type, lastModified: now }));
+    });
+    return out;
+  };
+
+  const intercept = (type, filesOf, remake) => {
+    window.addEventListener(type, (event) => {
+      if (ours.has(event)) return;
+      const list = filesOf(event);
+      if (!list || !list.length) return;
+      // What came with the files - a spreadsheet's cells are copied as text
+      // and as a picture of them - goes along too. The event handed on used to
+      // carry the cleaned files alone, and a synthetic paste inserts nothing
+      // by itself, so pasting such cells into a text field pasted nothing.
+      const source = event.clipboardData || event.dataTransfer;
+      const strings = {};
+      for (const kind of ['text/plain', 'text/html', 'text/uri-list']) {
+        const value = source && source.getData(kind);
+        if (value) strings[kind] = value;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const target = event.target;
+      cleanFiles(list).then((clean) => {
+        for (const [kind, value] of Object.entries(strings)) {
+          try { clean.setData(kind, value); } catch { /* read-only list */ }
+        }
+        if (type === 'drop' && target instanceof HTMLInputElement && target.type === 'file') {
+          target.files = clean.files;
+          target.dispatchEvent(new Event('input', { bubbles: true }));
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return;
+        }
+        const again = remake(event, clean);
+        ours.add(again);
+        target.dispatchEvent(again);
+        // Unhandled and into something editable: what a real paste would
+        // have done with the text.
+        const editable = target && (target.isContentEditable ||
+          target.tagName === 'TEXTAREA' ||
+          (target instanceof HTMLInputElement && !['file', 'checkbox', 'radio', 'button', 'submit'].includes(target.type)));
+        if (type === 'paste' && !again.defaultPrevented && editable && strings['text/plain']) {
+          document.execCommand('insertText', false, strings['text/plain']);
+        }
+      }).catch(() => { /* not cleaned: not delivered */ });
+    }, true);
+  };
+
+  intercept('drop', (e) => e.dataTransfer && e.dataTransfer.files, (e, dt) => new DragEvent('drop', {
+    bubbles: true, cancelable: true, composed: true, dataTransfer: dt,
+    clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY,
+    ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey
+  }));
+  intercept('paste', (e) => e.clipboardData && e.clipboardData.files, (e, dt) => new ClipboardEvent('paste', {
+    bubbles: true, cancelable: true, composed: true, clipboardData: dt
+  }));
+}
+if (process.argv.includes('--debrowser-private')) installFileCleaner();
+
+/*
+ * Fetch the page behind a link the user is about to follow (see
+ * src/main/speculation.js). Top frame of an ordinary web page only, and never
+ * in a private window.
+ *
+ * Intent is a pointer resting on the link for a moment, or the button going
+ * down on it - a pointer passing over a list of links fetches none of them.
+ * Each link is asked about once; the browser says whether this page may carry
+ * a rule, and if so one rule naming that one link is added. At most a few per
+ * page, so a page of links cannot be turned into a page of requests.
+ */
+if (!process.argv.includes('--debrowser-private') && window === window.top &&
+    /^https?:$/.test(location.protocol)) {
+  const DWELL_MS = 120;
+  const MAX_PER_PAGE = 8;
+  const asked = new Set();
+  let dwell = null;
+  // Once the page is navigating away, a rule added now arrives behind the
+  // navigation it was meant to speed up - measured, it then made a click that
+  // came too fast for it slower, 362 ms against 206. So none is added after.
+  let leaving = false;
+  // Leaving means a new document. A single-page app's pushState fires
+  // `navigate` too, same-document, and counting it as leaving stopped every
+  // prefetch on the site for good after its first route change; a same-page
+  // route change starts the per-page allowance again instead.
+  if (window.navigation) {
+    window.navigation.addEventListener('navigate', (e) => {
+      if (e.hashChange || e.downloadRequest) return;
+      if (e.destination && e.destination.sameDocument) asked.clear();
+      else leaving = true;
+    });
+  }
+  window.addEventListener('pageshow', () => { leaving = false; });
+
+  // A <meta> content security policy the response headers did not carry:
+  // checked here, where it can be seen.
+  const metaPolicyBlocks = () => [...document.querySelectorAll('meta[http-equiv]')]
+    .some((m) => /^content-security-policy$/i.test(m.httpEquiv) &&
+      /(^|;)\s*(script-src|script-src-elem|default-src)\b/i.test(m.content) &&
+      !/'inline-speculation-rules'/i.test(m.content));
+
+  const linkOf = (target) => {
+    const a = target && target.closest ? target.closest('a[href]') : null;
+    if (!a || a.hasAttribute('download') || (a.target && a.target !== '_self')) return null;
+    let url;
+    try { url = new URL(a.href, location.href); } catch { return null; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    // A jump within this page is not a navigation.
+    if (url.origin === location.origin && url.pathname === location.pathname &&
+        url.search === location.search) return null;
+    url.hash = '';
+    return url.href;
+  };
+
+  const prefetch = async (href) => {
+    if (!href || asked.has(href) || asked.size >= MAX_PER_PAGE) return;
+    asked.add(href);
+    if (metaPolicyBlocks()) return;
+    const ok = await ipcRenderer.invoke('debrowser:may-speculate', href).catch(() => false);
+    if (!ok || leaving || !document.head) return;
+    const rule = document.createElement('script');
+    rule.type = 'speculationrules';
+    rule.textContent = JSON.stringify({ prefetch: [{ source: 'list', urls: [href] }] });
+    document.head.append(rule);
+  };
+
+  document.addEventListener('pointerover', (event) => {
+    const href = linkOf(event.target);
+    clearTimeout(dwell);
+    if (href && !asked.has(href)) dwell = setTimeout(() => prefetch(href), DWELL_MS);
+  }, { capture: true, passive: true });
+  document.addEventListener('pointerout', () => clearTimeout(dwell), { capture: true, passive: true });
+  document.addEventListener('pointerdown', (event) => {
+    if (event.button === 0) prefetch(linkOf(event.target));
+  }, { capture: true, passive: true });
+}
+
+/*
+ * Protected video.
+ *
+ * This build of Electron has no Widevine, so a site that plays DRM video -
+ * Netflix, Disney+, Prime Video, Spotify - is refused the key system and shows
+ * its own error. The browser cannot fix that from here without shipping a
+ * third-party Electron, so it says so instead, and offers to open the page in
+ * a browser that can play it. `requestMediaKeySystemAccess` is watched, not
+ * changed: the page gets exactly the answer it would have got, and the
+ * browser hears only which key system was refused.
+ *
+ * Not in private windows, where there is nowhere to send the page that would
+ * not leave Tor.
+ */
+if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol)) {
+  const { contextBridge } = require('electron');
+  // Only when the page got no DRM at all. Players and test pages ask about
+  // every key system in turn - PlayReady, FairPlay - and go on to use the one
+  // that answers; a refusal of those alongside a Widevine that works is not a
+  // page that cannot play. So a refusal waits a moment, and counts only if
+  // nothing was granted meanwhile.
+  let told = false;
+  let granted = false;
+  const tell = (outcome, system) => {
+    if (outcome === 'granted') { granted = true; return; }
+    if (told) return;
+    setTimeout(() => {
+      if (told || granted) return;
+      told = true;
+      ipcRenderer.send('debrowser:drm-needed', String(system).slice(0, 64));
+    }, 1500);
+  };
+  try {
+    contextBridge.executeInMainWorld({
+      func: (report) => {
+        const proto = window.Navigator.prototype;
+        const original = proto.requestMediaKeySystemAccess;
+        if (typeof original !== 'function') return;
+        proto.requestMediaKeySystemAccess = new Proxy(original, {
+          apply(target, self, args) {
+            const result = Reflect.apply(target, self, args);
+            const system = String(args[0] || '');
+            // Clear Key is not DRM, and it works here.
+            if (system !== 'org.w3.clearkey') result.then(() => report('granted', system), () => report('refused', system));
+            return result;
+          }
+        });
+      },
+      args: [tell]
+    });
+  } catch { /* an older bridge: no notice, and nothing else changes */ }
+}
+
+/*
+ * Light graphics (src/main/graphics.js): on a machine with no graphics card,
+ * YouTube is asked for H.264 rather than VP9 or AV1. All three are decoded by
+ * the processor there, and H.264 costs a fraction of the others - the trick
+ * the h264ify extension is known for. YouTube only, because it always has
+ * H.264 to give; a site with nothing but VP9 would be left with no video.
+ */
+if (process.argv.includes('--debrowser-light-video') && /(^|\.)(youtube\.com|youtube-nocookie\.com)$/.test(location.hostname)) {
+  const { contextBridge } = require('electron');
+  try {
+    contextBridge.executeInMainWorld({
+      func: () => {
+        const costly = /\b(vp0?8|vp0?9|av01)\b/i;
+        const ms = window.MediaSource;
+        if (ms && typeof ms.isTypeSupported === 'function') {
+          const original = ms.isTypeSupported.bind(ms);
+          ms.isTypeSupported = (type) => !costly.test(String(type)) && original(type);
+        }
+        const proto = window.HTMLMediaElement && window.HTMLMediaElement.prototype;
+        if (proto && typeof proto.canPlayType === 'function') {
+          const canPlay = proto.canPlayType;
+          proto.canPlayType = function (type) { return costly.test(String(type)) ? '' : canPlay.call(this, type); };
+        }
+        const caps = navigator.mediaCapabilities;
+        if (caps && typeof caps.decodingInfo === 'function') {
+          const decodingInfo = caps.decodingInfo.bind(caps);
+          caps.decodingInfo = (config) => {
+            const type = config && config.video && config.video.contentType;
+            if (costly.test(String(type || ''))) return Promise.resolve({ supported: false, smooth: false, powerEfficient: false });
+            return decodingInfo(config);
+          };
+        }
+      },
+      args: []
+    });
+  } catch { /* an older bridge: the page chooses as it would */ }
+}
+
+/*
+ * Passkeys, in the browser's own list (src/main/passkeys.js).
+ *
+ * A request for "any passkey of mine for this site" is asked of the browser
+ * first: it lists the site's passkeys in its own view, under the address bar
+ * or under the sign-in field, and hands back only the one picked - which is
+ * then requested from Windows by name, so Windows Hello asks whether it is you
+ * and nothing more. Anything the browser does not take (null) goes to Chromium
+ * exactly as the page wrote it. The accounts never pass through here: the page
+ * learns only the credential chosen, as it would from the signed answer.
+ *
+ * On macOS and Linux the passkeys are Debrowser's own (passkey-store.js), so
+ * a page offering to make one, or naming the one it wants, is asked about here
+ * too; after Chromium has made or used it, the browser is told, and takes the
+ * key back out of the tab.
+ *
+ * A field marked for passkeys (`autocomplete="username webauthn"`) says where
+ * the dropdown goes, as it does in Chrome; its position is all that is sent.
+ *
+ * Not in private windows, which keep nothing and ask Windows for nothing new.
+ */
+if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol)) {
+  const { contextBridge } = require('electron');
+  const ask = (request) => ipcRenderer.invoke('debrowser:passkey-request', request);
+  const canAsk = () => ipcRenderer.invoke('debrowser:passkey-available');
+  const gaveUp = () => ipcRenderer.send('debrowser:passkey-abort');
+  const settled = () => ipcRenderer.send('debrowser:passkey-done');
+  try {
+    contextBridge.executeInMainWorld({
+      func: (ask, canAsk, gaveUp, settled) => {
+        /* global atob, btoa, DOMException -- the page's own, in its world */
+        const proto = window.CredentialsContainer && window.CredentialsContainer.prototype;
+        if (!proto || typeof proto.get !== 'function') return;
+        const decode = (s) => {
+          const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
+          const out = new Uint8Array(b.length);
+          for (let i = 0; i < b.length; i++) out[i] = b.charCodeAt(i);
+          return out;
+        };
+        const encode = (source) => {
+          try {
+            const bytes = source instanceof ArrayBuffer ? new Uint8Array(source)
+              : new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+            let s = '';
+            for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+            return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+          } catch { return null; }
+        };
+        const ids = (list) => (Array.isArray(list) ? list.map((c) => c && c.id && encode(c.id)).filter(Boolean) : []);
+        // What Chromium says when its own dialog is closed: the page cannot
+        // tell a dismissal here from one there.
+        const refused = () => new DOMException('The operation either timed out or was not allowed. ' +
+          'See: https://www.w3.org/TR/webauthn-2/#sctn-privacy-considerations-client.', 'NotAllowedError');
+        const already = () => new DOMException('The user attempted to register an authenticator that contains ' +
+          'one of the credentials already registered with the relying party.', 'InvalidStateError');
+
+        // Ask the browser, then Chromium with what it answered. `then` makes
+        // the call Chromium sees; a passkey kept by the browser is told when
+        // that call has settled, so it can take the key back.
+        const through = (target, self, args, question, then) => {
+          const options = args[0];
+          const signal = options.signal;
+          if (signal && signal.aborted) return Reflect.apply(target, self, args);
+          return new Promise((resolve, reject) => {
+            let done = false;
+            const onAbort = () => {
+              if (done) return;
+              done = true;
+              gaveUp();
+              reject(signal.reason !== undefined ? signal.reason : new DOMException('signal is aborted without reason', 'AbortError'));
+            };
+            if (signal) signal.addEventListener('abort', onAbort, { once: true });
+            const finish = (fn) => {
+              if (done) return;
+              done = true;
+              if (signal) signal.removeEventListener('abort', onAbort);
+              fn();
+            };
+            const asWritten = () => resolve(Reflect.apply(target, self, args));
+            ask(question).then((answer) => finish(() => {
+              if (!answer) { asWritten(); return; }
+              if (answer.cancel) { reject(refused()); return; }
+              if (answer.exists) { reject(already()); return; }
+              const call = Reflect.apply(target, self, [then(answer)]);
+              if (answer.done) call.then(settled, settled);
+              resolve(call);
+            }), () => finish(asWritten));
+          });
+        };
+
+        proto.get = new Proxy(proto.get, {
+          apply(target, self, args) {
+            const options = args[0];
+            const pk = options && options.publicKey;
+            if (!pk || typeof pk !== 'object' || options.mediation === 'silent') return Reflect.apply(target, self, args);
+            const named = ids(pk.allowCredentials);
+            return through(target, self, args, {
+              rpId: typeof pk.rpId === 'string' ? pk.rpId : '',
+              conditional: options.mediation === 'conditional',
+              allow: named.length ? named : null
+            }, (answer) => {
+              // Asked now, not left waiting: the user has just chosen.
+              const now = Object.assign({}, options);
+              delete now.mediation;
+              if (!answer.native) {
+                now.publicKey = Object.assign({}, pk, { allowCredentials: [{ type: 'public-key', id: decode(answer.id) }] });
+              }
+              return now;
+            });
+          }
+        });
+
+        if (typeof proto.create === 'function') {
+          proto.create = new Proxy(proto.create, {
+            apply(target, self, args) {
+              const options = args[0];
+              const pk = options && options.publicKey;
+              if (!pk || typeof pk !== 'object') return Reflect.apply(target, self, args);
+              return through(target, self, args, {
+                rpId: pk.rp && typeof pk.rp.id === 'string' ? pk.rp.id : '',
+                create: {
+                  name: pk.user && typeof pk.user.name === 'string' ? pk.user.name : '',
+                  exclude: ids(pk.excludeCredentials)
+                }
+              }, () => options);
+            }
+          });
+        }
+
+        // The dropdown is the browser's to show, so a page may wait on the
+        // field, as it would in Chrome.
+        const PKC = window.PublicKeyCredential;
+        if (PKC && typeof PKC.isConditionalMediationAvailable === 'function') {
+          PKC.isConditionalMediationAvailable = new Proxy(PKC.isConditionalMediationAvailable, {
+            apply(target, self, args) {
+              return canAsk().then((yes) => yes || Reflect.apply(target, self, args), () => Reflect.apply(target, self, args));
+            }
+          });
+        }
+      },
+      args: [ask, canAsk, gaveUp, settled]
+    });
+  } catch { /* an older bridge: Windows' own dialog, as before */ }
+
+  // Where the field for passkeys is, while it has the keyboard.
+  const isPasskeyField = (el) => el instanceof HTMLInputElement && /\bwebauthn\b/i.test(el.getAttribute('autocomplete') || '');
+  let passkeyField = null;
+  let frame = 0;
+  const reportField = () => {
+    frame = 0;
+    if (!passkeyField) return;
+    const r = passkeyField.getBoundingClientRect();
+    ipcRenderer.send('debrowser:passkey-field', { left: r.left, bottom: r.bottom, width: r.width });
+  };
+  const follow = () => { if (passkeyField && !frame) frame = requestAnimationFrame(reportField); };
+  document.addEventListener('focusin', (e) => {
+    if (!isPasskeyField(e.target)) return;
+    passkeyField = e.target;
+    reportField();
+  }, true);
+  document.addEventListener('focusout', (e) => {
+    if (e.target !== passkeyField) return;
+    passkeyField = null;
+    ipcRenderer.send('debrowser:passkey-field', null);
+  }, true);
+  window.addEventListener('scroll', follow, { passive: true, capture: true });
+  window.addEventListener('resize', follow, { passive: true });
+  // Down from the field moves into the list, as in Chrome's.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' && e.target === passkeyField && !e.altKey) ipcRenderer.send('debrowser:passkey-key');
+  }, true);
+}

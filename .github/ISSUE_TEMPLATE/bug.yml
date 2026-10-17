@@ -1,0 +1,26 @@
+name: Bug
+description: Something does not work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Open …
+        2. Click …
+  - type: textarea
+    id: version
+    attributes:
+      label: Version info
+      description: Menu → Copy version info (or Ctrl+K, "version"), pasted here.
+      render: text
+    validations:
+      required: true

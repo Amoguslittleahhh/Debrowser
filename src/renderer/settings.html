@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: debrowser:;">
+  <title>Settings</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <header>
+    <!-- The section list, in a window too narrow to keep it beside the page. -->
+    <button class="rail-toggle" id="rail-toggle" type="button" aria-label="Sections" aria-controls="rail"
+            aria-expanded="false" title="Sections">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
+    </button>
+    <h1>Settings</h1>
+    <!--
+      Search, because the page is now eight sections long and the fastest way to
+      a setting you can name is to type its name. It filters the rows that are
+      already here rather than searching a separate index: one list of settings,
+      and nothing to keep in step with it.
+    -->
+    <input id="q" type="search" spellcheck="false" autocomplete="off"
+           placeholder="Search settings" aria-label="Search settings">
+    <button class="close" id="close" title="Close settings (Esc)" aria-label="Close settings">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
+  </header>
+
+  <div class="shell">
+  <!--
+    The rail, built from the sections themselves so a new section appears in it
+    without being listed twice. It marks where you are as you scroll, which is
+    what makes a long page of settings navigable rather than merely long.
+  -->
+  <nav class="rail" id="rail" aria-label="Settings sections"></nav>
+
+  <main>
+    <!--
+      Every control is generated from the same descriptor list in settings.js,
+      so a new preference is one entry there rather than a block of markup, a
+      handler and a place to forget to read the saved value back.
+    -->
+    <section data-section="appearance">
+      <h2>Appearance</h2>
+      <div class="rows" data-rows="appearance"></div>
+    </section>
+
+    <section data-section="browsing">
+      <h2>Search and startup</h2>
+      <div class="rows" data-rows="browsing"></div>
+    </section>
+
+    <section data-section="tabs">
+      <h2>Tabs and windows</h2>
+      <div class="rows" data-rows="tabs"></div>
+    </section>
+
+    <section data-section="spaces">
+      <h2>Spaces</h2>
+      <div class="rows" data-rows="spaces"></div>
+    </section>
+
+    <section data-section="memory">
+      <h2>Memory</h2>
+      <div class="rows" data-rows="resources"></div>
+      <p class="note">
+        Debrowser puts tabs to sleep and wakes them on its own, and stays within
+        what you set here. When your computer runs short of memory, it starts
+        sooner, whatever these say.
+      </p>
+    </section>
+
+    <section data-section="downloads">
+      <h2>Downloads</h2>
+      <div class="rows" data-rows="downloads"></div>
+      <div class="rows" id="download-list"></div>
+    </section>
+
+    <section data-section="bookmarks">
+      <h2>Bookmarks</h2>
+      <div class="rows" id="bookmark-actions"></div>
+      <p class="note" id="bookmark-state"></p>
+      <div class="rows" id="bookmark-list"></div>
+    </section>
+
+    <section data-section="credentials">
+      <h2>Passwords and payment</h2>
+      <p class="note" id="credential-state"></p>
+      <div class="rows" id="passcode-rows"></div>
+      <div class="rows" data-rows="credentials"></div>
+    </section>
+
+    <section data-section="private">
+      <h2>Private windows</h2>
+      <p class="note">
+        Private windows (Ctrl+Shift+N) send everything through Tor, keep nothing on
+        this computer, and are kept off the network by the operating system where it
+        can. These settings apply to the next private window you open.
+      </p>
+      <div class="rows" data-rows="private"></div>
+    </section>
+
+    <section data-section="advanced">
+      <h2>Advanced</h2>
+      <div class="rows" data-rows="advanced"></div>
+    </section>
+
+    <section data-section="labs">
+      <h2>Labs</h2>
+      <p class="note">
+        Things being tried out, off until you turn them on. They may change or
+        go in a later release.
+        <button class="link-btn" id="labs-feedback">Tell us how it went</button>
+      </p>
+      <div class="rows" data-rows="labs"></div>
+    </section>
+
+    <section data-section="updates">
+      <h2>Updates</h2>
+      <div class="rows" data-rows="updates"></div>
+      <div class="update-foot">
+        <div class="update-status">
+          <p class="note" id="update-state"></p>
+          <!-- Checking and getting ready: a sweep. Downloading: how far. Ready: full. -->
+          <div class="update-bar" id="update-bar" hidden aria-hidden="true"><span></span></div>
+        </div>
+        <button class="ghost-btn" id="check-updates" hidden>Check now</button>
+      </div>
+    </section>
+    <p class="note empty-search" id="no-match" hidden></p>
+  </main>
+  </div>
+
+  <script src="theme.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

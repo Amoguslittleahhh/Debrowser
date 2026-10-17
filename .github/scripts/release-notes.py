@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Print one version's release notes, exactly as they should appear on its
+GitHub release page.
+
+A release page describes the release it is on and nothing else. Publishing the
+whole changelog means every download page repeats the notes for versions the
+reader already has, burying the one thing they came for.
+
+Lives in a file rather than inline in the workflow because two workflows need
+it - the one that publishes a release and the one that republishes notes for a
+release that already exists - and two copies of this would drift.
+
+Usage:  release-notes.py [version]     # e.g. 1.1.0; omit for the newest
+
+Around the version's own notes, when the workflow provides them (environment):
+
+  header   one line, as Safari and Brave print theirs - the version, the
+           commit it was built from, the date, and the Chromium it runs on
+           (COMMIT, CHROMIUM) - so "which engine is this" is never a question;
+           then which file to download for each system
+           (src/main/setup/downloads.json), since a release carries more
+           files than the few anyone downloads
+  footer   where it came from: the build that made the files (GITHUB_RUN_URL),
+           what changed since the last release (COMPARE_URL), and the SHA-256
+           of every file attached (CHECKSUMS, a `sha256sum` listing) - then
+           the credit line
+
+Each part is left out when its value is not there, so the script run by hand
+prints just the notes and the credit, as it always did.
+"""
+
+import datetime
+import json
+import os
+import re
+import sys
+
+CHANGELOG = 'CHANGELOG.md'
+DOWNLOADS = os.path.join('src', 'main', 'setup', 'downloads.json')
+
+# Credit both, side by side. A release's `author` is whoever's token created it,
+# which is always github-actions[bot] because the workflow publishes with the
+# built-in GITHUB_TOKEN; that field cannot be set to a person, so the credit
+# goes in the body, which is the part anyone actually reads.
+FOOTER = ('\n\n---\n\nReleased by **Amoguslittleahhh** (<amogus36311@gmail.com>) '
+          'and **`github-actions[bot]`**.\n')
+
+
+def section(text, version=None):
+    """The body of one `## ` section, without its heading.
+
+    Matched on a prefix, because a heading may carry a title after the version
+    ("## 1.0.0 - first stable release") and an exact match would miss it.
+    """
+    if version:
+        head = re.search(r'^## ' + re.escape(version) + r'(?:\s.*)?$', text, re.M)
+        if not head:
+            sys.exit(f'{CHANGELOG}: no section for version {version}')
+    else:
+        head = re.search(r'^## .*$', text, re.M)
+        if not head:
+            sys.exit(f'{CHANGELOG}: no version sections at all')
+
+    rest = text[head.end():]
+    nxt = re.search(r'^## ', rest, re.M)
+    return (rest[:nxt.start()] if nxt else rest).strip('\n')
+
+
+def header(version):
+    """`2.0.0 (a1b2c3d) · 27 October 2026 · Chromium 152.0.7977.65`, from what is known."""
+    parts = []
+    commit = os.environ.get('COMMIT', '')[:7]
+    if version:
+        parts.append(f'**{version}**' + (f' ({commit})' if commit else ''))
+    # The release's own date when the notes of one already out are rebuilt
+    # (release-notes.yml), so fixing a typo does not move it to today.
+    day = datetime.date.today()
+    try:
+        day = datetime.date.fromisoformat(os.environ.get('RELEASE_DATE', '').strip()[:10]) or day
+    except ValueError:
+        pass
+    parts.append(day.strftime('%-d %B %Y'))
+    chromium = os.environ.get('CHROMIUM', '').strip()
+    if chromium:
+        parts.append(f'Chromium {chromium}')
+    return ' · '.join(parts) + '\n\n'
+
+
+def downloads(version):
+    """The file for each system, linked for this version, and what the rest are."""
+    try:
+        listing = json.load(open(DOWNLOADS, encoding='utf-8'))
+    except (OSError, ValueError):
+        return ''
+    # Only files this release has, by the checksum listing of what is
+    # attached: notes rebuilt for a release from before these names would
+    # otherwise link to files it never had.
+    sums = os.environ.get('CHECKSUMS', '').strip()
+    if not sums or not os.path.exists(sums):
+        return ''
+    attached = {re.split(r'\s+\*?', l.strip(), 1)[-1] for l in open(sums, encoding='utf-8') if l.strip()}
+    base = listing['latest'].replace('/latest/download/', f'/download/v{version}/')
+    rows = [f'| {f["label"]} | [{f["file"]}]({base}{f["file"]}) |' for f in listing['files'] if f['file'] in attached]
+    if not rows:
+        return ''
+    return ('| Download for | File |\n|---|---|\n' + '\n'.join(rows) +
+            '\n\nThe other files below are for updates and package managers.\n\n')
+
+
+def provenance():
+    """The build, the comparison, and the checksums, for whoever wants to verify."""
+    lines = []
+    run = os.environ.get('GITHUB_RUN_URL', '').strip()
+    compare = os.environ.get('COMPARE_URL', '').strip()
+    if run:
+        lines.append(f'Built by [this workflow run]({run}) from the commit above.')
+    if compare:
+        lines.append(f'[Everything that changed since the last release]({compare}).')
+    sums = os.environ.get('CHECKSUMS', '').strip()
+    if sums and os.path.exists(sums):
+        rows = []
+        for line in open(sums, encoding='utf-8'):
+            m = re.match(r'^([0-9a-f]{64})\s+\*?(?:.*/)?(\S.*)$', line.strip())
+            if m:
+                rows.append(f'| `{m.group(2)}` | `{m.group(1)}` |')
+        if rows:
+            lines.append('<details><summary>SHA-256 checksums</summary>\n\n| File | SHA-256 |\n|---|---|\n' +
+                         '\n'.join(rows) + '\n\n</details>')
+    return ('\n\n---\n\n' + '\n\n'.join(lines)) if lines else ''
+
+
+def main():
+    version = sys.argv[1].lstrip('v') if len(sys.argv) > 1 else None
+    body = section(open(CHANGELOG, encoding='utf-8').read(), version)
+    if not body.strip():
+        # An empty body publishes a release that says nothing, which is a
+        # packaging mistake worth failing on rather than shipping.
+        sys.exit(f'{CHANGELOG}: notes for {version or "the newest version"} are empty')
+    top = header(version) if os.environ.get('COMMIT') or os.environ.get('CHROMIUM') else ''
+    if top and version:
+        top += downloads(version)
+    sys.stdout.write(top + body + provenance() + FOOTER)
+
+
+if __name__ == '__main__':
+    main()

@@ -26,25 +26,66 @@ const el = {
 
 const rows = new Map();
 let budgetPinnedByUser = false;
+/** What the last release of the slider asked for, until the browser reports it. */
+let budgetSent = null;
 
+// In the words the tab strip's hover card uses (chrome.js, tierLabel), not
+// the governor's own names for its tiers: one tab, one description.
 const TIER_TEXT = {
-  active: 'Active',
-  warm: 'Background',
-  cold: 'Idle · discardable',
-  frozen: 'Frozen · 0% CPU',
-  hibernated: 'Hibernated · compressed',
-  discarded: 'Discarded · 0 MB'
+  active: 'Open now',
+  warm: 'Running in the background',
+  cold: 'Quiet · sleeps if memory runs short',
+  frozen: 'Asleep · paused, using no processor',
+  hibernated: 'Asleep · memory squeezed down',
+  discarded: 'Asleep · memory given back'
 };
 
+/**
+ * What the native helper is and is not measuring, in a sentence.
+ *
+ * "Summed" on its own is a dead end: it says the number is inflated and gives
+ * nobody a way to find out why. The two failures behind it look identical from
+ * the panel and have completely different fixes - a helper that is not there at
+ * all, and a helper that runs but is refused by the operating system for the
+ * renderers that hold most of the memory. The counts and the reason separate
+ * them.
+ */
+const FAILURE_TEXT = {
+  'os 5': 'the system refused access to those processes',
+  'os 87': 'the system rejected the request',
+  'os 299': 'only part of the process could be read',
+  timeout: 'the helper didn’t answer in time',
+  gone: 'the helper isn’t running',
+  nonsense: 'the helper returned a figure that can’t be right',
+  unparsed: 'the helper returned something unrecognised'
+};
+
+function coverageNote(state) {
+  const cov = state.probeCoverage;
+  if (!cov || !cov.total) return '';
+  if (cov.measured === 0 && !(cov.failures || []).length) {
+    return ' The native helper isn’t measuring anything on this machine.';
+  }
+
+  const worst = (cov.failures || [])[0];
+  const why = worst
+    ? ` ${FAILURE_TEXT[worst.kind] || `the helper reported ${worst.kind}`} ` +
+      `(${worst.count} time${worst.count === 1 ? '' : 's'}).`
+    : '';
+  return ` The native helper measured ${cov.measured} of ${cov.total} processes;` +
+    ` the rest are counted as working set.${why}`;
+}
+
 const PRESSURE_TEXT = {
-  none: 'Under budget. Tabs are demoted on the idle ladder and by the live cap.',
-  moderate: 'Approaching budget. Idle tabs are being trimmed sooner.',
-  high: 'Over budget. Idle tabs are being frozen and may be discarded.',
-  critical: 'Well over budget. Reclaiming aggressively from the least-used tabs.'
+  none: 'Within budget.',
+  moderate: 'Close to the budget, so quiet tabs go to sleep sooner.',
+  high: 'Over budget. Quiet tabs are paused, and some may go to sleep to make room.',
+  critical: 'Well over budget. The tabs you’ve used least are going to sleep.'
 };
 
 function render(state) {
-  el.total.textContent = `${state.totalMB} MB`;
+  // As measured this tick; the smoothed figure is the governor's, for its decisions.
+  el.total.textContent = `${state.totalNowMB ?? state.totalMB} MB`;
 
   // Say which quantity this is. The same label sits over two different
   // measurements depending on the platform: proportional set size on Linux,
@@ -56,29 +97,86 @@ function render(state) {
   // them, so the figure runs roughly 2x high and climbs with process count.
   // Leaving that unsaid means a Windows user reads a number two to three times
   // the browser's real footprint with nothing to tell them.
-  const proportional = state.accounting === 'pss';
-  el.total.title = proportional
+  // 'probe' is the native helper: a true proportional figure on Windows, and
+  // the footprint macOS itself charges. Both are honest totals, so neither
+  // carries the over-counting warning.
+  // 'mixed' is deliberately not counted as proportional: part of the total is
+  // still summed working set, so the over-count warning stays up.
+  // 'suspect' is the helper running, covering every process, and returning a
+  // total that is not meaningfully below summed working set - so whatever it
+  // is reporting, it is not a proportional figure, and claiming one would be
+  // worse than the plain over-count it replaced.
+  const proportional = state.accounting === 'pss' || state.accounting === 'probe';
+  el.total.title = state.accounting === 'suspect'
+    ? 'The native helper ran and covered every process, but its total isn’t ' +
+      `meaningfully below summed working set (${state.probeRatio}x of it), so it is ` +
+      'not delivering a proportional figure. On Windows the likely cause is that ' +
+      'the share count a page carries is three bits wide and saturates at seven: ' +
+      'a system DLL mapped into a hundred processes is charged at a seventh to ' +
+      'each of ours rather than a hundredth. Treat this as an over-count.'
+    : state.accounting === 'probe'
+    ? (state.probeMechanism === 'proc_pid_rusage'
+        ? 'Physical footprint, the figure macOS charges each process and shows in ' +
+          'Activity Monitor. It excludes clean file-backed pages – one copy of ' +
+          'Chromium in every renderer – which is where the over-counting came from. ' +
+          'It doesn’t divide shared dirty pages, so it isn’t proportional set size.'
+        : 'Proportional set size, computed by walking each process\'s working set ' +
+          'and dividing every shared page by the number of processes sharing it. ' +
+          'Windows caps that share count at 7, so a page shared by more processes ' +
+          'is counted slightly high.')
+    : proportional
     ? 'Proportional set size: pages shared between processes are counted once, ' +
       'split across the processes sharing them. This is real physical memory.'
     : 'Summed working set. This platform offers no cheap proportional measure, ' +
-      'so pages shared between processes - chiefly one copy of Chromium in each ' +
-      'of them - are counted once per process. Measured at about 2x the ' +
+      'so pages shared between processes – chiefly one copy of Chromium in each ' +
+      'of them – are counted once per process. Measured at about 2x the ' +
       'proportional figure, rising with process count. The browser is holding ' +
-      'meaningfully less than this number says.';
-  el.totalLabel.textContent = proportional ? 'resident' : 'resident (over-counts)';
+      'meaningfully less than this number says.' + coverageNote(state);
+  // One word, because the tile is a third of a 360px panel and the label is
+  // set in uppercase at 10.5px: "resident (over-counts)" did not fit and was
+  // rendered as "RESIDENT (OVE…", which is a label that has to be hovered to be
+  // read. So a word or two: "In use" for a proportional figure, which is the
+  // memory the browser really holds, and "Roughly" for summed working set,
+  // which runs high - and the tooltip carries the explanation either way.
+  el.totalLabel.textContent = proportional ? 'In use' : 'Roughly';
+  el.totalLabel.classList.toggle('inexact', !proportional);
+
+  // Private working set has no sharing to argue about, so printing it beside
+  // the total turns "is this figure inflated?" from a judgement into a
+  // subtraction anyone can do. It is also the column Task Manager shows, which
+  // is what someone checking this by hand will have in front of them.
+  if (state.privateTotalMB != null && state.rssTotalMB) {
+    el.totalLabel.title =
+      `${state.totalNowMB ?? state.totalMB} MB reported · ${state.rssTotalMB} MB summed working set · ` +
+      `${state.privateTotalMB} MB private. Private is what Task Manager's Memory ` +
+      'column shows and involves no shared pages at all, so the gap between it and ' +
+      'the total is the shared memory being attributed to this browser.';
+  }
 
   el.budget.textContent = `${state.budgetMB} MB`;
-  el.renderers.textContent = state.maxLiveTabs
-    ? `${state.liveTabs}/${state.maxLiveTabs}`
-    : String(state.liveTabs);
-  el.renderers.title = state.maxLiveTabs
-    ? `${state.liveTabs} tabs hold a renderer, out of a cap of ${state.maxLiveTabs}. ` +
-      `Beyond the cap the least-recently-used tab is discarded.`
-    : 'Live renderer cap is disabled.';
+  // The count, not a ration.
+  //
+  // This read "15/12" - which is true, and reads as a limit the browser is
+  // failing to keep. It is neither: tabs are never rationed, and the cap is an
+  // internal reclaim threshold, not a quota the user is spending. Showing it as
+  // a fraction invited exactly the wrong question, so the tile shows how many
+  // tabs currently hold a renderer and the tooltip explains what that means.
+  el.renderers.textContent = String(state.liveTabs);
+  el.renderers.title =
+    `${state.liveTabs} of ${state.tabs.length} open tabs hold a renderer. ` +
+    'The rest keep their place, their history and their scroll, and come back ' +
+    'when you return to them. Open as many as you like.';
 
   el.pressure.textContent = PRESSURE_TEXT[state.pressure] || state.pressure;
   el.pressure.dataset.pressure = state.pressure;
 
+  // Held while dragging, and released once the browser reports the value the
+  // drag set - after that the slider follows it again, including changes made
+  // from Settings.
+  if (budgetPinnedByUser && budgetSent !== null && state.budgetMB === budgetSent) {
+    budgetPinnedByUser = false;
+    budgetSent = null;
+  }
   if (!budgetPinnedByUser) {
     el.budgetInput.value = String(state.budgetMB);
     el.budgetOut.textContent = `${state.budgetMB} MB`;
@@ -86,28 +184,69 @@ function render(state) {
 
   renderRows(state.tabs);
 
-  if (!proportional) {
+  // The explanations are off by default and live in Settings.
+  //
+  // This panel is a live instrument: what each tab is holding, right now, and
+  // why. A paragraph of prose beside a number that changes twice a second is
+  // noise in front of the thing you opened it to read. The text was worth
+  // keeping rather than deleting, so it appears on request - "Explain the
+  // memory figures" in Settings - and the label still says "over-counts" either
+  // way, because a wrong number with no warning is the one thing that is not
+  // acceptable.
+  const detail = state.prefs && state.prefs.showMemoryDetail;
+
+  if (detail && !proportional) {
     el.pressure.textContent +=
       ` Memory is counted as summed working set on this platform, which counts ` +
-      `each shared page once per process - about 2x high, and more with more ` +
+      `each shared page once per process – about 2x high, and more with more ` +
       `processes open. The real footprint is lower; the budget is compared ` +
       `against the same inflated figure, so it reclaims earlier rather than later.`;
   }
 
-  const merging = state.pageMerging;
-  if (merging && merging.active) {
-    el.pressure.textContent += ` Page merging is active (KSM): ~${merging.profitMB} MB saved system-wide. ` +
-      'Deduplication is a known timing side channel - see the README.';
+  // Pages drawn by the processor, not the graphics card (main graphics.js):
+  // said, with what it is costing now and where to try otherwise.
+  const g = state.graphics;
+  if (g && g.software) {
+    el.pressure.textContent += ` Pages are drawn by the processor here, not the graphics card` +
+      (state.gpuCpuPercent >= 5 ? ` - drawing is using about ${state.gpuCpuPercent}% of it now` : '') +
+      (g.overridden ? '.' : '. Settings → Advanced can try the graphics card.');
+  } else if (g && g.work) {
+    // A card in use, but not for everything: a virtual machine's display
+    // usually draws pages and 3D but leaves video to the processor.
+    const names = { threeD: '3D (WebGL)', video: 'video decoding', drawing: 'drawing' };
+    const cpu = Object.keys(names).filter((k) => g.work[k] === 'processor').map((k) => names[k]);
+    if (cpu.length) el.pressure.textContent += ` On the processor here, not the graphics card: ${cpu.join(', ')}.`;
+  }
+  if (state.prefs && state.prefs.lightGraphics) {
+    el.pressure.textContent += ' Light graphics is on: less motion, background tabs asleep sooner, YouTube in H.264.';
   }
 
+  const merging = state.pageMerging;
+  if (detail && merging && merging.active) {
+    el.pressure.textContent += ` Page merging is active (KSM): ~${merging.profitMB} MB saved system-wide. ` +
+      'Deduplication is a known timing side channel – see the README.';
+  }
+
+  // Before the governor's first sample there are no counts yet: the footer
+  // keeps its dash rather than the whole panel stopping on the missing figure.
   const s = state.stats;
+  if (!s) return;
+  // Both counts, each under its own name.
+  //
+  // This said "N process(es)" and printed `rendererCount`, which counts only
+  // processes of type Tab - so the browser, GPU and network processes were
+  // missing from a number labelled as every process. On a fresh window it read
+  // "2 process(es)" beside a total of 510MB, which makes the total look
+  // impossible rather than merely high, and sends anyone reading it after the
+  // wrong bug.
+  const n = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
   let line =
-    `${state.profile} profile · ${state.rendererCount} process(es) · ` +
-    `${s.freezes} frozen · ${s.discards} discarded · ~${s.reclaimedMB} MB reclaimed`;
+    `${n(state.processCount, 'process', 'processes')}, ${n(state.rendererCount, 'for pages', 'for pages')} · ` +
+    `${n(s.freezes, 'tab paused', 'tabs paused')} · ${n(s.discards, 'put to sleep', 'put to sleep')} · about ${s.reclaimedMB} MB freed`;
   // Only shown once the heap limit rule has actually acted, so the line stays
   // quiet in the default configuration where the rule is off.
   if (s.heapCollections) {
-    line += ` · ${s.heapCollections} heap collection(s), ~${s.heapReclaimedMB} MB`;
+    line += ` · ${n(s.heapCollections, 'memory clean-up')}, about ${s.heapReclaimedMB} MB`;
   }
 
   // An inert lever must be visible, not silent: "nothing has hibernated yet" and
@@ -117,22 +256,35 @@ function render(state) {
     el.pressure.textContent += ` Hibernation unavailable: ${hib.reason}.`;
     // Name the fix, not just the fault. "No swap" is something the user can act
     // on in one command; "unavailable" on its own is not.
-    if (state.compression && !state.compression.available) {
+    //
+    // Only where the fix is the fix, though. Off Linux the mechanism is not
+    // implemented at all, so a missing compressor is not what is stopping it,
+    // and this line used to follow "not implemented on win32" with "enabling
+    // zram or swap would turn it on" - contradicting the sentence before it and
+    // sending the user after something that would not have helped.
+    if (state.compression && state.compression.applicable && !state.compression.available) {
       el.pressure.textContent += ' Enabling zram or swap would turn it on.';
     }
   } else if (hib && hib.disabled) {
     el.pressure.textContent += ' Hibernation disabled: it reclaimed too little on this machine.';
   } else if (s.hibernations) {
-    line += ` · ${s.hibernations} hibernated, ~${Math.round(s.hibernateReclaimedMB)} MB compressed`;
+    // Two figures, because they are two different claims and only the second
+    // one is about the machine. What left the processes is what the syscall
+    // reports; what the machine got back is that minus whatever the compressor
+    // now holds, measured independently. Quoting only the first is how a
+    // compressor that achieved nothing would still read as a saving.
+    line += ` · ${s.hibernations} hibernated, ~${Math.round(s.hibernateReclaimedMB)} MB left the renderers`;
+    if (hib && hib.netMeasured) {
+      line += `, ~${Math.round(s.hibernateNetMB)} MB back to the machine`;
+    }
   }
 
   // What the reclaim cost, next to what it saved. `restore` is the one that
   // matters: it is the only reclaim in this browser the user can feel.
+  // Typical figures, in words; the slow tail is for the benchmark, not here.
   const lat = state.latency || {};
-  const timings = [];
-  if (lat.restore) timings.push(`restore ${lat.restore.p50}/${lat.restore.p95} ms`);
-  if (lat.switch) timings.push(`switch ${lat.switch.p50}/${lat.switch.p95} ms`);
-  if (timings.length) line += ` · ${timings.join(', ')} (p50/p95)`;
+  if (lat.restore) line += ` · waking a tab takes about ${lat.restore.p50} ms`;
+  if (lat.switch) line += ` · switching about ${lat.switch.p50} ms`;
 
   el.stats.textContent = line;
 }
@@ -140,8 +292,18 @@ function render(state) {
 function renderRows(tabs) {
   const seen = new Set();
 
-  // Heaviest first: the tabs worth acting on are the ones at the top.
-  const ordered = [...tabs].sort((a, b) => b.rssMB - a.rssMB);
+  // Heaviest first: the tabs worth acting on are the ones at the top. Not
+  // while the pointer is on the list, though - two tabs of similar size
+  // swapping places every tick put the Discard click on the wrong tab.
+  const hold = el.list.matches(':hover') && rows.size === tabs.length &&
+               tabs.every((tab) => rows.has(tab.id));
+  let ordered;
+  if (hold) {
+    const at = new Map([...el.list.children].map((node, i) => [node, i]));
+    ordered = [...tabs].sort((a, b) => at.get(rows.get(a.id).root) - at.get(rows.get(b.id).root));
+  } else {
+    ordered = [...tabs].sort((a, b) => b.rssMB - a.rssMB);
+  }
 
   ordered.forEach((tab, index) => {
     seen.add(tab.id);
@@ -170,6 +332,13 @@ function createRow(id) {
   const dot = document.createElement('span');
   dot.className = 'dot';
 
+  // The site's own icon, so a list of twenty rows can be read by looking rather
+  // than by reading. Same treatment as the tab strip: the letter underneath,
+  // the logo over it, and the logo removed if it never loads.
+  const chip = document.createElement('span');
+  chip.className = 'row-chip';
+  chip.setAttribute('aria-hidden', 'true');
+
   const main = document.createElement('div');
   main.className = 'row-main';
   const title = document.createElement('div');
@@ -183,15 +352,16 @@ function createRow(id) {
 
   const action = document.createElement('button');
   action.className = 'row-action';
-  action.textContent = 'Discard';
+  action.textContent = 'Sleep';
+  action.title = 'Put this tab to sleep now. It reloads when you go back to it.';
   action.addEventListener('click', () => api.send('discard-tab', { id }));
 
   root.addEventListener('click', (event) => {
     if (event.target !== action) api.send('activate-tab', { id });
   });
 
-  root.append(dot, main, mem, action);
-  return { root, dot, title, sub, mem, action, state: {} };
+  root.append(dot, chip, main, mem, action);
+  return { root, dot, chip, title, sub, mem, action, state: {} };
 }
 
 function updateRow(row, tab) {
@@ -213,7 +383,39 @@ function updateRow(row, tab) {
     prev.tier = tab.tier;
   }
 
-  const mem = tab.tier === 'discarded' ? '—' : `${tab.rssMB} MB`;
+  // Keyed on the site rather than the URL: a tab moving between pages on one
+  // host keeps its letter and its colour, and rewriting them on every
+  // navigation would be work for no visible change.
+  const host = siteOf(tab.url);
+  if (prev.host !== host) {
+    row.chip.textContent = (host.replace(/^[^a-z0-9]+/i, '')[0] || '?');
+    row.chip.style.setProperty('--hue', String(siteHue(host)));
+    prev.host = host;
+  }
+
+  if (prev.favicon !== tab.favicon) {
+    if (row.icon) { row.icon.remove(); row.icon = null; }
+    // The letter is a stand-in for a logo, not a tile to draw one on: favicons
+    // are transparent far more often than not, so the chip has to stop painting
+    // once the real icon is up. Reset first, in case the previous page had one
+    // and this one does not.
+    row.chip.classList.remove('has-icon');
+    const src = iconSrc(tab.favicon);
+    if (src) {
+      const icon = document.createElement('img');
+      icon.className = 'row-icon';
+      icon.alt = '';
+      icon.decoding = 'async';
+      icon.src = src;
+      icon.addEventListener('load', () => row.chip.classList.add('has-icon'));
+      icon.addEventListener('error', () => icon.remove());
+      row.chip.append(icon);
+      row.icon = icon;
+    }
+    prev.favicon = tab.favicon;
+  }
+
+  const mem = tab.tier === 'discarded' ? '—' : `${tab.memNowMB ?? tab.rssMB} MB`;
   if (prev.mem !== mem) {
     row.mem.textContent = mem;
     prev.mem = mem;
@@ -232,6 +434,7 @@ function updateRow(row, tab) {
   }
 }
 
+/** The site a tab is on, for the chip's letter and colour. */
 function describe(tab) {
   const parts = [TIER_TEXT[tab.tier] || tab.tier];
 
@@ -241,22 +444,39 @@ function describe(tab) {
   if (tab.audible) parts.push('playing audio');
   if (tab.hasDirtyInput) parts.push('unsaved input · protected');
   if (tab.sharesProcess) parts.push('shares a process');
-  if (tab.cpu >= 1) parts.push(`${tab.cpu}% CPU`);
+  // A share of the whole machine, as the system's own task manager shows it.
+  const cpu = tab.cpuNow ?? tab.cpu;
+  if (cpu >= 1) parts.push(`${Math.round(cpu)}% of CPU`);
 
   return parts.join(' · ');
 }
 
 /* ------------------------------------------------------------------ */
 
+el.close.append(crossIcon());
 el.close.addEventListener('click', () => api.send('toggle-panel'));
 
 el.budgetInput.addEventListener('input', () => {
   budgetPinnedByUser = true;
+  budgetSent = null;
   el.budgetOut.textContent = `${el.budgetInput.value} MB`;
 });
 
 el.budgetInput.addEventListener('change', () => {
-  api.send('set-budget', { mb: Number(el.budgetInput.value) });
+  budgetSent = Number(el.budgetInput.value);
+  api.send('set-budget', { mb: budgetSent });
 });
 
-api.onState(render);
+// Dragged away and back to where it started, the slider fires no `change`,
+// so nothing was sent and nothing ever let it follow the setting again. Let
+// go without a change, it follows again at once.
+const letGo = () => setTimeout(() => {
+  if (budgetPinnedByUser && budgetSent === null) budgetPinnedByUser = false;
+}, 0);
+el.budgetInput.addEventListener('pointerup', letGo);
+el.budgetInput.addEventListener('blur', letGo);
+
+api.onState((state) => {
+  applyThemePrefs(state.prefs);
+  render(state);
+});

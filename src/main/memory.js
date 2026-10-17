@@ -119,7 +119,7 @@ function footprintMB(pid, rssFallbackMB) {
  * matters because the failure modes look identical from the outside:
  *
  *   processMergeable  this process opted in, via prctl(PR_SET_MEMORY_MERGE)
- *                     before exec - see tools/ksm-launch.c. Detected by looking
+ *                     before exec - see native/helpers/ksm-launch.c. Detected by looking
  *                     for the `mg` VmFlag, since prctl cannot be called from
  *                     Node and the flag is what KSM actually keys on.
  *   ksmRunning        the kernel's scanner is enabled system-wide, which needs
@@ -333,10 +333,18 @@ function processType(pid) {
  * because the pages stay in RAM compressed, which is what the measured 4-12ms
  * resume assumes.
  *
- * @returns {{available:boolean, compressor:string|null, swapMB:number, zramMB:number}}
+ * `applicable` separates "there is no compressor" from "a compressor is not the
+ * question here". Off Linux the trim mechanism does not exist at all, so an
+ * absent compressor is not the reason and configuring one would change nothing.
+ * Without this the panel read the bare `available: false` as a missing
+ * compressor and told Windows users to enable zram, immediately after telling
+ * them the feature is not implemented on their platform - advice that was both
+ * self-contradicting and impossible to act on.
+ *
+ * @returns {{available:boolean, applicable:boolean, compressor:string|null, swapMB:number, zramMB:number}}
  */
 function compressionStatus() {
-  const none = { available: false, compressor: null, swapMB: 0, zramMB: 0 };
+  const none = { available: false, applicable: isLinux, compressor: null, swapMB: 0, zramMB: 0 };
   if (!isLinux) return none;
 
   let text;
@@ -359,9 +367,18 @@ function compressionStatus() {
     if (/zram/i.test(cols[0])) zramMB += mb;
   }
 
+  // zswap compresses in RAM in front of a disk swap, so pages trimmed onto it
+  // free memory at once, as zram's do; plain disk swap keeps a copy in RAM
+  // until something else needs the room.
+  let zswap = false;
+  try {
+    zswap = /^[Y1]/.test(fs.readFileSync('/sys/module/zswap/parameters/enabled', 'utf8'));
+  } catch { /* not built in */ }
+
   return {
     available: swapMB > 0,
-    compressor: swapMB === 0 ? null : (zramMB > 0 ? 'zram' : 'swap'),
+    applicable: true,
+    compressor: swapMB === 0 ? null : (zramMB > 0 ? 'zram' : (zswap ? 'zswap' : 'swap')),
     swapMB: Math.round(swapMB),
     zramMB: Math.round(zramMB)
   };

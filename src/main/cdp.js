@@ -62,14 +62,28 @@ class CdpSession {
         return false;
       }
     }
-    this.wc.debugger.once('detach', () => {
-      this.attached = false;
-      this.enabledDomains.clear();
-    });
+    // Once per session object, not per attach: a detach we make ourselves
+    // does not emit the event, so a listener per attach piled up on every
+    // freeze and thaw.
+    if (!this.watchingDetach) {
+      this.watchingDetach = true;
+      this.wc.debugger.on('detach', () => {
+        this.attached = false;
+        this.enabledDomains.clear();
+      });
+    }
     return true;
   }
 
-  detach() {
+  /**
+   * `keepAttached` is a private tab's: its timezone, locale, screen and user
+   * agent overrides live in this session and end with it - measured, a detach
+   * puts the real values back at once - so the governor's tidy-up detach, on
+   * every tab brought to the front, uncovered the page until they were put
+   * back. Only the tab going away detaches it (`force`).
+   */
+  detach({ force = false } = {}) {
+    if (this.keepAttached && !force) return;
     if (!this.attached) return;
     try {
       this.wc.debugger.detach();
@@ -105,6 +119,29 @@ class CdpSession {
       return result;
     } catch (err) {
       this.log(`cdp ${method} failed: ${err.message}`);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * A command for a child session - a frame or a worker the page's session
+   * auto-attached to - rather than for the page. Same ceiling, same null on
+   * failure.
+   */
+  async sendTo(sessionId, method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    if (!this.attached || this.wc.isDestroyed()) return null;
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+      if (typeof timer.unref === 'function') timer.unref();
+    });
+    try {
+      const result = await Promise.race([this.wc.debugger.sendCommand(method, params, sessionId), timeout]);
+      return result === TIMED_OUT ? null : result;
+    } catch (err) {
+      this.log(`cdp ${method} (child) failed: ${err.message}`);
       return null;
     } finally {
       clearTimeout(timer);

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Update ready</title>
+  <link rel="stylesheet" href="theme.css">
+  <!-- The sheet, the backdrop and the way it arrives come from the menu, which
+       is the same mechanism. Only what is inside differs. -->
+  <link rel="stylesheet" href="menu.css">
+  <link rel="stylesheet" href="update.css">
+</head>
+<body class="menu-body update-body">
+  <!-- Dimmed here, unlike the menu's, because this is a prompt rather than a
+       panel: the browser is asking something and the rest of the window should
+       read as waiting for the answer. Clicking it still means "Later". -->
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="sheet card" id="sheet" role="dialog" aria-modal="true"
+       aria-labelledby="title" tabindex="-1">
+    <h2 id="title">Update ready</h2>
+    <p class="lead" id="lead">A new version is ready to install.</p>
+    <p class="detail">Your settings, open tabs and saved data are kept. The browser closes while it installs.</p>
+    <div class="actions">
+      <button class="btn ghost" id="later" type="button">Later</button>
+      <button class="btn primary" id="restart" type="button">Restart now</button>
+    </div>
+  </div>
+
+  <script src="theme.js"></script>
+  <script src="update.js"></script>
+</body>
+</html>

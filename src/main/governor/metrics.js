@@ -21,6 +21,28 @@
  */
 
 const { MB } = require('../config');
+const os = require('os');
+const { status: graphicsStatusOf } = require('../graphics');
+
+/** Graphics, read once a second at most: the answer only changes on a GPU crash. */
+let graphicsCache = { at: 0, value: null };
+function graphicsStatus(app) {
+  if (!app || typeof app.getGPUFeatureStatus !== 'function') return null;
+  if (Date.now() - graphicsCache.at > 1000) graphicsCache = { at: Date.now(), value: graphicsStatusOf(app) };
+  return graphicsCache.value;
+}
+/**
+ * How old a native probe reading may be before the process counts as
+ * unmeasured again.
+ *
+ * The helper is a child process answering on a pipe, so every reading is
+ * already one tick behind - that staleness is accepted and documented in
+ * `refreshProbes`. This is the bound on it when replies stop coming: long
+ * enough that a slow tick or two costs no coverage, short enough that a
+ * renderer which has since doubled cannot be reported at its old size.
+ */
+const PROBE_STALE_MS = 30_000;
+
 const { readProcessMemory, accountingMode, pageMergingStatus,
         unreportedProcessesMB, compressionStatus } = require('../memory');
 const platform = require('../platform');
@@ -30,6 +52,16 @@ const EMA_ALPHA = 0.35;
 
 /** Overhead attributed to a renderer regardless of page content. */
 const RENDERER_BASE_MB = 12;
+
+/**
+ * How far below summed working set a proportional total must land to be
+ * believed, and how many processes must be running before the question is
+ * worth asking. 0.8 is the plan's "moved by less than 20% from summed working
+ * set" turned into a runtime check; below four processes there is too little
+ * sharing for the comparison to mean anything.
+ */
+const MAX_PROPORTIONAL_RATIO = 0.8;
+const MIN_PIDS_FOR_SHARING = 4;
 
 class Metrics {
   /**
@@ -41,9 +73,69 @@ class Metrics {
     this.getTabs = getTabs;
     /** @type {Map<number, {rssMB:number, cpu:number, type:string}>} */
     this.byPid = new Map();
+    /**
+     * Last figure the native probe returned for each pid, on the platforms that
+     * need it. Empty on Linux, where smaps_rollup is read inline.
+     * @type {Map<number, {pssMB:number, privateMB:number}>}
+     */
+    this.probed = new Map();
+    /** True while a round of probes is outstanding, so ticks do not stack. */
+    this.probing = false;
     this.totalMB = 0;
     this.browserOverheadMB = 0;
+    /**
+     * Summed working set, kept beside the proportional total rather than
+     * replaced by it.
+     *
+     * A proportional measure is only worth the helper it costs if it lands
+     * meaningfully below this. Keeping both is what lets the browser check
+     * that instead of assuming it - see `snapshot()`.
+     */
+    this.rssTotalMB = 0;
+    /** Summed private working set, where the platform reports it. */
+    this.privateTotalMB = null;
     this.lastSampleAt = 0;
+  }
+
+  /**
+   * Ask the native probe for this tick's figures, for the next tick to use.
+   *
+   * Fire and forget on purpose. The sampler is synchronous and runs on the
+   * governor's tick; awaiting a child process here would put a pipe read on the
+   * critical path of every tier decision. One round at a time, so a slow helper
+   * cannot accumulate a backlog of requests for pids that have since exited.
+   */
+  refreshProbes(raw) {
+    if (accountingMode() === 'pss' || this.probing) return;
+    this.probing = true;
+
+    // Asked again until it is answered. One timed-out `caps` used to leave this
+    // null for the life of the process, and the panel then explained the wrong
+    // platform's measurement - a Windows share-count caveat on a Mac.
+    if (!this.probeMechanism && !this.askingMechanism) {
+      this.askingMechanism = true;
+      platform.measureCapability()
+        .then((cap) => { if (cap.available) this.probeMechanism = cap.mechanism; })
+        .catch(() => { /* try again next tick */ })
+        .finally(() => { this.askingMechanism = false; });
+    }
+    const pids = raw.map((proc) => proc.pid);
+    Promise.all(pids.map(async (pid) => {
+      const m = await platform.measureProcess(pid);
+      // A miss keeps the last reading rather than dropping it, and `sample`
+      // stops trusting it once it is `PROBE_STALE_MS` old.
+      //
+      // Dropping it immediately was worse than it looks: the fallback for an
+      // unmeasured process is its summed working set, which is the ~2x figure
+      // the helper exists to replace - so one slow reply per tick fed an
+      // inflated sample into that process's smoothed average and the total
+      // drifted upward for as long as the misses continued.
+      if (!m) return;
+      this.probed.set(pid, {
+        pssMB: m.pssBytes / MB, privateMB: m.privateBytes == null ? null : m.privateBytes / MB, at: Date.now()
+      });
+    })).catch(() => { /* a failed probe simply leaves the fallback in place */ })
+      .finally(() => { this.probing = false; });
   }
 
   /**
@@ -52,10 +144,23 @@ class Metrics {
    * synchronous call into the browser process, not a per-process walk.
    */
   sample() {
+    const now = Date.now();
     const raw = this.app.getAppMetrics();
+    this.refreshProbes(raw);
+    // Renderers that hold a tab. Electron calls every renderer a 'Tab', the
+    // browser's own interface among them - the toolbar, a spare new tab page,
+    // a menu - and those are overhead like the GPU process: no tab row shows
+    // them and acting on tabs cannot reclaim them. Counted as neither, they
+    // were 37MB of a total that the rows and the overhead line did not add up to.
+    const tabPids = new Set();
+    for (const tab of this.getTabs()) if (tab.isLive && tab.pid) tabPids.add(tab.pid);
     const seen = new Set();
     let total = 0;
+    let totalNow = 0;
     let overhead = 0;
+    let rssTotal = 0;
+    let privateTotal = 0;
+    let privateKnown = 0;
 
     for (const proc of raw) {
       const pid = proc.pid;
@@ -71,8 +176,16 @@ class Metrics {
       // pss, rss and private together, and taking them from the same read also
       // means they describe the same instant.
       const detail = readProcessMemory(pid);
-      const footprint = detail ? detail.pssMB : rssMB;
-      const priv = detail ? detail.privateMB : null;
+      // Off Linux, `detail` is null and the native probe fills the gap. Its
+      // reading is from the previous tick, because the helper is a child
+      // process and this sampler is synchronous - a tick may not wait on a
+      // pipe. That staleness is bounded by the tick interval and is invisible
+      // next to the smoothing every figure here already goes through; blocking
+      // the governor for a fresher number would be the worse trade.
+      const fresh = this.probed.get(pid);
+      const probed = fresh && (now - fresh.at) < PROBE_STALE_MS ? fresh : null;
+      const footprint = detail ? detail.pssMB : (probed ? probed.pssMB : rssMB);
+      const priv = detail ? detail.privateMB : (probed ? probed.privateMB : null);
       const cpu = proc.cpu?.percentCPUUsage || 0;
 
       const prev = this.byPid.get(pid);
@@ -83,6 +196,13 @@ class Metrics {
             type: proc.type
           }
         : { rssMB: footprint, cpu, type: proc.type };
+      // And as measured this tick, for the task manager. The smoothed figures
+      // are for decisions, which must not flap on one sample; a display that
+      // lags shows a page that has quietened as still busy - measured, a tab
+      // paused at once was shown at 5%, 3%, 2%, 1% CPU over the next 8 seconds.
+      smoothed.memNowMB = footprint;
+      smoothed.cpuNow = cpu;
+      smoothed.hostsTab = proc.type === 'Tab' && tabPids.has(pid);
       // Left null where the platform cannot report it, rather than falling back
       // to the footprint. Private bytes and PSS are different quantities, and
       // the one consumer of this field screens on it *because* it is not PSS -
@@ -92,7 +212,17 @@ class Metrics {
 
       this.byPid.set(pid, smoothed);
       total += smoothed.rssMB;
-      if (proc.type !== 'Tab') overhead += smoothed.rssMB;
+      totalNow += footprint;
+      if (!smoothed.hostsTab) overhead += smoothed.rssMB;
+
+      // Unsmoothed on purpose: this is the yardstick the proportional figure is
+      // measured against, and smoothing it would let the comparison drift with
+      // the thing it is checking.
+      rssTotal += rssMB;
+      if (smoothed.privateMB != null) {
+        privateTotal += smoothed.privateMB;
+        privateKnown++;
+      }
     }
 
     // Drop processes that have exited so stale memory never inflates the total.
@@ -103,6 +233,7 @@ class Metrics {
     for (const pid of this.byPid.keys()) {
       if (seen.has(pid)) continue;
       this.byPid.delete(pid);
+      this.probed.delete(pid);
       platform.forgetProcess(pid);
     }
 
@@ -110,14 +241,66 @@ class Metrics {
     // zygotes, ~29MB that does not grow with tab count. Counting them is the
     // difference between a budget compared against this browser's real
     // footprint and one compared against most of it.
-    const unreported = unreportedProcessesMB(seen).mb;
+    const left = unreportedProcessesMB(seen);
+    const unreported = left.mb;
+    // Counted as well as weighed: the total held them while the count did not,
+    // which left "8 processes" beside a total eleven processes add up to.
+    this.unreportedCount = Array.isArray(left.processes) ? left.processes.length : 0;
     total += unreported;
+    totalNow += unreported;
     overhead += unreported;
 
     this.totalMB = total;
+    this.totalNowMB = totalNow;
     this.browserOverheadMB = overhead;
+    this.rssTotalMB = rssTotal;
+    this.privateTotalMB = privateKnown ? privateTotal : null;
     this.lastSampleAt = Date.now();
     return this.totalMB;
+  }
+
+  /**
+   * Is the native probe actually delivering a proportional figure?
+   *
+   * A probe that runs, returns, and covers every process still proves nothing
+   * about what it returned. The whole reason for it is that summing working
+   * set counts one copy of Chromium in every renderer; if its total is not
+   * meaningfully below that sum, it is reporting the same over-count under a
+   * better name - and the panel would say "resident" where it used to say
+   * "resident (over-counts)", which is worse than the fault it replaced.
+   *
+   * This check was in the plan for the helper and never written. On Windows,
+   * `ShareCount` is three bits wide and saturates at seven, so a page mapped
+   * into a hundred processes - every system DLL - is charged at a seventh
+   * rather than a hundredth, to each of our processes in turn. That inflates
+   * the total in exactly the way the helper exists to prevent, and it looks
+   * like success from the inside.
+   *
+   * Only asked once there are enough processes for sharing to be worth
+   * measuring. With one or two, PSS legitimately sits close to RSS because
+   * there is little to share, and failing it there would be a false alarm.
+   *
+   * @returns {boolean}
+   */
+  /**
+   * How many processes the native helper is currently measuring.
+   *
+   * Counted fresh rather than by map size: a reading the sampler has stopped
+   * trusting is not coverage, and counting it would let the label say "every
+   * process measured" about a total that is mostly summed working set again.
+   */
+  probeCoverage() {
+    const now = Date.now();
+    let measured = 0;
+    for (const entry of this.probed.values()) {
+      if ((now - entry.at) < PROBE_STALE_MS) measured++;
+    }
+    return { measured, total: this.byPid.size, failures: platform.measureFailures() };
+  }
+
+  probeIsProportional() {
+    if (this.byPid.size < MIN_PIDS_FOR_SHARING || this.rssTotalMB <= 0) return true;
+    return this.totalMB <= this.rssTotalMB * MAX_PROPORTIONAL_RATIO;
   }
 
   /**
@@ -151,7 +334,19 @@ class Metrics {
     for (const [pid, tabs] of groups) {
       const proc = this.byPid.get(pid);
       if (!proc) {
-        for (const tab of tabs) { tab.rssMB = 0; tab.cpu = 0; }
+        // Every field, not just the two. `privateMB` left at its last reading
+        // is a measurement of a process that no longer exists, and both
+        // `shouldHibernate` and the heap-limit rule gate on it - so a tab whose
+        // renderer had just died could still be picked for an action against a
+        // number describing the dead one.
+        for (const tab of tabs) {
+          tab.rssMB = 0;
+          tab.cpu = 0;
+          tab.memNowMB = 0;
+          tab.cpuNow = 0;
+          tab.privateMB = null;
+          tab.sharesProcess = false;
+        }
         continue;
       }
 
@@ -159,6 +354,8 @@ class Metrics {
         tabs[0].rssMB = proc.rssMB;
         tabs[0].privateMB = proc.privateMB ?? null;
         tabs[0].cpu = proc.cpu;
+        tabs[0].memNowMB = proc.memNowMB;
+        tabs[0].cpuNow = proc.cpuNow;
         tabs[0].sharesProcess = false;
         continue;
       }
@@ -170,6 +367,7 @@ class Metrics {
       tabs.forEach((tab, i) => {
         const share = weights[i] / weightSum;
         tab.rssMB = proc.rssMB * share;
+        tab.memNowMB = proc.memNowMB * share;
         tab.privateMB = proc.privateMB == null ? null : proc.privateMB * share;
         tab.sharesProcess = true;
         tab.processTabCount = tabs.length;
@@ -181,6 +379,7 @@ class Metrics {
         // main-thread time, measured per document over CDP; fall back to the
         // split only until the first sample lands.
         tab.cpu = tab.taskCpu != null ? tab.taskCpu : proc.cpu * share;
+        tab.cpuNow = tab.taskCpu != null ? tab.taskCpu : proc.cpuNow * share;
       });
     }
 
@@ -188,6 +387,8 @@ class Metrics {
     for (const tab of this.getTabs()) {
       if (!tab.pid) {
         tab.rssMB = 0;
+        tab.memNowMB = 0;
+        tab.cpuNow = 0;
         tab.privateMB = null;
         tab.cpu = 0;
         tab.sharesProcess = false;
@@ -203,21 +404,66 @@ class Metrics {
   reclaimableMB() {
     let sum = 0;
     for (const [, proc] of this.byPid) {
-      if (proc.type === 'Tab') sum += proc.rssMB;
+      if (proc.hostsTab) sum += proc.rssMB;
     }
     return sum;
   }
 
   snapshot() {
+    const coverage = this.probeCoverage();
     return {
-      accounting: accountingMode(),
+      // What the figures actually are, rather than what the platform can do in
+      // principle.
+      //
+      // Every process, not merely one. A partly-probed total is a mixture -
+      // proportional figures for the pids that answered, summed working set for
+      // the rest - and calling that 'probe' drops the "over-counts" warning from
+      // a number that is still over-counting. One slow renderer would have been
+      // enough. Mixtures read as the fallback they mostly are.
+      // Four states, because three of them are genuinely different and the
+      // difference matters to whoever reads the number:
+      //
+      //   pss    the kernel's own proportional figure (Linux)
+      //   probe  every process measured by the native helper
+      //   mixed  some measured, the rest still summed working set - so the
+      //          total still over-counts, and must still say so
+      //   rss    none measured; the old summed figure throughout
+      //
+      // An all-or-nothing rule was tried and is wrong: one process that exits
+      // between the sample and the probe, or that cannot be opened, pinned the
+      // label to 'rss' and hid the fact that the helper was working perfectly
+      // for everything else.
+      accounting: accountingMode() === 'pss'
+        ? 'pss'
+        : coverage.measured === 0 ? 'rss'
+        : coverage.measured < coverage.total ? 'mixed'
+        : this.probeIsProportional() ? 'probe' : 'suspect',
+      // Reported rather than merely folded into the label above, because
+      // "summed" has exactly one useful follow-up question - how much of it,
+      // and why - and the browser is the only thing that can answer it.
+      probeCoverage: coverage,
+      probeRatio: this.rssTotalMB > 0
+        ? Math.round((this.totalMB / this.rssTotalMB) * 100) / 100
+        : null,
+      rssTotalMB: Math.round(this.rssTotalMB),
+      privateTotalMB: this.privateTotalMB == null ? null : Math.round(this.privateTotalMB),
+      probeMechanism: this.probeMechanism || null,
       pageMerging: pageMergingStatus(),
       compression: compressionStatus(),
       totalMB: Math.round(this.totalMB),
+      // As measured this tick, for display (see `memNowMB`).
+      totalNowMB: Math.round(this.totalNowMB ?? this.totalMB),
       overheadMB: Math.round(this.browserOverheadMB),
       reclaimableMB: Math.round(this.reclaimableMB()),
-      processCount: this.byPid.size,
-      rendererCount: [...this.byPid.values()].filter((p) => p.type === 'Tab').length
+      processCount: this.byPid.size + (this.unreportedCount || 0),
+      // The graphics process, as a share of the whole machine: on a machine
+      // drawing pages with its processor (graphics.js), this is where a game
+      // in a tab shows up.
+      gpuCpuPercent: Math.round([...this.byPid.values()].filter((p) => p.type === 'GPU')
+        .reduce((sum, p) => sum + (p.cpu || 0), 0) / Math.max(1, os.cpus().length)),
+      graphics: graphicsStatus(this.app),
+      // Renderers holding tabs; the browser's own interface is counted in the processes, not here.
+      rendererCount: [...this.byPid.values()].filter((p) => p.hostsTab).length
     };
   }
 }

@@ -9,6 +9,7 @@
  */
 
 const { ipcMain } = require('electron');
+const { originOf } = require('./data/credentials');
 
 const VALID_DEMANDS = new Set(['idle', 'light', 'heavy']);
 
@@ -27,6 +28,17 @@ class IpcHub {
   }
 
   wire() {
+    // A page was refused protected video. Private windows never send it.
+    ipcMain.on('debrowser:drm-needed', (event) => {
+      const tab = this.tabForWebContents(event.sender.id);
+      if (!tab || tab.drmNeeded) return;
+      // Widevine may still be installing: the tab is reloaded once it is,
+      // and only a refusal after that is shown.
+      if (this.onDrmNeeded && this.onDrmNeeded(tab)) return;
+      tab.drmNeeded = true;
+      tab.emit('updated');
+    });
+
     ipcMain.on('debrowser:probe', (event, payload) => {
       const tab = this.tabForWebContents(event.sender.id);
       if (!tab) return;
@@ -61,9 +73,24 @@ class IpcHub {
       if (demand === 'heavy') tab.lastHeavyAt = Date.now();
     });
 
-    ipcMain.on('debrowser:capture-result', (_event, requestId, state) => {
+    ipcMain.on('debrowser:capture-result', (event, requestId, state) => {
       const entry = this.pending.get(requestId);
       if (!entry) return;
+
+      // The reply has to come from the renderer that was asked.
+      //
+      // Request ids are a counter, so they are guessable, and this resolved on
+      // the id alone - which let any renderer answer another tab's capture. The
+      // forged reply is not inert: `applySuspendedPageState` writes the fields
+      // back with `el.innerHTML = field.value` into whatever document the real
+      // tab restores, so one compromised page could put markup into a different
+      // origin's DOM. Every other channel in this file already checks the
+      // sender; this one said it did and did not.
+      if (event.sender.id !== entry.senderId) {
+        this.log(`ignored a capture reply for ${requestId} from the wrong renderer`);
+        return;
+      }
+
       clearTimeout(entry.timer);
       this.pending.delete(requestId);
       entry.resolve(state);
@@ -89,7 +116,9 @@ class IpcHub {
       }, timeoutMs);
       if (typeof timer.unref === 'function') timer.unref();
 
-      this.pending.set(requestId, { resolve, timer });
+      // The id alone is not proof of who is answering. Recorded with the
+      // renderer it was sent to, so the reply can be checked against it.
+      this.pending.set(requestId, { resolve, timer, senderId: webContents.id });
 
       try {
         webContents.send('debrowser:capture', requestId);
@@ -98,6 +127,93 @@ class IpcHub {
         this.pending.delete(requestId);
         resolve(null);
       }
+    });
+  }
+
+  /**
+   * A page offering a sign-in it has just submitted.
+   *
+   * The origin is taken from the tab's own URL, never from the payload. A page
+   * that claimed someone else's origin would otherwise get a credential saved
+   * under it - and then offered back on the real site.
+   */
+  wireCredentialOffer(onOffer) {
+    ipcMain.on('debrowser:credential-offer', (event, payload) => {
+      const tab = this.tabForWebContents(event.sender.id);
+      if (!tab || tab.internal) return;
+      if (!payload || typeof payload !== 'object') return;
+      // And only while the frame that sent it is still the page the tab
+      // shows. A page leaving for another site can submit on its way out, and
+      // its message can land after the tab's URL has moved on - offering to
+      // save the leaving page's password under the arriving page's origin.
+      let frameUrl = null;
+      try { frameUrl = event.senderFrame && event.senderFrame.url; } catch { /* frame gone */ }
+      if (!frameUrl || originOf(frameUrl) !== originOf(tab.url)) return;
+      if (typeof payload.password !== 'string' || !payload.password) return;
+
+      // One below each limit, not exactly it: the store's validators are
+      // `< 512` and `< 1024`, so truncating *to* the limit produced a value the
+      // user had already agreed to save and the store then silently refused.
+      const username = typeof payload.username === 'string' ? payload.username.slice(0, 511) : '';
+      onOffer(tab, { username, password: payload.password.slice(0, 1023) });
+    });
+  }
+
+  /**
+   * A page's passkey requests (probe-preload.js), answered by the broker
+   * (passkeys.js). The site the passkeys are for is judged against the address
+   * of the frame that asked, as the browser knows it - and only the page's own
+   * top frame asks; the preload is not in its iframes.
+   */
+  wirePasskeys(broker) {
+    const pageTab = (event) => {
+      const tab = this.tabForWebContents(event.sender.id);
+      if (!tab || tab.internal) return null;
+      let top = false;
+      try { top = Boolean(event.senderFrame) && event.senderFrame === event.sender.mainFrame; } catch { /* frame gone */ }
+      return top ? tab : null;
+    };
+    ipcMain.handle('debrowser:passkey-available', (event) => Boolean(pageTab(event)) && broker.available());
+    ipcMain.handle('debrowser:passkey-request', (event, payload) => {
+      const tab = pageTab(event);
+      if (!tab || !payload || typeof payload !== 'object') return null;
+      let frameUrl = null;
+      try { frameUrl = event.senderFrame.url; } catch { return null; }
+      const ids = (list) => (Array.isArray(list)
+        ? list.filter((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,1400}$/.test(id)).slice(0, 64)
+        : null);
+      const create = payload.create && typeof payload.create === 'object' ? {
+        name: typeof payload.create.name === 'string' ? payload.create.name.slice(0, 200) : '',
+        exclude: ids(payload.create.exclude) || []
+      } : null;
+      const allow = ids(payload.allow);
+      return broker.request(tab, frameUrl, {
+        rpId: typeof payload.rpId === 'string' ? payload.rpId.slice(0, 253) : '',
+        conditional: payload.conditional === true,
+        allow: allow && allow.length ? allow : null,
+        create
+      });
+    });
+    // The page's request to Chromium settled, after a passkey kept here was
+    // put in its tab for it: the store takes it back.
+    ipcMain.on('debrowser:passkey-done', (event) => {
+      const tab = pageTab(event);
+      if (tab) broker.done(tab).catch(() => {});
+    });
+    ipcMain.on('debrowser:passkey-field', (event, rect) => {
+      const tab = pageTab(event);
+      if (!tab) return;
+      const ok = rect && typeof rect === 'object' &&
+        ['left', 'bottom', 'width'].every((k) => Number.isFinite(rect[k]) && Math.abs(rect[k]) < 1e5);
+      broker.field(tab, ok ? { left: rect.left, bottom: rect.bottom, width: rect.width } : null);
+    });
+    ipcMain.on('debrowser:passkey-abort', (event) => {
+      const tab = pageTab(event);
+      if (tab) broker.abort(tab);
+    });
+    ipcMain.on('debrowser:passkey-key', (event) => {
+      const tab = pageTab(event);
+      if (tab) broker.enterList(tab);
     });
   }
 

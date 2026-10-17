@@ -1,0 +1,100 @@
+/*
+ * Downloads. Layout, header and notes come from settings.css, which this page
+ * links first, including the search field and the tools beside it; the list
+ * frame is shared with the history page and repeated here rather than linked,
+ * because history.css also carries a day-heading treatment and a visit row
+ * that mean nothing to a download.
+ */
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  max-width: 820px;
+  margin: 14px auto 6px;
+  padding: 0 10px 0 12px;      /* the rows' own insets, so the count ends where their buttons do */
+}
+
+.count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.list { max-width: 820px; margin: 0 auto 40px; }
+
+#empty { max-width: 820px; margin: 26px auto; }
+
+/*
+ * One row per file: the site's mark, what is happening, and the one button
+ * that applies. Cancel and Clear are the same control because they are the
+ * same decision at two points in a download's life, and a row with both would
+ * leave one of them dead at all times.
+ */
+.download {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--radius);
+  transition: background-color var(--fast) var(--ease);
+}
+.download:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.download:active { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
+.download-text { flex: 1; min-width: 0; }
+
+.download-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-status {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A failed download says why in its status line, so the line is the thing that
+   needs to read as a failure - not the filename, which is still just a name. */
+.download[data-state="failed"] .download-status { color: var(--crit); }
+.download[data-state="done"] .download-status { color: var(--ok, var(--text-dim)); }
+
+/*
+ * The progress bar.
+ *
+ * A transform on one element, so a download updating twice a second never
+ * causes layout - the same rule the toolbar's memory meter follows, and worth
+ * following here because this is the one page in the browser that redraws
+ * itself while you watch it.
+ */
+.meter {
+  display: block;
+  height: 3px;
+  margin: 6px 0 2px;
+  border-radius: 2px;
+  background: var(--wash-soft);
+  overflow: hidden;
+}
+
+.meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 240ms linear;
+}
+
+/* The site's mark is the shared component in theme.css. */
+
+/* Both actions in one group at the end of the row, so the row's right edge is
+   a single column of buttons however many of them a given state has. */
+.download-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: none;
+}

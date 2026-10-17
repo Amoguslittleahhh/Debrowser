@@ -1,0 +1,546 @@
+/* New tab. Palette and base reset come from theme.css. */
+
+html, body { height: 100%; }
+
+body {
+  display: grid;
+  /* `safe`, so a page taller than the window starts at the top and scrolls
+     rather than centring its head off-screen where nothing can reach it. */
+  place-items: safe center;
+  /* Scrolls rather than clips: Ctrl+wheel zooms this page like any other, and
+     at 200% the tiles fell off the bottom with no way to reach them. */
+  overflow: auto;
+}
+
+/*
+ * One measure for the whole page.
+ *
+ * The field was 560px and the tiles 760, so nothing on the page shared an edge
+ * with anything else and the tiles read as misaligned - which is exactly what
+ * they are. The tiles need the width (four hostnames do not fit in 560), so the
+ * field takes the same width rather than the grid taking a narrower one.
+ */
+main {
+  width: min(760px, calc(100vw - 48px));
+  margin-top: -8vh;          /* optically centred rather than measured-centred */
+  padding: var(--s6) 0;      /* and never flush against an edge once it scrolls */
+  text-align: center;
+}
+
+/*
+ * The name, quietly. A 34px bold wordmark over a pill-shaped field is the
+ * stock start page, and this one is opened more than any other page in the
+ * browser - it should read as the browser's own, not as a landing page.
+ */
+#wordmark {
+  margin: 0 0 var(--s4);
+  font-size: var(--fs-title);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.01em;
+  color: var(--text-dim);
+  /* No entrance. There was a 140 ms fade from transparent, and a page that is
+     ready 20 ms after Ctrl+T but fades in over the next 140 is a page that
+     looks slow: measured, its first contentful paint came 35-40 ms after the
+     document was ready, because Chromium does not count transparent text as
+     painted and neither does the eye. It is drawn whole on its first frame. */
+}
+
+#q {
+  width: 100%;
+  height: 46px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-lead);
+  outline: none;
+  user-select: text;
+  cursor: text;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+
+#q:hover { border-color: color-mix(in srgb, var(--text) 18%, var(--border)); }
+
+#q:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+.stat {
+  margin: var(--s5) 0 0;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  min-height: 1em;
+}
+
+/* Centred under the search, like everything else on the page: left-aligned it
+   read as a stray caption rather than as the day's figures. */
+.receipt {
+  display: block;
+  margin: var(--s2) auto 0;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--fs-small);
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.receipt:hover { background: var(--wash-soft); color: var(--text); }
+.receipt b { color: var(--ok); font-weight: var(--fw-bold); }
+
+/* ------------------------------------------------------------------ */
+/* Tiles                                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Four across, two rows, and nothing below them.
+ *
+ * Sized so eight tiles are exactly as wide as the search field above, which is
+ * what makes the page read as one block rather than as a box with a grid
+ * underneath it. The grid does not reflow to three or five: a start page whose
+ * tiles move when the window is resized is a page you cannot build muscle
+ * memory for, and at this width four fits from the minimum window size up.
+ */
+.tiles {
+  display: grid;
+  /* `minmax(0, 1fr)`, not `1fr`: a grid item's automatic minimum size is its
+     content, so a long hostname pushed its column - and the whole grid - wider
+     than the search field above it, which is the one thing the tiles are
+     supposed to line up with. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s2);
+  margin: var(--s6) 0 0;
+  text-align: left;
+}
+
+.tile {
+  position: relative;
+}
+
+.tile-open {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  min-width: 0;
+  /* No card. Eight bordered boxes in a grid is the template everyone has seen;
+     a row of marks and names that only gets a surface under the pointer is
+     what a list of shortcuts actually is. */
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
+}
+
+.tile-open:hover {
+  background: var(--bg-raised);
+  border-color: var(--border-soft);
+  transition-duration: var(--instant);
+}
+.tile-open:active { background: var(--wash); }
+
+/* A press that moves is the cheapest way to make a tile feel like a button
+   rather than a picture of one. */
+.tile-open:active { transform: scale(0.98); }
+
+.tile-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+}
+.tile-open:hover .tile-label { color: var(--text); }
+
+/*
+ * The remove button appears on hover, and is a real target when it does.
+ *
+ * Kept out of the flow entirely rather than reserved and hidden: a tile is 80px
+ * of horizontal room and a permanent × in the corner of each one turns eight
+ * tiles into eight dismiss buttons, which is the wrong thing to notice first.
+ */
+.tile-forget {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.tile:hover .tile-forget, .tile:focus-within .tile-forget { opacity: 1; }
+.tile-forget:hover { color: var(--crit); }
+
+/* A forgotten tile: gone from sight, its place kept. */
+.tile.gone { opacity: 0; visibility: hidden; transition: opacity var(--fast) var(--ease), visibility 0s linear var(--fast); }
+
+/* ------------------------------------------------------------------ */
+/* Designs                                                             */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Every design but Legacy draws this page the same way: the mark and a large
+ * search line in the first screen, "Continue with these tabs" a scroll below.
+ * Legacy is everything above, untouched - its wordmark, tiles and memory line.
+ */
+.brand, .continue { display: none; }
+.brand-dot { fill: var(--accent); }
+
+/* The mark and the field sit in the middle of the window; the recent pages
+   start just under them, not centred with them. The offset is half the
+   window less half the pair's height (mark 26 + gap 22 + field 58), never
+   negative, so a short window scrolls rather than cutting the mark off. */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) {
+  display: block;
+  box-sizing: border-box;
+  /* As tall as its content: at 100% the field's top margin, which collapses
+     through the body, came on top of the full height and always scrolled. */
+  height: auto;
+  padding: 0 0 32px;
+  /* The toolbar's own colour: the tab in front, the toolbar and this page are
+     one surface, as Safari's start page is - a shade darker, the page read as
+     a hole under the window's chrome. The field below is the recess. */
+  background: var(--tint-2);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 64px));
+  /* The field centred in the window, unless that pushes the card below the
+     fold: then everything rises just enough to fit, down to 24px from the top.
+     --fit is main's own height, kept by newtab.js. */
+  /* The whole group - mark, field, today's line, favourites or the Continue
+     card - in the middle of the page, as much room above as below. It sat a
+     little above the middle (0.42 of the spare height), which read as not
+     centred. --fit is the group's own height, kept by newtab.js; a short
+     window scrolls from 24px down. */
+  margin: max(24px, calc((100vh - var(--fit, 106px)) / 2)) auto 24px;
+  padding: 0;
+  text-align: left;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) :is(#wordmark, .stat) {
+  display: none;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  color: var(--text);
+}
+.brand-name { font-size: 20px; font-weight: 600; letter-spacing: -0.03em; }
+
+/*
+ * The field is an address bar, not a headline: boxed, at a size text is typed
+ * at, with the magnifier and the key it answers to. The mark above it is the
+ * page's heading. Icon and hint are drawn by the form so the input stays a
+ * plain text field for the keyboard and for anything reading the page.
+ */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #search { position: relative; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #search::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translateY(-50%);
+  background: var(--text-dim);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='4.8'/%3E%3Cpath d='M10.5 10.5L14 14'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #search::after {
+  content: 'Enter \21B5';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  pointer-events: none;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #q {
+  height: 58px;
+  padding: 0 96px 0 48px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  /* Cut into the page as the address bar is cut into the toolbar above it. */
+  background: var(--bg);
+  font-family: var(--font-ui);
+  font-size: 17px;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) #q:focus {
+  /* The field has the keyboard from the moment the page opens, so its focus
+     is a state it sits in, not an event: the accent edge says where typing
+     goes, without the halo glowing at someone who has not touched anything. */
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  box-shadow: none;
+}
+
+/* Paper: a serif in a barely rounded box. */
+body[data-design="paper"] .brand-name { font-family: var(--font-display); font-size: 24px; font-weight: 400; letter-spacing: 0; }
+body[data-design="paper"] #q { font-family: var(--font-display); font-size: 19px; border-radius: 6px; }
+
+/* Grid: a square box ruled in the text colour; the name is a label. */
+body[data-design="grid"] .brand-mark rect { rx: 4; }
+body[data-design="grid"] .brand-name {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 400;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+body[data-design="grid"] #q { height: 64px; border-color: var(--text); font-size: 20px; font-weight: 500; }
+body[data-design="grid"] #q:focus { box-shadow: none; outline: 2px solid var(--accent); outline-offset: -2px; }
+body[data-design="grid"] #search::after {
+  content: 'ENTER';
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  border-color: var(--text-dim);
+}
+
+/* Continue with these tabs */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .continue:not([hidden]) {
+  display: block;
+  box-sizing: border-box;
+  width: min(680px, calc(100vw - 64px));
+  margin: 0 auto;
+  padding: 6px 8px 12px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--text) 4%, var(--tint-2));
+}
+.continue-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px; }
+.continue-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.continue-menu { position: relative; }
+.continue-more {
+  width: 32px; height: 32px; border: 0; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--text-dim);
+}
+.continue-more:hover { background: var(--wash-soft); color: var(--text); }
+.continue-pop {
+  position: absolute; right: 0; top: 36px; z-index: 2;
+  padding: 4px; border-radius: var(--radius);
+  background: var(--bg-input); border: 1px solid var(--border);
+}
+.continue-pop button {
+  display: block; white-space: nowrap; padding: 8px 12px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); font: inherit; font-size: var(--fs-small); text-align: left;
+}
+.continue-pop button:hover { background: var(--wash); }
+.continue-row {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  padding: 9px 12px; border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--text); font: inherit; text-align: left;
+  transition: background-color var(--fast) var(--ease);
+}
+.continue-row:hover { background: var(--wash-soft); transition-duration: var(--instant); }
+/* Each row's mark on a tile of one size - a favicon on its own floated at
+   whatever size it was drawn, beside two lines of text. */
+.continue-row .chip {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text) 14%, transparent);
+}
+.continue-row .chip.has-icon { background: var(--bg); }
+.continue-row .site-icon { inset: 8px; width: 18px; height: 18px; border-radius: 4px; }
+.continue-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.continue-when {
+  flex: none;
+  margin-left: 12px;
+  font-size: var(--fs-small);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* With the card showing, the favourites give it the room (newtab.js). */
+/* Beside the card, the favourites become one quiet row under the field:
+   smaller marks, one-line names, no heading. They used to give way to the
+   card entirely, which took the most-used sites - the thing a new tab is
+   most often opened to reach - off the page. Legacy keeps its own list. */
+.continue-title { font-size: var(--fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.continue-meta { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.continue-empty { margin: 0; padding: 14px 12px 6px; font-size: var(--fs-body); color: var(--text-dim); }
+.continue-all {
+  margin: 6px 12px 0; padding: 4px 0; border: 0; background: transparent;
+  /* The accent, drawn toward the text colour: on the card's lifted surface the
+     plain accent text measured 3.7:1 - a link that is hard to read is one
+     nobody presses. */
+  color: color-mix(in srgb, var(--accent-text) 62%, var(--text)); font: inherit; font-size: 13px; font-weight: 600;
+}
+/* The card's secondary text, a step brighter than the page's: the card is
+   lifted off the page, and the page's dim grey fell just under 4.5:1 on it. */
+.continue :is(.continue-meta, .continue-when) { color: color-mix(in srgb, var(--text-dim) 88%, var(--text)); }
+.continue-all:hover { text-decoration: underline; }
+
+body[data-design="paper"] .continue-head h2 { font-family: var(--font-display); font-size: 21px; font-weight: 400; }
+body[data-design="paper"] .continue:not([hidden]) { border: 1px solid var(--border-soft); }
+
+body[data-design="grid"] .continue:not([hidden]) {
+  padding: 0; background: transparent; border: 1px solid var(--text);
+}
+body[data-design="grid"] .continue-head { padding: 6px 6px 6px 16px; border-bottom: 1px solid var(--text); }
+body[data-design="grid"] .continue-head h2 {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase;
+}
+body[data-design="grid"] .continue-row { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); }
+body[data-design="grid"] .continue-meta { font-family: var(--font-mono); font-size: 11px; }
+body[data-design="grid"] .continue-all {
+  margin: 0; padding: 14px 16px; font-family: var(--font-mono); font-size: 11px; font-weight: 400;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+
+/* Ledger: a go button in the accent at the end of the field, in place of the
+   Enter hint the other designs draw. */
+.go { display: none; }
+body[data-design="ledger"] #search::after { display: none; }
+body[data-design="ledger"] .go {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--bg-input);
+  transition: filter var(--fast) var(--ease);
+}
+body[data-design="ledger"] .go:hover { filter: brightness(1.08); }
+body[data-design="ledger"] .go:active { transform: translateY(-50%) scale(0.96); }
+.go svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/*
+ * Favourites, in every design but Legacy (which keeps its own list above).
+ *
+ * The page was a mark, a field and one line - a first screen with nothing to
+ * press but the keyboard. These are the sites you go to most, as Safari's
+ * start page sets them: a large mark on a quiet tile, the name under it. Each
+ * design's own tokens shape them - Ledger's soft corners, Paper's serif
+ * names, Grid's square edges and capitals - so they are its tiles, not a
+ * borrowed widget.
+ *
+ * The receipt line moves up under the field, where it reads as the field's
+ * caption, and the favourites sit below it.
+ */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) main {
+  display: flex;
+  flex-direction: column;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .receipt { order: 1; align-self: center; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles:not([hidden]) {
+  order: 2;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 16px 6px;
+  margin: 30px 0 0;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles::before {
+  content: 'Favourites';
+  grid-column: 1 / -1;
+  /* In line with the first mark, which sits centred in a column wider than it. */
+  margin: 0 0 -6px calc((100% - 7 * 6px) / 16 - 28px);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-bold);
+  color: var(--text-dim);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open {
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px 6px;
+  border: 0;
+  text-align: center;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open:hover { background: var(--wash-soft); }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .chip {
+  width: 56px;
+  height: 56px;
+  border-radius: calc(var(--radius-lg) + 2px);
+  font-size: 22px;
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text) 14%, transparent);
+  transition: transform var(--fast) var(--ease-out);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open:hover .chip { transform: translateY(-1px); }
+/* A favicon is drawn for 16 to 32 pixels; stretched to the tile it blurs. So
+   the site's mark sits at the size it was made for, on a quiet surface. */
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .chip.has-icon {
+  background: var(--bg);
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .site-icon {
+  inset: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-label {
+  flex: none;
+  width: 100%;
+  text-align: center;
+  /* Two lines at most, broken at a dot (see favouriteName), then an ellipsis. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  line-height: 1.3;
+  min-height: 2.6em;
+}
+body[data-design="paper"] .tile-label { font-family: var(--font-display); font-size: 13px; }
+body[data-design="grid"] .tiles::before { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
+body[data-design="grid"] .tile-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-forget { top: 0; right: 8px; }
+
+/* The row beside the card (see above). After the design rules, so it wins. */
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles:not([hidden]) {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 4px;
+  margin: 20px 0 0;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tiles::before { display: none; }
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open {
+  gap: 6px;
+  padding: 6px 2px 4px;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .chip {
+  width: 44px;
+  height: 44px;
+  font-size: 18px;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-open .site-icon {
+  inset: 12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .tile-label {
+  -webkit-line-clamp: 1;
+  min-height: 0;
+  font-size: 12px;
+}

@@ -155,6 +155,28 @@ const padL = (s, n) => String(s).padStart(n);
     console.log(`\n  note: no swap or zram configured, so hibernation is inert on this host.`);
   }
 
+  // Where the total actually is, by process role. An aggregate hides a
+  // regression that moves memory from renderers into the browser process, and
+  // it is the only way to see what a *small* run is made of - at one tab the
+  // answer is almost entirely fixed overhead, and naming which process holds it
+  // is the difference between a lever and a guess.
+  const roles = Object.entries(on.breakdown).sort((a, b) => b[1] - a[1]);
+  console.log(`\n  by process: ${roles.map(([k, v]) => `${k} ${v}MB`).join(' · ')}`);
+
+  if (on.browserHeap) {
+    console.log(`  of which ours: ${on.browserHeap.heapMB}MB of JavaScript heap in the ` +
+      `browser process (+${on.browserHeap.externalMB}MB external)`);
+  }
+
+  // What the browser process is holding for tabs that are not live. The middle
+  // term of the memory model, and the only one that grows without a bound.
+  const held = on.retained;
+  if (held) {
+    console.log(`\n  retained: ${held.kb} KB of session state for ${TABS} tabs ` +
+      `(${held.perTabKB} KB per tab, biggest ${held.biggestKB} KB, ` +
+      `${held.navEntries} navigation entries, ${held.tabsWithPageState} with page state)`);
+  }
+
   console.log(`\n  saving: ${pct.toFixed(1)}%`);
   console.log(`  governed tab states: ${JSON.stringify(on.tiers)}\n`);
 

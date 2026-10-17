@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Debrowser test: Firefox MV3",
+  "version": "1.0",
+  "description": "Firefox's Manifest V3, whose background is scripts rather than a service worker.",
+  "browser_specific_settings": { "gecko": { "id": "firefox-mv3@debrowser.test" } },
+  "background": { "scripts": ["background.js"] },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_end" }]
+}

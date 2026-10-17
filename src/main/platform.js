@@ -11,15 +11,14 @@
 
 const os = require('os');
 const path = require('path');
-const fs = require('fs');
-const { spawn } = require('child_process');
+const { HelperProcess, HELPER_GONE } = require('./helper-process');
 const { MB } = require('./config');
 const { compressionStatus } = require('./memory');
 
 const PLATFORM = process.platform; // 'linux' | 'darwin' | 'win32'
 const isLinux = PLATFORM === 'linux';
-const isMac = PLATFORM === 'darwin';
 const isWindows = PLATFORM === 'win32';
+const isMac = PLATFORM === 'darwin';
 
 /* ------------------------------------------------------------------ */
 /* Process priority                                                     */
@@ -132,11 +131,40 @@ function helperPath(name) {
   if (process.resourcesPath && __dirname.includes(`app.asar${path.sep}`)) {
     return path.join(process.resourcesPath, 'tools', name);
   }
-  return path.join(__dirname, '..', '..', 'tools', name);
+  return path.join(__dirname, '..', '..', 'native', 'helpers', name);
 }
 
-const TRIM_BINARY = helperPath('mem-trim');
-const TRIM_TIMEOUT_MS = 2000;
+const TRIM_BINARY = helperPath(process.platform === 'win32' ? 'mem-trim.exe' : 'mem-trim');
+const PROBE_BINARY = helperPath(process.platform === 'win32' ? 'mem-probe.exe' : 'mem-probe');
+
+/**
+ * Measurement has a much tighter deadline than a trim.
+ *
+ * A trim is a syscall that may legitimately take a while paging a large heap
+ * out. A measurement is a walk of a working set, on the governor's tick, for
+ * every process - so a slow one must be abandoned and the tick completed with
+ * the fallback figure rather than waited on.
+ */
+const PROBE_TIMEOUT_MS = 400;
+/**
+ * What the *first* measurement may take: a process spawn, and on Windows a
+ * first-run scan of an unsigned helper. Both are one-off and neither is the
+ * governor's tick to pay for, but timing them out costs a whole round of
+ * coverage - and a round that lands late is invisible, while a round that never
+ * lands shows up as a summed total.
+ */
+const PROBE_COLD_TIMEOUT_MS = 5000;
+// Measured 0.2-0.6s for an ordinary renderer and 1.7-2.9s for a 1GB one; at
+// 2s the big ones timed out and were recorded as FROZEN while really paged out.
+const TRIM_TIMEOUT_MS = 5000;
+/**
+ * What the *first* trim-helper answer may take, for the same reason the probe
+ * has one: the spawn and, on Windows, a first-run scan of an unsigned binary.
+ * `caps` and `avail` are usually the first two things asked of this helper and
+ * both are cheap once it is running, so a cold deadline costs nothing in the
+ * steady state and avoids reporting a healthy helper as absent.
+ */
+const TRIM_COLD_TIMEOUT_MS = 5000;
 
 /**
  * How long a pid stays "just trimmed".
@@ -177,36 +205,44 @@ const TRIM_TIMEOUT_BACKOFF_MAX_MS = 60_000;
 const TRIM_MAP_LIMIT = 256;
 
 /**
- * Resolution meaning "there is no helper", as distinct from "the helper did not
- * answer in time".
- *
- * The difference decides whether a failure is charged to the pid that happened
- * to ask. It cannot be inferred after the fact by looking at `this.child`: the
- * exit handler nulls it, resolves the pending request - which only *queues* the
- * continuation - and then synchronously restarts the helper, so by the time the
- * caller resumes, `this.child` is a live process again and the crash looks like
- * a per-pid timeout. Not a string any reply can be.
- */
-const HELPER_GONE = '\u0000helper-gone';
-
-/**
  * What a command or a reply is *about*, which is all the correlation this
  * protocol needs: `trim <pid>` is answered by `ok <pid> …` or `err <pid> …`,
  * and `caps` by `caps linux <0|1>`.
  */
 function replyId(line) {
   const [verb, second] = line.split(' ');
-  return verb === 'caps' ? 'caps' : second;
+  // Two verbs answer about themselves rather than about a pid; everything else
+  // names the process it is about, which is what lets a late reply to a
+  // timed-out request be dropped instead of handed to the next caller.
+  if (verb === 'caps' || verb === 'avail') return verb;
+  return second;
 }
 
-class TrimHelper {
+class TrimHelper extends HelperProcess {
   constructor(log = () => {}) {
-    this.log = log;
-    this.child = null;
-    this.pending = null;      // { id, resolve, timer } - one request at a time
-    this.queue = [];
-    this.restarts = 0;
-    this.stopped = false;
+    super({
+      name: 'mem-trim',
+      binary: TRIM_BINARY,
+      timeoutMs: TRIM_TIMEOUT_MS,
+      coldTimeoutMs: TRIM_COLD_TIMEOUT_MS,
+      replyId,
+      // Linux and Windows have a mechanism; macOS has none that a program may
+      // reach - `memorystatus_control` is private and `MADV_FREE_REUSABLE` only
+      // works on your own memory - so it refuses by name rather than shipping a
+      // call nobody has run.
+      precondition: () => (isLinux || isWindows
+        ? null
+        : `not implemented on ${PLATFORM}`),
+      // Two different audiences, two different remedies. Telling someone with
+      // an installed build to run an npm script in a source tree they do not
+      // have is the same class of wrong answer as telling them to `setcap` a
+      // binary that was merely not executable.
+      missingHint: (binary) => (binary.includes('resources')
+        ? `helper missing from this build: ${binary}`
+        : 'native/helpers/mem-trim not built (npm run build:memtrim)'),
+      log
+    });
+
     /**
      * Pids trimmed recently, and when.
      *
@@ -219,6 +255,8 @@ class TrimHelper {
      * only place both the trim and its undo pass through.
      */
     this.trimmedAt = new Map();
+    /** Last answer to `avail`, so a failed read can say "unknown" rather than 0. */
+    this.lastAvail = null;
     /**
      * Pids whose trim the kernel refused: `pid -> { until, strikes }`.
      *
@@ -229,171 +267,6 @@ class TrimHelper {
     this.refused = new Map();
     /** null until the helper has been asked; then true/false. */
     this.canTrim = null;
-    this.reason = null;
-  }
-
-  /**
-   * Start the helper, once. It is deliberately long-lived: spawning a process
-   * per trim would cost more than the trim it performs saves, and tier
-   * transitions are frequent.
-   */
-  start() {
-    if (this.child || this.reason || this.stopped) return Boolean(this.child);
-    if (!isLinux) { this.reason = `not implemented on ${PLATFORM}`; return false; }
-    if (!fs.existsSync(TRIM_BINARY)) {
-      // Two different audiences, two different remedies. Telling someone with an
-      // installed build to run an npm script in a source tree they do not have
-      // is the same class of wrong answer as telling them to `setcap` a binary
-      // that was merely not executable.
-      this.reason = TRIM_BINARY.includes('resources')
-        ? `helper missing from this build: ${TRIM_BINARY}`
-        : 'tools/mem-trim not built (npm run build:memtrim)';
-      return false;
-    }
-    try {
-      this.child = spawn(TRIM_BINARY, [], { stdio: ['pipe', 'pipe', 'ignore'] });
-    } catch (err) {
-      this.reason = `could not start helper: ${err.message}`;
-      return false;
-    }
-
-    let buffer = '';
-    this.child.stdout.on('data', (chunk) => {
-      buffer += chunk.toString();
-      let nl;
-      while ((nl = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        // Every reply names what it answers - `ok <pid>`, `err <pid>`, `caps` -
-        // so a line that does not name the outstanding request is the late
-        // answer to one that already timed out. Dropping it on that basis is
-        // what stops the stale byte count for pid A being handed to the caller
-        // waiting on pid B; a timed-out request is never cancelled, because the
-        // helper is inside a syscall and will answer eventually.
-        if (!this.pending || replyId(line) !== this.pending.id) continue;
-        this.settle(line);
-      }
-    });
-    // Writing to a helper that has died raises EPIPE, and Node reports that as
-    // an asynchronous 'error' event on the stream rather than throwing from
-    // `write()` - so the try/catch in `send` never sees it, and an 'error' event
-    // with no listener is fatal to the *browser*. A dead memory-trim helper
-    // taking the whole browser down with it is the worst possible trade for an
-    // optimisation that is inert on most machines. Caught here, and reported as
-    // what it is: there is no helper, so nobody's pid is at fault.
-    const pipeFailed = (err) => {
-      this.log(`mem-trim pipe error: ${err.message}`);
-      this.settle(HELPER_GONE);
-    };
-    this.child.stdin.on('error', pipeFailed);
-    this.child.stdout.on('error', pipeFailed);
-
-    // An 'error' on the child itself is a different animal from a broken pipe:
-    // it means the process could not be *spawned* (EACCES on a binary that is
-    // not executable, ENOEXEC on one built for another architecture), and node
-    // does not promise an 'exit' after it - so nothing else will ever set
-    // `reason`, and the restart-once path would spin on a binary that cannot
-    // run. Recorded as the permanent, named failure it is, which is also what
-    // stops `probe` reporting it as a missing capability.
-    this.child.on('error', (err) => {
-      this.reason = `could not start helper: ${err.message}`;
-      this.child = null;
-      this.settle(HELPER_GONE);
-    });
-
-    // A helper that dies takes trim with it rather than the browser: every
-    // caller treats an unavailable trim as "do nothing", never as an error.
-    this.child.on('exit', () => {
-      this.child = null;
-      this.settle(HELPER_GONE);
-      if (this.stopped) return;      // we asked it to go
-      if (this.restarts++ === 0) {
-        this.log('mem-trim helper exited; restarting once');
-        this.start();
-      } else {
-        this.reason = 'helper exited repeatedly';
-      }
-    });
-    // The helper must never be the reason the browser will not exit, and must
-    // never be unreferenced while a reply is in flight - unreferencing stdout
-    // permanently means the event loop can exit before the answer arrives, and
-    // the request simply never resolves. So the handles are referenced only
-    // while a request is outstanding; see `hold` and `release`.
-    this.child.unref();
-    this.release();
-    return true;
-  }
-
-  /**
-   * Shut the helper down. Called on quit; safe to call when not running.
-   *
-   * The flag is the point: killing the child fires the `exit` handler, whose
-   * job is to bring a crashed helper back. Without it, shutting down spawned a
-   * fresh helper process on the way out of the browser.
-   */
-  stop() {
-    this.stopped = true;
-    const child = this.child;
-    this.child = null;
-    if (!child) return;
-    try {
-      child.stdin.end();
-      child.kill();
-    } catch { /* already gone */ }
-  }
-
-  /** Keep the event loop alive while waiting for a reply. */
-  hold() {
-    if (!this.child) return;
-    this.child.stdout.ref();
-    this.child.stdin.ref();
-  }
-
-  /** Stop holding it once nothing is outstanding. */
-  release() {
-    if (!this.child || this.pending || this.queue.length) return;
-    this.child.stdout.unref();
-    this.child.stdin.unref();
-  }
-
-  settle(line) {
-    const waiting = this.pending;
-    this.pending = null;
-    if (waiting) {
-      clearTimeout(waiting.timer);
-      waiting.resolve(line);
-    }
-    const next = this.queue.shift();
-    if (next) this.send(next.command, next.resolve);
-    else this.release();
-  }
-
-  send(command, resolve) {
-    if (!this.start()) return resolve(HELPER_GONE);
-    if (this.pending) {
-      this.queue.push({ command, resolve });
-      return undefined;
-    }
-    const timer = setTimeout(() => {
-      // A wedged helper must never stall a tier transition. Giving up here does
-      // not cancel the request; the stdout handler drops the late reply when it
-      // arrives, because it will not name the request outstanding by then.
-      this.log(`mem-trim timed out on "${command}"`);
-      this.settle(null);
-    }, TRIM_TIMEOUT_MS);
-    if (typeof timer.unref === 'function') timer.unref();
-    this.pending = { id: replyId(command), resolve, timer };
-    this.hold();
-    try {
-      this.child.stdin.write(`${command}\n`);
-    } catch {
-      this.settle(HELPER_GONE);
-    }
-    return undefined;
-  }
-
-  request(command) {
-    return new Promise((resolve) => this.send(command, resolve));
   }
 
   /** Bytes advised, or null if the trim did not happen. */
@@ -540,11 +413,43 @@ class TrimHelper {
       // The helper ran and answered "no". On a desktop that is overwhelmingly
       // the missing capability, and it is the one with a fix.
       this.reason = m
-        ? 'needs CAP_SYS_NICE: sudo setcap cap_sys_nice+ep tools/mem-trim'
+        ? 'needs CAP_SYS_NICE: sudo setcap cap_sys_nice+ep native/helpers/mem-trim'
         : `helper gave an unreadable answer: "${line}"`;
     }
     return this.canTrim;
   }
+}
+
+/**
+ * What the machine has spare, and whether trimmed pages have anywhere to go.
+ *
+ * Asked of the helper rather than read here, because the two platforms answer
+ * it with different system calls and this is the one place that already knows
+ * which platform it is talking to. Linux reads MemAvailable and the swap
+ * totals; Windows reads GlobalMemoryStatusEx.
+ *
+ * This is the figure the hibernation tier is judged on. A working set that
+ * shrank by 200MB has proved nothing until the machine has 200MB more
+ * available than it did - pages leaving a process reappear as the compressor's
+ * own allocation, measured at about 2:1, so a per-process reading alone
+ * overstates the saving by roughly double. That mistake has been made twice in
+ * this project and both times it took an independent reading to catch.
+ *
+ * @returns {Promise<{availBytes:number, backingTotalBytes:number, backingFreeBytes:number}|null>}
+ */
+async function availableMemory(log) {
+  const h = trimHelper(log);
+  const reply = await h.request('avail');
+  if (!reply || reply === HELPER_GONE) return null;
+  const [, avail, total, free] = reply.split(' ').map(Number);
+  if (!Number.isFinite(avail) || avail < 0) return null;
+  const out = {
+    availBytes: avail,
+    backingTotalBytes: Number.isFinite(total) && total >= 0 ? total : 0,
+    backingFreeBytes: Number.isFinite(free) && free >= 0 ? free : 0
+  };
+  h.lastAvail = out;
+  return out;
 }
 
 let helper = null;
@@ -556,6 +461,196 @@ const trimHelper = (log) => (helper || (helper = new TrimHelper(log)));
  * unavailable platform, missing capability, dead helper. Never rejects: a failed
  * trim is a missed optimisation, not an error.
  */
+/**
+ * Per-process memory on the platforms that do not hand it out for free.
+ *
+ * Linux is not served by this: smaps_rollup already carries a real Pss line,
+ * read directly and more cheaply than a round trip through a helper. A second
+ * path to the same number would be one more thing to keep honest.
+ */
+class MeasureHelper extends HelperProcess {
+  constructor(log = () => {}) {
+    super({
+      name: 'mem-probe',
+      binary: PROBE_BINARY,
+      timeoutMs: PROBE_TIMEOUT_MS,
+      coldTimeoutMs: PROBE_COLD_TIMEOUT_MS,
+      replyId,
+      precondition: () => (isLinux
+        ? 'not needed on Linux - smaps_rollup reports Pss directly'
+        : null),
+      missingHint: (binary) => (binary.includes('resources')
+        ? `helper missing from this build: ${binary}`
+        : 'native/helpers/mem-probe not built (npm run build:memprobe)'),
+      log
+    });
+    /** null until the helper has been asked; then true/false. */
+    this.canMeasure = null;
+    this.mechanism = null;
+    /** How measurements have failed, by kind. See `noteFailure`. */
+    this.failures = new Map();
+  }
+
+  /** `{ pssBytes, privateBytes }`, or null if this pid could not be measured. */
+  async measure(pid) {
+    if (!Number.isInteger(pid) || pid <= 0) return null;
+    if (this.canMeasure === false) return null;
+
+    const reply = await this.request(`measure ${pid}`);
+    if (!reply || reply === HELPER_GONE) {
+      this.noteFailure(reply === HELPER_GONE ? 'gone' : 'timeout');
+      return null;
+    }
+
+    const parts = reply.split(' ');
+    if (parts[0] !== 'ok') {
+      // The helper says why, and until now that answer was thrown away - so a
+      // browser measuring none of its renderers looked exactly like a browser
+      // with no helper at all, and the panel could only say "summed". The code
+      // is the operating system's own: 5 is access denied, which is what an
+      // Untrusted renderer returns to the wrong access mask.
+      this.noteFailure(parts[0] === 'err' ? `os ${parts[2]}` : 'unparsed');
+      return null;
+    }
+    const pssBytes = Number(parts[2]);
+    const privateBytes = Number(parts[3]);
+    if (!Number.isFinite(pssBytes) || pssBytes <= 0) {
+      this.noteFailure('nonsense');
+      return null;
+    }
+    // Zero is the probe's "not measured" (macOS has no private figure), and
+    // is kept as null so nothing downstream reads it as a measured nothing.
+    return { pssBytes, privateBytes: Number.isFinite(privateBytes) && privateBytes > 0 ? privateBytes : null };
+  }
+
+  /**
+   * Tally why measurements fail, by kind rather than by pid.
+   *
+   * Per-pid would be a map that grows with every renderer the browser has ever
+   * had; the question anyone actually asks is "why is this not being measured",
+   * and the answer is the same for all thirty of them.
+   */
+  noteFailure(kind) {
+    this.failures.set(kind, (this.failures.get(kind) || 0) + 1);
+  }
+
+  /** The failure kinds seen so far, commonest first. */
+  failureSummary() {
+    return [...this.failures.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([kind, count]) => ({ kind, count }));
+  }
+
+  /** `{available, mechanism, reason}`, in the shape every capability uses. */
+  async capability() {
+    if (this.canMeasure !== null) {
+      return { available: this.canMeasure, mechanism: this.mechanism, reason: this.reason };
+    }
+    const reply = await this.request('caps');
+    if (reply === HELPER_GONE) {
+      // No helper, and a named reason for it. Permanent.
+      this.canMeasure = false;
+      return { available: false, mechanism: null, reason: this.reason || 'helper unavailable' };
+    }
+    if (!reply) {
+      // A timeout is not a verdict. The helper may simply have been slow to
+      // start - 400ms is a tight budget for a cold process - and latching the
+      // capability off here would disable native measurement for the rest of
+      // the session on the strength of one slow reply. Left unlatched so the
+      // next tick asks again.
+      return { available: false, mechanism: null, reason: 'helper did not answer in time' };
+    }
+    // `caps <mechanism> <0|1>`
+    const [, mechanism, supported] = reply.split(' ');
+    this.mechanism = mechanism || null;
+    this.canMeasure = supported === '1';
+    if (!this.canMeasure && !this.reason) {
+      this.reason = `no measurement backend built for ${PLATFORM}`;
+    }
+    return { available: this.canMeasure, mechanism: this.mechanism, reason: this.canMeasure ? null : this.reason };
+  }
+}
+
+let measureHelper = null;
+function getMeasureHelper(log) {
+  if (!measureHelper) measureHelper = new MeasureHelper(log);
+  return measureHelper;
+}
+
+function measureProcess(pid, log) {
+  return getMeasureHelper(log).measure(pid);
+}
+
+function probeBinaryPath() {
+  return PROBE_BINARY;
+}
+
+/* ------------------------------------------------------------------ */
+/* Efficiency mode                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Each process's efficiency mode as last set, so a command goes out only on a
+ * change: the governor re-asserts priorities every tick, and a helper round
+ * trip per tab per tick would cost the very power this is meant to save.
+ */
+const ecoState = new Map();
+/** How efficiency mode has been refused, logged once each. */
+const ecoRefused = new Set();
+
+/**
+ * Put a process into the operating system's efficiency mode, or take it out.
+ *
+ *   Windows  EcoQoS (power throttling), as Task Manager's Efficiency mode
+ *   macOS    the Darwin background band, as `taskpolicy -b`
+ *   Linux    a utilisation clamp and idle-class I/O on every thread
+ *
+ * Through the helper that already runs on each: mem-trim on Windows and Linux,
+ * mem-probe on macOS. Never rejects; resolves whether it took. Advisory, like
+ * priority - a refusal leaves the process as it was.
+ */
+async function setEfficiency(pid, on, log = () => {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  on = on === true;
+  if ((ecoState.get(pid) ?? false) === on) return true;
+  ecoState.set(pid, on);
+  if (ecoState.size > TRIM_MAP_LIMIT) ecoState.delete(ecoState.keys().next().value);
+  const helperFor = isMac ? getMeasureHelper(log) : (isLinux || isWindows) ? trimHelper(log) : null;
+  if (!helperFor) return false;
+  // The helper was made with the governor's log; a caller without one uses it.
+  if (log.length === 0 && helperFor.log) log = helperFor.log;
+  const reply = await helperFor.request(`eco ${pid} ${on ? 1 : 0}`).catch(() => null);
+  const ok = typeof reply === 'string' && reply.startsWith('ok ');
+  if (!ok) {
+    ecoState.delete(pid);
+    const why = typeof reply === 'string' ? reply.split(' ').slice(2).join(' ') : 'no answer';
+    if (!ecoRefused.has(why)) {
+      ecoRefused.add(why);
+      log(`efficiency mode refused for pid ${pid}: ${why || reply}`);
+    }
+  }
+  return ok;
+}
+
+/** What efficiency mode was last set to for a process (false if never). */
+function efficiencyOf(pid) {
+  return ecoState.get(pid) === true;
+}
+
+function measureCapability(log) {
+  return getMeasureHelper(log).capability();
+}
+
+/** Why measurements are failing, if they are. Commonest kind first. */
+function measureFailures() {
+  return measureHelper ? measureHelper.failureSummary() : [];
+}
+
+function stopMeasureHelper() {
+  if (measureHelper) measureHelper.stop();
+}
+
 function trimProcessMemory(pid, log) {
   return trimHelper(log).trim(pid);
 }
@@ -589,6 +684,7 @@ function trimBackoffMs(pid) {
  */
 function forgetProcess(pid) {
   if (helper && pid) helper.forgetProcess(pid);
+  ecoState.delete(pid);
 }
 
 /** Release the trim helper. Called from `before-quit`. */
@@ -608,6 +704,30 @@ function stopTrimHelper() {
 async function trimCapability(log) {
   const h = trimHelper(log);
   const permitted = await h.probe();
+
+  // Windows needs no second condition, and that is a real difference rather
+  // than a shortcut. Its compression store lives in physical memory, so a
+  // trimmed page has somewhere to go whether or not a pagefile is configured -
+  // where Linux with no swap has nowhere at all and the syscall succeeds having
+  // done nothing. The pagefile figure is still reported, because it is what
+  // decides whether pages that *cannot* be compressed have a home.
+  if (isWindows) {
+    const mem = await availableMemory(log);
+    const pagefileMB = mem ? Math.round(mem.backingTotalBytes / MB) : 0;
+    return {
+      available: permitted,
+      permitted,
+      mechanism: permitted ? 'SetProcessWorkingSetSizeEx -> Windows Memory Compression' : null,
+      reason: permitted ? null : (h.reason || `not implemented on ${PLATFORM}`),
+      compression: {
+        available: permitted,
+        applicable: true,
+        compressor: 'windows memory compression',
+        swapMB: pagefileMB,
+        zramMB: 0
+      }
+    };
+  }
 
   // Two independent conditions, and the second is the one that bites. The
   // helper's self-test only proves the syscall is *permitted*: MADV_PAGEOUT
@@ -680,14 +800,6 @@ function recommendedLiveTabs() {
   return 12;
 }
 
-/** Free physical memory as a fraction of total. Used for host-level pressure. */
-function systemMemoryPressure() {
-  const total = os.totalmem();
-  const free = os.freemem();
-  if (!total) return 0;
-  return 1 - free / total;
-}
-
 /**
  * True when we are root on Linux without `--no-sandbox` on the command line -
  * the configuration where Chromium aborts at startup rather than running
@@ -724,7 +836,7 @@ function systemInfo() {
  * burning CPU. We want Chromium's own throttling fully switched *on*, and then
  * we go further than it does.
  */
-function chromiumSwitches(cfg) {
+function chromiumSwitches(cfg, incognito = null) {
   const switches = [];
   const features = [];
   const disabledFeatures = [];
@@ -748,7 +860,7 @@ function chromiumSwitches(cfg) {
     // Security-relevant: see `siteIsolation` in config.js. Cross-site subframes
     // stop getting their own processes, and Chromium no longer guarantees that
     // two sites never share an address space.
-    disabledFeatures.push('site-per-process', 'IsolateOrigins');
+    disabledFeatures.push('SitePerProcess', 'IsolateOrigins');   // the feature's name, not the switch's
     switches.push(['disable-site-isolation-trials']);
   }
 
@@ -784,7 +896,46 @@ function chromiumSwitches(cfg) {
   //                           33.0MB for optimize-for-size alone), while also
   //                           shrinking image caches and disabling features the
   //                           user would notice. Same benefit, real cost.
-  if (cfg.optimizeForSize) switches.push(['js-flags', '--optimize-for-size']);
+  //   --disk-cache-size, --media-cache-size
+  //                           the theory was that Chromium sizes these from the
+  //                           host's RAM and disk, so a machine with plenty of
+  //                           both pays for caches it never fills - and that
+  //                           bounding them would come off the fixed overhead,
+  //                           which is the largest line in the budget and the
+  //                           one that decides the tab count at which per-tab
+  //                           memory gets good. Measured at 8MB and 4MB against
+  //                           the defaults over the 14-tab suite: 243MB and
+  //                           243MB of browser+GPU+utility overhead, against
+  //                           242MB and 240MB unset. No win, and marginally the
+  //                           wrong way, which is noise. The caveat worth
+  //                           keeping: that workload fetches a handful of small
+  //                           pages from a local fixture server, so it says
+  //                           nothing about a browser that has been reading the
+  //                           web for an hour. Worth re-measuring against a
+  //                           long session before anyone concludes the idea is
+  //                           dead - but not worth shipping on a hunch.
+  // One `--js-flags`, whatever goes into it: Chromium keeps the last value of a
+  // repeated switch, so incognito's compiler flags appended separately would
+  // have silently replaced this one, or been replaced by it.
+  const jsFlags = cfg.optimizeForSize ? ['--optimize-for-size'] : [];
+  if (incognito) {
+    const mode = require('./incognito/mode');
+    jsFlags.push(...(mode.JS_LEVELS[incognito.jsLevel] || []));
+    switches.push(...mode.switches(incognito));
+    // Nothing a private window plays reaches the system's media controls:
+    // Windows' volume flyout and lock screen, macOS's Now Playing, Linux's
+    // MPRIS applets all showed the page's title, site and artwork, and kept
+    // them on screen after the window had gone. Here, with the rest of the
+    // disabled features, because a second --disable-features would replace
+    // this one rather than add to it.
+    disabledFeatures.push('HardwareMediaKeyHandling', 'MediaSessionService');
+  } else if (cfg.jsLevel === 'balanced' || cfg.jsLevel === 'maximum') {
+    // The ordinary browser, hardened by choice (Settings): the same levels a
+    // private window uses - most attacks on the JavaScript engine go through
+    // its optimising compilers, and these turn them off.
+    jsFlags.push(...require('./incognito/mode').JS_LEVELS[cfg.jsLevel]);
+  }
+  if (jsFlags.length) switches.push(['js-flags', jsFlags.join(' ')]);
 
   // --- Per-platform ------------------------------------------------------
 
@@ -808,6 +959,25 @@ function chromiumSwitches(cfg) {
     // running as root need it on the argv; see `runningRootUnsandboxed`.
   }
 
+  // Not `HardwareSecureDecryption`, tried in 1.9.3 for Windows' PlayReady:
+  // the flag only matters once a PlayReady CDM is registered, and Chrome
+  // registers it from chrome/common/media/cdm_registration.cc (AddPlayReady,
+  // under ENABLE_PLAYREADY) - Chrome's layer, which Electron does not build.
+  // castLabs' binary has the media code but not that registration, so the
+  // key system never appears. Streaming views (streamview.js) are the route.
+
+  // Scrollbars that appear while you scroll and fade when you stop, as a Mac
+  // draws them, rather than a permanent trough down the side of every panel
+  // and page. Measured: with it, a scrolling page has no scrollbar pixels at
+  // rest in this Electron build; without it, a 252-grey track. A Mac already
+  // has them; Windows and Linux draw scrollbars through the same Aura code the
+  // feature switches, and if it were ignored the scrollbar would be as before.
+  // Not in a private window: a page can measure the scrollbar's width, and
+  // changing it there would change what the window looks like to a tracker.
+  if (process.platform !== 'darwin' && !incognito && !process.env.DEBROWSER_CLASSIC_SCROLLBARS) {
+    features.push('OverlayScrollbar');
+  }
+
   if (features.length) switches.push(['enable-features', features.join(',')]);
   if (disabledFeatures.length) switches.push(['disable-features', disabledFeatures.join(',')]);
 
@@ -815,24 +985,28 @@ function chromiumSwitches(cfg) {
 }
 
 module.exports = {
+  measureProcess, measureCapability, measureFailures, stopMeasureHelper, probeBinaryPath, helperPath,
   PLATFORM,
   isLinux,
   isMac,
   isWindows,
   setProcessPriority,
   getProcessPriority,
+  setEfficiency,
+  efficiencyOf,
   trimProcessMemory,
   untrimProcessMemory,
   trimBackoffMs,
   forgetProcess,
   trimCapability,
+  availableMemory,
   stopTrimHelper,
   canRaisePriority,
   clampPriority,
   runningRootUnsandboxed,
   recommendedBudgetMB,
   recommendedLiveTabs,
-  systemMemoryPressure,
   systemInfo,
-  chromiumSwitches
+  chromiumSwitches,
+  helperPath
 };

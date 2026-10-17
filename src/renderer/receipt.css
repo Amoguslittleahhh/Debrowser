@@ -1,0 +1,60 @@
+/* The week's receipt: four figures, then a bar for each day. */
+
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+main { width: min(760px, 100% - 32px); margin: 0 auto; padding: 48px 0 64px; }
+h1 { margin: 0 0 var(--s2); font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+body[data-design="paper"] h1 { font-family: var(--font-display); font-weight: 400; }
+.lead { margin: 0 0 var(--s6); color: var(--text-dim); font-size: 15px; line-height: 1.5; }
+h2 {
+  margin: var(--s7) 0 var(--s3);
+  color: var(--text-dim);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+
+/* The four figures as a row of type between hairlines, not four cards: a
+   receipt lists, it does not tile. The first, memory, is the point and is
+   set largest. */
+.totals {
+  display: grid;
+  grid-template-columns: 1.4fr repeat(3, 1fr);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.total { padding: var(--s4) var(--s4) var(--s4) 0; }
+.total + .total { padding-left: var(--s4); border-left: 1px solid var(--border-soft); }
+.total .n { display: block; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.total:first-child .n { font-size: 30px; }
+.total .what { color: var(--text-dim); font-size: var(--fs-small); }
+
+.chart {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  align-items: end;
+  gap: var(--s3);
+  height: 200px;
+}
+.day { display: grid; grid-template-rows: auto 1fr auto; height: 100%; text-align: center; gap: 6px; }
+.day .v { color: var(--text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.day .bar-wrap { display: flex; align-items: flex-end; }
+.day .bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px;
+  /* The past in a quiet tone and today in the accent, so the eye lands on
+     the one bar that is still growing. */
+  background: color-mix(in srgb, var(--text) 18%, transparent);
+  transform-origin: bottom;
+  animation: grow var(--slow) var(--ease-out) both;
+}
+.day.today .bar { background: var(--accent); }
+.day .d { color: var(--text-dim); font-size: var(--fs-small); }
+.day.today .d { color: var(--text); font-weight: 600; }
+@keyframes grow { from { transform: scaleY(0); } }
+
+.fine { margin: var(--s7) 0 0; color: var(--text-dim); font-size: 13px; }
+
+@media (max-width: 600px) {
+  .totals { grid-template-columns: repeat(2, 1fr); }
+  .total:nth-child(3) { padding-left: 0; border-left: 0; }
+}

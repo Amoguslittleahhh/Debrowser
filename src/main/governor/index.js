@@ -33,6 +33,8 @@ const { Tier, Pressure, tierRank, TIER_ORDER, isStopped, MB } = require('../conf
 const { Metrics } = require('./metrics');
 const { BoostController } = require('./boost');
 const { applyTier, refreshPriority } = require('./tiers');
+/** Logical processors, for CPU figures as a share of the whole machine. */
+const CORES = Math.max(1, require('os').cpus().length);
 const { HeapLimiter } = require('./heap-limit');
 const { readProcessMemory } = require('../memory');
 const platform = require('../platform');
@@ -40,12 +42,36 @@ const platform = require('../platform');
 /** Refresh per-tab heap/CPU every N ticks; each needs a CDP round trip. */
 const HEAP_SAMPLE_EVERY = 3;
 
+/**
+ * Shortest gap between two forced collections on the same tab.
+ *
+ * A collection lowers the live set, which lowers the limit derived from it,
+ * while the committed total V8 has not handed back stays where it was - so
+ * without a floor the tab is immediately "over limit" again and gets collected
+ * on every qualifying tick, forever.
+ */
+const HEAP_COLLECT_FLOOR_MS = 60_000;
+
+/** How long after start the hibernation probe waits: past the first paint. */
+const PROBE_DELAY_MS = 1500;
+
+/** The longest reclaiming waits on an animation in front (holdForAnimation). */
+const QUIESCE_MAX_MS = 60_000;
+
 class Governor {
   /**
    * @param {object} deps - { app, cfg, tabManager, ipcHub, log, onUpdate }
    */
-  constructor({ app, cfg, tabManager, ipcHub, log = () => {}, onUpdate = () => {} }) {
+  /**
+   * @param {object} deps
+   * @param {(tab) => ('never'|'early'|undefined)} [deps.sitePolicy] - what the user
+   *   chose for the tab's site: keep it awake, or let it sleep sooner
+   */
+  constructor({ app, cfg, tabManager, ipcHub, log = () => {}, onUpdate = () => {}, sitePolicy = () => undefined }) {
     this.app = app;
+    this.sitePolicy = sitePolicy;
+    /** Battery mode: the ladder runs faster (see runIdleLadder). Set by main.js. */
+    this.saver = false;
     this.cfg = cfg;
     this.tabs = tabManager;
     this.ipcHub = ipcHub;
@@ -62,7 +88,7 @@ class Governor {
     this.running = false;
     this.stats = {
       discards: 0, freezes: 0, settles: 0, reclaimedMB: 0,
-      hibernations: 0, hibernateReclaimedMB: 0
+      hibernations: 0, hibernateReclaimedMB: 0, hibernateNetMB: 0
     };
 
     /**
@@ -94,12 +120,17 @@ class Governor {
 
   start() {
     if (this.timer) return;
+    this.tickEvery = this.tickInterval();
     this.timer = setInterval(() => {
       this.tick().catch((err) => this.log(`governor tick failed: ${err.stack || err.message}`));
-    }, this.cfg.tickMs);
+    }, this.tickEvery);
     if (typeof this.timer.unref === 'function') this.timer.unref();
     this.log(`governor started: budget ${this.cfg.memoryBudgetMB}MB, profile ${this.cfg.profile}`);
-    this.probeTrim();
+    // Not now: the probe spawns a process, which blocks this thread for ~8 ms
+    // while the first tab is waiting on it for its page. Nothing can hibernate
+    // in the first seconds anyway - a tab has to sit unseen for longer.
+    const probe = setTimeout(() => this.probeTrim(), PROBE_DELAY_MS);
+    if (typeof probe.unref === 'function') probe.unref();
   }
 
   /**
@@ -119,6 +150,7 @@ class Governor {
     platform.trimCapability(this.log).then((cap) => {
       this.trimAvailable = cap.available;
       this.trimReason = cap.reason;
+      this.trimCompressor = cap.compression?.compressor ?? null;
       this.log(cap.available
         ? `hibernation available via ${cap.mechanism}`
         : `hibernation unavailable: ${cap.reason}`);
@@ -131,6 +163,50 @@ class Governor {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * How often to tick: less often in battery mode. Each tick reads every
+   * process's memory - on Linux the kernel walks each one's page tables for
+   * it, and that read was nearly all of the browser process's idle CPU - and
+   * sends the result to every view that draws it, waking each renderer.
+   */
+  tickInterval() {
+    return this.saver ? (this.cfg.saverTickMs || this.cfg.tickMs) : this.cfg.tickMs;
+  }
+
+  /**
+   * The operating system's efficiency mode for background tabs, in battery
+   * mode (platform.setEfficiency: EcoQoS on Windows, the background band on
+   * macOS, a utilisation clamp and idle I/O on Linux). By process, since a
+   * renderer can hold several tabs: one in front, playing sound, or on a call
+   * keeps its whole process at full speed - EcoQoS on an audio renderer is
+   * how a song starts to stutter. A command goes out only on a change.
+   */
+  applyEfficiency() {
+    const awake = new Set();
+    const all = this.tabs.all();
+    const pids = new Map();
+    for (const tab of all) {
+      if (!tab.isLive) continue;
+      const pid = tab.pid;
+      if (!pid) continue;
+      pids.set(tab, pid);
+      if (tab.visible || tab.tier === Tier.ACTIVE || tab.audible || tab.capturing || tab.boosted) awake.add(pid);
+    }
+    for (const pid of new Set(pids.values())) {
+      platform.setEfficiency(pid, this.saver === true && !awake.has(pid), this.log);
+    }
+  }
+
+  /** Battery mode came or went: tick at the matching pace. */
+  setSaver(on) {
+    this.saver = on;
+    this.applyEfficiency();
+    if (this.timer && this.tickEvery !== this.tickInterval()) {
+      this.stop();
+      this.start();
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -150,6 +226,9 @@ class Governor {
 
       const active = this.tabs.activeTab();
       this.boost.update(active, this.tabs.all());
+      // How long reclaiming has been held off for an animation (holdForAnimation).
+      if (this.boost.quiesceRequested) this.quiesceSince ??= Date.now();
+      else this.quiesceSince = null;
 
       await this.runPostAnimationSettle();
       await this.runIdleLadder();
@@ -160,6 +239,7 @@ class Governor {
       await this.runHeapLimits();
       await this.enforceLiveTabCap();
       await this.enforceBudget();
+      this.applyEfficiency();
 
       this.onUpdate(this.snapshot());
     } finally {
@@ -187,6 +267,9 @@ class Governor {
       if (!tab.isLive || !tab.cdp) continue;
       if (isStopped(tab.tier)) continue;   // stopped: cannot answer, and re-attaching undoes the point
       if (tab.boosted) continue; // never add CDP traffic to an animating tab
+      // Nor to the page in front: measuring re-attaches the debugger and turns
+      // on Performance, the instrumentation tiers.js detaches from it.
+      if (tab.visible) continue;
 
       // Two consumers want this reading, and it costs a CDP round trip, so it
       // is taken once here for both: attribution needs a per-tab heap only when
@@ -208,13 +291,18 @@ class Governor {
 
       if (metrics.jsHeapBytes != null) tab.jsHeapMB = metrics.jsHeapBytes / MB;
 
-      // Differentiate cumulative task time into a percentage of one core.
+      // Differentiate cumulative task time into a percentage of the whole
+      // machine - the unit `getAppMetrics` reports every other CPU figure in
+      // (measured: a renderer spinning one core of four reads 24.7). As a
+      // percentage of one core, a tab sharing a process read four times
+      // busier than a tab with its own, on a four-core machine, in the same
+      // column - and was frozen four times sooner for it.
       if (metrics.taskDurationSec != null) {
         if (tab.lastTaskSec != null && tab.lastTaskAt) {
           const elapsedSec = (now - tab.lastTaskAt) / 1000;
           if (elapsedSec > 0) {
             const busySec = Math.max(0, metrics.taskDurationSec - tab.lastTaskSec);
-            tab.taskCpu = (busySec / elapsedSec) * 100;
+            tab.taskCpu = (busySec / elapsedSec) * 100 / CORES;
           }
         }
         tab.lastTaskSec = metrics.taskDurationSec;
@@ -275,9 +363,21 @@ class Governor {
    * Two things are never done here: collecting the visible tab, whose stall the
    * user would feel, and collecting while anything is animating anywhere.
    */
+  /**
+   * Whether reclaiming waits for an animation in front to finish. Not for
+   * ever: an endless spinner or carousel kept every budget, cap and heap limit
+   * off, at any pressure. So never at critical pressure, and never for more
+   * than a minute at a stretch.
+   */
+  holdForAnimation() {
+    if (!this.boost.quiesceRequested) return false;
+    if (this.pressure === Pressure.CRITICAL) return false;
+    return !(this.quiesceSince && Date.now() - this.quiesceSince > QUIESCE_MAX_MS);
+  }
+
   async runHeapLimits() {
     if (!this.cfg.heapLimit.enabled) return;
-    if (this.boost.quiesceRequested) return;
+    if (this.holdForAnimation()) return;
 
     for (const tab of this.tabs.all()) {
       if (!this.heapLimiter.worthMeasuring(tab)) continue;
@@ -291,12 +391,34 @@ class Governor {
       const backlog = !tab.heapBacklogCollected;
       if (!backlog && !this.heapLimiter.isOverLimit(tab)) continue;
 
+      // The interval floor the heap limiter's own header promises, which was
+      // never actually applied here.
+      //
+      // Collecting drops `liveHeapBytes` to the live set, so the limit derived
+      // from it drops too - while `heapTotalBytes` stays at the committed size
+      // V8 has not handed back. `isOverLimit` is therefore true again
+      // immediately, and every qualifying hidden tab was collected forever on
+      // a roughly six-second cycle. A forced collection is not free; doing it
+      // in a loop costs more than the heap it is chasing.
+      const sinceLast = Date.now() - (tab.lastHeapCollectionAt || 0);
+      if (!backlog && sinceLast < HEAP_COLLECT_FLOOR_MS) continue;
+      tab.lastHeapCollectionAt = Date.now();
+
       const beforeTotal = tab.heapTotalBytes;
       const result = await tab.cdp.collectGarbage();
       if (!result) continue;
 
       // Re-read so L is the live set measured just after collecting. The
       // limiter owns every heap field on the tab; nothing is assigned here.
+      //
+      // Guarded, because `collectGarbage` is awaited with a five-second ceiling
+      // and a renderer can die inside that window - the tab closed, or the
+      // process OOM-killed - which nulls `tab.cdp` in teardown. Unguarded, this
+      // threw a TypeError straight out of the tick, and the tick is where
+      // `enforceLiveTabCap` and `enforceBudget` run: the browser quietly
+      // stopped reclaiming at the exact moment memory pressure killed a
+      // renderer. tiers.js already guards the identical pattern.
+      if (!tab.cdp) continue;
       const after = await tab.cdp.pageMetrics();
       this.heapLimiter.recordCollection(tab, {
         beforeTotal,
@@ -317,13 +439,27 @@ class Governor {
 
   async runIdleLadder() {
     const now = Date.now();
-    const accel = this.cfg.pressureAccel[this.pressure] ?? 1;
+    // On battery (main.js, battery mode) the whole ladder runs at a third of
+    // its timings, and a background tab still burning CPU is frozen at a
+    // quarter of the usual threshold: power is the thing being saved.
+    const accel = (this.cfg.pressureAccel[this.pressure] ?? 1) * (this.saver ? 0.35 : 1);
+    const freezeCpu = this.cfg.freezeCpuThreshold * (this.saver ? 0.25 : 1);
 
     for (const tab of this.tabs.all()) {
       if (tab.visible) {
         if (tab.tier !== Tier.ACTIVE) await applyTier(tab, Tier.ACTIVE, this.ctx());
         else refreshPriority(tab, this.cfg);
         continue;
+      }
+
+      // Before the skip, not after. `shouldSkip` returns early for a tab with
+      // no renderer, and this is the only place outside `activate` that clears
+      // a speculation - so a tab that was speculated on and never became live
+      // (queued behind the admission limit and then closed, or OOM-killed) left
+      // `speculatingId` set for the rest of the session, silently disabling
+      // every future speculative restore with nothing in the log to say why.
+      if (tab.speculativeUntil && now > tab.speculativeUntil && !tab.everVisible && !tab.isLive) {
+        this.tabs.clearSpeculation(tab);
       }
 
       if (this.shouldSkip(tab)) continue;
@@ -340,7 +476,9 @@ class Governor {
         continue;
       }
 
-      const idle = tab.idleMs(now);
+      // A site the user said may sleep early runs the whole ladder at a
+      // quarter of its timings; one kept awake is capped in the protections.
+      const idle = tab.idleMs(now) * (this.sitePolicy(tab) === 'early' ? 4 : 1);
       let target = Tier.WARM;
       if (idle >= this.cfg.coldAfterMs * accel) target = Tier.COLD;
 
@@ -355,7 +493,7 @@ class Governor {
       // worker. There the trade is overwhelmingly worth it: real CPU to zero
       // for a few megabytes. Freezing a page that is already quiet buys no CPU
       // (it is using none) and costs that memory for nothing.
-      if (idle >= this.cfg.freezeAfterMs * accel && tab.cpu >= this.cfg.freezeCpuThreshold) {
+      if (idle >= this.cfg.freezeAfterMs * accel && tab.cpu >= freezeCpu) {
         target = Tier.FROZEN;
       }
 
@@ -375,12 +513,12 @@ class Governor {
       // it gets revisited; the reload when it does is cheaper than carrying
       // that indefinitely, and it is the only reclaim that returns the whole
       // renderer rather than a fraction of a heap.
-      if (idle >= this.cfg.discardAfterMs * accel) target = Tier.DISCARDED;
-      // Discarding on a timer alone is deliberately not done here. An idle
-      // frozen tab costs no CPU and has already been collected; destroying
-      // it buys the remainder only at the price of a reload later. That trade
-      // is only worth making under real memory pressure, which is the
-      // budget's job below.
+      //
+      // Or when the user said (Settings, "Put tabs to sleep"): at once, or
+      // after the minutes they chose - exactly, not shortened by pressure or
+      // battery, which still hurry everything before this step.
+      const chosen = this.cfg.sleepAfterMs;
+      if (chosen != null ? idle >= chosen : idle >= this.cfg.discardAfterMs * accel) target = Tier.DISCARDED;
 
       target = this.clampToProtections(tab, target);
       if (tierRank(target) > tierRank(tab.tier)) {
@@ -396,14 +534,30 @@ class Governor {
           ? this.metrics.byPid.get(tab.pid)?.privateMB ?? null
           : null;
 
+        // And what the machine had spare before the trim, which is the reading
+        // the tier is actually judged on. Taken here, immediately before the
+        // trim, so the window it brackets is milliseconds wide and whatever
+        // else the machine is doing has as little time as possible to move it.
+        const availBefore = target === Tier.HIBERNATED && before != null
+          ? (await platform.availableMemory(this.log))?.availBytes ?? null
+          : null;
+
         // Where the tab actually landed, not where it was asked to go:
         // freezing and trimming can each be refused, and a tier the tab is not
         // in must not be counted as one it reached.
         const reached = await applyTier(tab, target, this.ctx());
         if (reached === Tier.FROZEN) this.stats.freezes += 1;
-        if (reached === Tier.HIBERNATED && !this.measuredPids.has(tab.pid)) {
-          this.measuredPids.add(tab.pid);
-          this.recordHibernation(tab, before);
+        // Read once: `Tab#pid` asks the renderer rather than returning a field,
+        // because a cached one goes stale the moment a tab navigates across
+        // sites - so a pair of reads is a pair of native calls.
+        const pid = tab.pid;
+        if (reached === Tier.HIBERNATED && pid && !this.measuredPids.has(pid)) {
+          this.measuredPids.add(pid);
+          // Not awaited: the measurement is bookkeeping, and a tick that waited
+          // on a helper round trip for it would be a tick the ladder is not
+          // running. Failures inside it are logged, never thrown at the tick.
+          this.recordHibernation(tab, before, availBefore)
+            .catch((err) => this.log(`hibernation measurement failed: ${err.message}`));
         }
       }
     }
@@ -433,7 +587,7 @@ class Governor {
   async enforceLiveTabCap() {
     const cap = this.cfg.maxLiveTabs;
     if (!cap) return;
-    if (this.boost.quiesceRequested) return; // never reclaim mid-animation
+    if (this.holdForAnimation()) return; // not mid-animation, within limits
 
     const liveCount = this.tabs.all().filter((tab) => tab.isLive).length;
     let excess = liveCount - cap;
@@ -469,9 +623,9 @@ class Governor {
 
   async enforceBudget() {
     if (this.pressure === Pressure.NONE) return;
-    if (this.boost.quiesceRequested) return; // never reclaim mid-animation
+    if (this.holdForAnimation()) return; // not mid-animation, within limits
 
-    const discardAllowed = tierRank(this.pressure) !== undefined &&
+    const discardAllowed =
       PRESSURE_RANK[this.pressure] >= PRESSURE_RANK[this.cfg.discardFromPressure];
 
     let overBy = this.metrics.totalMB - this.cfg.memoryBudgetMB * this.cfg.pressure.moderate;
@@ -491,14 +645,17 @@ class Governor {
         this.stats.discards += 1;
         overBy -= before;              // the whole renderer is gone
         this.stats.reclaimedMB += before;
-      } else {
-        if (next === Tier.FROZEN) this.stats.freezes += 1;
-        // A cold/frozen trim typically returns a meaningful fraction of the
-        // page's heap. Estimate conservatively so we do not over-reclaim on
-        // the strength of an optimistic guess; the next tick measures reality.
+      } else if (next === Tier.HIBERNATED) {
+        // A trim returns a real fraction of the page's memory. Estimated
+        // conservatively; the next tick measures what it actually was.
         const estimate = Math.max(0, (before - this.cfg.tabFloorMB) * 0.35);
         overBy -= estimate;
         this.stats.reclaimedMB += estimate;
+      } else if (next === Tier.FROZEN) {
+        // COLD and FROZEN free nothing - freezing costs memory, by this file's
+        // own measurement - so they are steps on the way, not savings. Booking
+        // savings for them ended the pass before anything was reclaimed.
+        this.stats.freezes += 1;
       }
     }
   }
@@ -525,7 +682,12 @@ class Governor {
 
   /** One step further down, respecting every protection. */
   nextTierDown(tab, discardAllowed) {
-    const ceiling = this.clampToProtections(tab, Tier.DISCARDED, { discardAllowed });
+    let ceiling = this.clampToProtections(tab, Tier.DISCARDED, { discardAllowed });
+    // HIBERNATED is a trim, and a trim is only allowed where `shouldHibernate`
+    // would allow it: private windows turn it off so a page's memory never
+    // reaches the pagefile, and this path reached it anyway under pressure.
+    // Nor FROZEN on the way to it, which costs memory rather than saving any.
+    if (ceiling === Tier.HIBERNATED && !this.hibernationUsable()) ceiling = Tier.COLD;
     const currentRank = tierRank(tab.tier);
     const ceilingRank = tierRank(ceiling);
     if (ceilingRank <= currentRank) return null;
@@ -541,6 +703,11 @@ class Governor {
     return next;
   }
 
+  /** Whether a trim may happen at all, before any per-tab question. */
+  hibernationUsable() {
+    return Boolean(this.cfg.hibernate.enabled && !this.hibernationDisabled && this.trimAvailable);
+  }
+
   /* ---------------------------------------------------------------- */
   /* Protections                                                       */
   /* ---------------------------------------------------------------- */
@@ -549,15 +716,49 @@ class Governor {
    * Cap how far a tab may be demoted. Returns the lowest tier permitted for
    * this tab right now, which may be higher than the tier requested.
    */
-  clampToProtections(tab, requested, { discardAllowed = true, ignoreGrace = false } = {}) {
+  /**
+   * How long a tab just left is spared a discard. A minute, unless the user
+   * chose to have tabs sleep sooner than that: then their choice, and at once
+   * means at once.
+   */
+  graceMs() {
+    const chosen = this.cfg.sleepAfterMs;
+    return chosen != null ? Math.min(this.cfg.minLifetimeMs, chosen) : this.cfg.minLifetimeMs;
+  }
+
+  clampToProtections(tab, requested, { discardAllowed = true, ignoreGrace = false, explicit = false } = {}) {
     let floor = requested;
 
     const cap = (tier) => {
       if (tierRank(tier) < tierRank(floor)) floor = tier;
     };
 
+    // The browser's own pages are governed like any other tab.
+    //
+    // They used to be pinned at ACTIVE, on the reasoning that every tier below
+    // it is wrong for them: freezing one stops the page servicing the controls
+    // the user is operating, and discarding one throws away a half-filled form.
+    //
+    // In a real session that made three of the six live renderers Settings, the
+    // downloads page and a new tab page - about 95MB held permanently - while
+    // the actual websites beside them sat discarded at zero. A browser whose
+    // own pages are the expensive ones has the rule backwards.
+    //
+    // What the exemption was really protecting is unsubmitted text, and that is
+    // `hasDirtyInput`'s job. These pages carry the command bridge rather than
+    // `probe-preload.js`, so nothing was watching them - so they report it
+    // themselves now, from the one kind of field that can lose anything: a
+    // search box, or the new tab page's query. Settings needs no such rule
+    // because every control on it saves the moment it changes; there is nothing
+    // there to lose.
+    //
+    // They are cheap to bring back, which is the other half of why this is
+    // safe: a local page, and one that lands in a renderer the prewarmer keeps
+    // warm - 46ms measured against 79ms cold.
     // Audio is the most noticeable thing a browser can take away.
     if (tab.audible) cap(Tier.WARM);
+    // So is a call or a recording: a tab with the camera or microphone.
+    if (tab.capturing) cap(Tier.WARM);
 
     // Unsubmitted input survives a freeze perfectly; it does not survive a
     // discard. The memory cost of holding it is not a close call.
@@ -581,11 +782,27 @@ class Governor {
     // minute. And `ignoreGrace` lets the live-tab cap through, because there
     // the candidates are already ordered least-recently-used: the tab being
     // discarded is the Nth least recent, never one just left.
-    if (tab.everVisible && !ignoreGrace && tab.idleMs() < this.cfg.minLifetimeMs) {
+    if (tab.everVisible && !ignoreGrace && tab.idleMs() < this.graceMs()) {
       cap(Tier.HIBERNATED);
     }
 
-    if (tab.pinned) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.COLD);
+    // Asked for by name ("Put to sleep"), a pin or a keep-awake rule gives way:
+    // they are about what the browser does by itself, not about what you ask.
+    if (tab.pinned && !explicit) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.COLD);
+
+    // A site the user keeps awake - a chat, a music player, a dashboard. Warm,
+    // like a tab playing sound, until memory is critical: then it may be
+    // hibernated, which loses nothing, but never discarded.
+    if (this.sitePolicy(tab) === 'never' && !explicit) cap(this.pressure === Pressure.CRITICAL ? Tier.HIBERNATED : Tier.WARM);
+
+    // A tab with developer tools open is a tab being worked on.
+    //
+    // WARM, not COLD: freezing the page stops the task queues the inspector is
+    // driving, so a frozen tab under DevTools is an inspector attached to
+    // something that will not answer. The user closes the tools and the tab
+    // rejoins the ladder like any other - and the cost of getting this wrong,
+    // losing a console session mid-debug, is worse than one resident renderer.
+    if (tab.devToolsOpen) cap(Tier.WARM);
 
     if (!discardAllowed) cap(Tier.HIBERNATED);
 
@@ -606,6 +823,12 @@ class Governor {
     if (!this.trimAvailable) return false;
     if (idle < cfg.afterMs * accel) return false;
 
+    // Plain disk swap writes the pages out but keeps them in RAM until
+    // something else needs the room, so without pressure a trim frees next
+    // to nothing - measured 1-14MB of a 90MB trim - and the tab then wakes
+    // from disk, 0.7-1s when memory is tight. Only worth it under pressure.
+    if (this.trimCompressor === 'swap' && this.pressure === Pressure.NONE) return false;
+
     // A speculative page load must never be the reason a frame is dropped, and
     // neither must a syscall plus a resume stall.
     if (this.boost.quiesceRequested) return false;
@@ -618,10 +841,11 @@ class Governor {
     // This renderer's trim was refused recently. Asked here rather than left to
     // fail in `demote`, so the tab simply stays where it is instead of being
     // walked down the ladder every tick to be turned back at the last step.
-    if (platform.trimBackoffMs(tab.pid) > 0) return false;
+    const pid = tab.pid;
+    if (platform.trimBackoffMs(pid) > 0) return false;
 
     // Every tab sharing this renderer must also be ready to go.
-    const group = this.metrics.tabsByPid().get(tab.pid);
+    const group = this.metrics.tabsByPid().get(pid);
     if (!group) return false;
     return group.every((sibling) => sibling === tab || (
       !sibling.visible
@@ -640,7 +864,7 @@ class Governor {
    * otherwise keep paying the syscall and the resume stall forever in exchange
    * for nothing, which is exactly the failure this repo deletes levers for.
    */
-  recordHibernation(tab, privateBeforeMB) {
+  async recordHibernation(tab, privateBeforeMB, availBeforeBytes) {
     this.stats.hibernations += 1;
     if (privateBeforeMB == null) return;
 
@@ -649,10 +873,41 @@ class Governor {
     // readings are of the same process, taken the same way - a share compared
     // against a whole is not a measurement.
     const after = readProcessMemory(tab.pid);
-    if (!after) return;
-    const reclaimed = privateBeforeMB - after.privateMB;
-    this.stats.hibernateReclaimedMB += Math.max(0, reclaimed);
-    this.hibernationSamples.push(reclaimed);
+    const leftProcess = after ? privateBeforeMB - after.privateMB : null;
+    if (leftProcess != null) this.stats.hibernateReclaimedMB += Math.max(0, leftProcess);
+
+    /*
+     * What the *machine* got back, which is a different number and the only one
+     * worth judging the tier on.
+     *
+     * Pages leaving a process do not evaporate: zram and Windows Memory
+     * Compression both hold them, compressed, in physical memory - measured at
+     * about 2:1 - so a process that shed 200MB may have handed the machine only
+     * 100MB. The self-disable below used to read the per-process drop, which
+     * means on a host where compression achieved nothing at all it would have
+     * seen a large number and kept the tier switched on forever. That is this
+     * project's own named worst case: "a syscall returning success is not
+     * evidence it did anything", and the per-process figure is the syscall
+     * agreeing with itself.
+     *
+     * The independent reading is what M4b was validated against by hand -
+     * MemAvailable moved +149MB against a claimed 270MB - and this is that
+     * check, made automatic.
+     */
+    let net = null;
+    if (availBeforeBytes != null) {
+      const mem = await platform.availableMemory(this.log);
+      if (mem) net = (mem.availBytes - availBeforeBytes) / MB;
+    }
+    if (net != null) this.stats.hibernateNetMB += net;
+
+    // Judged on the net figure where there is one, and on the per-process drop
+    // only where the platform cannot give one. Never on both: a lever that
+    // passes on either number is a lever with no gate.
+    const sample = net != null ? net : leftProcess;
+    if (sample == null) return;
+    this.hibernationSamples.push(sample);
+    this.hibernationNet = net != null;
 
     const cfg = this.cfg.hibernate;
     if (this.hibernationSamples.length < cfg.sampleSize) return;
@@ -661,8 +916,9 @@ class Governor {
     const median = sorted[Math.floor(sorted.length / 2)];
     if (median < cfg.minReclaimMB) {
       this.hibernationDisabled = true;
-      this.log(`hibernation disabled: median reclaim ${median.toFixed(1)}MB over ` +
-               `${sorted.length} tabs is below the ${cfg.minReclaimMB}MB it costs to bother`);
+      this.log(`hibernation disabled: median ${this.hibernationNet ? 'net system' : 'per-process'} ` +
+               `reclaim ${median.toFixed(1)}MB over ${sorted.length} tabs is below the ` +
+               `${cfg.minReclaimMB}MB it costs to bother`);
     } else {
       // Proven on this host; stop sampling.
       this.hibernationSamples = [];
@@ -672,10 +928,11 @@ class Governor {
   /** Tabs that should be left entirely alone this tick. */
   shouldSkip(tab) {
     if (!tab.isLive) return true;
+    if (tab.activating) return true;                    // being brought to the front
     if (tab.loading) return true;                       // never interrupt a load
     if (tab.crashed) return true;
     if (tab.boosted) return true;
-    if (tab.wc.isDevToolsOpened?.()) return true;       // the user is inspecting it
+    if (tab.devToolsOpen) return true;                  // the user is inspecting it
     return false;
   }
 
@@ -708,6 +965,26 @@ class Governor {
     const reached = await applyTier(tab, target, this.ctx());
     if (reached === Tier.DISCARDED) this.stats.discards += 1;
     return reached !== null;
+  }
+
+  /**
+   * "Put to sleep", from the tab's menu or the command bar: now, rather than
+   * when the ladder would get to it. Sound, a call, unsent text and open
+   * developer tools still hold it awake - losing any of those is worse than
+   * the memory - and the answer says how far it went.
+   *
+   * @returns {Promise<string|null>} the tier it is in afterwards
+   */
+  async sleepNow(tab) {
+    if (!tab || tab.visible || !tab.isLive) return tab ? tab.tier : null;
+    const target = this.clampToProtections(tab, Tier.DISCARDED, { ignoreGrace: true, explicit: true });
+    const before = tab.rssMB;
+    const reached = await applyTier(tab, target, this.ctx());
+    if (reached === Tier.DISCARDED) {
+      this.stats.discards += 1;
+      this.stats.reclaimedMB += before;
+    }
+    return tab.tier;
   }
 
   /** Called by the tab manager the moment the user switches tabs. */
@@ -753,6 +1030,7 @@ class Governor {
       maxLiveTabs: this.cfg.maxLiveTabs,
       liveTabs: this.tabs.all().filter((tab) => tab.isLive).length,
       pressure: this.pressure,
+      saver: this.saver === true,
       profile: this.cfg.profile,
       boostedTabId: this.boost.boostedTabId,
       stats: {
@@ -766,7 +1044,12 @@ class Governor {
       hibernation: {
         available: this.trimAvailable,
         reason: this.trimAvailable ? null : this.trimReason,
-        disabled: this.hibernationDisabled
+        disabled: this.hibernationDisabled,
+        // Whether the figures beside this were checked against the machine or
+        // only against the process that shed them. The difference is the whole
+        // question of whether compression paid, so it is reported rather than
+        // left for the reader to assume the better of the two.
+        netMeasured: this.hibernationNet === true
       },
       tabs: this.tabs.all().map((t) => t.toJSON())
     };

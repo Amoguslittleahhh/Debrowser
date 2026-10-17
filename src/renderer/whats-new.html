@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>Release Notes</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="whats-new.css">
+</head>
+<body>
+  <!-- Every version's notes, from the CHANGELOG.md packed with the app, set in
+       the design you use. -->
+  <main>
+    <header>
+      <h1 id="title">Release Notes</h1>
+      <p class="lead" id="lead"></p>
+    </header>
+    <div id="update" class="update" role="status" hidden>
+      <p id="update-text"></p>
+      <button id="update-go" class="primary" type="button">Update in Settings</button>
+    </div>
+    <div id="notes"></div>
+  </main>
+  <script src="theme.js"></script>
+  <script src="whats-new.js"></script>
+</body>
+</html>

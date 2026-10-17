@@ -1,0 +1,52 @@
+{
+  "comment": "What to download, per system - read by the release notes (.github/scripts/release-notes.py), the download page (tools/changelog-site.js) and the AppImage's own setup (install.js, beside this file). The names are electron-builder.yml's artifactName for each target.",
+  "latest": "https://github.com/Amoguslittleahhh/Debrowser/releases/latest/download/",
+  "files": [
+    {
+      "id": "windows",
+      "os": "windows",
+      "label": "Windows",
+      "file": "Debrowser-Windows-Setup.exe",
+      "note": "Windows 10 and 11, 64-bit. Installs for you alone, without asking for an administrator."
+    },
+    {
+      "id": "mac-arm64",
+      "os": "mac",
+      "arch": "arm64",
+      "label": "macOS, Apple silicon",
+      "file": "Debrowser-macOS-arm64.dmg",
+      "note": "Macs with an M1 chip or later - most Macs from 2021 on."
+    },
+    {
+      "id": "mac-x64",
+      "os": "mac",
+      "arch": "x64",
+      "label": "macOS, Intel",
+      "file": "Debrowser-macOS-x64.dmg",
+      "note": "Macs with an Intel processor."
+    },
+    {
+      "id": "deb",
+      "os": "linux",
+      "family": "deb",
+      "label": "Linux: Ubuntu, Debian, Mint",
+      "file": "Debrowser-Linux.deb",
+      "note": "Opens in your software centre to install."
+    },
+    {
+      "id": "rpm",
+      "os": "linux",
+      "family": "rpm",
+      "label": "Linux: Fedora, RHEL, openSUSE",
+      "file": "Debrowser-Linux.rpm",
+      "note": "Opens in your software centre to install."
+    },
+    {
+      "id": "appimage",
+      "os": "linux",
+      "label": "Linux: any other",
+      "file": "Debrowser-Linux.AppImage",
+      "note": "One file that runs anywhere and updates itself. Make it executable, then open it."
+    }
+  ]
+}

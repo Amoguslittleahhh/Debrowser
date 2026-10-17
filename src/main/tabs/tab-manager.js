@@ -18,8 +18,10 @@
 
 const { session: electronSession } = require('electron');
 const { Tab } = require('./tab');
-const { Tier } = require('../config');
-const { LatencyTracker } = require('../latency');
+const pages = require('../pages');
+const { Tier, isStopped } = require('../config');
+const { LatencyTracker } = require('../testing/latency');
+const { kindsFor } = require('../site-permissions');
 
 /**
  * How long a speculatively restored tab is allowed to stay resident before the
@@ -29,22 +31,65 @@ const { LatencyTracker } = require('../latency');
  */
 const SPECULATION_TTL_MS = 10_000;
 
+/**
+ * The one partition every tab runs in.
+ *
+ * Exported because `protocol.handle` registers per session: main has to give
+ * the same string to pages.serve, and a second literal that drifted from this
+ * one would silently reintroduce internal pages failing inside tabs while
+ * working everywhere else.
+ *
+ * Incognito's has no `persist:` prefix, which is what keeps it in memory: a
+ * persistent partition writes its cache, cookies and storage under the
+ * profile, and the leak test found exactly that - a disk cache of every page
+ * visited, sitting in the private profile until it was wiped.
+ */
+const PRIVATE = require('../incognito/mode').INCOGNITO;
+const BROWSING_PARTITION = PRIVATE
+  ? 'debrowser-incognito'
+  : 'persist:debrowser';
+
 class TabManager {
   /**
    * @param {object} options - { partition, onEvent, log }
    */
   constructor({
     cfg,
-    partition = 'persist:debrowser',
+    partition = BROWSING_PARTITION,
     onEvent = () => {},
     onPresent = async () => {},
     onCover = () => false,
     onUncover = () => {},
     canSpeculate = () => true,
+    applyZoom = () => {},
+    // Incognito gives each tab a session of its own (see incognito/circuits.js);
+    // everywhere else every tab shares the browsing partition.
+    sessionFor = null,
+    // Told about each session the first time a tab uses it, so what is
+    // registered per session - our pages, downloads - reaches it.
+    onNewSession = () => {},
+    // The space a new tab without an opener goes in (spaces.js).
+    spaceOf = () => 'home',
+    // One per window, and what every window's manager has in common: the
+    // sessions already set up - set up twice, a session took each download
+    // twice - and the latency figures, which describe the browser, not a window.
+    shared = null,
+    windowId = 1,
     log = () => {}
   } = {}) {
     this.cfg = cfg;
     this.session = electronSession.fromPartition(partition);
+    this.sessionFor = sessionFor;
+    this.onNewSession = onNewSession;
+    this.spaceOf = spaceOf;
+    /** The window this manager's tabs are in. */
+    this.windowId = windowId;
+    /** Sessions already given the permission policy. */
+    const firstOfAll = !shared || !shared.configured.has(this.session);
+    this.configured = shared ? shared.configured : new WeakSet();
+    // The refusals the shared sessions' handler records, read from any window.
+    this.deniedPermissions = shared ? shared.deniedPermissions : [];
+    this.configured.add(this.session);
     this.onEvent = onEvent;
     /**
      * Called with a tab that is about to be shown, and awaited before it is.
@@ -52,6 +97,8 @@ class TabManager {
      * crucially, to unfreeze it - while it is still off screen.
      */
     this.onPresent = onPresent;
+    /** Hands over a spare new tab page view, or null; set by main.js (prewarm.js). */
+    this.takeSpare = null;
     /**
      * Show / take away the restore placeholder. The shell owns the view; the
      * tab manager owns the moment, because only it knows a restore is starting.
@@ -64,6 +111,8 @@ class TabManager {
      * governor, which owns pressure and the animation quiesce; see `speculate`.
      */
     this.canSpeculate = canSpeculate;
+    /** Sets each new document's zoom; see zoom.js. */
+    this.applyZoom = applyZoom;
     this.log = log;
 
     /** @type {Tab[]} - ordered as shown in the tab strip */
@@ -84,18 +133,83 @@ class TabManager {
      * What reclaim costs the user. Read by the governor's snapshot and asserted
      * in the smoke suite; see ../latency.js for why this is measured at all.
      */
-    this.latency = new LatencyTracker();
+    this.latency = shared ? shared.latency : new LatencyTracker();
 
-    this.configureSession();
+    if (firstOfAll) this.configureSession();
   }
 
-  configureSession() {
-    this.session.setPermissionRequestHandler((_wc, permission, callback) => {
+  /** What a second window's manager shares with this one's (see the constructor). */
+  shareWith() {
+    return { configured: this.configured, latency: this.latency, deniedPermissions: this.deniedPermissions };
+  }
+
+  /**
+   * Each tab's events, through this manager: finishing a load frees an
+   * admission slot for whatever is queued. Re-pointed when a tab moves to
+   * another window, whose manager then owns its slot.
+   */
+  relayFor(tab) {
+    tab.onEvent = (t, event, payload) => {
+      if (event === 'updated' && !t.loading) this.pumpLoadQueue();
+      this.onEvent(t, event, payload);
+    };
+  }
+
+  configureSession(ses = this.session) {
+    /** The last few refusals, newest last - so a test can see one happened. */
+    if (!this.deniedPermissions) this.deniedPermissions = [];
+    ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+      // Camera, microphone, location and notifications: asked of the user,
+      // and remembered per site (site-permissions.js). Only in the ordinary
+      // browser - a private window never sets `askPermission`, so there these
+      // fall through to the refusal below with everything else.
+      const kinds = kindsFor(permission, details);
+      if (kinds && this.askPermission) {
+        this.askPermission(wc, kinds, details, callback);
+        return;
+      }
       // Grant only what a page needs to function without user-visible prompts
-      // this prototype has no UI for; everything sensitive is denied.
+      // this browser has no UI for; everything sensitive is denied. That
+      // includes `openExternal`: a `mailto:` or `zoommtg:` link would start
+      // another program, which in a private window means a connection that
+      // does not go through Tor.
       const allowed = new Set(['fullscreen', 'clipboard-sanitized-write']);
-      callback(allowed.has(permission));
+      // Protected video, in the ordinary browser only - the same line as the
+      // four asked about above, since a private window has no `askPermission`.
+      // And `persistent-storage`: a site asking that its data - a YouTube
+      // Premium download, say - be spared when the disk runs low. Chrome grants
+      // it without a prompt; refused, the videos saved for offline were the
+      // first thing cleared. Private windows keep nothing on disk to spare.
+      const ordinary = Boolean(this.askPermission);
+      const ok = allowed.has(permission) ||
+        (ordinary && (permission === 'mediaKeySystem' || permission === 'persistent-storage'));
+      if (!ok) {
+        this.deniedPermissions.push(permission);
+        if (this.deniedPermissions.length > 20) this.deniedPermissions.shift();
+      }
+      callback(ok);
     });
+
+    // What a page is told when it only asks whether it has a permission.
+    // Electron's default says "granted" to everything, so a site read yes and
+    // then had its request refused. For the four above, the truth: granted
+    // only where the user allowed it. Chromium still sends the request when a
+    // check says no, so this never stops a site from asking. Anything else
+    // keeps the default.
+    ses.setPermissionCheckHandler((_wc, permission, origin, details) => {
+      // A private window grants nothing beyond the two above, and says so when
+      // asked: answering "granted" to a check for something it then refuses
+      // was both untrue and a trait of this browser a page could read.
+      if (PRIVATE) return permission === 'fullscreen' || permission === 'clipboard-sanitized-write';
+      const kinds = kindsFor(permission, details?.mediaType ? { mediaTypes: [details.mediaType] } : {});
+      if (!kinds) return true;
+      return Boolean(this.permissionGranted && this.permissionGranted(origin, kinds));
+    });
+    // USB, HID, serial and Bluetooth devices: never in a private window, which
+    // has no chooser and no business learning what is plugged in.
+    if (PRIVATE && typeof ses.setDevicePermissionHandler === 'function') {
+      ses.setDevicePermissionHandler(() => false);
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -117,22 +231,42 @@ class TabManager {
    * renderer at all - the same state the governor discards a tab into - so
    * background and restored tabs cost nothing until they are first shown.
    */
-  create({ url = 'about:blank', activate = true, realise = activate, index = null } = {}) {
+  /**
+   * The session a new tab runs in: its opener's, so a link opened from a
+   * signed-in page is still signed in; or a new one where each tab gets its
+   * own; or the shared browsing partition.
+   */
+  sessionForNew(opener, spaceId) {
+    const ses = (opener && opener.session) || (this.sessionFor ? this.sessionFor(spaceId) : this.session);
+    if (!this.configured.has(ses)) {
+      this.configured.add(ses);
+      this.configureSession(ses);
+      this.onNewSession(ses);
+    }
+    return ses;
+  }
+
+  create({ url = 'about:blank', activate = true, realise = activate, index = null, opener = null, spaceId = null } = {}) {
+    // A tab opened from a page stays in that page's space - and its partition.
+    const space = spaceId || (opener && opener.spaceId) || this.spaceOf();
     const tab = new Tab({
-      session: this.session,
+      session: this.sessionForNew(opener, space),
       url,
-      onEvent: (t, event, payload) => {
-        // Finishing a load frees an admission slot for whatever is queued.
-        if (event === 'updated' && !t.loading) this.pumpLoadQueue();
-        this.onEvent(t, event, payload);
-      },
+      applyZoom: this.applyZoom,
       log: this.log
     });
+    this.relayFor(tab);
 
+    tab.spaceId = space;
+    tab.windowId = this.windowId;
     if (index == null) this.tabs.push(tab);
     else this.tabs.splice(index, 0, tab);
 
-    if (realise) this.admit(tab);
+    // A new tab page takes the spare one if there is one waiting, already
+    // loaded and drawn (prewarm.js); otherwise it is built as any tab is.
+    const spare = realise && pages.pageName(url) === 'newtab' && this.takeSpare ? this.takeSpare() : null;
+    if (spare) tab.adopt(spare);
+    else if (realise) this.admit(tab);
     else tab.tier = Tier.DISCARDED;
 
     this.onEvent(tab, 'created');
@@ -181,9 +315,20 @@ class TabManager {
     // the end: a restore and a switch are the same code path and differ only in
     // whether there was a renderer to begin with.
     const wasLive = tab.isLive;
+    // A frozen tab is live, and promoting it costs a real CDP round trip to
+    // restart its task queues. Counting that as a "switch" made one series out
+    // of two different operations: switching to a running tab, which should be
+    // immediate because there is nothing to do, and thawing one, which has
+    // unavoidable work in it. The combined p95 was then whichever thaw happened
+    // to be slowest, and said nothing about whether a switch blocks.
+    const wasStopped = wasLive && isStopped(tab.tier);
     const stop = this.latency.start('switch');
 
     this.activeId = id;
+    // Chosen, but not visible until `onPresent` returns - which can be a thaw
+    // of up to two seconds. The governor reads this so a tick in that window
+    // does not tear down the tab the user just picked (tiers.js, superseded).
+    tab.activating = true;
     // Bypass the admission queue: the user is waiting on this one.
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
@@ -201,18 +346,22 @@ class TabManager {
       await this.onPresent(tab);
     } catch (err) {
       this.log(`present failed for tab ${tab.id}: ${err.message}`);
+    } finally {
+      tab.activating = false;
     }
 
     // The user may have switched away again while we were promoting. The sample
     // is still recorded: the work was done and the time was spent, and dropping
     // it would quietly exclude exactly the slow restores a user gave up on.
+    const series = !wasLive ? 'restore' : (wasStopped ? 'thaw' : 'switch');
+
     if (this.activeId !== id) {
-      stop(wasLive ? 'switch' : 'restore');
+      stop(series);
       return tab;
     }
 
     tab.setVisible(true);
-    stop(wasLive ? 'switch' : 'restore');
+    stop(series);
     this.clearSpeculation(tab);
     this.onEvent(tab, 'activated');
     return tab;
@@ -235,16 +384,33 @@ class TabManager {
   uncoverWhenReady(tab, id) {
     const wc = tab.wc;
     if (!wc) {
-      this.onUncover();
+      this.onUncover(tab);
       return;
     }
     const done = () => {
       // If the user has already moved on, the placeholder belongs to whatever
       // they moved to; leave it to that activation to clear.
-      if (this.activeId === id) this.onUncover();
+      //
+      // Except that only holds when the tab they moved to raised one of its
+      // own. `activate` shows a placeholder only for a tab with no renderer, so
+      // switching from a still-restoring tab to a live one left the previous
+      // tab's screenshot sitting over a perfectly good page until the 1500ms
+      // ceiling in window.js expired. Clearing it whenever the tab that is now
+      // active is live costs nothing: a live tab has real content behind the
+      // placeholder by definition.
+      if (this.activeId === id) { this.onUncover(tab); return; }
+      const current = this.byId(this.activeId);
+      if (current && current.isLive) this.onUncover(tab);
     };
     wc.once('did-stop-loading', done);
-    wc.once('did-fail-load', done);
+    // The page's own failure, not a subframe's: a blocked tracker iframe took
+    // the placeholder down before the page it covers had loaded.
+    const failed = (_e, _code, _desc, _url, isMainFrame) => {
+      if (!isMainFrame) return;
+      wc.removeListener('did-fail-load', failed);
+      done();
+    };
+    wc.on('did-fail-load', failed);
     wc.once('render-process-gone', done);
   }
 
@@ -267,8 +433,13 @@ class TabManager {
 
     const timer = setTimeout(() => {
       wc.removeListener('did-stop-loading', done);
-      this.latency.record('content', ceilingMs);
-      stop();  // consumed, so the listener below cannot also record
+      // `stop()` records and *then* becomes a no-op, so recording the ceiling
+      // explicitly beside it put two samples in the series for one load, and
+      // every timed-out load counted twice in the percentiles. Elapsed time at
+      // the moment this timer fires is the ceiling, so stopping is all that
+      // was ever needed - and it still consumes the stop, which is what keeps
+      // the listener below from recording a third.
+      stop();
     }, ceilingMs);
     if (typeof timer.unref === 'function') timer.unref();
 
@@ -369,22 +540,97 @@ class TabManager {
   close(id) {
     const index = this.tabs.findIndex((tab) => tab.id === id);
     if (index === -1) return false;
+    const tab = this.tabs[index];
+    // A picture of the page must not outlive the tab it was taken from.
+    tab.closed = true;
+    tab.discardThumbnail();
+    tab.teardownView();
+    this.release(id);
+
+    // Where it was, so "Undo" can put it back there.
+    tab.closedIndex = index;
+    this.onEvent(tab, 'closed');
+    return true;
+  }
+
+  /**
+   * Take a tab out of this window's strip, renderer and all, and hand it back:
+   * closing it, or moving it to another window (`adopt` there). The tab in
+   * front goes to its neighbour.
+   */
+  release(id) {
+    const index = this.tabs.findIndex((tab) => tab.id === id);
+    if (index === -1) return null;
 
     const [tab] = this.tabs.splice(index, 1);
     const queued = this.loadQueue.indexOf(tab);
     if (queued !== -1) this.loadQueue.splice(queued, 1);
-    // A picture of the page must not outlive the tab it was taken from.
-    tab.discardThumbnail();
-    tab.teardownView();
+    // The governor's expiry clause only walks tabs that still exist, so a tab
+    // closed while it was being speculated on left `speculatingId` set for the
+    // rest of the session, and every later speculative restore was refused with
+    // nothing in the log to say why. Only when it is *this* tab: closing any
+    // other one used to free the slot while the speculated tab stayed resident.
+    if (this.speculatingId === tab.id) this.clearSpeculation(tab);
 
     if (this.activeId === id) {
-      const next = this.tabs[index] || this.tabs[index - 1] || null;
+      // The neighbour in the same space: closing a tab never throws you into
+      // another space. None left there, and the caller opens a new tab in it.
+      const same = (t) => t && t.spaceId === tab.spaceId;
+      const after = this.tabs.slice(index).find(same);
+      const before = this.tabs.slice(0, index).reverse().find(same);
+      const next = after || before || null;
       this.activeId = null;
       if (next) this.activate(next.id).catch((err) => this.log(`activate failed: ${err.message}`));
     }
+    return tab;
+  }
 
-    this.onEvent(tab, 'closed');
+  /**
+   * A tab from another window's strip (`release` there), into this one at
+   * `index` - or at the end - and, unless told otherwise, in front.
+   */
+  adopt(tab, { index = null, activate = true } = {}) {
+    this.relayFor(tab);
+    tab.windowId = this.windowId;
+    // Hidden until this window presents it: shown, it would be drawn into a
+    // window it is no longer in.
+    if (tab.view) tab.setVisible(false);
+    const pinned = this.tabs.filter((t) => t.pinned).length;
+    const at = index == null ? this.tabs.length
+      : Math.max(tab.pinned ? 0 : pinned, Math.min(tab.pinned ? pinned : this.tabs.length, index));
+    this.tabs.splice(at, 0, tab);
+    this.onEvent(tab, 'adopted');
+    if (activate) this.activate(tab.id).catch((err) => this.log(`activate failed: ${err.message}`));
+    return tab;
+  }
+
+  /**
+   * Put a tab at `index` in the strip, as dragging it there does. Returns
+   * whether anything moved.
+   */
+  move(id, index) {
+    const from = this.tabs.findIndex((tab) => tab.id === id);
+    if (from === -1 || !Number.isInteger(index)) return false;
+    // Pinned tabs are a group at the start of the strip, and each kind stays
+    // on its own side of the line.
+    const pinnedOthers = this.tabs.filter((t) => t.pinned && t.id !== id).length;
+    const lo = this.tabs[from].pinned ? 0 : pinnedOthers;
+    const hi = this.tabs[from].pinned ? pinnedOthers : this.tabs.length - 1;
+    const to = Math.max(lo, Math.min(index, hi));
+    if (to === from) return false;
+    const [tab] = this.tabs.splice(from, 1);
+    this.tabs.splice(to, 0, tab);
+    this.onEvent(tab, 'moved');
     return true;
+  }
+
+  /** Pin or unpin a tab, moving it to the edge of the pinned group. */
+  setPinned(id, pinned) {
+    const tab = this.byId(id);
+    if (!tab) return;
+    tab.pinned = Boolean(pinned);
+    const edge = this.tabs.filter((t) => t.pinned && t !== tab).length;
+    if (!this.move(id, edge)) this.onEvent(tab, 'updated');
   }
 
   /** Every live renderer, deduplicated by process. */
@@ -392,6 +638,16 @@ class TabManager {
     const pids = new Set();
     for (const tab of this.tabs) if (tab.pid) pids.add(tab.pid);
     return pids;
+  }
+
+  /**
+   * Every tab, as their window closes: each closed as `close` closes one, but
+   * with nothing brought forward on the way - waking each next tab in turn
+   * only to close it was a renderer started per tab for nothing.
+   */
+  closeEvery() {
+    this.activeId = null;
+    for (const tab of [...this.tabs]) this.close(tab.id);
   }
 
   closeAll() {
@@ -402,4 +658,4 @@ class TabManager {
   }
 }
 
-module.exports = { TabManager };
+module.exports = { BROWSING_PARTITION, TabManager };

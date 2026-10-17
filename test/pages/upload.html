@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>upload</title>
+<!-- What a site receives from a file input: the bytes, as a page reads them. -->
+<input type="file" id="f">
+<script>
+document.getElementById('f').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) { window.__upload = { none: true }; return; }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let text = '';
+  for (const b of bytes) text += String.fromCharCode(b);
+  window.__upload = { name: file.name, size: bytes.length, gps: text.includes('GPS'), base64: btoa(text) };
+});
+</script>
