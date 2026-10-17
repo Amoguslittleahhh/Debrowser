@@ -659,11 +659,14 @@ const SECTIONS = {
       label: 'A small window for links from other apps',
       hint: 'Links from other apps open in a small window. Keep one as a tab with Open in Debrowser.',
       type: 'checkbox'
-    },
+    }
+  ],
+
+  extensions: [
     {
-      key: 'labExtensions',
+      key: 'extensions',
       label: 'Chrome and Firefox extensions',
-      hint: 'Add from the Chrome Web Store, Edge or Firefox Add-ons, or from a file; popups open from the puzzle button. Never in private windows.',
+      hint: 'Add from the Chrome Web Store, Edge or Firefox Add-ons, or from a file; they open from the puzzle button beside the address bar. Never in private windows.',
       type: 'checkbox'
     }
   ],
@@ -721,7 +724,7 @@ function buildAll(state = {}) {
   if (!state.incognito) {
     document.querySelector('[data-rows="appearance"]').prepend(welcomeRow());
     document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow(), safetyRow());
-    extensionRows(document.querySelector('[data-rows="labs"]'));
+    extensionRows(document.querySelector('[data-rows="extensions"]'));
     const advanced = document.querySelector('[data-rows="advanced"]');
     setupRows(advanced);
     window.addEventListener('focus', () => setupRows(advanced));
@@ -731,9 +734,9 @@ function buildAll(state = {}) {
 }
 
 /*
- * Extensions (a Lab): each installed one - its name, where it came from, and
+ * Extensions: each installed one - its name, where it came from, and
  * Remove - then Add, from a packed file (.crx, .xpi, .zip) or an unpacked
- * folder. Shown while the Lab is on; the browser picks the file, so this
+ * folder. Shown while they are on; the browser picks the file, so this
  * page never sees a path.
  */
 function extensionRows(host) {
@@ -752,6 +755,14 @@ function extensionRows(host) {
       const where = ext.from === 'firefox' ? 'Firefox' : 'Chrome';
       const { row, control } = simpleRow(`${ext.name} ${ext.version}`,
         ext.error ? `${where} extension. It didn’t start: ${ext.error}` : `${where} extension`);
+      // Its own logo before its name, as Chrome lists them.
+      if (typeof ext.icon === 'string' && /^data:image\//.test(ext.icon)) {
+        const img = document.createElement('img');
+        img.className = 'ext-icon';
+        img.alt = '';
+        img.src = ext.icon;
+        row.querySelector('.row-label').prepend(img);
+      }
       const remove = smallButton('Remove');
       remove.addEventListener('click', async () => {
         await api.request('extension-remove', { id: ext.id });
@@ -795,7 +806,7 @@ function extensionRows(host) {
     box.replaceChildren(...rows, addRow, storeRow);
   };
   api.onState((state) => {
-    const now = state?.prefs?.labExtensions === true;
+    const now = state?.prefs?.extensions === true;
     if (now !== on) { on = now; render(); }
   });
   render();
@@ -1780,6 +1791,7 @@ const SECTION_ICONS = {
   credentials: ['M5 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z', 'M7.5 8h6', 'M11 8v2', 'M13.5 8v2.5'],
   private: ['M8 2.5l4.5 1.8v3.4c0 2.8-1.9 4.8-4.5 5.8-2.6-1-4.5-3-4.5-5.8V4.3z'],
   advanced: ['M3 4.5h10', 'M3 8h10', 'M3 11.5h10', 'M10 3v3', 'M6 6.5v3', 'M11 10v3'],
+  extensions: ['M3.5 5.5h3v-1a1.5 1.5 0 0 1 3 0v1h3v3h-1a1.5 1.5 0 0 0 0 3h1v2h-9z'],
   labs: ['M6.5 2.5h3', 'M7 2.5v4L3.2 12.4a.8.8 0 0 0 .7 1.1h8.2a.8.8 0 0 0 .7-1.1L9 6.5v-4', 'M4.8 10h6.4'],
   updates: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
   sync: ['M3 6.5a5 5 0 0 1 9-2', 'M12.5 2.5v2.2h-2.2', 'M13 9.5a5 5 0 0 1-9 2', 'M3.5 13.5v-2.2h2.2']

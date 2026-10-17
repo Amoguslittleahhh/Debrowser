@@ -102,31 +102,34 @@
           <path d="M8 2.2l1.76 3.57 3.94.57-2.85 2.78.67 3.92L8 11.2l-3.52 1.85.67-3.92L2.3 6.34l3.94-.57z"/>
         </svg>
       </button>
-      <!--
-        Downloads. Hidden until there is something to show, the way Chrome and
-        Edge both do it: a button that is dead for the first hour of every session
-        is a button in the way. The ring around it fills while something is
-        arriving, so the toolbar answers "is it done yet" without being opened.
-      -->
-      <!-- Extensions (a Lab): shown while it is on and one is installed. -->
-      <button class="icon-btn" id="extensions" hidden title="Extensions" aria-label="Extensions">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M3.5 5.5h3v-1a1.5 1.5 0 0 1 3 0v1h3v3h-1a1.5 1.5 0 0 0 0 3h1v2h-9z"/>
-        </svg>
-      </button>
-      <button class="icon-btn downloads" id="downloads" hidden
-              title="Downloads (Ctrl+J)" aria-label="Downloads">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/>
-          <path d="M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5"/>
-        </svg>
-        <!-- A thin circle round the button, filling clockwise from the top. -->
-        <svg class="downloads-ring" viewBox="0 0 32 32" aria-hidden="true">
-          <circle class="ring-track" cx="16" cy="16" r="14.5"/>
-          <circle class="ring-fill" id="downloads-ring" cx="16" cy="16" r="14.5" pathLength="100"/>
-        </svg>
-      </button>
     </div>
+
+    <!-- Extensions and downloads sit in the toolbar beside the address bar, as
+         in Chrome: they act on the browser, not on the page in the field.
+         Extensions: shown while they are on and one is installed. -->
+    <button class="icon-btn" id="extensions" hidden title="Extensions" aria-label="Extensions">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3.5 5.5h3v-1a1.5 1.5 0 0 1 3 0v1h3v3h-1a1.5 1.5 0 0 0 0 3h1v2h-9z"/>
+      </svg>
+    </button>
+    <!--
+      Downloads. Hidden until there is something to show, the way Chrome and
+      Edge both do it: a button that is dead for the first hour of every session
+      is a button in the way. The ring around it fills while something is
+      arriving, so the toolbar answers "is it done yet" without being opened.
+    -->
+    <button class="icon-btn downloads" id="downloads" hidden
+            title="Downloads (Ctrl+J)" aria-label="Downloads">
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 2.5v7"/><path d="M5 7l3 3 3-3"/>
+        <path d="M3 11.5v1.5a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-1.5"/>
+      </svg>
+      <!-- A thin circle round the button, filling clockwise from the top. -->
+      <svg class="downloads-ring" viewBox="0 0 32 32" aria-hidden="true">
+        <circle class="ring-track" cx="16" cy="16" r="14.5"/>
+        <circle class="ring-fill" id="downloads-ring" cx="16" cy="16" r="14.5" pathLength="100"/>
+      </svg>
+    </button>
 
     <!--
       Private windows only: which kind of window this is, and whether its

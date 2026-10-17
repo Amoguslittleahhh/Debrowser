@@ -792,3 +792,12 @@ input[type="range"]:disabled { opacity: 0.4; }
 
 /* The installed extensions, under the Lab that loads them. */
 .extension-rows[hidden] { display: none; }
+
+/* An extension's own logo, before its name in the list. */
+.ext-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  object-fit: contain;
+}

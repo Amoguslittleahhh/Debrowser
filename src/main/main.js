@@ -880,8 +880,8 @@ function main() {
     ...(prefs && prefs.get('labTabGroups') === true ? { groups: tabGroups.describe() } : {}),
     ...(!INCOGNITO && systemAccentNow ? { systemAccent: systemAccentNow } : {}),
     ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {}),
-    // The toolbar's puzzle button, while the Lab is on and something is installed.
-    ...(extensions && prefs && prefs.get('labExtensions') === true ? { extensionCount: extensions.list().length } : {})
+    // The toolbar's puzzle button, while extensions are on and something is installed.
+    ...(extensions && prefs && prefs.get('extensions') === true ? { extensionCount: extensions.list().length } : {})
   });
 
   /**
@@ -1096,7 +1096,7 @@ function main() {
   };
 
   /**
-   * What extensions hear about this tab (a Lab): its navigation as
+   * What extensions hear about this tab: its navigation as
    * webNavigation events and its state as tabs events, by its page id as
    * every other part of the extension API knows it - and only for the
    * extensions that listen, so with none listening this costs nothing.
@@ -1114,7 +1114,7 @@ function main() {
     if (INCOGNITO || !tab.isLive) return;
     const wc = tab.wc;
     const id = wc.id;
-    const listening = () => Boolean(extensions && extensions.listening && prefs.get('labExtensions') === true);
+    const listening = () => Boolean(extensions && extensions.listening && prefs.get('extensions') === true);
     // Built only when someone is listening: a function in the arguments is
     // called then, so a browser with no extensions does no work per event.
     const send = (name, ...args) => {
@@ -1234,8 +1234,8 @@ function main() {
           mediaType: params.mediaType && params.mediaType !== 'none' ? params.mediaType : undefined,
           editable: Boolean(params.isEditable) }
       };
-      // Extensions' own items (a Lab), after the browser's.
-      if (extensions && !INCOGNITO && !tab.internal && prefs.get('labExtensions') === true) {
+      // Extensions' own items, after the browser's.
+      if (extensions && !INCOGNITO && !tab.internal && prefs.get('extensions') === true) {
         const extra = extensions.menuItemsFor(params, tab.url);
         if (extra.length) {
           context.model.items.push({ kind: 'separator' }, ...extra.map((m) => ({
@@ -1637,7 +1637,7 @@ function main() {
         if (shell) shell.attachTab(tab);
         if (extensions && tab.wc && !tab.wc.isDestroyed()) {
           extensions.announceActiveTab(tab.wc.id);
-          if (extensions.listening && prefs.get('labExtensions') === true) {
+          if (extensions.listening && prefs.get('extensions') === true) {
             extensions.broadcast('tabs.onActivated', [{ tabId: tab.wc.id, windowId: tab.windowId || 1 }]);
           }
         }
@@ -1765,8 +1765,8 @@ function main() {
       if (prefs.get('blockAds') !== false && !OFFLINE_MODE) setTimeout(() => blocker.load(), 3000).unref?.();
     }
 
-    // Extensions (a Lab, extensions.js): every browsing session is known, so
-    // switching the Lab on reaches the ones already open; loaded only while
+    // Extensions (extensions.js): every browsing session is known, so
+    // turning them on reaches the ones already open; loaded only while
     // it is on. Never in a private window.
     if (!INCOGNITO) {
       extensions = new Extensions(OFFLINE_MODE && !process.env.DEBROWSER_EXT_DIR
@@ -1824,7 +1824,7 @@ function main() {
         // An extension driving a tab through the debugger says so, as Chrome's
         // bar does: it can read and act on everything in that page.
         debugging: (ext, wc, on) => {
-          if (on) runCommand.toast(`${ext.name} is controlling a tab. Remove it in Settings → Labs to stop it`);
+          if (on) runCommand.toast(`${ext.name} is controlling a tab. Remove it in Settings → Extensions to stop it`);
         },
         /*
          * Signing in for an extension (identity.launchWebAuthFlow): the page,
@@ -1876,11 +1876,11 @@ function main() {
           n.show();
         }
       });
-      pages.setBridge((token, op, args) => (prefs.get('labExtensions') === true
+      pages.setBridge((token, op, args) => (prefs.get('extensions') === true
         ? extensions.bridge(token, op, args) : Promise.reject(new Error('extensions are off'))));
       browsingSetup.push((ses) => {
         extensions.sessions.add(ses);
-        if (prefs.get('labExtensions') === true) extensions.attach(ses).catch((e) => log(`extensions: ${e.message}`));
+        if (prefs.get('extensions') === true) extensions.attach(ses).catch((e) => log(`extensions: ${e.message}`));
       });
     }
 
@@ -3928,7 +3928,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
       // the store page in front, if it is one, to add; and the list in Settings.
       case 'extensions-menu': {
         const ext = getExtensions();
-        if (!ext || prefs.get('labExtensions') !== true) break;
+        if (!ext || prefs.get('extensions') !== true) break;
         const x = Math.round(Number(payload?.x) || 0);
         const y = Math.round(Number(payload?.y) || 0);
         const right = Math.round(Number(payload?.right) || x);
@@ -3941,11 +3941,11 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
           // Its side panel is open here: the same place closes it.
           ? { id: 'close-extension-panel', label: `Close ${e.name}`, icon: 'close', payload: { id: e.id } }
           : e.popup
-          ? { id: 'open-extension-popup', label: label(e), icon: 'puzzle', payload: { id: e.id, ...anchor } }
-          : { id: 'click-extension', label: label(e), icon: 'puzzle', payload: { id: e.id } }));
+          ? { id: 'open-extension-popup', label: label(e), icon: 'puzzle', image: ext.iconData(e.id), payload: { id: e.id, ...anchor } }
+          : { id: 'click-extension', label: label(e), icon: 'puzzle', image: ext.iconData(e.id), payload: { id: e.id } }));
         if (store) items.unshift({ id: 'add-extension-from-page', label: 'Add this extension to Debrowser', icon: 'plus', payload: {} },
           ...(items.length ? [{ kind: 'separator' }] : []));
-        items.push({ kind: 'separator' }, { id: 'open-settings', label: 'Manage extensions', icon: 'gear', payload: { section: 'labs' } });
+        items.push({ kind: 'separator' }, { id: 'open-settings', label: 'Manage extensions', icon: 'gear', payload: { section: 'extensions' } });
         context.model = { items, params: {} };
         shell.openSheet('context', anchor);
         break;
@@ -4046,7 +4046,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         const ext = getExtensions();
         const target = storeTarget(payload?.url);
         if (!ext || !target) { runCommand.toast('That isn’t an extension’s page on a store Debrowser knows'); break; }
-        if (prefs.get('labExtensions') !== true) runCommand('set-pref', { key: 'labExtensions', value: true });
+        if (prefs.get('extensions') !== true) runCommand('set-pref', { key: 'extensions', value: true });
         const ses = session.fromPartition(BROWSING_PARTITION);
         runCommand.toast('Adding the extension…');
         downloadFromStore(target, (u) => ses.fetch(u), path.join(app.getPath('temp'), 'debrowser-store'), process.versions.chrome)
@@ -4748,10 +4748,10 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         publish();
         break;
 
-      // Extensions are a Lab, managed where the Lab is turned on.
+      // Extensions, managed in their own section of Settings.
       case 'open-extensions':
         if (INCOGNITO) break;
-        openInternalPage(tabs, `${pages.SETTINGS_URL}#labs`);
+        openInternalPage(tabs, `${pages.SETTINGS_URL}#extensions`);
         publish();
         break;
 
@@ -4846,7 +4846,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
           }
         }
         const extensions = getExtensions();
-        if (payload.key === 'labExtensions' && extensions) {
+        if (payload.key === 'extensions' && extensions) {
           if (payload.value === true) for (const ses of extensions.sessions) extensions.attach(ses).catch(() => {});
           else extensions.detachAll();
         }
@@ -6188,17 +6188,17 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
         return { ok: true, ...result, pages, browser: profile.browser };
       }
 
-      // Extensions (a Lab): the list, adding one from a file or a folder the
+      // Extensions: the list, adding one from a file or a folder the
       // user picks - the page never names a path - and removing one.
       case 'extensions-list': {
         const ext = getExtensions();
         if (!ext) return { items: [] };
         return { items: ext.list().map(({ id, name, version, from }) =>
-          ({ id, name, version, from, error: ext.errors?.[id] || null })) };
+          ({ id, name, version, from, icon: ext.iconData(id), error: ext.errors?.[id] || null })) };
       }
       case 'extension-add': {
         const ext = getExtensions();
-        if (!ext || prefs.get('labExtensions') !== true) return { ok: false, reason: 'Turn on Extensions in Labs first.' };
+        if (!ext || prefs.get('extensions') !== true) return { ok: false, reason: 'Turn on extensions in Settings first.' };
         const folder = payload?.folder === true;
         const { canceled, filePaths: picked } = await dialog.showOpenDialog(shell.window, folder
           ? { title: 'Add an unpacked extension', properties: ['openDirectory'] }
@@ -6947,8 +6947,8 @@ function menuModel({ tabs, shell }) {
     { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },
     // Not in a private window, which has no saved passwords to show.
     ...(INCOGNITO ? [] : [{ id: 'open-passwords', label: 'Passwords', icon: 'key' }]),
-    // Only while the Lab is on: with it off there is nothing to manage.
-    ...(!INCOGNITO && shell.prefs?.get('labExtensions') === true
+    // Only while extensions are on: with it off there is nothing to manage.
+    ...(!INCOGNITO && shell.prefs?.get('extensions') === true
       ? [{ id: 'open-extensions', label: 'Extensions', icon: 'puzzle' }] : []),
     { kind: 'separator' },
     { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live,
