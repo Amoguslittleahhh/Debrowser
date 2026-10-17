@@ -1,0 +1,62 @@
+# The checks a contributor runs locally, on every push and pull request -
+# rather than only when a release is cut, which is where release.yml runs
+# them and where a regression costs the most to find.
+#
+#   lint     eslint over src, tools, bench and test
+#   smoke    the browser started headless and driven through its suite
+#   audit    every page the browser draws itself, against axe-core's WCAG 2.2
+#            A and AA rules and tools/audit-probe.js (tools/audit.sh)
+#
+# Linux only: it is the fast runner, and the suites are the same on each
+# system. release.yml still runs them on Windows and macOS before a release.
+
+name: Checks
+
+on:
+  push:
+    branches: [claude/master-build, claude/research-build]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # As in release.yml: npm ci can succeed with castLabs' binary missing.
+      - name: Ensure the Electron binary is present
+        run: node -e "require('electron')" > /dev/null || npm rebuild electron || node node_modules/electron/install.js
+
+      - name: Lint
+        run: npm run lint
+
+      # The smoke suite measures through the trim helper on Linux.
+      - name: Build the trim helper
+        run: npm run build:memtrim
+
+      - name: Smoke test
+        timeout-minutes: 15
+        run: npm run smoke:headless
+
+      # Both themes of the default design, each page in a process of its own.
+      - name: Accessibility audit
+        timeout-minutes: 20
+        run: |
+          AUDIT_FLAGS=--no-sandbox xvfb-run -a sh tools/audit.sh
+          AUDIT_FLAGS="--no-sandbox --theme=light" xvfb-run -a sh tools/audit.sh

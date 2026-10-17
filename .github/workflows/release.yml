@@ -110,6 +110,9 @@ jobs:
     # right and silently never matches.
     env:
       AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      # A Developer ID certificate for macOS, which makes the next step sign
+      # and notarize the Mac build instead of sealing it ad hoc.
+      MAC_SIGNING: ${{ secrets.MAC_CERT_BASE64 != '' && secrets.APPLE_ID != '' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -353,8 +356,27 @@ jobs:
           # macOS: without this, electron-builder hunts the runner's keychain for
           # any signing identity and fails confusingly when it finds none.
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        if: ${{ !(matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true') }}
+        if: ${{ !(matrix.os == 'windows-latest' && env.AZURE_SIGNING == 'true') && !(matrix.os == 'macos-latest' && env.MAC_SIGNING == 'true') }}
         run: npx electron-builder ${{ matrix.platform }} --publish never
+
+      # macOS, signed with a Developer ID and notarized, once the secrets exist:
+      # MAC_CERT_BASE64 (base64 of the Developer ID Application .p12),
+      # MAC_CERT_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and
+      # APPLE_TEAM_ID. Gatekeeper then opens the app with no Open Anyway step.
+      # The ad-hoc identity is taken out of the config for this run only, so
+      # electron-builder signs with the certificate CSC_LINK brings in.
+      - name: Package, signed and notarized (macOS)
+        if: ${{ matrix.os == 'macos-latest' && env.MAC_SIGNING == 'true' }}
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          sed -i '' "/^  identity: '-'$/d" electron-builder.yml
+          grep -q "identity: '-'" electron-builder.yml && { echo "the ad-hoc identity is still set"; exit 1; }
+          npx electron-builder ${{ matrix.platform }} --publish never -c.mac.notarize=true
 
       # The fuses (electron-builder.yml), read back from what was actually
       # packaged - and the one that matters most tried for real: with

@@ -232,13 +232,16 @@ the difference between "still works in three years" and "silently unsigned".
 
 ## Signing on the other platforms
 
-- **macOS.** Not signed and not notarized, so Gatekeeper refuses the first
-  launch outright. Right-click → Open (once), or
-  `xattr -cr /Applications/Debrowser.app`. Proper signing needs an Apple
-  Developer account ($99/yr): `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`,
-  `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`. `hardenedRuntime` and the
-  entitlements in `build/entitlements.mac.plist` are already configured for it.
-  Unlike Windows, there is no reputation clock — notarizing works immediately.
+- **macOS.** Sealed ad hoc and not notarized until there is an Apple
+  Developer account ($99/yr), so Gatekeeper refuses the first launch: System
+  Settings → Privacy & Security → Open Anyway (once). With an account, add
+  five repository secrets and the release workflow signs with the Developer
+  ID and notarizes, with nothing else to change: `MAC_CERT_BASE64` (base64 of
+  the Developer ID Application `.p12`), `MAC_CERT_PASSWORD`, `APPLE_ID`,
+  `APPLE_APP_SPECIFIC_PASSWORD` (made at account.apple.com) and
+  `APPLE_TEAM_ID`. `hardenedRuntime` and the entitlements in
+  `build/entitlements.mac.plist` are already configured for it. Unlike
+  Windows, there is no reputation clock — notarizing works immediately.
 - **Linux.** Signed with one key of the project's own (free, made once; see
   below). The `.rpm` is signed itself, because dnf and zypper check package
   signatures. The `.deb` is not - nothing on Ubuntu checks a downloaded `.deb`'s
