@@ -83,6 +83,9 @@ function keystoreCapability() {
 const KINDS = {
   login: 'logins.dat',
   payment: 'payments.dat',
+  // Postal addresses, with the name, email and phone a checkout asks for
+  // beside them. Filled only on a click, as cards are.
+  address: 'addresses.dat',
   // Passkeys Debrowser keeps itself, where the system has no store it may use
   // (macOS without Apple's browser entitlement, Linux): see passkey-store.js.
   passkey: 'passkeys.dat'
@@ -113,6 +116,18 @@ const SHAPES = {
     expiry: (v) => typeof v === 'string' && /^(0[1-9]|1[0-2])\/[0-9]{2}$/.test(v),
     holder: (v) => typeof v === 'string' && v.length < 256
   },
+  address: {
+    label: (v) => typeof v === 'string' && v.length > 0 && v.length < 128,
+    name: (v) => typeof v === 'string' && v.length < 256,
+    organization: (v) => typeof v === 'string' && v.length < 256,
+    street: (v) => typeof v === 'string' && v.length < 512,
+    city: (v) => typeof v === 'string' && v.length < 128,
+    region: (v) => typeof v === 'string' && v.length < 128,
+    postal: (v) => typeof v === 'string' && v.length < 32,
+    country: (v) => typeof v === 'string' && v.length < 128,
+    email: (v) => typeof v === 'string' && v.length < 320,
+    tel: (v) => typeof v === 'string' && v.length < 64
+  },
   // The site, the credential's id (base64url), the account it signs in as,
   // and the private key (PKCS#8, base64) - which never leaves this process
   // except into the tab's authenticator for the one sign-in it was picked for.
@@ -132,6 +147,7 @@ const SHAPES = {
 const IDENTITY = {
   login: (r) => `${r.origin}\u0000${r.username}`,
   payment: (r) => r.label,
+  address: (r) => r.label,
   passkey: (r) => r.id
 };
 
@@ -165,7 +181,7 @@ class Credentials {
     this.key = null;
     this.unavailable = null;   // a named reason, or null when usable
     /** @type {Record<string, object[]>} kind -> records, decrypted, in memory */
-    this.records = { login: [], payment: [], passkey: [] };
+    this.records = { login: [], payment: [], address: [], passkey: [] };
     this.loaded = false;
   }
 
@@ -422,6 +438,12 @@ class Credentials {
         // Last four only. The rest is never sent anywhere it is not needed.
         last4: r.number.slice(-4),
         expiry: r.expiry
+      })),
+      // Enough to tell them apart in a list or a menu, and no more.
+      addresses: (this.records.address || []).map((r) => ({
+        id: r.label,
+        label: r.label,
+        summary: [r.name, r.street.split('\n')[0], r.city].filter(Boolean).join(', ')
       })),
       // Never the key.
       passkeys: (this.records.passkey || []).map((r) => ({ id: r.id, rpId: r.rpId, name: r.name, display: r.display }))

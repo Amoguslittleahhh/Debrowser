@@ -8,6 +8,7 @@
  *   sleep     'never' to keep its tabs awake, 'early' to let them sleep sooner
  *   thirdPartyCookies  true where other sites' cookies are let back in on it
  *   forget    true to clear what the site stores once its last tab closes
+ *   dark      false where dark websites are turned off for it
  *
  * Keyed by host, as Chromium keys zoom: a site's choices hold on all its pages
  * and both schemes. That is right for these three - none of them grants the
@@ -34,6 +35,8 @@ const VALID = {
   sleep: (v) => v === 'never' || v === 'early',
   thirdPartyCookies: (v) => v === true,
   forget: (v) => v === true,
+  // False where the user turned dark websites off (dark-pages.js).
+  dark: (v) => v === false,
   // The user's own style sheet for the site, and the things they hid on it (site-styles.js).
   css: (v) => typeof v === 'string' && v.length > 0 && v.length <= 20000,
   hide: (v) => Array.isArray(v) && v.length > 0 && v.length <= 50 &&

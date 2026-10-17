@@ -24,7 +24,9 @@ const el = {
   open: $('open'), logins: $('logins'), loginsEmpty: $('logins-empty'),
   cards: $('cards'), cardsEmpty: $('cards-empty'),
   passkeys: $('passkeys'), passkeysSection: $('passkeys-section'),
-  cardForm: $('card-form'), cardError: $('card-error'), addCard: $('add-card')
+  cardForm: $('card-form'), cardError: $('card-error'), addCard: $('add-card'),
+  addresses: $('addresses'), addressesEmpty: $('addresses-empty'),
+  addressForm: $('address-form'), addressError: $('address-error'), addAddress: $('add-address')
 };
 
 /** Show one state: 'off', 'unavailable', 'locked' or 'open'. */
@@ -129,12 +131,13 @@ $('setup').addEventListener('click', () => api.send('open-settings', { section: 
 /* The lists                                                           */
 /* ------------------------------------------------------------------ */
 
-let data = { logins: [], payments: [], passkeys: [] };
+let data = { logins: [], payments: [], addresses: [], passkeys: [] };
 
 function clearLists() {
-  data = { logins: [], payments: [], passkeys: [] };
+  data = { logins: [], payments: [], addresses: [], passkeys: [] };
   el.logins.replaceChildren();
   el.cards.replaceChildren();
+  el.addresses.replaceChildren();
   el.passkeys.replaceChildren();
 }
 
@@ -171,7 +174,7 @@ importButton.addEventListener('click', async () => {
 async function load() {
   const res = await ask('list-credentials');
   if (!res) return;
-  data = { logins: res.logins || [], payments: res.payments || [], passkeys: res.passkeys || [] };
+  data = { logins: res.logins || [], payments: res.payments || [], addresses: res.addresses || [], passkeys: res.passkeys || [] };
   render();
 }
 
@@ -197,6 +200,12 @@ function render() {
     kind: 'payment', id: p.id, title: p.label, detail: `•••• ${p.last4} · ${p.expiry}`
   })));
   el.cardsEmpty.hidden = data.payments.length > 0;
+
+  const addresses = data.addresses.filter((a) => hit(a.label, a.summary));
+  el.addresses.replaceChildren(...addresses.map((a) => row({
+    kind: 'address', id: a.id, title: a.label, detail: a.summary || ''
+  })));
+  el.addressesEmpty.hidden = data.addresses.length > 0;
 
   // Only where Debrowser keeps passkeys itself (macOS, Linux), and has some.
   const passkeys = data.passkeys.filter((p) => hit(p.rpId, p.name, p.display));
@@ -339,18 +348,19 @@ function row({ kind, id, title, site, detail, flag = null }) {
     remove.textContent = 'Delete';
   });
 
-  if (kind === 'payment') {
+  if (kind === 'payment' || kind === 'address') {
     const fill = button('Fill');
-    fill.title = 'Put this card into the page you were on before this one';
+    fill.title = `Put this ${kind === 'payment' ? 'card' : 'address'} into the page you were on before this one`;
     fill.addEventListener('click', async () => {
-      const ok = await ask('fill-payment', { id });
+      const ok = await ask(kind === 'payment' ? 'fill-payment' : 'fill-address', { id });
       fill.textContent = ok ? 'Filled' : 'No page to fill';
       setTimeout(() => { fill.textContent = 'Fill'; }, 1500);
     });
     controls.append(fill);
   }
   // A passkey has nothing to show or copy - its key never leaves the browser.
-  if (kind === 'passkey') controls.append(remove);
+  // An address is shown in its row already.
+  if (kind === 'passkey' || kind === 'address') controls.append(remove);
   else controls.append(reveal, copy, remove);
 
   const body = document.createElement('div');
@@ -392,6 +402,29 @@ el.cardForm.addEventListener('submit', async (event) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Adding an address                                                   */
+/* ------------------------------------------------------------------ */
+
+el.addressForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const address = {};
+  for (const key of ['label', 'name', 'organization', 'street', 'city', 'region', 'postal', 'country', 'email', 'tel']) {
+    address[key] = $(`address-${key}`).value.trim();
+  }
+  if (!address.name && !address.street && !address.email) {
+    el.addressError.textContent = 'Add at least a name, a street or an email.';
+    return;
+  }
+  const saved = await ask('save-address', address);
+  if (saved === null) return;
+  if (!saved) { el.addressError.textContent = 'Couldn’t save that address.'; return; }
+  el.addressError.textContent = '';
+  el.addressForm.reset();
+  el.addAddress.open = false;
+  load();
+});
+
+/* ------------------------------------------------------------------ */
 
 el.query.addEventListener('input', render);
 clearOnEscape(el.query);
@@ -401,7 +434,7 @@ window.addEventListener('keydown', (event) => {
   // Not mid-form: Escape in the card form or the passcode field (say, to
   // dismiss autofill) used to close the tab and lose what was typed.
   const t = event.target;
-  if (t !== el.query && t.closest && t.closest('input, textarea, select, #card-form, #locked')) return;
+  if (t !== el.query && t.closest && t.closest('input, textarea, select, #card-form, #address-form, #locked')) return;
   api.send('close-tab');
 });
 

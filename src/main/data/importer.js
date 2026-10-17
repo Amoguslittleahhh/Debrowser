@@ -6,8 +6,9 @@
  *   history    from a Chromium-family profile's `History` or a Firefox-family
  *              `places.sqlite` - the pages they have been to, so the address
  *              bar knows their sites on the first day rather than the tenth
- *   bookmarks  from a Firefox-family `places.sqlite` (Chromium-family ones are
- *              JSON, and bookmarks.js reads those itself)
+ *   bookmarks  from a Firefox-family `places.sqlite`, or Safari's
+ *              `Bookmarks.plist` (Chromium-family ones are JSON, and
+ *              bookmarks.js reads those itself)
  *   passwords  from the CSV file every browser and password manager exports
  *
  * The databases are read from a copy. The browser that owns them is often
@@ -32,6 +33,9 @@ const MAX_LOGINS = 5000;
 const CHROME_EPOCH_OFFSET_MS = 11644473600000;
 const fromChrome = (ms) => Number(ms) - CHROME_EPOCH_OFFSET_MS;
 const fromFirefox = (ms) => Number(ms);
+/* Safari: seconds since 2001 (Core Data's reference date). */
+const SAFARI_EPOCH_OFFSET_MS = 978307200000;
+const fromSafari = (seconds) => Number(seconds) * 1000 + SAFARI_EPOCH_OFFSET_MS;
 const sane = (ms) => (Number.isFinite(ms) && ms > 0 && ms < Date.now() + 86_400_000 ? ms : null);
 
 /**
@@ -59,6 +63,7 @@ function withCopy(file, read) {
 /** The database a profile keeps its history in, from the file findProfiles located. */
 function historyFile(profile) {
   if (profile.kind === 'firefox') return profile.path;                   // places.sqlite
+  if (profile.kind === 'safari') return path.join(path.dirname(profile.path), 'History.db');
   return path.join(path.dirname(profile.path), 'History');             // beside Bookmarks
 }
 
@@ -70,14 +75,19 @@ function readHistory(profile) {
   const file = historyFile(profile);
   if (!fs.existsSync(file)) return { ok: false, reason: `${profile.browser} has no history to bring over` };
   try {
-    const rows = withCopy(file, (db) => (profile.kind === 'firefox'
-      ? db.prepare(`SELECT url, title, visit_count AS visits, last_visit_date / 1000 AS at FROM moz_places
-                    WHERE visit_count > 0 AND hidden = 0 AND last_visit_date IS NOT NULL
-                    ORDER BY last_visit_date DESC LIMIT ${MAX_HISTORY}`).all()
-      : db.prepare(`SELECT url, title, visit_count AS visits, last_visit_time / 1000 AS at FROM urls
-                    WHERE hidden = 0 AND last_visit_time > 0
-                    ORDER BY last_visit_time DESC LIMIT ${MAX_HISTORY}`).all()));
-    const time = profile.kind === 'firefox' ? fromFirefox : fromChrome;
+    const queries = {
+      firefox: `SELECT url, title, visit_count AS visits, last_visit_date / 1000 AS at FROM moz_places
+                WHERE visit_count > 0 AND hidden = 0 AND last_visit_date IS NOT NULL
+                ORDER BY last_visit_date DESC LIMIT ${MAX_HISTORY}`,
+      safari: `SELECT i.url AS url, v.title AS title, i.visit_count AS visits, MAX(v.visit_time) AS at
+               FROM history_items i JOIN history_visits v ON v.history_item = i.id
+               GROUP BY i.id ORDER BY at DESC LIMIT ${MAX_HISTORY}`,
+      chromium: `SELECT url, title, visit_count AS visits, last_visit_time / 1000 AS at FROM urls
+                 WHERE hidden = 0 AND last_visit_time > 0
+                 ORDER BY last_visit_time DESC LIMIT ${MAX_HISTORY}`
+    };
+    const rows = withCopy(file, (db) => db.prepare(queries[profile.kind] || queries.chromium).all());
+    const time = { firefox: fromFirefox, safari: fromSafari }[profile.kind] || fromChrome;
     const entries = [];
     for (const r of rows) {
       if (!/^https?:/i.test(r.url || '')) continue;
@@ -87,6 +97,7 @@ function readHistory(profile) {
     }
     return { ok: true, entries };
   } catch (err) {
+    if (profile.kind === 'safari' && (err.code === 'EPERM' || err.code === 'EACCES')) return { ok: false, reason: SAFARI_LOCKED };
     return { ok: false, reason: `could not read ${profile.browser}'s history (${err.message})` };
   }
 }
@@ -111,6 +122,125 @@ function readFirefoxBookmarks(profile) {
   } catch (err) {
     return { ok: false, reason: `could not read ${profile.browser}'s bookmarks (${err.message})` };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Safari                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * macOS keeps ~/Library/Safari from every app the user has not given Full
+ * Disk Access. Said as what to do, with the way round it: Safari's own export
+ * (File > Export Browsing Data) writes bookmarks as HTML and passwords as CSV,
+ * both of which import from a file here.
+ */
+const SAFARI_LOCKED = 'macOS keeps Safari’s data private. Allow Debrowser in System Settings > Privacy & Security > ' +
+  'Full Disk Access, or export from Safari (File > Export Browsing Data) and import that file';
+
+/**
+ * A binary property list (`bplist00`), as Safari writes Bookmarks.plist.
+ * Enough of the format for that file: dictionaries, arrays, strings, numbers,
+ * dates, booleans and data. Offsets are checked, so a damaged file throws
+ * rather than reading past its end.
+ */
+function parseBinaryPlist(buf) {
+  if (buf.length < 40 || buf.toString('latin1', 0, 8) !== 'bplist00') throw new Error('not a binary property list');
+  const trailer = buf.subarray(buf.length - 32);
+  const offsetSize = trailer[6];
+  const refSize = trailer[7];
+  const count = Number(trailer.readBigUInt64BE(8));
+  const top = Number(trailer.readBigUInt64BE(16));
+  const tableAt = Number(trailer.readBigUInt64BE(24));
+  if (count > 2_000_000 || tableAt + count * offsetSize > buf.length) throw new Error('damaged property list');
+  const uint = (at, size) => {
+    if (at + size > buf.length) throw new Error('damaged property list');
+    let v = 0;
+    for (let i = 0; i < size; i++) v = v * 256 + buf[at + i];
+    return v;
+  };
+  const offsets = Array.from({ length: count }, (_, i) => uint(tableAt + i * offsetSize, offsetSize));
+  const seen = new Set();
+
+  const read = (ref) => {
+    if (ref >= count || seen.has(ref)) throw new Error('damaged property list');
+    const at = offsets[ref];
+    const marker = buf[at];
+    const kind = marker >> 4;
+    let info = marker & 0x0f;
+    let start = at + 1;
+    // A length of 15 means the real length follows, as an integer object.
+    const length = () => {
+      if (info !== 0x0f) return info;
+      const size = 1 << (buf[start] & 0x0f);
+      const n = uint(start + 1, size);
+      start += 1 + size;
+      return n;
+    };
+    switch (kind) {
+      case 0x0: return info === 0x08 ? false : info === 0x09 ? true : null;
+      case 0x1: return uint(start, 1 << info);
+      case 0x2: return info === 2 ? buf.readFloatBE(start) : buf.readDoubleBE(start);
+      case 0x3: return new Date(buf.readDoubleBE(start) * 1000 + SAFARI_EPOCH_OFFSET_MS);
+      case 0x4: { const n = length(); return buf.subarray(start, start + n); }
+      case 0x5: { const n = length(); return buf.toString('latin1', start, start + n); }
+      case 0x6: {
+        const n = length();
+        const out = Buffer.from(buf.subarray(start, start + n * 2));
+        out.swap16();
+        return out.toString('utf16le');
+      }
+      case 0xa: {
+        const n = length();
+        seen.add(ref);
+        const out = Array.from({ length: n }, (_, i) => read(uint(start + i * refSize, refSize)));
+        seen.delete(ref);
+        return out;
+      }
+      case 0xd: {
+        const n = length();
+        seen.add(ref);
+        const out = {};
+        for (let i = 0; i < n; i++) {
+          const key = read(uint(start + i * refSize, refSize));
+          out[String(key)] = read(uint(start + (n + i) * refSize, refSize));
+        }
+        seen.delete(ref);
+        return out;
+      }
+      default: return null;
+    }
+  };
+  return read(top);
+}
+
+/** Safari's bookmarks, with the folder each is in. The Reading List is left to Safari. */
+function readSafariBookmarks(profile) {
+  let root;
+  try {
+    root = parseBinaryPlist(fs.readFileSync(profile.path));
+  } catch (err) {
+    if (err.code === 'EPERM' || err.code === 'EACCES') return { ok: false, reason: SAFARI_LOCKED };
+    return { ok: false, reason: `could not read Safari's bookmarks (${err.message})` };
+  }
+  const entries = [];
+  const walk = (node, folder) => {
+    if (!node || typeof node !== 'object' || entries.length >= MAX_BOOKMARKS) return;
+    if (node.WebBookmarkType === 'WebBookmarkTypeLeaf') {
+      const url = typeof node.URLString === 'string' ? node.URLString : '';
+      if (/^https?:/i.test(url)) {
+        const title = node.URIDictionary && typeof node.URIDictionary.title === 'string' ? node.URIDictionary.title : '';
+        entries.push({ url, title, folder, addedAt: Date.now() });
+      }
+      return;
+    }
+    if (node.Title === 'com.apple.ReadingList') return;
+    // Safari's own top-level lists - the bar and the menu - are where, not what.
+    const own = /^(BookmarksBar|BookmarksMenu)$/.test(node.Title || '');
+    const name = !node.Title || own ? folder : node.Title;
+    for (const child of Array.isArray(node.Children) ? node.Children : []) walk(child, name);
+  };
+  walk(root, '');
+  return { ok: true, entries };
 }
 
 /* ------------------------------------------------------------------ */
@@ -179,4 +309,4 @@ function parseLoginCsv(text) {
   return { ok: true, logins };
 }
 
-module.exports = { readHistory, readFirefoxBookmarks, parseLoginCsv, parseCsv };
+module.exports = { readHistory, readFirefoxBookmarks, readSafariBookmarks, parseBinaryPlist, parseLoginCsv, parseCsv };

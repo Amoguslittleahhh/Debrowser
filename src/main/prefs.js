@@ -17,6 +17,7 @@
 const fs = require('fs');
 const { readJson } = require('./data/store-file');
 const { DEFAULT_SHORTCUTS_TEXT } = require('./site-shortcuts');
+const { LANGUAGES: TRANSLATE_LANGUAGES } = require('./translate');
 const path = require('path');
 const { app } = require('electron');
 
@@ -138,6 +139,8 @@ const SCHEMA = {
    * anyone whose machine is not set that way but who wants nothing moving here.
    */
   reduceMotion: { def: false,    ok: (v) => typeof v === 'boolean' },
+  /** Pages that come only in light, shown dark (dark-pages.js). */
+  darkWebsites: { def: false,    ok: (v) => typeof v === 'boolean' },
 
   showMemoryMeter: { def: true,  ok: (v) => typeof v === 'boolean' },
   showTierDots: { def: true,     ok: (v) => typeof v === 'boolean' },
@@ -194,6 +197,12 @@ const SCHEMA = {
    * along the strip.
    */
   tabCycleOrder: { def: 'recent', ok: (v) => v === 'recent' || v === 'strip' },
+
+  /**
+   * The language "Translate page" and "Translate selection" turn pages into
+   * (translate.js). 'auto' is the system's language.
+   */
+  translateTo: { def: 'auto', ok: (v) => v === 'auto' || TRANSLATE_LANGUAGES.includes(v) },
 
   /**
    * Whether the welcome tour has been through, or skipped. A new profile

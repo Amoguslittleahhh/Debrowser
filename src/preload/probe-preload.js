@@ -534,32 +534,113 @@ ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
 });
 
 /**
+ * The fields of a form, found the way a person would: by the `autocomplete`
+ * token the site gave them, else by their name, id or label. Only fields that
+ * are on screen and enabled - a hidden or zero-sized field is exactly where a
+ * page harvests autofill it never showed the user.
+ */
+function findField(tokens, pattern) {
+  const shown = (el) => {
+    if (el.disabled || el.readOnly || el.type === 'hidden') return false;
+    const box = el.getBoundingClientRect();
+    if (box.width < 4 || box.height < 4) return false;
+    const style = getComputedStyle(el);
+    return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0.1;
+  };
+  const fields = [...document.querySelectorAll('input, select, textarea')].filter(shown);
+  for (const token of tokens) {
+    const hit = fields.find((el) => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).includes(token));
+    if (hit) return hit;
+  }
+  if (!pattern) return null;
+  return fields.find((el) => {
+    const label = el.labels && el.labels[0] ? el.labels[0].textContent : '';
+    const text = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, label].join(' ');
+    return pattern.test(text);
+  }) || null;
+}
+
+/**
+ * Set a field as typing would, so frameworks that keep state outside the DOM
+ * (React, Vue, Angular) see it. A `<select>` takes the option whose value or
+ * text matches, and is left alone when none does.
+ */
+function setField(el, value) {
+  if (!el || !value) return false;
+  if (el.tagName === 'SELECT') {
+    const want = String(value).trim().toLowerCase();
+    const option = [...el.options].find((o) => o.value.toLowerCase() === want || o.text.trim().toLowerCase() === want);
+    if (!option) return false;
+    el.value = option.value;
+  } else {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+    if (setter) setter.call(el, value); else el.value = value;
+  }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+/**
  * Fill payment details, on a click the user made in the browser's own UI.
  *
  * Never on load. A page can place a payment field off-screen or at zero size
  * and harvest whatever an autofill puts in it, and unlike a password there is
  * no origin binding to make that safe - a card number is equally valid
  * everywhere. So this only ever arrives because the user asked for it while
- * looking at the page.
+ * looking at the page, and only fields on screen are filled.
  */
 ipcRenderer.on('debrowser:payment-fill', (_event, record) => {
   try {
     if (!record) return;
-    const pick = (token, fallback) =>
-      document.querySelector(`input[autocomplete~="${token}"]`) ||
-      (fallback ? document.querySelector(fallback) : null);
+    setField(findField(['cc-number'], /card.?num|cc.?num|cardnumber/i), record.number);
+    setField(findField(['cc-name'], /name.?on.?card|card.?holder|cc.?name/i), record.holder);
+    const [month, year] = String(record.expiry || '').split('/');
+    const together = findField(['cc-exp'], /expir|exp.?date|mm.?\/?.?yy/i);
+    if (together && together.tagName !== 'SELECT' && !/month|year/i.test(`${together.name} ${together.id}`)) {
+      setField(together, record.expiry);
+    } else {
+      const monthField = findField(['cc-exp-month'], /exp.*month|month/i);
+      const yearField = findField(['cc-exp-year'], /exp.*year|year/i);
+      // A month list may be "01" or "1"; a year list "29" or "2029".
+      if (!setField(monthField, month)) setField(monthField, String(Number(month)));
+      if (yearField) {
+        const long = `20${year}`;
+        if (yearField.tagName === 'SELECT' || Number(yearField.maxLength) === 4) {
+          if (!setField(yearField, long)) setField(yearField, year);
+        } else setField(yearField, year);
+      }
+    }
+  } catch { /* nothing fillable here */ }
+});
 
-    const setValue = (el, value) => {
-      if (!el || !value) return;
-      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
-      if (setter) setter.call(el, value); else el.value = value;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-
-    setValue(pick('cc-number'), record.number);
-    setValue(pick('cc-name'), record.holder);
-    setValue(pick('cc-exp'), record.expiry);
+/** A saved address, on the same terms as a card: on a click, into fields on screen. */
+ipcRenderer.on('debrowser:address-fill', (_event, record) => {
+  try {
+    if (!record) return;
+    const lines = String(record.street || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const [given, ...rest] = String(record.name || '').trim().split(/\s+/);
+    const fullName = findField(['name'], /full.?name|^name$|your.?name/i);
+    if (fullName) setField(fullName, record.name);
+    else {
+      setField(findField(['given-name'], /first.?name|given.?name|fname/i), given);
+      setField(findField(['family-name'], /last.?name|family.?name|surname|lname/i), rest.join(' '));
+    }
+    setField(findField(['organization'], /company|organi[sz]ation/i), record.organization);
+    const street = findField(['street-address'], null);
+    if (street && street.tagName === 'TEXTAREA') setField(street, lines.join('\n'));
+    else if (street) setField(street, lines.join(', '));
+    else {
+      setField(findField(['address-line1'], /address.?(line)?.?1|street|^address$/i), lines[0]);
+      setField(findField(['address-line2'], /address.?(line)?.?2|apartment|suite|apt/i), lines.slice(1).join(', '));
+    }
+    setField(findField(['address-level2'], /city|town|locality/i), record.city);
+    setField(findField(['address-level1'], /state|province|region|county/i), record.region);
+    setField(findField(['postal-code'], /zip|post.?code|postal/i), record.postal);
+    const country = findField(['country', 'country-name'], /country/i);
+    setField(country, record.country);
+    setField(findField(['email'], /e.?mail/i), record.email);
+    setField(findField(['tel'], /phone|tel|mobile/i), record.tel);
   } catch { /* nothing fillable here */ }
 });
 
