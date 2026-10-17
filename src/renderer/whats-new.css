@@ -6,11 +6,11 @@
  * Grid as a Swiss poster.
  */
 
-body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); line-height: 1; }
 main { width: min(760px, 100% - 32px); margin: 0 auto; padding: 48px 0 72px; }
 header { margin-bottom: var(--s6); }
 h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
-.lead { margin: var(--s2) 0 0; color: var(--text-dim); font-size: var(--fs-lead); line-height: 1.5; }
+.lead { margin: var(--s2) 0 0; color: var(--text-dim); font-size: var(--fs-lead); line-height: 1; }
 
 .update {
   display: flex;
@@ -23,7 +23,7 @@ h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; text
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
 }
-.update p { flex: 1 1 280px; margin: 0; font-size: var(--fs-body); line-height: 1.5; }
+.update p { flex: 1 1 280px; margin: 0; font-size: var(--fs-body); line-height: 1; }
 .primary {
   height: 32px;
   padding: 0 var(--s4);
@@ -71,7 +71,7 @@ h2 { margin: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular
   gap: var(--s4);
   padding: 5px 0;
   font-size: var(--fs-body);
-  line-height: 1.5;
+  line-height: 1;
 }
 /* A new kind starts a little apart from the one before, as Zen's groups do. */
 .changes li.first:not(:first-child) { margin-top: var(--s3); }
@@ -116,13 +116,13 @@ body[data-design="paper"] .release { border-bottom: 1px solid var(--border-soft)
 body[data-design="paper"] h2 { font-family: var(--font-display); font-size: 24px; font-weight: 400; }
 body[data-design="paper"] .installed { background: none; border: 1px solid currentColor; }
 body[data-design="paper"] .kind { font-family: var(--font-display); font-size: 15px; font-style: italic; font-weight: 400; }
-body[data-design="paper"] .changes li { font-size: 15px; line-height: 1.6; }
+body[data-design="paper"] .changes li { font-size: 15px; line-height: 1; }
 
 /* Grid: a Swiss poster. A heavy rule, a big number, mono kinds, square. */
 body[data-design="grid"] main { width: min(880px, 100% - 32px); }
 body[data-design="grid"] h1 { font-size: 44px; font-weight: 700; letter-spacing: -0.04em; text-transform: lowercase; }
 body[data-design="grid"] .release { padding-top: var(--s3); border-top: 3px solid var(--text); }
-body[data-design="grid"] h2 { font-size: 36px; font-weight: 700; letter-spacing: -0.04em; line-height: 1.1; }
+body[data-design="grid"] h2 { font-size: 36px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
 body[data-design="grid"] .installed,
 body[data-design="grid"] .kind { font-family: var(--font-mono); font-size: var(--fs-micro); letter-spacing: 0.08em; text-transform: uppercase; }
 body[data-design="grid"] .installed { padding: 2px 6px; background: var(--text); color: var(--bg); }
