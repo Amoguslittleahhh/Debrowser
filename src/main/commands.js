@@ -45,7 +45,7 @@ const COMMANDS = [
   { title: 'Save page', command: 'save-page', keywords: 'download' },
   { title: 'Screenshot the whole page', command: 'screenshot-page', keywords: 'capture image picture', needsTab: true },
   { title: 'Print', command: 'print' },
-  { title: 'What’s new in this version', command: 'open-whats-new', keywords: 'changelog release notes update' },
+  { title: 'Release Notes', command: 'open-whats-new', keywords: 'changelog release notes update what’s new whats new' },
   { title: 'Copy version info', command: 'copy-version-info', keywords: 'about bug report' },
   { title: 'Report a problem', command: 'report-problem', keywords: 'bug feedback issue crash', normalOnly: true },
   { title: 'Zoom in', command: 'zoom', payload: { direction: 'in' }, keywords: 'bigger larger' },

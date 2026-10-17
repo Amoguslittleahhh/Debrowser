@@ -120,7 +120,7 @@ body[data-design="paper"] .changes li { font-size: 15px; line-height: 1; }
 
 /* Grid: a Swiss poster. A heavy rule, a big number, mono kinds, square. */
 body[data-design="grid"] main { width: min(880px, 100% - 32px); }
-body[data-design="grid"] h1 { font-size: 44px; font-weight: 700; letter-spacing: -0.04em; text-transform: lowercase; }
+body[data-design="grid"] h1 { font-size: 44px; font-weight: 700; letter-spacing: -0.04em; }
 body[data-design="grid"] .release { padding-top: var(--s3); border-top: 3px solid var(--text); }
 body[data-design="grid"] h2 { font-size: 36px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
 body[data-design="grid"] .installed,

@@ -312,7 +312,7 @@ function titleFor(url) {
     case 'danger': return 'Warning';
     case 'safety': return 'Safety check';
     case 'receipt': return 'This week';
-    case 'whats-new': return 'What’s new';
+    case 'whats-new': return 'Release Notes';
     case 'reader': return 'Reader view';
     case 'style': return 'Site style';
     case 'fingerprint': return 'What sites can see';

@@ -6698,7 +6698,7 @@ function menuModel({ tabs, shell }) {
     { id: 'show-shortcuts', label: 'Keyboard shortcuts', accel: accel('show-shortcuts'), icon: 'keyboard' },
     { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
     { kind: 'separator' },
-    { id: 'open-whats-new', label: 'What’s new', icon: 'notes' },
+    { id: 'open-whats-new', label: 'Release Notes', icon: 'notes' },
     { id: 'report-problem', label: 'Report a problem…', icon: 'flag' },
     { id: 'copy-version-info', label: 'Copy version info', icon: 'copy' },
     // macOS has Quit in its own app menu, as every browser there does.
