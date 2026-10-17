@@ -4,6 +4,12 @@
 
 ### New
 
+- **Sync between your computers.** Settings > Sync keeps your bookmarks, reading list and settings the same on each computer, through a folder you already sync, such as iCloud Drive, OneDrive, Dropbox, Google Drive or Syncthing. It is encrypted with a passphrase you choose, so whoever stores the folder can't read it. A bookmark deleted on one computer goes from the others too. Passwords and cards stay on each computer.
+- **Fill addresses and cards from the field.** Right-click a field on a checkout page to fill a saved card or address. Addresses are new: add them in Passwords, beside your cards. Only fields you can see are filled, and nothing is filled until you choose it.
+- **Translate a page or a selection.** Right-click a page and choose Translate page, or select some words and choose Translate. It uses Google Translate, which fetches the page without your cookies, so a page you're signed in to comes back as a visitor sees it. Settings > Search and startup chooses the language. Not offered in private windows.
+- **Dark websites.** Settings > Appearance > Dark websites shows sites that only come in light in dark colours, and leaves sites with a dark look of their own as they are. Right-click a page to turn it off for that site.
+- **macOS: import from Safari.** Settings > Bookmarks > Find browsers now finds Safari and brings over its bookmarks and history. macOS asks you to allow Debrowser under Full Disk Access first; if you'd rather not, export from Safari (File > Export Browsing Data) and import the file.
+
 - **Extension side panels, Claude's among them.** An extension that opens in Chrome's side panel now opens down the right of the window, beside the page, for the tab you opened it on; choose it again in the puzzle menu to close it. Extensions can sign in to their own service, and those that ask for the debugger permission can read and operate a tab, as Claude does to act for you – Debrowser shows a notice when one starts.
 
 ### Improved

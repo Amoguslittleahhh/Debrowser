@@ -318,7 +318,7 @@ textarea:focus { border-color: var(--accent); box-shadow: var(--ring); }
    label column and wrong here. */
 .unit { font-size: var(--fs-small); color: var(--text-dim); }
 
-select, input[type="text"], input[type="number"] {
+select, input[type="text"], input[type="number"], input[type="password"] {
   height: 32px;
   min-width: 150px;
   padding: 0 10px;
@@ -344,7 +344,8 @@ select:focus, input:focus { border-color: var(--accent); }
  * width: they carry a unit beside them.
  */
 .row-control > select,
-.row-control > input[type="text"] { width: 212px; }
+.row-control > input[type="text"],
+.row-control > input[type="password"] { width: 212px; }
 
 /* A real checkbox, accented and sized up - a hand-rolled toggle would mean
    reimplementing focus, keyboard activation and the accessibility tree. */

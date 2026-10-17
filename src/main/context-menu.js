@@ -52,7 +52,7 @@ const sep = () => ({ kind: 'separator' });
  * Build the menu.
  *
  * @param {Electron.ContextMenuParams} params - Chromium's hit test
- * @param {object} state - { canGoBack, canGoForward, bookmarked, internal }
+ * @param {object} state - { canGoBack, canGoForward, bookmarked, internal, fill }
  */
 function buildModel(params = {}, state = {}) {
   const items = [];
@@ -116,6 +116,25 @@ function buildModel(params = {}, state = {}) {
       { id: 'edit-paste', label: 'Paste', icon: 'clipboard', accel: 'Ctrl+V',
         enabled: flags.canPaste !== false },
       { id: 'edit-select-all', label: 'Select all', icon: 'select', accel: 'Ctrl+A' });
+    // Saved cards and addresses, offered in the field the user right-clicked:
+    // the click is what makes filling them safe (main.js, fillOnRequest).
+    // While the passwords are locked, one item that opens them instead.
+    const fill = state.fill;
+    if (fill && (fill.cards.length || fill.addresses.length)) {
+      items.push(sep());
+      if (fill.locked) {
+        items.push({ id: 'open-passwords', label: 'Fill a saved card or address…', icon: 'key' });
+      } else {
+        for (const card of fill.cards.slice(0, 3)) {
+          items.push({ id: 'fill-card-here', label: `Fill card “${ellipsis(card.label, 24)}”`, icon: 'key',
+            payload: { id: card.id } });
+        }
+        for (const address of fill.addresses.slice(0, 3)) {
+          items.push({ id: 'fill-address-here', label: `Fill address “${ellipsis(address.label, 24)}”`, icon: 'key',
+            payload: { id: address.id } });
+        }
+      }
+    }
   } else if (selection) {
     if (items.length) items.push(sep());
     items.push(
@@ -130,6 +149,10 @@ function buildModel(params = {}, state = {}) {
     // A link that opens this page scrolled to the words, highlighted. Only
     // for text in the page itself, not in a frame inside it: the link names
     // the page, and the words would not be found there.
+    if (state.translate && !params.isEditable) {
+      items.push({ id: 'translate-selection', label: `Translate “${ellipsis(selection)}”`, icon: 'translate',
+        payload: { text: selection } });
+    }
     const page = params.pageURL || '';
     const inFrame = params.frameURL && params.frameURL !== page;
     if (!state.internal && !inFrame && /^https?:/i.test(page)) {
@@ -170,6 +193,15 @@ function buildModel(params = {}, state = {}) {
     { id: 'save-page', label: 'Save page as…', icon: 'download', accel: shortcuts.accelFor('save-page'),
       enabled: !state.internal },
     { id: 'print', label: 'Print…', icon: 'print', accel: shortcuts.accelFor('print') },
+    ...(state.darkHere === true || state.darkHere === false
+      ? [{ id: 'toggle-site-dark', label: state.darkHere ? 'Turn off dark mode on this site' : 'Use dark mode on this site', icon: 'moon' }]
+      : []),
+    // Through Google's translation proxy (translate.js), and worded so: the
+    // address goes to Google when this is picked, and not before.
+    ...(state.translate && !state.internal ? [state.translate.translated
+      ? { id: 'translate-original', label: 'Show original page', icon: 'translate' }
+      : { id: 'translate-page', label: `Translate page to ${state.translate.name} with Google`, icon: 'translate',
+        enabled: state.translate.possible }] : []),
     { id: 'view-source', label: 'View page source', icon: 'code',
       accel: shortcuts.accelFor('view-source'), enabled: !state.internal },
     inspect);

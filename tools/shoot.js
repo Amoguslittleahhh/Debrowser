@@ -112,7 +112,10 @@ const ANSWERS = {
   ] },
   'list-credentials': { available: true, reason: null, logins: [
     { id: 'c1', site: 'https://github.com', username: 'amogus36311@gmail.com' }
-  ], payments: [] },
+  ], payments: [], addresses: [
+    { id: 'Home', label: 'Home', summary: 'Sam Rivera, 12 Elm Street, Leeds' }
+  ] },
+  'sync-status': { on: false, available: true, reason: null },
   'top-sites': { items: [
     { url: 'https://github.com/', title: 'GitHub', icon: null, visits: 140 },
     { url: 'https://mail.google.com/', title: 'Gmail', icon: null, visits: 96 },
@@ -250,6 +253,7 @@ const SHOTS = [
   // Startup, then the tab and window behaviours - the rows people come to
   // Settings to change most, and several of them selects of unequal width.
   { name: 'settings-browsing', file: 'settings.html', w: 1280, h: 860, hash: 'browsing' },
+  { name: 'settings-sync', file: 'settings.html', w: 1280, h: 860, hash: 'sync' },
   { name: 'history',  file: 'history.html',  w: 1280, h: 700 },
   { name: 'downloads', file: 'downloads.html', w: 1280, h: 700 },
   { name: 'newtab',   file: 'newtab.html',   w: 1280, h: 700 },
@@ -314,6 +318,7 @@ const SHOTS = [
     replies: { 'vault-status': { available: true, configured: true, unlocked: true },
       'list-credentials': { available: true, reason: null,
         logins: [{ id: 'c1', origin: 'https://github.com', username: 'amogus36311@gmail.com' }], payments: [],
+        addresses: [{ id: 'Home', label: 'Home', summary: 'Sam Rivera, 12 Elm Street, Leeds' }],
         passkeys: [{ id: 'k1', rpId: 'google.com', name: 'alice.walker@gmail.com', display: 'Alice Walker' },
           { id: 'k2', rpId: 'github.com', name: 'awalker', display: '' }] } } },
   // The passwords page locked, on a machine with Windows Hello.

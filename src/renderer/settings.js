@@ -19,6 +19,10 @@
 
 const api = window.debrowser;
 
+/** The languages translation offers - translate.js, LANGUAGES, which prefs.js checks the choice against. */
+const TRANSLATE_LANGUAGES = ['ar', 'bn', 'cs', 'da', 'de', 'el', 'en', 'es', 'fa', 'fi', 'fr', 'he', 'hi', 'hu', 'id', 'it',
+  'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sv', 'sw', 'th', 'tl', 'tr', 'uk', 'ur', 'vi', 'zh-CN', 'zh-TW'];
+
 /** Set by watchSections: look again at which section is current. */
 let remarkRail = () => {};
 
@@ -170,6 +174,12 @@ const SECTIONS = {
       type: 'checkbox'
     },
     {
+      key: 'darkWebsites',
+      label: 'Dark websites',
+      hint: 'Shows sites that only come in light with dark colours. Sites with a dark look of their own keep it. Right-click a page to turn it off there.',
+      type: 'checkbox'
+    },
+    {
       key: 'showMemoryMeter',
       label: 'Show the memory meter',
       hint: 'Hiding it doesn’t stop tabs sleeping.',
@@ -206,6 +216,15 @@ const SECTIONS = {
       startupFill: true
     },
     { key: 'searchEngine', label: 'Search engine', type: 'select', options: 'engines' },
+    {
+      key: 'translateTo',
+      label: 'Translate pages into',
+      hint: 'Right-click a page or a selection to translate it. Google Translate fetches the page to do it, without your cookies, so a page you are signed in to comes back as a visitor sees it.',
+      type: 'select',
+      options: [{ value: 'auto', name: 'Your system’s language' }, ...TRANSLATE_LANGUAGES.map((code) => ({
+        value: code, name: new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code
+      }))]
+    },
     {
       key: 'siteShortcuts',
       label: 'Site search shortcuts',
@@ -1629,7 +1648,7 @@ api.onState((state) => {
   if (!state.prefs) return;
   if (Array.isArray(state.searchEngines)) engines = state.searchEngines;
   if (!built) {
-    buildAll(state); renderPasscode(); renderBookmarks();
+    buildAll(state); renderPasscode(); renderBookmarks(); renderSync();
     buildRail();
     revealSection();
   }
@@ -1760,7 +1779,8 @@ const SECTION_ICONS = {
   private: ['M8 2.5l4.5 1.8v3.4c0 2.8-1.9 4.8-4.5 5.8-2.6-1-4.5-3-4.5-5.8V4.3z'],
   advanced: ['M3 4.5h10', 'M3 8h10', 'M3 11.5h10', 'M10 3v3', 'M6 6.5v3', 'M11 10v3'],
   labs: ['M6.5 2.5h3', 'M7 2.5v4L3.2 12.4a.8.8 0 0 0 .7 1.1h8.2a.8.8 0 0 0 .7-1.1L9 6.5v-4', 'M4.8 10h6.4'],
-  updates: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2']
+  updates: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
+  sync: ['M3 6.5a5 5 0 0 1 9-2', 'M12.5 2.5v2.2h-2.2', 'M13 9.5a5 5 0 0 1-9 2', 'M3.5 13.5v-2.2h2.2']
 };
 
 function sectionIcon(name) {
@@ -2112,6 +2132,102 @@ function updateDownloadRow(node, item) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Sync                                                                */
+/* ------------------------------------------------------------------ */
+
+/** "2 minutes ago", for when the folder was last read and written. */
+function ago(at) {
+  const minutes = Math.round((Date.now() - at) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  return new Date(at).toLocaleDateString();
+}
+
+async function renderSync() {
+  const host = document.getElementById('sync-rows');
+  const note = document.getElementById('sync-state');
+  if (!host) return;
+  const status = await api.request('sync-status');
+  if (!status) return;
+
+  if (!status.on || status.needsPassphrase) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const text = document.createElement('div');
+    text.className = 'row-text';
+    const label = document.createElement('span');
+    label.className = 'row-label';
+    label.textContent = status.needsPassphrase ? 'Enter your sync passphrase' : 'Turn on sync';
+    const hint = document.createElement('span');
+    hint.className = 'row-hint';
+    hint.textContent = status.needsPassphrase
+      ? 'This computer lost its copy of the key. Choose the same folder again.'
+      : 'Choose a passphrase, then the folder. On your other computers, choose the same folder and passphrase.';
+    text.append(label, hint);
+    const control = document.createElement('div');
+    control.className = 'row-control';
+    const pass = document.createElement('input');
+    pass.type = 'password';
+    pass.placeholder = 'Passphrase';
+    pass.autocomplete = 'new-password';
+    pass.setAttribute('aria-label', 'Sync passphrase');
+    const button = document.createElement('button');
+    button.className = 'ghost-btn';
+    button.textContent = 'Choose folder…';
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      note.textContent = 'Setting up…';
+      const res = await api.request('sync-start', { passphrase: pass.value });
+      button.disabled = false;
+      if (!res || res.cancelled) { note.textContent = ''; return; }
+      if (!res.ok) { note.textContent = res.reason || 'That didn’t work.'; return; }
+      pass.value = '';
+      note.textContent = res.joined ? 'Joined. Your other computers’ bookmarks and settings are coming in.' : 'Sync is on.';
+      renderSync();
+    });
+    control.append(pass, button);
+    row.append(text, control);
+    host.replaceChildren(row);
+    if (!status.available && !status.on) {
+      note.textContent = `Sync isn’t available on this computer: ${status.reason || 'no system keystore'}.`;
+      button.disabled = true;
+    } else if (status.error) note.textContent = status.error;
+    return;
+  }
+
+  const others = status.devices.length
+    ? status.devices.map((d) => `${d.name} (${ago(d.at)})`).join(', ')
+    : 'none yet';
+  host.replaceChildren(
+    bookmarkAction(
+      `Syncing as ${status.deviceName}`,
+      `Folder: ${status.folder}. Other computers: ${others}.`,
+      'Sync now',
+      async (button) => {
+        button.disabled = true;
+        const res = await api.request('sync-now');
+        button.disabled = false;
+        note.textContent = res && res.ok ? 'Up to date.' : (res && res.reason) || 'That didn’t work.';
+        renderSync();
+      }),
+    bookmarkAction(
+      'Stop syncing on this computer',
+      'Everything stays here as it is, and on your other computers.',
+      'Stop',
+      async (button) => {
+        button.disabled = true;
+        await api.request('sync-stop');
+        note.textContent = 'Sync is off on this computer.';
+        renderSync();
+      })
+  );
+  if (status.error) note.textContent = status.error;
+  else if (!note.textContent && status.lastSync) note.textContent = `Last synced ${ago(status.lastSync)}.`;
+}
+
 async function renderBookmarks() {
   const host = document.getElementById('bookmark-list');
   const actions = document.getElementById('bookmark-actions');
@@ -2127,7 +2243,7 @@ async function renderBookmarks() {
     bookmarkForm(),
     bookmarkAction(
       'Import from a browser on this machine',
-      'Looks for Chrome, Edge, Brave, Vivaldi, Arc, Firefox, Zen and their relatives.',
+      'Looks for Chrome, Edge, Brave, Vivaldi, Arc, Firefox, Zen, Safari and their relatives.',
       'Find browsers',
       async (button) => {
         button.disabled = true;
@@ -2215,7 +2331,7 @@ function renderProfiles(profiles, state, host) {
   state.textContent = `Found ${profiles.length} profile${profiles.length === 1 ? '' : 's'}.`;
   const rows = profiles.map((profile) => bookmarkAction(
     profile.browser,
-    profile.kind === 'firefox' ? 'Firefox-family profile' : 'Chromium-family profile',
+    { firefox: 'Firefox-family profile', safari: 'Safari, on this Mac' }[profile.kind] || 'Chromium-family profile',
     'Import',
     async (button) => {
       button.disabled = true;

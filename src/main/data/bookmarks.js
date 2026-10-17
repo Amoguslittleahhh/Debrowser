@@ -471,7 +471,7 @@ function chromeTime(value) {
  * Chromium's `Bookmarks` file. Neither list needs per-browser parsing - only
  * per-browser *paths*.
  *
- * @returns {Array<{browser:string, kind:'chromium'|'firefox', path:string}>}
+ * @returns {Array<{browser:string, kind:'chromium'|'firefox'|'safari', path:string}>}
  */
 function findProfiles() {
   const home = os.homedir();
@@ -550,6 +550,14 @@ function findProfiles() {
     }
   }
 
+  // Safari: one profile, in a folder macOS shows only to apps with Full Disk
+  // Access. Listed whenever it is there; reading it says what to do if macOS
+  // refuses (importer.js).
+  if (process.platform === 'darwin') {
+    const safari = path.join(home, 'Library', 'Safari', 'Bookmarks.plist');
+    if (exists(safari) || fs.existsSync(path.dirname(safari))) found.push({ browser: 'Safari', kind: 'safari', path: safari });
+  }
+
   return found;
 }
 
@@ -573,6 +581,7 @@ function readProfile(profile) {
     return { ok: false, reason: 'no profile given' };
   }
   if (profile.kind === 'firefox') return require('./importer').readFirefoxBookmarks(profile);
+  if (profile.kind === 'safari') return require('./importer').readSafariBookmarks(profile);
 
   let raw;
   try {

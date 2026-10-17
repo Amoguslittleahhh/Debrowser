@@ -53,7 +53,8 @@ const { Archive } = require('./data/archive');
 
 const reader = require('./reader');
 const readerStore = new reader.ReaderStore();
-const { Credentials, originOf } = require('./data/credentials');
+const { Credentials, originOf, keystoreCapability } = require('./data/credentials');
+const { Sync } = require('./data/sync');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
 const { startupTabs, placeKey, reopenable } = require('./startup');
@@ -109,6 +110,8 @@ const { pageMergingStatus } = require('./memory');
 const pages = require('./pages');
 const shortcuts = require('./shortcuts');
 const contextMenu = require('./context-menu');
+const translate = require('./translate');
+const darkPages = require('./dark-pages');
 
 const fs = require('fs');
 const path = require('path');
@@ -718,6 +721,8 @@ function main() {
   let siteStyles = null;
   let archive = null;
   let readingList = null;
+  /** Sync through a folder the user already syncs (data/sync.js). Never in a private window. */
+  let sync = null;
   // The tab last brought to the front, for automatic picture-in-picture.
   let lastPresented = null;
 
@@ -1121,6 +1126,26 @@ function main() {
    * reason: a discarded tab comes back with a new renderer, and the listener
    * died with the old one.
    */
+  /** The saved cards and addresses a right-clicked field may be filled from, if any. */
+  const fillOffer = (params, tab) => {
+    if (!params.isEditable || INCOGNITO || tab.internal || !credentials || !vault || !vault.configured()) return null;
+    if (!credentials.capability().available) return null;
+    const { payments, addresses } = credentials.list();
+    return { locked: !vault.unlocked(), cards: payments || [], addresses: addresses || [] };
+  };
+
+  /** What "Translate page" would translate into, or null where it is not offered. */
+  const translateOffer = (tab) => {
+    if (INCOGNITO || tab.internal || !prefs) return null;
+    const target = translate.targetLanguage(prefs.get('translateTo'), app.getLocale());
+    return {
+      target,
+      name: translate.languageName(target),
+      translated: translate.isTranslated(tab.url),
+      possible: Boolean(translate.pageUrl(tab.url, target))
+    };
+  };
+
   const bindContextMenu = (tab) => {
     if (!tab.isLive) return;
     tab.wc.on('context-menu', (_event, params) => {
@@ -1141,7 +1166,12 @@ function main() {
           savedForLater: Boolean(readingList && tab.url && readingList.has(tab.url)),
           internal: tab.internal,
           incognito: INCOGNITO,
-          engineName: prefs ? prefs.engineName() : null
+          engineName: prefs ? prefs.engineName() : null,
+          fill: fillOffer(params, tab),
+          translate: translateOffer(tab),
+          // Dark websites, while it is on: whether it applies on this site.
+          darkHere: !INCOGNITO && !tab.internal && prefs && prefs.get('darkWebsites') === true &&
+            darkPages.hostOf(tab.url) ? darkPages.wanted(prefs, sitePrefs, darkPages.hostOf(tab.url)) : null
         }),
         // Kept beside the model rather than in it: an item's payload is what
         // the renderer may send back, and the page's own coordinates are not
@@ -1347,6 +1377,7 @@ function main() {
         break;
       case 'dom-ready':
         if (siteStyles) siteStyles.apply(tab);
+        if (!INCOGNITO) darkPages.apply(tab, prefs, sitePrefs);
         break;
       case 'peek':
         // Not in a private window: its tabs carry protections a bare view
@@ -2074,6 +2105,16 @@ function main() {
     if (INCOGNITO) bookmarks.readOnly = true;
     // So the state broadcast can carry the revision the bookmarks bar watches.
     for (const w of windows) w.shell.bookmarks = bookmarks;
+    if (!INCOGNITO && !OFFLINE_MODE) {
+      sync = new Sync({
+        dir: app.getPath('userData'), bookmarks, readingList, prefs,
+        // As Settings would set it, so whatever a setting changes follows.
+        applyPref: (key, value) => runCommand('set-pref', { key, value }),
+        safeStorage: require('electron').safeStorage, keystore: keystoreCapability,
+        log: (line) => log('sync', line)
+      });
+      if (sync.status().on) sync.schedule();
+    }
     // Read live rather than captured, so switching recording off in the history
     // page stops the very next navigation from being written down.
     //
@@ -2121,6 +2162,8 @@ function main() {
       sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
       getReadingList: () => readingList,
       getExtensions: () => extensions,
+      getCredentials: () => credentials,
+      getVault: () => vault,
       passkeys,
       // A getter: the manager is made just below, once the commands exist.
       getDownloads: () => downloads
@@ -2179,7 +2222,7 @@ function main() {
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs: tabsInUse, shell: shellInUse, windowOps, credentials, vault, bookmarks, history, downloads, prefs, log, context,
       sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts,
-      getArchive: () => archive, getExtensions: () => extensions });
+      getArchive: () => archive, getExtensions: () => extensions, getSync: () => sync });
 
     /*
      * The tabs from last time, or one new one.
@@ -2587,6 +2630,8 @@ function main() {
     // Every window goes now, as the browser closing - not each kept to reopen.
     quitState.quitting = true;
     if (startupGuard) startupGuard.clear();
+    // What changed in the last couple of minutes goes to the folder now.
+    if (sync && sync.status().on) sync.syncNow();
     if (updater) updater.stop();
     if (prewarm) prewarm.drop();
     if (governor) governor.stop();
@@ -2885,7 +2930,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
                        getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null, getReadingList = () => null,
-                       passkeys = null, getExtensions = () => null }) {
+                       passkeys = null, getExtensions = () => null, getCredentials = () => null, getVault = () => null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
     for (const t of everyTab()) if (t.isLive && SitePrefs.hostOf(t.url) === host) t.wc.reload();
@@ -4186,6 +4231,39 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         break;
       }
 
+      // Translation, through Google's proxy (translate.js). The page in
+      // place, as a translate bar would; the selection in a tab of its own.
+      case 'translate-page': {
+        if (!active?.isLive || INCOGNITO) break;
+        const target = translate.pageUrl(active.url, translate.targetLanguage(prefs.get('translateTo'), app.getLocale()));
+        if (target) active.wc.loadURL(target);
+        break;
+      }
+      // Dark websites, on this site or not: remembered for it (site-prefs).
+      case 'toggle-site-dark': {
+        const host = active?.isLive ? darkPages.hostOf(active.url) : null;
+        if (!host || !sitePrefs || INCOGNITO) break;
+        const on = darkPages.wanted(prefs, sitePrefs, host);
+        sitePrefs.set(host, 'dark', on ? false : null);
+        for (const tab of everyTab()) {
+          if (darkPages.hostOf(tab.url) !== host) continue;
+          if (on) darkPages.remove(tab); else darkPages.apply(tab, prefs, sitePrefs);
+        }
+        break;
+      }
+
+      case 'translate-original': {
+        const original = active?.isLive ? translate.originalUrl(active.url) : null;
+        if (original) active.wc.loadURL(original);
+        break;
+      }
+      case 'translate-selection': {
+        if (INCOGNITO) break;
+        const target = translate.textUrl(payload?.text, translate.targetLanguage(prefs.get('translateTo'), app.getLocale()));
+        if (target) tabs.create({ url: target });
+        break;
+      }
+
       case 'search-selection': {
         const text = String(payload?.text ?? '').trim();
         if (!text) break;
@@ -4201,6 +4279,16 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
       case 'edit-copy': if (active?.isLive) active.wc.copy(); break;
       case 'edit-paste': if (active?.isLive) active.wc.paste(); break;
       case 'edit-select-all': if (active?.isLive) active.wc.selectAll(); break;
+
+      // A saved card or address, into the tab whose field was right-clicked.
+      case 'fill-card-here':
+      case 'fill-address-here': {
+        const vault = getVault();
+        if (!active || context.model?.tabId !== active.id || !vault || !vault.unlocked()) break;
+        vault.touch();
+        fillOnRequest(active, command === 'fill-card-here' ? 'payment' : 'address', payload?.id, getCredentials(), log);
+        break;
+      }
 
       // Right-clicking the address bar. Paste and go names what it will do:
       // an address is gone to, anything else searched for.
@@ -4653,6 +4741,13 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         }
         if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
         if (payload.key === 'secureDns') applySecureDns(prefs, log);
+        // Dark websites: open pages change now rather than on their next load.
+        if (payload.key === 'darkWebsites') {
+          for (const tab of everyTab()) {
+            if (payload.value === true) darkPages.apply(tab, prefs, sitePrefs);
+            else darkPages.remove(tab);
+          }
+        }
         const extensions = getExtensions();
         if (payload.key === 'labExtensions' && extensions) {
           if (payload.value === true) for (const ses of extensions.sessions) extensions.attach(ses).catch(() => {});
@@ -5324,6 +5419,9 @@ const INCOGNITO_REFUSED = new Set([
   'new-window', 'move-tab-to-new-window', 'move-tab-to-window', 'tear-tab', 'tear-preview',
   'extensions-list', 'extension-add', 'extension-remove', 'open-extensions',
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
+  'save-address', 'fill-address', 'fill-card-here', 'fill-address-here',
+  'translate-page', 'translate-selection', 'toggle-site-dark',
+  'sync-status', 'sync-start', 'sync-now', 'sync-stop',
   'check-passwords',
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
   'list-history', 'delete-history', 'clear-history', 'forget-site',
@@ -5407,7 +5505,7 @@ const ANY = '*';
 /** What only the passwords page may ask: unlocking, and the records. */
 const VAULT_RECORD_REQUESTS = new Set([
   'vault-unlock', 'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment',
-  'import-logins-file', 'check-passwords'
+  'save-address', 'fill-address', 'import-logins-file', 'check-passwords'
 ]);
 const PAGE_POLICY = new Map([
   ['chrome', { commands: ANY, requests: CHROME_REQUESTS }],
@@ -5494,7 +5592,7 @@ function pageMay(page, channel, name) {
 function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
                        getReceipts = () => null, getArchive = () => null, getExtensions = () => null,
-                       context = { model: null } }) {
+                       getSync = () => null, context = { model: null } }) {
   const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     if (windowOps) windowOps.useSender(event.sender, { views: true });
@@ -5921,6 +6019,35 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       // Reads a profile this machine already has. Chromium-family files are
       // JSON and are read directly; Firefox-family ones are named and refused
       // with the reason, because places.sqlite is a live database.
+      // Sync (data/sync.js): its state, turning it on with a folder the user
+      // picks in the system's dialog - the page never names a path - and off.
+      case 'sync-status': {
+        const sync = getSync();
+        return sync ? sync.status() : { on: false, available: false, reason: 'sync isn’t available here' };
+      }
+      case 'sync-start': {
+        const sync = getSync();
+        if (!sync) return { ok: false, reason: 'Sync isn’t available here.' };
+        const { canceled, filePaths: picked } = await dialog.showOpenDialog(shell.window, {
+          title: 'Choose a folder that syncs between your computers',
+          buttonLabel: 'Sync here',
+          properties: ['openDirectory', 'createDirectory']
+        });
+        if (canceled || !picked || !picked.length) return { ok: false, cancelled: true };
+        const result = await sync.start(picked[0], String(payload?.passphrase ?? ''));
+        if (result.ok) sync.schedule();
+        return result;
+      }
+      case 'sync-now': {
+        const sync = getSync();
+        return sync ? sync.syncNow() : { ok: false };
+      }
+      case 'sync-stop': {
+        const sync = getSync();
+        if (sync) { clearInterval(sync.timer); sync.stop(); }
+        return { ok: true };
+      }
+
       case 'import-from-profile': {
         const list = findProfiles();
         const profile = list.find((p) => p.path === payload?.path);
@@ -6100,7 +6227,9 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       case 'delete-credential':
       case 'reveal-credential':
       case 'save-payment':
-      case 'fill-payment': {
+      case 'fill-payment':
+      case 'save-address':
+      case 'fill-address': {
         if (!vault.unlocked()) return { locked: true };
         vault.touch();
         return credentialRequest(command, payload, { tabs, credentials, log });
@@ -6110,6 +6239,20 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
         return null;
     }
   });
+}
+
+/**
+ * Put a saved card or address into a page, because the user just asked for it
+ * - from the passwords page, or from the menu of the field they right-clicked.
+ * Never on load: see `fillSavedLogin` for why these two kinds wait for a click.
+ */
+function fillOnRequest(tab, kind, id, credentials, log) {
+  if (!tab || tab.internal || !tab.isLive || !credentials) return false;
+  const record = credentials.reveal(kind, id);
+  if (!record) return false;
+  tab.sendToPage(kind === 'payment' ? 'debrowser:payment-fill' : 'debrowser:address-fill', record);
+  log('credentials', `filled ${kind === 'payment' ? 'payment details' : 'an address'} on request`);
+  return true;
 }
 
 /** The saved-record requests, once the vault is known to be unlocked. */
@@ -6139,17 +6282,29 @@ function credentialRequest(command, payload, { tabs, credentials, log }) {
         expiry: String(payload?.expiry ?? ''),
         holder: String(payload?.holder ?? '')
       });
-    case 'fill-payment': {
+    case 'save-address': {
+      const field = (key, max) => String(payload?.[key] ?? '').trim().slice(0, max);
+      return credentials.put('address', {
+        label: field('label', 127),
+        name: field('name', 255),
+        organization: field('organization', 255),
+        street: field('street', 511),
+        city: field('city', 127),
+        region: field('region', 127),
+        postal: field('postal', 31),
+        country: field('country', 127),
+        email: field('email', 319),
+        tel: field('tel', 63)
+      });
+    }
+    case 'fill-payment':
+    case 'fill-address': {
       // Into the page behind this one, not into the passwords page: the most
       // recently used tab that is actually a web page.
-      const record = credentials.reveal('payment', payload?.id);
       const tab = tabs.all()
         .filter((t) => !t.internal && t.isLive)
         .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
-      if (!record || !tab) return false;
-      tab.sendToPage('debrowser:payment-fill', record);
-      log('credentials', 'filled payment details on request');
-      return true;
+      return fillOnRequest(tab, command === 'fill-payment' ? 'payment' : 'address', payload?.id, credentials, log);
     }
     default:
       return null;
