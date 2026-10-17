@@ -318,7 +318,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // DEBROWSER_SMOKE_ONLY=features, optionally DEBROWSER_SMOKE_FEATURE=<name>.
   const featureKit = () => ({ check, waitFor, inTime, sleep, pageUrl: (name) => pageUrl(name), tabs, shell, windowOps,
     prefs, runCommand, context, credentials, vault, bookmarks, history, sitePrefs, readingList, getSync, contextMenu, app,
-    openInternalPage, senderPage, menuModel });
+    openInternalPage, senderPage, menuModel, getExtensions });
   if (process.env.DEBROWSER_SMOKE_ONLY === 'features') {
     await require('./smoke-features').runFeatures(featureKit());
     const failedOnly = results.filter((r) => !r.passed);
@@ -1439,14 +1439,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // extensions when there are any to manage, and a way out.
   {
     const ids = () => menuModel({ tabs, shell }).filter((item) => item.id).map((item) => item.id);
-    const wasLab = prefs.get('labExtensions');
-    prefs.set('labExtensions', false);
+    const wasLab = prefs.get('extensions');
+    prefs.set('extensions', false);
     const without = ids();
-    prefs.set('labExtensions', true);
+    prefs.set('extensions', true);
     const withLab = ids();
-    prefs.set('labExtensions', wasLab);
+    prefs.set('extensions', wasLab);
     const wantExit = process.platform !== 'darwin';
-    check('the menu offers a new window, find in page, extensions (with the Lab on) and exit',
+    check('the menu offers a new window, find in page, extensions (while they are on) and exit',
       ['new-window', 'find-open'].every((id) => without.includes(id)) &&
       !without.includes('open-extensions') && withLab.includes('open-extensions') &&
       without.includes('quit-browser') === wantExit,
@@ -5719,7 +5719,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     for (const [key, value] of saved) prefs.set(key, value);
   }
 
-  // Extensions (a Lab): a Chrome one from its folder and a Firefox one from a
+  // Extensions: a Chrome one from its folder and a Firefox one from a
   // packed .xpi, each proving it ran on a page - the Firefox one through
   // `browser.*`, which only the shim provides - then gone again when removed.
   if (getExtensions()) {
@@ -5755,8 +5755,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     };
     const xpi = path.join(os.tmpdir(), `debrowser-firefox-hello-${process.pid}.xpi`);
     fs.writeFileSync(xpi, zip(path.join(fixtures, 'firefox-hello')));
-    const wasLab = prefs.get('labExtensions');
-    runCommand('set-pref', { key: 'labExtensions', value: true });
+    const wasLab = prefs.get('extensions');
+    runCommand('set-pref', { key: 'extensions', value: true });
     const installed = [];
     let installError = '';
     try {
@@ -5814,7 +5814,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     if (tools && menu[0]) runCommand('extension-menu-click', { ext: tools.id, menu: menu[0].menuId });
     const clicked = await waitFor(() => Boolean(tabWith('#clicked-hi')), { timeoutMs: 10_000 });
     for (const t of [tabWith('#alarm-soon'), tabWith('#clicked-hi')]) if (t) tabs.close(t.id);
-    check('Labs: an extension’s request rules and its own request code block, its alarm fires, tab events reach it, and its right-click item shows and answers',
+    check('Extensions: an extension’s request rules and its own request code block, its alarm fires, tab events reach it, and its right-click item shows and answers',
       blocked.stat === 'blocked' && blocked.dyn === 'blocked' && blocked.webRequest === 'blocked' && blocked.fine === 200 &&
         alarmed && tabsSaid.includes('idle.html') && menu.length === 1 && menu[0].label === 'Say “hi”' && clicked,
       `requests ${JSON.stringify(blocked)}; tabs.onUpdated said ${tabsSaid || '(nothing)'}; alarm ${alarmed}; ` +
@@ -5847,7 +5847,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     })() : false;
     if (panelExt) runCommand('close-extension-panel', { id: panelExt.id });
     const panelClosed = !shell.extPanel && shell.contentBounds().width === narrowBefore;
-    check('Labs: an extension built like Claude opens its side panel from the puzzle menu, drives the tab through the debugger and signs in, past its own strict page policy',
+    check('Extensions: an extension built like Claude opens its side panel from the puzzle menu, drives the tab through the debugger and signs in, past its own strict page policy',
       panelShown && pageNarrowed === 400 && panelSaid.tabId === page.wc.id && panelSaid.title === pageTitle &&
         typeof panelSaid.signedIn === 'string' && panelSaid.signedIn.startsWith(`${panelSaid.back}?code=fixture-code`) &&
         layerCurrent && panelClosed,
@@ -5860,14 +5860,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await sleep(500);
     const after = await inTime(marks(), 3000, {});
     tabs.close(page.id);
-    runCommand('set-pref', { key: 'labExtensions', value: wasLab });
+    runCommand('set-pref', { key: 'extensions', value: wasLab });
     fs.rmSync(xpi, { force: true });
-    check('Labs: Chrome and Firefox extensions run - Firefox ones through promise-style browser.*, MV2 and MV3 - and stop when removed',
+    check('Extensions: Chrome and Firefox extensions run - Firefox ones through promise-style browser.*, MV2 and MV3 - and stop when removed',
       !installError && seen.c === 'ran' && seen.f === 'pong:ping' && seen.m === 'mv3:pong' &&
         !after.c && !after.f && !after.m && ext.list().length === 0,
       `install ${installError || 'ok'}; listed ${listed}; chrome=${seen.c} firefox=${seen.f} firefox-mv3=${seen.m}; ` +
       `after removing ${JSON.stringify(after)}`);
-    check('Labs: an extension’s popup opens from the toolbar, sees the page it was opened over, and has windows and menus',
+    check('Extensions: an extension’s popup opens from the toolbar, sees the page it was opened over, and has windows and menus',
       popupInfo.url === page.url && popupInfo.win === true && popupInfo.menu === 'hello',
       `popup said ${popupSaid || '(nothing)'}; page ${page.url}`);
   }
@@ -5885,7 +5885,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       ['not a url', 'none']
     ];
     const got = cases.map(([u]) => { const t = storeTarget(u); return t ? `${t.store}:${t.id}` : 'none'; });
-    check('Labs: a Chrome Web Store, Edge Add-ons or Firefox Add-ons page is recognised as the extension to add',
+    check('Extensions: a Chrome Web Store, Edge Add-ons or Firefox Add-ons page is recognised as the extension to add',
       got.every((g, i) => g === cases[i][1]), got.join(', '));
   }
 
@@ -6474,7 +6474,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       'vault-set', 'vault-remove', 'vault-unlock', 'import-logins-file', 'import-bookmark-file', 'import-from-profile',
       'make-default', 'forget-site', 'site-clear-data', 'safety-revoke', 'check-passwords', 'update-restart',
       'save-payment', 'fill-payment', 'remove-bookmark', 'forget-bookmark', 'toggle-bookmark', 'delete-space',
-      'site-style-set', 'hide-element', 'show-hidden', 'screenshot-page', 'report-problem']);
+      'site-style-set', 'hide-element', 'show-hidden', 'screenshot-page', 'report-problem', 'extension-add']);
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'preload', 'chrome-preload.js'), 'utf8');
     const list = src.slice(src.indexOf('const COMMANDS = new Set(['), src.indexOf(']);', src.indexOf('const COMMANDS = new Set([')));
     const names = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).filter((c) => !skipRequests.has(c));

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Extensions, as a Lab: Chrome's and Firefox's.
+ * Extensions: Chrome's and Firefox's.
  *
  * Electron loads an unpacked Chrome extension into a session and runs part of
  * the extension API: content scripts, background pages and service workers,
@@ -248,6 +248,54 @@ function adaptPage(html) {
 function popupOf(manifest) {
   const action = manifest.action || manifest.browser_action || manifest.page_action || null;
   return action && action.default_popup ? String(action.default_popup).replace(/^\/+/, '') : null;
+}
+
+/**
+ * The extension's own logo, as its manifest names it: the toolbar button's
+ * icon first, as Chrome shows it there, else the extension's icons. The
+ * smallest that is at least 32px, so it stays sharp at 16px on a 2x screen.
+ */
+function iconOf(manifest) {
+  const action = manifest.action || manifest.browser_action || manifest.page_action || {};
+  const pick = (set) => {
+    if (typeof set === 'string') return set;
+    if (!set || typeof set !== 'object') return null;
+    const sizes = Object.keys(set).map(Number).filter((n) => Number.isFinite(n) && set[n]).sort((a, b) => a - b);
+    if (!sizes.length) return null;
+    return set[sizes.find((n) => n >= 32) ?? sizes[sizes.length - 1]];
+  };
+  const file = pick(action.default_icon) || pick(manifest.icons);
+  return file ? String(file).replace(/^\/+/, '') : null;
+}
+
+const ICON_TYPES = { '.png': 'image/png', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.bmp': 'image/bmp' };
+
+/**
+ * Whether a match pattern ("<all_urls>", "*://*.example.com/*") covers an
+ * address: what an extension's host permissions allow it to reach.
+ */
+function matchesPattern(pattern, address) {
+  let u;
+  try { u = new URL(address); } catch { return false; }
+  if (!/^(https?|wss?|ftp):$/.test(u.protocol)) return false;
+  if (pattern === '<all_urls>') return true;
+  const m = /^(\*|https?|wss?|ftp):\/\/(\*|(?:\*\.)?[^/*]+)(\/.*)?$/.exec(String(pattern));
+  if (!m) return false;
+  const [, scheme, host] = m;
+  if (scheme === '*' ? !/^(https?|wss?):$/.test(u.protocol) : u.protocol !== `${scheme}:`) return false;
+  if (host === '*') return true;
+  if (host.startsWith('*.')) return u.hostname === host.slice(2) || u.hostname.endsWith(host.slice(1));
+  return u.hostname === host;
+}
+
+/** A cookie as Electron has it, as Chrome's cookies API describes it. */
+function chromeCookie(k) {
+  return {
+    name: k.name, value: k.value, domain: k.domain, hostOnly: Boolean(k.hostOnly), path: k.path || '/',
+    secure: Boolean(k.secure), httpOnly: Boolean(k.httpOnly), sameSite: k.sameSite || 'unspecified',
+    session: Boolean(k.session), ...(k.expirationDate ? { expirationDate: k.expirationDate } : {}), storeId: '0'
+  };
 }
 
 /* ---- Stores ----------------------------------------------------------------- */
@@ -579,12 +627,59 @@ class Extensions {
         return tabs.map((t) => ({ type: 'page', id: String(t.id), tabId: t.id, url: t.url, title: t.title,
           attached: this.debugging.has(`${ext.id}:${t.id}`) }));
       }
+      case 'cookies.get':
+      case 'cookies.getAll':
+      case 'cookies.set':
+      case 'cookies.remove': return this.cookies(ext, op.slice(8), a);
       case 'tabs.captureVisibleTab': {
         if (!this.hooks.captureActive) throw new Error('pictures of the page aren’t available here');
         return this.hooks.captureActive(a);
       }
       default: throw new Error(`${op} isn’t available in Debrowser yet`);
     }
+  }
+
+  /**
+   * chrome.cookies, on the browsing session: only for an extension that asked
+   * for "cookies", and only for the sites its host permissions reach - in
+   * Chrome a cookie outside them is not there to read or write.
+   */
+  async cookies(ext, method, a) {
+    if (!ext.permissions.includes('cookies')) throw new Error('This extension did not ask for "cookies".');
+    const ses = [...this.sessions][0];
+    if (!ses) return method === 'getAll' ? [] : null;
+    const may = (address) => (ext.hosts || []).some((p) => matchesPattern(p, address));
+    const siteOf = (k) => `http${k.secure ? 's' : ''}://${String(k.domain || '').replace(/^\./, '')}${k.path || '/'}`;
+    const url = a.url ? String(a.url) : null;
+    if (url && !may(url)) {
+      if (method === 'getAll') return [];
+      throw new Error(`No host permissions for cookies at url: "${url}".`);
+    }
+    if (method === 'get') {
+      if (!url) throw new Error('A url is needed.');
+      const [found] = await ses.cookies.get({ url, name: String(a.name || '') });
+      return found ? chromeCookie(found) : null;
+    }
+    if (method === 'getAll') {
+      const filter = {};
+      if (url) filter.url = url;
+      for (const k of ['name', 'domain', 'path', 'secure', 'session']) if (a[k] !== undefined) filter[k] = a[k];
+      const all = await ses.cookies.get(filter);
+      return all.filter((k) => may(siteOf(k))).map(chromeCookie);
+    }
+    if (method === 'set') {
+      if (!url) throw new Error('A url is needed.');
+      const details = { url };
+      for (const k of ['name', 'value', 'domain', 'path', 'secure', 'httpOnly', 'expirationDate', 'sameSite']) {
+        if (a[k] !== undefined) details[k] = a[k];
+      }
+      await ses.cookies.set(details);
+      const [found] = await ses.cookies.get({ url, name: String(a.name || '') });
+      return found ? chromeCookie(found) : null;
+    }
+    if (!url) throw new Error('A url is needed.');
+    await ses.cookies.remove(url, String(a.name || ''));
+    return { url, name: String(a.name || ''), storeId: '0' };
   }
 
   /**
@@ -881,12 +976,15 @@ class Extensions {
         out.push({
           id, dir, name: displayName(dir, manifest), version: String(manifest.version || ''),
           from: meta.from || 'chrome', addedAt: meta.addedAt || 0, manifestVersion: manifest.manifest_version || 2,
-          popup: popupOf(manifest), background: meta.background || null, token: meta.token || null,
+          popup: popupOf(manifest), icon: iconOf(manifest), background: meta.background || null, token: meta.token || null,
           // The page its side panel opens on, if the manifest names one; it
           // may name it later instead, with sidePanel.setOptions.
           sidePanel: manifest.side_panel && manifest.side_panel.default_path
             ? String(manifest.side_panel.default_path).replace(/^\/+/, '') : null,
           permissions: [...(manifest.permissions || [])].map(String),
+          // The sites it may reach: MV3's own list, or MV2's patterns among its permissions.
+          hosts: [...(manifest.host_permissions || []), ...(manifest.permissions || [])].map(String)
+            .filter((p) => p === '<all_urls>' || p.includes('://')),
           // Rules it ships, or only ones it adds while running: those are
           // saved too, and must be in force from the next start.
           rules: Boolean(manifest.declarative_net_request) || [...(manifest.permissions || [])].some((p) =>
@@ -964,6 +1062,22 @@ class Extensions {
     this.cached = null;
     this.log(`extensions: installed ${manifest.name} (${from})`);
     return this.list().find((e) => e.id === id);
+  }
+
+  /**
+   * Its logo as a data: address, for the browser's own pages to draw: they
+   * cannot load chrome-extension:// or file:// addresses. Null without one.
+   */
+  iconData(id) {
+    const ext = this.list().find((e) => e.id === id);
+    if (!ext || !ext.icon) return null;
+    const file = path.resolve(ext.dir, ext.icon);
+    const type = ICON_TYPES[path.extname(file).toLowerCase()];
+    if (!type || !file.startsWith(ext.dir + path.sep)) return null;
+    try {
+      const data = fs.readFileSync(file);
+      return data.length <= 512 * 1024 ? `data:${type};base64,${data.toString('base64')}` : null;
+    } catch { return null; }
   }
 
   /** Tell an extension's pages which tab a popup is being opened over. */
@@ -1152,11 +1266,11 @@ class Extensions {
     }
   }
 
-  /** Out of every session, for the Lab being turned off. Copies stay on disk. */
+  /** Out of every session, for extensions being turned off. Copies stay on disk. */
   detachAll() {
     for (const ext of this.list()) this.unloadEverywhere(ext.id);
   }
 }
 
 module.exports = {
-  allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, storeTarget, downloadFromStore, COMPAT_FILE };
+  allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, iconOf, matchesPattern, storeTarget, downloadFromStore, COMPAT_FILE };

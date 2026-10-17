@@ -77,6 +77,13 @@ function render(items) {
       dot.className = 'swatch';
       dot.style.background = /^#[0-9a-f]{6}$/i.test(item.swatch) ? item.swatch : 'currentColor';
       button.append(dot);
+    } else if (typeof item.image === 'string' && /^data:image\//.test(item.image)) {
+      // An extension, by its own logo; the puzzle piece only when it has none.
+      const img = document.createElement('img');
+      img.className = 'item-image';
+      img.alt = '';
+      img.src = item.image;
+      button.append(img);
     } else {
       button.append(menuIcon(item.icon));
     }

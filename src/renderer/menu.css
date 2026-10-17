@@ -235,6 +235,14 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
 .zoom-reset:active:not(:disabled) { background: color-mix(in srgb, var(--text) 14%, transparent); }
 .zoom-reset:disabled { opacity: 0.38; }
 
+/* An extension's own logo, where the other items have a drawn icon. */
+.item .item-image {
+  width: var(--icon);
+  height: var(--icon);
+  flex: none;
+  object-fit: contain;
+}
+
 /* A space in the space menu: its colour, and the one you are in marked. */
 .item .swatch {
   flex: none;

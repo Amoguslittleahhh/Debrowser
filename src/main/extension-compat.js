@@ -23,7 +23,9 @@
  *    (drawn beside the page), runtime.getContexts for it, identity's
  *    launchWebAuthFlow (signing in with the browsing session's cookies), the
  *    debugger on a tab, tabs.captureVisibleTab, and action.onClicked and the
- *    badge where Electron's own action has no toolbar behind it.
+ *    badge where Electron's own action has no toolbar behind it, and
+ *    cookies, on the sites the extension may reach, and storage.sync (kept
+ *    locally: there is no account to sync it with).
  *  - Firefox's `browser.*`: the same API with promises, `menus` for
  *    `contextMenus`, and `onMessage` listeners that answer with a promise -
  *    installed over the `browser` newer Chromium has, which lacks all of
@@ -554,6 +556,42 @@
       if (typeof options === 'function') { cb = options; options = undefined; }
       return answer(call('tabs.captureVisibleTab', options || {}), cb);
     });
+  }
+
+  // storage.sync: Electron's answers every call with "not available", and
+  // Dark Reader and others keep their settings there - they read null and stop. There is no
+  // account to sync with, so it is local storage under Chrome's sync limits,
+  // as Chrome itself has it when signed out.
+  if (c.storage && c.storage.local) {
+    const local = c.storage.local;
+    define(c.storage, 'sync', {
+      get: (...a) => local.get(...a),
+      set: (...a) => local.set(...a),
+      remove: (...a) => local.remove(...a),
+      clear: (...a) => local.clear(...a),
+      getBytesInUse: (...a) => (local.getBytesInUse ? local.getBytesInUse(...a) : answer(Promise.resolve(0), a.find((x) => typeof x === 'function'))),
+      setAccessLevel: (d, cb) => answer(Promise.resolve(), cb),
+      onChanged: local.onChanged || event('storage.sync.onChanged'),
+      QUOTA_BYTES: 102400, QUOTA_BYTES_PER_ITEM: 8192, MAX_ITEMS: 512,
+      MAX_WRITE_OPERATIONS_PER_HOUR: 1800, MAX_WRITE_OPERATIONS_PER_MINUTE: 120
+    }, true);
+  }
+
+  // The browsing session's cookies, for an extension that asked for them and
+  // only on the sites it may reach: password managers, coupon finders and
+  // screen recorders read their own site's sign-in this way. Its own pages
+  // and worker only, as in Chrome; content scripts have no chrome.cookies.
+  if (extPage || isWorker) {
+    define(c, 'cookies', {
+      get: (d, cb) => answer(call('cookies.get', d || {}), cb),
+      getAll: (d, cb) => answer(call('cookies.getAll', d || {}).then((v) => v || []), cb),
+      set: (d, cb) => answer(call('cookies.set', d || {}), cb),
+      remove: (d, cb) => answer(call('cookies.remove', d || {}), cb),
+      getAllCookieStores: (cb) => answer(Promise.resolve([{ id: '0', tabIds: [] }]), cb),
+      onChanged: event('cookies.onChanged'),
+      OnChangedCause: { EVICTED: 'evicted', EXPIRED: 'expired', EXPLICIT: 'explicit', EXPIRED_OVERWRITE: 'expired_overwrite', OVERWRITE: 'overwrite' },
+      SameSiteStatus: { NO_RESTRICTION: 'no_restriction', LAX: 'lax', STRICT: 'strict', UNSPECIFIED: 'unspecified' }
+    }, true);
   }
 
   /*

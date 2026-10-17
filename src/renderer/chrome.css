@@ -666,7 +666,7 @@ body[data-layout="left"] .tab:not(:hover):not(.active) .tab-close { display: non
 
 .omnibox:hover { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); }
 
-/* The star, downloads and menu, at the end of the field. Smaller than the
+/* The star and the page's other actions, at the end of the field. Smaller than the
    toolbar's buttons so they sit inside its height, and the last one pulled
    toward the rounded end so the field keeps an even margin. */
 .omnibox .icon-btn {

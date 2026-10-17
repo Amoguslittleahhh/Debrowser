@@ -1858,7 +1858,7 @@ el.star.addEventListener('click', async () => {
   setStar(Boolean(res.bookmarked));
 });
 el.meter.addEventListener('click', () => api.send('toggle-panel'));
-// Extensions (a Lab): the list, and each one's popup, hang off this button.
+// Extensions: the list, and each one's popup, hang off this button.
 const extensionsBtn = document.getElementById('extensions');
 extensionsBtn.addEventListener('click', () => {
   const box = extensionsBtn.getBoundingClientRect();
