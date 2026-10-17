@@ -64,7 +64,10 @@ h2 { margin: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular
   font-size: var(--fs-micro);
   font-weight: 600;
 }
+.summary { margin: 0 0 var(--s3); max-width: 70ch; color: var(--text-dim); font-size: var(--fs-body); line-height: 1; }
 .changes { margin: 0; padding: 0; list-style: none; }
+.text strong { font-weight: 600; }
+.detail { color: var(--text-dim); }
 .changes li {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
@@ -89,6 +92,8 @@ code {
   background: var(--bg-input);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.92em;
+  /* A long command or file name breaks rather than widening the page. */
+  overflow-wrap: anywhere;
 }
 .release { padding: var(--s5) 0 var(--s6); }
 
@@ -103,6 +108,9 @@ body[data-design="legacy"] .release {
 
 /* Ledger: an account book. Ruled rows, the kind in its own column. */
 body[data-design="ledger"] .release { border-top: 1px solid var(--border); }
+/* Atkinson Hyperlegible draws 0 with a slash and has no plain one; the
+   version numbers are set in the system's face so they read as numbers. */
+body[data-design="ledger"] h2 { font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, Roboto, Ubuntu, sans-serif; }
 body[data-design="ledger"] .changes li { padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
 body[data-design="ledger"] .changes li:last-child { border-bottom: 0; }
 body[data-design="ledger"] .changes li.first:not(:first-child) { margin-top: 0; border-top: 1px solid var(--border); }
@@ -117,11 +125,15 @@ body[data-design="paper"] h2 { font-family: var(--font-display); font-size: 24px
 body[data-design="paper"] .installed { background: none; border: 1px solid currentColor; }
 body[data-design="paper"] .kind { font-family: var(--font-display); font-size: 15px; font-style: italic; font-weight: 400; }
 body[data-design="paper"] .changes li { font-size: 15px; line-height: 1; }
+body[data-design="paper"] .summary { font-family: var(--font-display); font-size: var(--fs-lead); font-style: italic; }
+body[data-design="paper"] .text strong { font-weight: 600; }
 
 /* Grid: a Swiss poster. A heavy rule, a big number, mono kinds, square. */
 body[data-design="grid"] main { width: min(880px, 100% - 32px); }
 body[data-design="grid"] h1 { font-size: 44px; font-weight: 700; letter-spacing: -0.04em; }
 body[data-design="grid"] .release { padding-top: var(--s3); border-top: 3px solid var(--text); }
+/* The tag sits on the middle of the number, as a cell centres its content. */
+body[data-design="grid"] .version { align-items: center; }
 body[data-design="grid"] h2 { font-size: 36px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
 body[data-design="grid"] .installed,
 body[data-design="grid"] .kind { font-family: var(--font-mono); font-size: var(--fs-micro); letter-spacing: 0.08em; text-transform: uppercase; }
