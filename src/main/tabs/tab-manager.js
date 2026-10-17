@@ -159,6 +159,11 @@ class TabManager {
     /** The last few refusals, newest last - so a test can see one happened. */
     if (!this.deniedPermissions) this.deniedPermissions = [];
     ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+      // An extension's own pages: allowed or blocked in its site settings
+      // (Settings → Extensions → its page); anything else goes on below.
+      const ext = this.extensionPermission && !PRIVATE
+        ? this.extensionPermission(details?.requestingUrl || wc?.getURL?.() || '', permission, details) : null;
+      if (ext !== null && ext !== undefined) { callback(ext); return; }
       // Camera, microphone, location and notifications: asked of the user,
       // and remembered per site (site-permissions.js). Only in the ordinary
       // browser - a private window never sets `askPermission`, so there these
@@ -201,6 +206,8 @@ class TabManager {
       // asked: answering "granted" to a check for something it then refuses
       // was both untrue and a trait of this browser a page could read.
       if (PRIVATE) return permission === 'fullscreen' || permission === 'clipboard-sanitized-write';
+      const ext = this.extensionPermission ? this.extensionPermission(origin || '', permission, details || {}) : null;
+      if (ext !== null && ext !== undefined) return ext;
       const kinds = kindsFor(permission, details?.mediaType ? { mediaTypes: [details.mediaType] } : {});
       if (!kinds) return true;
       return Boolean(this.permissionGranted && this.permissionGranted(origin, kinds));

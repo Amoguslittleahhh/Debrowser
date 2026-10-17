@@ -808,6 +808,9 @@ input[type="range"]:disabled { opacity: 0.4; }
  * over what it is, any control at the right.
  */
 .ext-page { background: var(--bg-raised, transparent); }
+/* While one is open, it is the page: every section but it is put away. */
+body[data-subpage] main > section:not(.ext-subpage), body[data-subpage] #no-match { display: none !important; }
+body[data-subpage] main > section.ext-subpage { display: block !important; }
 .ext-page-head { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--border-soft); }
 .ext-page-name { margin: 0; font-size: var(--fs-body, 14px); font-weight: 600; }
 .ext-page-icon { width: 24px; height: 24px; object-fit: contain; }

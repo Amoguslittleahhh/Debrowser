@@ -134,7 +134,7 @@ const { resolveShortcut } = require('./site-shortcuts');
 const palette = require('./palette');
 const uninstall = require('./setup/uninstall');
 const installer = require('./setup/install');
-const { SitePermissions, PermissionAsks, KINDS: SITE_KINDS, permissionOrigin } = require('./site-permissions');
+const { SitePermissions, PermissionAsks } = require('./site-permissions');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -1680,7 +1680,10 @@ function main() {
       });
       forEachManager((m) => {
         m.askPermission = (wc, kinds, details, callback) => permissionAsks.request(wc, kinds, details, callback);
-        m.permissionGranted = (origin, kinds) => sitePermissions.decide(permissionOrigin(origin), kinds) === 'allow';
+        m.permissionGranted = (origin, kinds) => sitePermissions.decide(originOf(origin), kinds) === 'allow';
+        // An extension's own pages: what its site settings say, or nothing.
+        m.extensionPermission = (url, permission, details) =>
+          (extensions && prefs.get('extensions') === true ? extensions.decidePermission(url, permission, details) : null);
       });
       // Permissions a site has not used in three months go by themselves,
       // checked at start and daily after.
@@ -6282,20 +6285,15 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
         const ext = getExtensions();
         return { icon: (ext && ext.iconData(String(payload?.id || ''))) || null };
       }
-      // Its site settings: what its own pages may use, kept for its address
-      // as for any site's, and Reset permissions, which forgets them all.
+      // Its site settings: every one Chrome lists, kept with the extension;
+      // Reset permissions puts them all back to their defaults.
       case 'extension-site-permissions': {
         const ext = getExtensions();
-        const info = ext && ext.details(String(payload?.id || ''));
-        if (!info || !info.id || !sitePermissions) return { ok: false };
-        const origin = `chrome-extension://${info.id}`;
-        const kinds = Object.keys(SITE_KINDS);
-        if (payload?.reset === true) for (const k of kinds) sitePermissions.set(origin, k, null);
-        else if (kinds.includes(payload?.kind)) {
-          sitePermissions.set(origin, payload.kind, payload.value === 'allow' || payload.value === 'block' ? payload.value : null);
-        }
-        const now = sitePermissions.forOrigin(origin);
-        return { ok: true, kinds: kinds.map((k) => ({ kind: k, label: SITE_KINDS[k], value: now[k] || 'ask' })) };
+        const id = String(payload?.id || '');
+        if (!ext || !ext.list().some((e) => e.id === id)) return { ok: false };
+        if (payload?.reset === true) ext.setSitePermission(id, null, null);
+        else if (payload?.kind) ext.setSitePermission(id, String(payload.kind), String(payload.value || ''));
+        return { ok: true, kinds: ext.sitePermissions(id) };
       }
 
       // An exported file the user picks. Read in main rather than in the
