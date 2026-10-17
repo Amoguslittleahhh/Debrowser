@@ -930,13 +930,19 @@ async function extensionPage(page, id, dev, back) {
       pick.addEventListener('change', async () =>
         drawPerms(await api.request('extension-site-permissions', { id, kind: k.kind, value: pick.value })));
       const row = el('div', 'ext-perm');
-      row.append(el('span', '', k.label), pick);
+      // One Debrowser has nothing for: listed, as Chrome lists it, not offered.
+      const name = el('span', 'ext-perm-name', k.label);
+      if (!k.applies) {
+        pick.disabled = true;
+        name.append(el('span', 'row-hint', 'Not available in Debrowser'));
+      }
+      row.append(name, pick);
       return row;
     });
     const reset = smallButton('Reset permissions');
     reset.addEventListener('click', async () => drawPerms(await api.request('extension-site-permissions', { id, reset: true })));
     const usage = el('div', 'ext-perm-head');
-    usage.append(el('span', 'row-hint', `Permissions for chrome-extension://${d.id || d.folderId}`), reset);
+    usage.append(el('span', 'row-hint', `Permissions for chrome-extension://${d.id || d.folderId}. Changes apply the next time one of its pages opens.`), reset);
     perms.replaceChildren(usage, ...rows);
   };
   const openPerms = smallButton('', 'icon-more');

@@ -826,6 +826,13 @@ function main() {
       if (posted.size > 64) posted.delete(posted.keys().next().value);
     });
     ses.on('will-download', (event, item, source) => {
+      // An extension's page whose site settings block Automatic downloads.
+      let from = '';
+      try { from = source && !source.isDestroyed() ? source.getURL() : ''; } catch { from = ''; }
+      if (extensions && from.startsWith('chrome-extension:') && extensions.siteChoice(from, 'downloads') === 'block') {
+        event.preventDefault();
+        return;
+      }
       const url = item.getURL();
       // Only what a download can mean. A blob: or data: URL has no server to
       // ask for ranges and nothing for our manager to fetch, so Chromium keeps
@@ -1775,6 +1782,16 @@ function main() {
     // turning them on reaches the ones already open; loaded only while
     // it is on. Never in a private window.
     if (!INCOGNITO) {
+      // An extension's own pages get its site settings as they load:
+      // JavaScript, Images, Pop-ups and Sound (Extensions.applyPageSettings).
+      app.on('web-contents-created', (_event, contents) => {
+        contents.on('did-start-navigation', (details, legacyUrl, _inPlace, legacyMain) => {
+          const url = details?.url ?? legacyUrl;
+          const main = details?.isMainFrame ?? legacyMain;
+          if (!main || !/^chrome-extension:/.test(String(url)) || !extensions || prefs.get('extensions') !== true) return;
+          extensions.applyPageSettings(contents, url).catch(() => {});
+        });
+      });
       extensions = new Extensions(OFFLINE_MODE && !process.env.DEBROWSER_EXT_DIR
         ? path.join(app.getPath('temp'), `debrowser-ext-${process.pid}`)
         : process.env.DEBROWSER_EXT_DIR || path.join(app.getPath('userData'), 'extensions'), log, {

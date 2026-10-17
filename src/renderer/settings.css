@@ -833,6 +833,7 @@ body[data-subpage] main > section.ext-subpage { display: block !important; }
 .ext-perms { padding: 4px var(--s4) 8px calc(var(--s4) + 16px); border-bottom: 1px solid var(--border-soft); }
 .ext-perm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: 8px 0; }
 .ext-perm { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: 6px 0; }
+.ext-perm-name { display: grid; }
 .ext-status:empty { display: none; }
 .ext-status { display: block; padding: 8px var(--s4); }
 .row.ext-off .row-label { opacity: 0.6; }
