@@ -22,7 +22,7 @@ if (require('../terminal/launch').launch()) return;
  */
 
 const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, BrowserWindow, powerMonitor,
-        systemPreferences, nativeTheme, shell: electronShell, net: electronNet } = require('electron');
+        systemPreferences, nativeTheme, shell: electronShell, net: electronNet, nativeImage } = require('electron');
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
@@ -135,6 +135,7 @@ const palette = require('./palette');
 const uninstall = require('./setup/uninstall');
 const installer = require('./setup/install');
 const { SitePermissions, PermissionAsks } = require('./site-permissions');
+const { WebApps, describe: describeWebApp, appArg } = require('./web-apps');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -750,6 +751,8 @@ function main() {
   let sitePrefs = null;
   let blocker = null;
   let extensions = null;
+  /** Sites installed as apps (web-apps.js). Never in a private window. */
+  let webApps = null;
   let receipts = null;
   /** What every ordinary browsing session gets (web-hooks, the blocker...), in order. */
   const browsingSetup = [];
@@ -1787,6 +1790,11 @@ function main() {
     // turning them on reaches the ones already open; loaded only while
     // it is on. Never in a private window.
     if (!INCOGNITO) {
+      // Under a test, a folder of its own that goes with the run.
+      webApps = new WebApps({ dir: OFFLINE_MODE ? fs.mkdtempSync(path.join(app.getPath('temp'), 'debrowser-apps-')) : app.getPath('userData'),
+        log: (m) => log('apps', m) });
+    }
+    if (!INCOGNITO) {
       // An extension's own pages get its site settings as they load:
       // JavaScript, Images, Pop-ups and Sound (Extensions.applyPageSettings).
       app.on('web-contents-created', (_event, contents) => {
@@ -2267,6 +2275,7 @@ function main() {
       sitePermissions, permissionAsks, blocker, sitePrefs, spaces, siteStyles, tabGroups, getArchive: () => archive,
       getReadingList: () => readingList,
       getExtensions: () => extensions,
+      getWebApps: () => webApps,
       getCredentials: () => credentials,
       getVault: () => vault,
       passkeys,
@@ -2327,7 +2336,7 @@ function main() {
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs: tabsInUse, shell: shellInUse, windowOps, credentials, vault, bookmarks, history, downloads, prefs, log, context,
       sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts,
-      getArchive: () => archive, getExtensions: () => extensions, getSync: () => sync,
+      getArchive: () => archive, getExtensions: () => extensions, getSync: () => sync, getWebApps: () => webApps,
       wake: (tab) => (governor ? governor.wake(tab) : null) });
 
     /*
@@ -2415,6 +2424,8 @@ function main() {
     // Links the system handed over at launch - Debrowser as the default
     // browser, a link clicked in another app - open after that, in front.
     if (!INCOGNITO) for (const url of [...launchUrls(process.argv), ...earlyUrls.splice(0)]) openExternal(url);
+    // Started from an installed app's shortcut: its window too.
+    if (webApps && appArg(process.argv)) runCommand('open-web-app', { id: appArg(process.argv) });
     // The taskbar button's jump list on Windows - right-click it, or drag up
     // on it - as every Windows browser has: a new tab and a private window,
     // without opening the browser first. Each relaunches with a flag, which a
@@ -2620,7 +2631,8 @@ function main() {
       });
     } else if (SMOKE_TEST) {
       runSmokeTest({ tabs: tabsInUse, governor, shell: shellInUse, windowOps, prefs, bookmarks, runCommand, history, context, credentials, vault,
-        blocker, sitePrefs, spaces, passkeys, getExtensions: () => extensions, readingList, getSync: () => sync });
+        blocker, sitePrefs, spaces, passkeys, getExtensions: () => extensions, readingList, getSync: () => sync,
+        getWebApps: () => webApps });
     } else if (SPEED_TEST) {
       // Startup, from this process starting to the first tab drawn.
       const startedAt = Date.now() - process.uptime() * 1000;
@@ -2703,6 +2715,11 @@ function main() {
       return;
     }
     if (!INCOGNITO && tabs && (secondArgv || []).includes('--new-tab')) runCommand('new-tab');
+    // An installed app's shortcut, while Debrowser runs: its window, and nothing else.
+    if (!INCOGNITO && webApps && appArg(secondArgv)) {
+      runCommand('open-web-app', { id: appArg(secondArgv) });
+      return;
+    }
     // A link opened while Debrowser runs arrives as a second launch.
     let quick = false;
     if (!INCOGNITO && tabs) for (const url of launchUrls(secondArgv || [], secondCwd)) quick = openExternal(url) || quick;
@@ -3045,7 +3062,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
                        bookmarks = null, closedTabs = [], previousSession = { tabs: [] }, context = { model: null },
                        find = null, quitState = null, siteZoom = new SiteZoom(() => 1),
                        circuits = null, slowJs = null, sitePermissions = null, permissionAsks = null,
-                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null, getReadingList = () => null,
+                       getDownloads = () => null, blocker = null, sitePrefs = null, spaces = null, siteStyles = null, tabGroups = new TabGroups(), getArchive = () => null, getReadingList = () => null, getWebApps = () => null,
                        passkeys = null, getExtensions = () => null, getCredentials = () => null, getVault = () => null }) {
   /** A site's style lost something: its open pages start again from what is saved. */
   const restyle = (host) => {
@@ -4815,6 +4832,62 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
       // The page and what it needs to show - images, styles - saved beside
       // it, where the user chooses. Suggested under the page's title in the
       // downloads folder, which is where they look for anything they kept.
+      // Install this site as an app (web-apps.js): its manifest read from the
+      // page, its icon fetched, its shortcuts written - then its window opens.
+      case 'install-web-app': {
+        const apps = getWebApps();
+        const tab = active;
+        if (!apps || !tab?.isLive || tab.internal || !/^https?:/i.test(String(tab.url))) {
+          if (apps) runCommand.toast('Only a website can be installed as an app');
+          break;
+        }
+        const ext = getExtensions && getExtensions();
+        const opener = tab.wc.getURL();
+        if (ext && opener.startsWith('chrome-extension:') && ext.siteChoice(opener, 'webApps') === 'block') break;
+        (async () => {
+          const page = await tab.wc.executeJavaScriptInIsolatedWorld(1003, [{ code: `(async () => {
+            const link = document.querySelector('link[rel~="manifest"]');
+            let manifest = null;
+            if (link) { try { manifest = await (await fetch(link.href, { credentials: 'include' })).json(); } catch {} }
+            const icons = [...document.querySelectorAll('link[rel~="icon"], link[rel~="apple-touch-icon"]')]
+              .map((l) => ({ src: l.href, sizes: (l.sizes && l.sizes.value) || '', rel: l.rel }));
+            const theme = document.querySelector('meta[name="theme-color"]');
+            return { url: location.href, title: document.title, manifest, manifestUrl: link ? link.href : null, icons,
+              theme: theme ? theme.content : null };
+          })()` }], true);
+          const info = page && describeWebApp(page);
+          if (!info) { runCommand.toast('This page can’t be installed as an app'); return; }
+          let png = null;
+          const tryIcon = async (url) => {
+            if (!url) return null;
+            try {
+              const res = await tab.wc.session.fetch(url);
+              if (!res.ok) return null;
+              const img = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+              return img.isEmpty() ? null : img.resize({ width: 256, height: 256, quality: 'best' }).toPNG();
+            } catch { return null; }
+          };
+          png = await tryIcon(info.iconUrl) || await tryIcon(new URL('/favicon.ico', info.startUrl).href);
+          const installed = apps.install(info, png);
+          publish();
+          runCommand.toast(`${installed.name} installed. Open it from its shortcut, or Settings → Apps`);
+          runCommand('open-web-app', { id: installed.id });
+        })().catch((e) => runCommand.toast(`That couldn’t be installed: ${e.message}`));
+        break;
+      }
+      case 'open-web-app': {
+        const apps = getWebApps();
+        if (!apps || !apps.byId(String(payload?.id || ''))) break;
+        apps.open(String(payload.id), {
+          session: session.fromPartition(BROWSING_PARTITION),
+          openInBrowser: (url) => {
+            openLinkTab(tabs, prefs, tabs.activeTab(), url, { foreground: true });
+            if (shell && !shell.window.isDestroyed()) shell.window.focus();
+          }
+        });
+        break;
+      }
+
       case 'save-page': {
         const tab = active;
         if (!tab?.isLive || tab.internal) break;
@@ -5546,6 +5619,7 @@ const INCOGNITO_REFUSED = new Set([
   'new-window', 'move-tab-to-new-window', 'move-tab-to-window', 'tear-tab', 'tear-preview',
   'extensions-list', 'extension-add', 'extension-remove', 'extension-details', 'extension-dev', 'open-extensions',
   'extension-setting', 'extension-site-permissions', 'extension-icon',
+  'install-web-app', 'open-web-app', 'web-apps-list', 'web-app-remove',
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
   'save-address', 'fill-address', 'fill-card-here', 'fill-address-here',
   'translate-page', 'translate-selection', 'toggle-site-dark',
@@ -5722,7 +5796,7 @@ function pageMay(page, channel, name) {
 function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
                        getReceipts = () => null, getArchive = () => null, getExtensions = () => null,
-                       getSync = () => null, context = { model: null }, wake = async () => {} }) {
+                       getSync = () => null, getWebApps = () => null, context = { model: null }, wake = async () => {} }) {
   const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     if (windowOps) windowOps.useSender(event.sender, { views: true });
@@ -6295,6 +6369,20 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
           }
           default: return { ok: false };
         }
+      }
+
+      // Settings → Apps: the sites installed as apps, to open or remove.
+      case 'web-apps-list': {
+        const apps = getWebApps();
+        return { items: apps ? apps.list().map((a) => {
+          let icon = null;
+          try { if (a.icon) icon = `data:image/png;base64,${require('fs').readFileSync(a.icon).toString('base64')}`; } catch { /* gone */ }
+          return { id: a.id, name: a.name, startUrl: a.startUrl, icon, installedAt: a.installedAt, shortcut: (a.shortcuts || []).length > 0 };
+        }) : [] };
+      }
+      case 'web-app-remove': {
+        const apps = getWebApps();
+        return { ok: Boolean(apps && apps.remove(String(payload?.id || ''))) };
       }
 
       // Its own settings, as Chrome's details page has them (extensions.js).
@@ -7067,6 +7155,8 @@ function menuModel({ tabs, shell }) {
     { id: 'find-open', label: 'Find in page\u2026', accel: accel('find-open'), icon: 'search', enabled: live },
     { id: 'save-page', label: 'Save page as\u2026', accel: accel('save-page'), icon: 'download',
       enabled: live && !tabs.activeTab()?.internal },
+    ...(INCOGNITO ? [] : [{ id: 'install-web-app', label: 'Install this site as an app\u2026', icon: 'plus',
+      enabled: live && !tabs.activeTab()?.internal && /^https?:/i.test(String(tabs.activeTab()?.url)) }]),
     { id: 'screenshot-page', label: 'Screenshot page', icon: 'image',
       enabled: live && !tabs.activeTab()?.internal },
     { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print',
@@ -7346,7 +7436,8 @@ function applySecureDns(prefs, log) {
 /* ------------------------------------------------------------------ */
 
 function runSmokeTest({ tabs, governor, shell, windowOps, prefs, bookmarks, runCommand, history, context, credentials, vault,
-                       blocker, sitePrefs, spaces, passkeys, getExtensions = () => null, readingList = null, getSync = () => null }) {
+                       blocker, sitePrefs, spaces, passkeys, getExtensions = () => null, readingList = null, getSync = () => null,
+                       getWebApps = () => null }) {
   const { runSmoke } = require('./testing/smoke');
   runSmoke({ tabs, governor, shell, windowOps, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
@@ -7355,7 +7446,7 @@ function runSmokeTest({ tabs, governor, shell, windowOps, prefs, bookmarks, runC
             // into their parts.
             runCommand: (command, payload, sender = null) => runCommand(command, payload, sender),
             history, context, credentials, vault, blocker, sitePrefs, spaces, passkeys,
-            getExtensions, readingList, getSync }).then((code) => {
+            getExtensions, readingList, getSync, getWebApps }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);

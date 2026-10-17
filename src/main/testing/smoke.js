@@ -95,7 +95,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
                           openInternalPage, senderPage, bookmarks,
                           runCommand = () => {}, history = null, context = { model: null },
                           credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null, passkeys = null,
-                          getExtensions = () => null, windowOps = null, readingList = null, getSync = () => null }) {
+                          getExtensions = () => null, windowOps = null, readingList = null, getSync = () => null, getWebApps = () => null }) {
   console.log('\n=== Debrowser smoke test ===\n');
   // Every uncaught error in the browser's own pages, for the whole run. A page
   // that throws half-way through drawing looks finished in a screenshot -
@@ -318,7 +318,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // DEBROWSER_SMOKE_ONLY=features, optionally DEBROWSER_SMOKE_FEATURE=<name>.
   const featureKit = () => ({ check, waitFor, inTime, sleep, pageUrl: (name) => pageUrl(name), tabs, shell, windowOps,
     prefs, runCommand, context, credentials, vault, bookmarks, history, sitePrefs, readingList, getSync, contextMenu, app,
-    openInternalPage, senderPage, menuModel, getExtensions });
+    openInternalPage, senderPage, menuModel, getExtensions, getWebApps });
   if (process.env.DEBROWSER_SMOKE_ONLY === 'features') {
     await require('./smoke-features').runFeatures(featureKit());
     const failedOnly = results.filter((r) => !r.passed);

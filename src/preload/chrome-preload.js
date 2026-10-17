@@ -186,6 +186,8 @@ const COMMANDS = new Set([
   'zoom',
   'print',
   'save-page',
+  'install-web-app',
+  'open-web-app',
   'toggle-devtools',
   'page-dirty',
   'set-pref',
@@ -299,6 +301,8 @@ const COMMANDS = new Set([
   'extension-setting',
   'extension-site-permissions',
   'extension-icon',
+  'web-apps-list',
+  'web-app-remove',
   'forget-site',
   'recent-pages',
   'hide-continue-card'

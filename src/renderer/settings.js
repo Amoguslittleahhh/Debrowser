@@ -677,6 +677,9 @@ const SECTIONS = {
     }
   ],
 
+  // Sites installed as apps: drawn by appRows, not preferences.
+  apps: [],
+
   updates: [
     {
       key: 'autoUpdate',
@@ -732,10 +735,14 @@ function buildAll(state = {}) {
     document.querySelector('[data-rows="browsing"]').prepend(defaultBrowserRow(), safetyRow());
     extensionRows(document.querySelector('[data-rows="extensions"]'));
     showExtensionPage();
+    appRows(document.querySelector('[data-rows="apps"]'));
     const advanced = document.querySelector('[data-rows="advanced"]');
     setupRows(advanced);
     window.addEventListener('focus', () => setupRows(advanced));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) setupRows(advanced); });
+  } else {
+    // A private window installs nothing.
+    document.querySelector('section[data-section="apps"]')?.remove();
   }
   built = true;
 }
@@ -1015,6 +1022,37 @@ async function extensionPage(page, id, dev, back) {
  * folder. Shown while they are on; the browser picks the file, so this
  * page never sees a path.
  */
+/*
+ * Apps: each site installed as an app, with Open and Remove, and how to
+ * install one - from the menu on the site itself.
+ */
+function appRows(host) {
+  const render = async () => {
+    const res = await api.request('web-apps-list');
+    const rows = ((res && res.items) || []).map((app) => {
+      const { row, control } = simpleRow(app.name, app.startUrl.replace(/^https?:\/\//, '').replace(/\/$/, ''));
+      if (typeof app.icon === 'string' && /^data:image\//.test(app.icon)) {
+        const img = document.createElement('img');
+        img.className = 'ext-icon';
+        img.alt = '';
+        img.src = app.icon;
+        row.querySelector('.row-label').prepend(img);
+      }
+      const open = smallButton('Open');
+      open.addEventListener('click', () => api.send('open-web-app', { id: app.id }));
+      const remove = smallButton('Remove');
+      remove.addEventListener('click', async () => { await api.request('web-app-remove', { id: app.id }); render(); });
+      control.append(open, remove);
+      return row;
+    });
+    const { row: how } = simpleRow(rows.length ? 'Install another' : 'No apps yet',
+      'On a site, open the menu and choose Install this site as an app. It gets its own window and a shortcut in your Start menu, applications or ~/Applications.');
+    host.replaceChildren(...rows, how);
+  };
+  render();
+  window.addEventListener('focus', render);
+}
+
 /** Developer mode as the browser last sent it, for an extension's own page. */
 let extensionDev = false;
 /** Whether the page was opened from the list here, so Back is history's back. */
@@ -2111,6 +2149,7 @@ const SECTION_ICONS = {
   private: ['M8 2.5l4.5 1.8v3.4c0 2.8-1.9 4.8-4.5 5.8-2.6-1-4.5-3-4.5-5.8V4.3z'],
   advanced: ['M3 4.5h10', 'M3 8h10', 'M3 11.5h10', 'M10 3v3', 'M6 6.5v3', 'M11 10v3'],
   extensions: ['M3.5 5.5h3v-1a1.5 1.5 0 0 1 3 0v1h3v3h-1a1.5 1.5 0 0 0 0 3h1v2h-9z'],
+  apps: ['M3 3h4v4H3z', 'M9 3h4v4H9z', 'M3 9h4v4H3z', 'M9 9h4v4H9z'],
   labs: ['M6.5 2.5h3', 'M7 2.5v4L3.2 12.4a.8.8 0 0 0 .7 1.1h8.2a.8.8 0 0 0 .7-1.1L9 6.5v-4', 'M4.8 10h6.4'],
   updates: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
   sync: ['M3 6.5a5 5 0 0 1 9-2', 'M12.5 2.5v2.2h-2.2', 'M13 9.5a5 5 0 0 1-9 2', 'M3.5 13.5v-2.2h2.2']
