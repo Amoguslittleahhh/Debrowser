@@ -76,6 +76,8 @@ Needs Node 22.13 or later, on Windows, macOS or Linux.
 
 ## More
 
+- **[Privacy](docs/PRIVACY.md):** every connection the browser makes by itself,
+  what it carries, and how to turn it off.
 - **[The full guide](docs/GUIDE.md):** using it, keyboard shortcuts, private
   windows, profiles, how it keeps tabs cheap, measurements, and limits worth knowing.
 - [What's new](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md) ·

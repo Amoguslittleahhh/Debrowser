@@ -366,6 +366,13 @@ if (THEME) STATE.prefs.theme = THEME.slice(8);
 const STRIP = process.argv.find((a) => a.startsWith('--strip='));
 if (STRIP) STATE.prefs.tabBarColor = STRIP.slice(8);
 
+// `--list`: the shots' names, one a line, for a caller that runs each in its
+// own process (see the note at the top) - tools/audit.sh does.
+if (process.argv.includes('--list')) {
+  process.stdout.write(`${SHOTS.map((s) => s.name).join('\n')}\n`);
+  app.exit(0);
+}
+
 const ONLY = process.argv.find((a) => a.startsWith('--only='));
 const WANTED = ONLY ? SHOTS.filter((s) => s.name === ONLY.slice(7)) : SHOTS;
 
