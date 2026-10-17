@@ -16,11 +16,21 @@
  * Never offered in a private window.
  */
 
+const { isLocalHost } = require('./incognito/policy');
+
 const PROXY_SUFFIX = '.translate.goog';
 
+/** Names that cannot be on the public internet, as HTTPS-first counts them (https-first.js). */
+const RESERVED = ['.test', '.example', '.invalid', '.localhost', '.local', '.lan', '.home.arpa', '.internal', '.corp'];
+
+/** The proxy's name for a site is one DNS label, and a label holds 63 characters. */
+const MAX_LABEL = 63;
+
 /** The languages Settings offers, by their BCP 47 code. Google's codes. */
-const LANGUAGES = ['ar', 'bn', 'cs', 'da', 'de', 'el', 'en', 'es', 'fa', 'fi', 'fr', 'he', 'hi', 'hu', 'id', 'it',
-  'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sv', 'sw', 'th', 'tl', 'tr', 'uk', 'ur', 'vi', 'zh-CN', 'zh-TW'];
+const LANGUAGES = ['af', 'am', 'ar', 'az', 'bg', 'bn', 'ca', 'cs', 'cy', 'da', 'de', 'el', 'en', 'es', 'et', 'eu', 'fa',
+  'fi', 'fr', 'gl', 'gu', 'he', 'hi', 'hr', 'hu', 'hy', 'id', 'is', 'it', 'ja', 'ka', 'kk', 'km', 'kn', 'ko', 'lo', 'lt',
+  'lv', 'mk', 'ml', 'mn', 'mr', 'ms', 'my', 'ne', 'nl', 'no', 'pa', 'pl', 'pt', 'ro', 'ru', 'si', 'sk', 'sl', 'sq', 'sr',
+  'sv', 'sw', 'ta', 'te', 'th', 'tl', 'tr', 'uk', 'ur', 'uz', 'vi', 'zh-CN', 'zh-TW', 'zu'];
 
 /**
  * The language to translate into: the one chosen in Settings, else the
@@ -47,11 +57,19 @@ function languageName(code, displayIn = 'en') {
   }
 }
 
-/** A host the proxy cannot reach: this machine, the local network, a bare address. */
-function isPrivateHost(host) {
-  return host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') ||
-    host.endsWith('.internal') || !host.includes('.') ||
-    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[');
+/**
+ * A host the proxy cannot reach: this machine, the local network, a bare
+ * address, a name reserved off the internet. A final dot is the same name.
+ */
+function isPrivateHost(hostname) {
+  const host = hostname.replace(/\.$/, '');
+  return host === 'localhost' || !host.includes('.') || isLocalHost(host) || hostname.startsWith('[') ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || RESERVED.some((suffix) => host.endsWith(suffix));
+}
+
+/** A query's own pairs, as the page wrote them, without Google's. */
+function ownQuery(search) {
+  return search.slice(1).split('&').filter((pair) => pair && !pair.startsWith('_x_tr_')).join('&');
 }
 
 /** True when `url` is already a page served through the proxy. */
@@ -74,14 +92,15 @@ function pageUrl(url, target) {
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
   if (u.username || u.password || u.port || isPrivateHost(u.hostname)) return null;
   if (isTranslated(url)) return null;
-  const host = u.hostname.replace(/-/g, '--').replace(/\./g, '-');
-  const out = new URL(`https://${host}${PROXY_SUFFIX}${u.pathname}`);
-  out.search = u.search;
-  out.searchParams.set('_x_tr_sl', 'auto');
-  out.searchParams.set('_x_tr_tl', target);
-  out.searchParams.set('_x_tr_hl', target);
-  out.hash = u.hash;
-  return out.toString();
+  const label = u.hostname.replace(/\.$/, '').replace(/-/g, '--').replace(/\./g, '-');
+  if (label.length > MAX_LABEL) return null;
+  // Added to the query as the page wrote it: put through URLSearchParams, a
+  // %20 came back as + and `?flag` as `?flag=`. A plain-HTTP site is fetched
+  // over HTTP, which Google is told with `_x_tr_sch`.
+  const own = ownQuery(u.search);
+  const tl = encodeURIComponent(target);
+  const ours = `_x_tr_sl=auto&_x_tr_tl=${tl}&_x_tr_hl=${tl}${u.protocol === 'http:' ? '&_x_tr_sch=http' : ''}`;
+  return new URL(`https://${label}${PROXY_SUFFIX}${u.pathname}?${own ? `${own}&` : ''}${ours}${u.hash}`).toString();
 }
 
 /** The page a proxied address stands for, for "Show original". */
@@ -92,15 +111,19 @@ function originalUrl(url) {
   const label = u.hostname.slice(0, -PROXY_SUFFIX.length);
   // Undo pageUrl: a doubled hyphen was a hyphen, a single one was a dot.
   const host = label.replace(/--/g, '\u0000').replace(/-/g, '.').replace(/\u0000/g, '-');
-  const out = new URL(`https://${host}${u.pathname}`);
-  for (const [key, value] of u.searchParams) if (!key.startsWith('_x_tr_')) out.searchParams.append(key, value);
-  out.hash = u.hash;
-  return out.toString();
+  const scheme = u.searchParams.get('_x_tr_sch') === 'http' ? 'http' : 'https';
+  const own = ownQuery(u.search);
+  try {
+    return new URL(`${scheme}://${host}${u.pathname}${own ? `?${own}` : ''}${u.hash}`).toString();
+  } catch {
+    return null;
+  }
 }
 
 /** Google Translate's page for some selected words. */
 function textUrl(text, target) {
-  const words = String(text || '').trim().slice(0, 5000);
+  // Not through the middle of a character: half an emoji is a stray mark.
+  const words = String(text || '').trim().slice(0, 5000).replace(/[\uD800-\uDBFF]$/, '');
   if (!words) return null;
   const out = new URL('https://translate.google.com/');
   out.searchParams.set('sl', 'auto');

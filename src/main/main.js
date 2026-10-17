@@ -1171,6 +1171,10 @@ function main() {
   /** The saved cards and addresses a right-clicked field may be filled from, if any. */
   const fillOffer = (params, tab) => {
     if (!params.isEditable || INCOGNITO || tab.internal || !credentials || !vault || !vault.configured()) return null;
+    // Only in the page itself. The fill goes to the top frame, where the
+    // preload listens, so a field in a frame inside it - a payment
+    // provider's, most often - was offered a card it never got.
+    if (params.frame && params.frame.parent) return null;
     if (!credentials.capability().available) return null;
     const { payments, addresses } = credentials.list();
     return { locked: !vault.unlocked(), cards: payments || [], addresses: addresses || [] };
@@ -6347,7 +6351,8 @@ function fillOnRequest(tab, kind, id, credentials, log) {
   if (!tab || tab.internal || !tab.isLive || !credentials) return false;
   const record = credentials.reveal(kind, id);
   if (!record) return false;
-  tab.sendToPage(kind === 'payment' ? 'debrowser:payment-fill' : 'debrowser:address-fill', record);
+  // A renderer that is frozen gets nothing, and the page must not say Filled.
+  if (!tab.sendToPage(kind === 'payment' ? 'debrowser:payment-fill' : 'debrowser:address-fill', record)) return false;
   log('credentials', `filled ${kind === 'payment' ? 'payment details' : 'an address'} on request`);
   return true;
 }
@@ -6397,10 +6402,14 @@ function credentialRequest(command, payload, { tabs, credentials, log }) {
     case 'fill-payment':
     case 'fill-address': {
       // Into the page behind this one, not into the passwords page: the most
-      // recently used tab that is actually a web page.
+      // recently used tab that is actually a web page, and only as the user
+      // left it. One put to sleep since is not passed over for the next page
+      // along, which is a page they did not pick; one that has gone to another
+      // site out of their sight is not filled at all.
       const tab = tabs.all()
-        .filter((t) => !t.internal && t.isLive)
+        .filter((t) => !t.internal)
         .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+      if (!tab || !tab.isLive || !tab.leftAtUrl || originOf(tab.wc.getURL()) !== originOf(tab.leftAtUrl)) return false;
       return fillOnRequest(tab, command === 'fill-payment' ? 'payment' : 'address', payload?.id, credentials, log);
     }
     default:

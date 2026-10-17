@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout: card</title>
+  <!--
+    A card form that says what each field is with the autocomplete tokens a
+    well-built checkout uses, the expiry as one MM/YY box. The security code is
+    never saved, so it must stay empty after a fill; so must the search box.
+  -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    input, select, textarea { display: block; margin: 4px 0 12px; padding: 6px; width: 300px; font: inherit; }
+  </style>
+</head>
+<body>
+  <input id="search" type="search" placeholder="Search the shop" aria-label="Search">
+  <p id="words">Plain words, which are not a field.</p>
+  <form id="pay" onsubmit="return false">
+    <label for="cc-name">Name on card</label>
+    <input id="cc-name" name="ccname" autocomplete="cc-name">
+    <label for="cc-number">Card number</label>
+    <input id="cc-number" name="cardnumber" autocomplete="cc-number" inputmode="numeric">
+    <label for="cc-exp">Expiry</label>
+    <input id="cc-exp" name="cc-exp" autocomplete="cc-exp" placeholder="MM/YY">
+    <label for="cc-csc">Security code</label>
+    <input id="cc-csc" name="cvc" autocomplete="cc-csc" inputmode="numeric">
+  </form>
+  <script>
+    // Which fields heard an input event, for the checks to read.
+    window.heard = [];
+    document.addEventListener('input', (e) => window.heard.push(e.target.id), true);
+  </script>
+</body>
+</html>

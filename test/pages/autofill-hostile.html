@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout with decoys</title>
+  <!--
+    A page that harvests autofill. Before each visible field is a decoy with
+    the same autocomplete token, hidden from the person a different way, so a
+    fill that takes the first match puts the value where nobody sees it. Every
+    decoy must stay empty and every visible field after it must be filled.
+
+    It also scripts right-clicks at its own fields, over and over, as a page
+    that wants the browser's menu without the user asking would.
+  -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    input, select { display: block; margin: 2px 0 8px; padding: 4px; width: 300px; height: 24px; font: inherit; }
+    form { columns: 2; }
+    .offscreen-left { position: absolute; left: -10000px; top: 0; }
+    .offscreen-top { position: absolute; left: 0; top: -10000px; }
+    .see-through { opacity: 0; }
+    .see-through-parent { opacity: 0; }
+    .gone { display: none; }
+    .zero { width: 0; height: 0; padding: 0; border: 0; margin: 0; }
+    .unseen { visibility: hidden; }
+    .clipped { clip-path: inset(50%); }
+    .shut { height: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <form id="pay" onsubmit="return false">
+    <input id="d-number-offscreen" class="offscreen-left" autocomplete="cc-number" tabindex="-1" aria-hidden="true">
+    <label for="number">Card number</label><input id="number" autocomplete="cc-number">
+
+    <input id="d-name-opacity" class="see-through" autocomplete="cc-name" tabindex="-1">
+    <label for="holder">Name on card</label><input id="holder" autocomplete="cc-name">
+
+    <input id="d-exp-none" class="gone" autocomplete="cc-exp">
+    <label for="exp">Expiry</label><input id="exp" autocomplete="cc-exp">
+  </form>
+
+  <form id="ship" onsubmit="return false">
+    <input id="d-given-hidden" type="hidden" autocomplete="given-name">
+    <label for="given">First name</label><input id="given" autocomplete="given-name">
+
+    <input id="d-family-zero" class="zero" autocomplete="family-name">
+    <label for="family">Last name</label><input id="family" autocomplete="family-name">
+
+    <div class="see-through-parent"><input id="d-org-parent-opacity" autocomplete="organization" tabindex="-1"></div>
+    <label for="org">Company</label><input id="org" autocomplete="organization">
+
+    <input id="d-line1-invisible" class="unseen" autocomplete="address-line1">
+    <label for="line1">Address line 1</label><input id="line1" autocomplete="address-line1">
+
+    <input id="d-line2-offscreen" class="offscreen-top" autocomplete="address-line2" tabindex="-1">
+    <label for="line2">Address line 2</label><input id="line2" autocomplete="address-line2">
+
+    <input id="d-city-clipped" class="clipped" autocomplete="address-level2" tabindex="-1">
+    <label for="city">City</label><input id="city" autocomplete="address-level2">
+
+    <input id="d-region-disabled" disabled autocomplete="address-level1">
+    <label for="region">State</label><input id="region" autocomplete="address-level1">
+
+    <input id="d-postal-readonly" readonly autocomplete="postal-code">
+    <label for="postal">ZIP</label><input id="postal" autocomplete="postal-code">
+
+    <div class="gone"><input id="d-email-parent-none" autocomplete="email"></div>
+    <label for="email">Email</label><input id="email" autocomplete="email">
+
+    <div class="shut"><input id="d-tel-shut" autocomplete="tel" tabindex="-1"></div>
+    <label for="tel">Phone</label><input id="tel" autocomplete="tel">
+
+    <div class="unseen"><select id="d-country-parent-invisible" autocomplete="country"><option value="">-</option><option value="US">United States</option></select></div>
+    <label for="country">Country</label>
+    <select id="country" autocomplete="country"><option value="">-</option><option value="GB">United Kingdom</option><option value="US">United States</option></select>
+  </form>
+  <script>
+    // Asking for the browser's menu without a person: a synthetic contextmenu
+    // event at each field, as often as a page likes.
+    window.pestered = 0;
+    setInterval(() => {
+      for (const el of document.querySelectorAll('#number, #given')) {
+        el.focus();
+        const r = el.getBoundingClientRect();
+        el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: r.left + 5, clientY: r.top + 5 }));
+        window.pestered += 1;
+      }
+    }, 150);
+  </script>
+</body>
+</html>

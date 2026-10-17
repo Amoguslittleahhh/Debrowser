@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout: card, expiry in two lists</title>
+  <!-- The expiry as a month list ("01".."12") and a four-digit year list. -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    input, select { display: block; margin: 4px 0 12px; padding: 6px; width: 300px; font: inherit; }
+  </style>
+</head>
+<body>
+  <form id="pay" onsubmit="return false">
+    <label for="number">Card number</label>
+    <input id="number" name="number" autocomplete="cc-number">
+    <label for="holder">Name on card</label>
+    <input id="holder" name="holder" autocomplete="cc-name">
+    <label for="month">Month</label>
+    <select id="month" name="month" autocomplete="cc-exp-month">
+      <option value="">MM</option>
+      <option>01</option><option>02</option><option>03</option><option>04</option>
+      <option>05</option><option>06</option><option>07</option><option>08</option>
+      <option>09</option><option>10</option><option>11</option><option>12</option>
+    </select>
+    <label for="year">Year</label>
+    <select id="year" name="year" autocomplete="cc-exp-year">
+      <option value="">YYYY</option>
+      <option>2026</option><option>2027</option><option>2028</option><option>2029</option>
+      <option>2030</option><option>2031</option><option>2032</option><option>2033</option>
+      <option>2034</option><option>2035</option>
+    </select>
+  </form>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dark websites: a light page</title>
+  <style>
+    html { background: #fff; }
+    body { margin: 0; font: 16px/1.5 sans-serif; color: #111; }
+    /* Fixed, as most sites' bars are: it has to stay at the top when scrolled. */
+    #bar { position: fixed; top: 0; left: 0; right: 0; height: 40px; background: #ffe066; color: #111; padding: 0 16px; line-height: 40px; }
+    main { padding: 60px 16px 3000px; }
+    .row { display: flex; gap: 16px; }
+    .swatch { width: 120px; height: 80px; display: block; flex: none; }
+    /* A picture from a style sheet, as a hero image usually is. */
+    #css-bg { background-image: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27120%27 height=%2780%27%3E%3Crect width=%27120%27 height=%2780%27 fill=%27%238040c0%27/%3E%3C/svg%3E"); }
+    #blank { height: 200px; }
+  </style>
+</head>
+<body>
+  <header id="bar">A fixed bar</header>
+  <main>
+    <div class="row">
+      <img id="img" class="swatch" alt="" src="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27120%27 height=%2780%27%3E%3Crect width=%27120%27 height=%2780%27 fill=%27%23d03030%27/%3E%3C/svg%3E">
+      <video id="video" class="swatch" width="120" height="80" poster="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27120%27 height=%2780%27%3E%3Crect width=%27120%27 height=%2780%27 fill=%27%233050d0%27/%3E%3C/svg%3E"></video>
+      <div id="css-bg" class="swatch"></div>
+      <div id="inline-bg" class="swatch" style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27120%27 height=%2780%27%3E%3Crect width=%27120%27 height=%2780%27 fill=%27%23902040%27/%3E%3C/svg%3E')"></div>
+      <picture id="pic"><img id="pic-img" class="swatch" alt="" src="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27120%27 height=%2780%27%3E%3Crect width=%27120%27 height=%2780%27 fill=%27%23203060%27/%3E%3C/svg%3E"></picture>
+    </div>
+    <p id="text">Plain words on a white page, which dark websites should show light on dark.</p>
+    <div id="blank"></div>
+  </main>
+</body>
+</html>

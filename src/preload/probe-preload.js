@@ -537,36 +537,64 @@ ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
  * The fields of a form, found the way a person would: by the `autocomplete`
  * token the site gave them, else by their name, id or label. Only fields that
  * are on screen and enabled - a hidden or zero-sized field is exactly where a
- * page harvests autofill it never showed the user.
+ * page harvests autofill it never showed the user. `taken` holds the fields
+ * this fill has already given a part to, so that one box is never two things.
  */
-function findField(tokens, pattern) {
+function findField(tokens, pattern, taken = null) {
   const shown = (el) => {
     if (el.disabled || el.readOnly || el.type === 'hidden') return false;
-    const box = el.getBoundingClientRect();
-    if (box.width < 4 || box.height < 4) return false;
+    // Transparent or invisible, itself or in any box around it.
+    if (typeof el.checkVisibility === 'function' &&
+        !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+    let { left, top, right, bottom } = el.getBoundingClientRect();
+    for (let node = el; node && node !== document.documentElement; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      // Clipped away: a clip-path, or a box around it that hides what overflows
+      // it (not one that scrolls - the person can scroll to what is in that).
+      if (style.clipPath && style.clipPath !== 'none') return false;
+      if (node === el) continue;
+      const clip = node.getBoundingClientRect();
+      if (/hidden|clip/.test(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
+      if (/hidden|clip/.test(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
+    }
+    if (right - left < 4 || bottom - top < 4) return false;
+    // Somewhere no scrolling reaches: left of the page, or above it.
+    if (right + window.scrollX <= 0 || bottom + window.scrollY <= 0) return false;
     const style = getComputedStyle(el);
     return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) > 0.1;
   };
-  const fields = [...document.querySelectorAll('input, select, textarea')].filter(shown);
+  const fields = [...document.querySelectorAll('input, select, textarea')]
+    .filter((el) => !(taken && taken.has(el)) && shown(el));
   for (const token of tokens) {
     const hit = fields.find((el) => (el.getAttribute('autocomplete') || '').toLowerCase().split(/\s+/).includes(token));
     if (hit) return hit;
   }
   if (!pattern) return null;
+  // Each hint on its own: run together with spaces between them, an anchored
+  // pattern such as ^name$ could never match.
   return fields.find((el) => {
     const label = el.labels && el.labels[0] ? el.labels[0].textContent : '';
-    const text = [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, label].join(' ');
-    return pattern.test(text);
+    return [el.name, el.id, el.getAttribute('aria-label'), el.placeholder, label]
+      .some((text) => Boolean(text) && pattern.test(String(text).trim()));
   }) || null;
 }
+
+/** What a fill last put in each field, so that a later one can take it out. */
+const filledByUs = new WeakMap();
 
 /**
  * Set a field as typing would, so frameworks that keep state outside the DOM
  * (React, Vue, Angular) see it. A `<select>` takes the option whose value or
- * text matches, and is left alone when none does.
+ * text matches, and is left alone when none does. With no value, a field is
+ * emptied only if what is in it is what an earlier fill put there - so a
+ * second address leaves none of the first behind, and nothing typed is lost.
  */
 function setField(el, value) {
-  if (!el || !value) return false;
+  if (!el) return false;
+  if (!value) {
+    if (!filledByUs.has(el) || filledByUs.get(el) !== el.value) return false;
+    value = '';
+  }
   if (el.tagName === 'SELECT') {
     const want = String(value).trim().toLowerCase();
     const option = [...el.options].find((o) => o.value.toLowerCase() === want || o.text.trim().toLowerCase() === want);
@@ -576,6 +604,7 @@ function setField(el, value) {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
     if (setter) setter.call(el, value); else el.value = value;
   }
+  filledByUs.set(el, el.value);
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
   return true;
@@ -620,27 +649,41 @@ ipcRenderer.on('debrowser:address-fill', (_event, record) => {
     if (!record) return;
     const lines = String(record.street || '').split('\n').map((l) => l.trim()).filter(Boolean);
     const [given, ...rest] = String(record.name || '').trim().split(/\s+/);
-    const fullName = findField(['name'], /full.?name|^name$|your.?name/i);
+    // One part to a box, and the country found first: a list labelled
+    // "Country/Region" is not the state, though its label says region.
+    const taken = new Set();
+    const find = (tokens, pattern) => {
+      const el = findField(tokens, pattern, taken);
+      if (el) taken.add(el);
+      return el;
+    };
+    setField(find(['country', 'country-name'], /country/i), record.country);
+    const fullName = find(['name'], /full.?name|^name$|your.?name/i);
     if (fullName) setField(fullName, record.name);
     else {
-      setField(findField(['given-name'], /first.?name|given.?name|fname/i), given);
-      setField(findField(['family-name'], /last.?name|family.?name|surname|lname/i), rest.join(' '));
+      setField(find(['given-name'], /first.?name|given.?name|fname/i), given);
+      setField(find(['family-name'], /last.?name|family.?name|surname|lname/i), rest.join(' '));
     }
-    setField(findField(['organization'], /company|organi[sz]ation/i), record.organization);
-    const street = findField(['street-address'], null);
+    setField(find(['organization'], /company|organi[sz]ation/i), record.organization);
+    const street = find(['street-address'], null);
     if (street && street.tagName === 'TEXTAREA') setField(street, lines.join('\n'));
     else if (street) setField(street, lines.join(', '));
     else {
-      setField(findField(['address-line1'], /address.?(line)?.?1|street|^address$/i), lines[0]);
-      setField(findField(['address-line2'], /address.?(line)?.?2|apartment|suite|apt/i), lines.slice(1).join(', '));
+      const line1 = find(['address-line1'], /address.?(line)?.?1|street|^address$/i);
+      const line2 = find(['address-line2'], /address.?(line)?.?2|apartment|suite|apt/i);
+      // A box for the whole street, known only by its label, takes every line.
+      if (line1 && (line1.tagName === 'TEXTAREA' || !line2)) {
+        setField(line1, lines.join(line1.tagName === 'TEXTAREA' ? '\n' : ', '));
+      } else {
+        setField(line1, lines[0]);
+        setField(line2, lines.slice(1).join(', '));
+      }
     }
-    setField(findField(['address-level2'], /city|town|locality/i), record.city);
-    setField(findField(['address-level1'], /state|province|region|county/i), record.region);
-    setField(findField(['postal-code'], /zip|post.?code|postal/i), record.postal);
-    const country = findField(['country', 'country-name'], /country/i);
-    setField(country, record.country);
-    setField(findField(['email'], /e.?mail/i), record.email);
-    setField(findField(['tel'], /phone|tel|mobile/i), record.tel);
+    setField(find(['address-level2'], /city|town|locality/i), record.city);
+    setField(find(['address-level1'], /state|province|region|county/i), record.region);
+    setField(find(['postal-code'], /zip|post.?code|postal/i), record.postal);
+    setField(find(['email'], /e.?mail/i), record.email);
+    setField(find(['tel'], /phone|tel|mobile/i), record.tel);
   } catch { /* nothing fillable here */ }
 });
 

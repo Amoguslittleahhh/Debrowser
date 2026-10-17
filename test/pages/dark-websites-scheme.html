@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dark websites: a page with a dark theme of its own</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html { background: #fff; color: #111; }
+    body { margin: 0; padding: 24px; font: 16px/1.5 sans-serif; }
+    #glyph { display: inline-block; font-size: 96px; line-height: 1; }
+    @media (prefers-color-scheme: dark) {
+      html { background: #15171a; color: #e6e6e6; }
+    }
+  </style>
+</head>
+<body>
+  <div id="glyph">&#x2588;&#x2588;</div>
+  <h1>Follows the system</h1>
+  <p>Light by day, dark when the browser says it prefers dark.</p>
+</body>
+</html>

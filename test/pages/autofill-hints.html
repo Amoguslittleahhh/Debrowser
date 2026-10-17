@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout: no autocomplete tokens</title>
+  <!--
+    A checkout that gives no autocomplete tokens at all, only names, ids and
+    labels, laid out as many shops lay theirs out: Country/Region first, one
+    "Name" box, the street as one box for every line. The month list has
+    values 1..12 and the year list two digits.
+  -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    input, select, textarea { display: block; margin: 2px 0 8px; padding: 4px; width: 300px; font: inherit; }
+    form { columns: 2; }
+  </style>
+</head>
+<body>
+  <form id="checkout" onsubmit="return false">
+    <label for="country">Country/Region</label>
+    <select id="country" name="country">
+      <option value="">Choose</option>
+      <option value="CA">Canada</option>
+      <option value="GB">United Kingdom</option>
+      <option value="US">United States</option>
+    </select>
+    <label for="name">Name</label>
+    <input id="name" name="name">
+    <label for="street">Street address</label>
+    <textarea id="street" name="street" rows="2"></textarea>
+    <label for="town">Town or city</label>
+    <input id="town" name="town">
+    <label for="state">State</label>
+    <input id="state" name="state">
+    <label for="zip">ZIP code</label>
+    <input id="zip" name="zip">
+    <label for="mail">Email</label>
+    <input id="mail" name="mail" type="email">
+    <label for="phone">Phone number</label>
+    <input id="phone" name="phone" type="tel">
+
+    <label for="cardnum">Card number</label>
+    <input id="cardnum" name="cardnum">
+    <label for="holder">Cardholder</label>
+    <input id="holder" name="holder">
+    <label for="expm">Expiry month</label>
+    <select id="expm" name="expm">
+      <option value="">Month</option>
+      <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+      <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+      <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+      <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+    </select>
+    <label for="expy">Expiry year</label>
+    <select id="expy" name="expy">
+      <option value="">Year</option>
+      <option>26</option><option>27</option><option>28</option><option>29</option><option>30</option>
+      <option>31</option><option>32</option><option>33</option><option>34</option><option>35</option>
+    </select>
+    <label for="cvc">Security code</label>
+    <input id="cvc" name="cvc">
+  </form>
+</body>
+</html>

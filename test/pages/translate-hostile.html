@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A page that opens its own menu</title>
+<style>body { font: 16px/1.5 sans-serif; margin: 24px; } #blank { height: 200px; }</style>
+</head>
+<body>
+<p id="words">Words this page selects for you, then right-clicks itself.</p>
+<div id="blank"></div>
+<script>
+  // Selects its own words and fires right-click events at itself, over and
+  // over, as a page hoping to put the browser's translate menu up would.
+  const fire = () => {
+    const range = document.createRange();
+    range.selectNodeContents(document.getElementById('words'));
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    for (const target of [document, document.body, document.getElementById('words')]) {
+      target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 30 }));
+      target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 2, clientX: 40, clientY: 30 }));
+      target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 2, clientX: 40, clientY: 30 }));
+    }
+  };
+  fire();
+  setInterval(fire, 100);
+</script>
+</body>
+</html>

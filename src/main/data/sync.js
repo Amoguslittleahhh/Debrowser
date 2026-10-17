@@ -70,7 +70,9 @@ function seal(key, value) {
 /** The value, or null for anything this key did not seal - a wrong passphrase, or a damaged file. */
 function open(key, sealed) {
   try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(sealed.iv, 'base64'));
+    // The tag's length is fixed here: left to the file, a tag cut to 4 bytes
+    // is accepted, and only those 4 are checked.
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(sealed.iv, 'base64'), { authTagLength: 16 });
     decipher.setAuthTag(Buffer.from(sealed.tag, 'base64'));
     const text = Buffer.concat([decipher.update(Buffer.from(sealed.data, 'base64')), decipher.final()]).toString('utf8');
     return JSON.parse(text);
@@ -87,6 +89,8 @@ function deriveKey(passphrase, salt) {
 
 function readJsonFile(file) {
   const stat = fs.statSync(file);
+  // A link to /dev/zero or a pipe reports no size, and reading it never ends.
+  if (!stat.isFile()) throw new Error('not a file');
   if (stat.size > MAX_FILE_BYTES) throw new Error('too large');
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
@@ -96,6 +100,11 @@ function writeJsonFile(file, value) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 });
   fs.renameSync(tmp, file);
+}
+
+/** What a snapshot says, without when it was written or its count. */
+function digestOf(snap) {
+  return crypto.createHash('sha256').update(JSON.stringify({ ...snap, at: 0, seq: undefined })).digest('hex');
 }
 
 /**
@@ -174,7 +183,8 @@ class Sync {
 
   status() {
     if (!this.state) return { on: false, available: this.keystore().available, reason: this.keystore().reason };
-    const devices = Object.entries(this.state.remote).map(([id, r]) => ({ id, name: r.name || 'Another computer', at: r.at || 0 }));
+    const devices = Object.entries(this.state.remote).filter(([, r]) => !r.gone)
+      .map(([id, r]) => ({ id, name: r.name || 'Another computer', at: r.at || 0 }));
     return {
       on: true,
       available: true,
@@ -212,6 +222,11 @@ class Sync {
           return { ok: false, reason: 'That isn’t the passphrase this folder was set up with.' };
         }
         joined = true;
+      } else if (fs.readdirSync(path.join(root, 'devices')).some((name) => DEVICE_FILE.test(name))) {
+        // Other computers sync here, under a passphrase check that is not
+        // here: deleted, or not arrived yet. A new one would start a second
+        // sync in the same folder that never reads the first.
+        return { ok: false, reason: 'Other computers already sync through this folder, but its passphrase check (sync.json) isn’t here yet. Wait for the folder to finish syncing, then try again.' };
       } else {
         const salt = crypto.randomBytes(16);
         key = await deriveKey(passphrase, salt);
@@ -261,16 +276,21 @@ class Sync {
     setTimeout(() => this.syncNow(), 5000).unref?.();
   }
 
+  /** A setting as the user chose it, not as light graphics decides it on this machine. */
+  chosen(key) {
+    return typeof this.prefs.chosen === 'function' ? this.prefs.chosen(key) : this.prefs.get(key);
+  }
+
   snapshot() {
     const prefs = {};
-    for (const key of SYNCED_PREFS) prefs[key] = this.prefs.get(key);
+    for (const key of SYNCED_PREFS) prefs[key] = this.chosen(key);
     return {
       v: 1,
       device: { id: this.state.deviceId, name: this.state.deviceName },
       at: Date.now(),
       bookmarks: this.bookmarks.all().map(({ url, title, folder, addedAt }) => ({ url, title, folder, addedAt })),
       readingList: this.readingList
-        ? this.readingList.items.map(({ url, title, addedAt, readAt }) => ({ url, title, addedAt, read: Boolean(readAt) }))
+        ? this.readingList.items.map(({ url, title, addedAt, readAt }) => ({ url, title, addedAt, read: Boolean(readAt), readAt: readAt || 0 }))
         : [],
       deleted: this.state.deleted,
       prefs
@@ -319,19 +339,60 @@ class Sync {
         return { ok: false, reason: this.error };
       }
       this.noteDeletions();
-      for (const name of names) {
-        if (!DEVICE_FILE.test(name) || name === `${this.state.deviceId}.json`) continue;
-        this.takeIn(path.join(devicesDir, name), name.slice(0, 16));
+      // This computer's file changed under it: another computer writes it - a
+      // profile copied there - and neither would ever read the other. This one
+      // takes a new name, and reads that file as the other computer's.
+      if (names.includes(`${this.state.deviceId}.json`) && this.state.lastWritten) {
+        let found = null;
+        try { found = open(this.key, readJsonFile(path.join(devicesDir, `${this.state.deviceId}.json`))); } catch { /* written again below */ }
+        if (found && digestOf(found) !== this.state.lastWritten) {
+          this.log(`sync: another computer writes as ${this.state.deviceId}; taking a new name`);
+          this.state.deviceId = crypto.randomBytes(8).toString('hex');
+          this.state.lastWritten = null;
+        }
       }
-      this.state.adoptPrefs = false;
+      const own = `${this.state.deviceId}.json`;
+      // Changed here since this computer last wrote: newer than anything
+      // another computer can be passing on, which may be only an echo of this
+      // one's earlier change.
+      const last = this.state.lastMine || {};
+      this.changedHere = {
+        prefs: new Set(last.prefs ? SYNCED_PREFS.filter((k) => JSON.stringify(this.chosen(k)) !== JSON.stringify(last.prefs[k])) : []),
+        bookmarks: new Set(last.names ? this.bookmarks.all()
+          .filter((b) => last.names[b.url] && (last.names[b.url][0] !== b.title || last.names[b.url][1] !== b.folder))
+          .map((b) => b.url) : [])
+      };
+      const present = new Set();
+      let tookIn = false;
+      for (const name of names) {
+        if (!DEVICE_FILE.test(name) || name === own) continue;
+        present.add(name.slice(0, 16));
+        // One computer's file that cannot be taken in is that one's problem.
+        try {
+          if (this.takeIn(path.join(devicesDir, name), name.slice(0, 16))) tookIn = true;
+        } catch (err) {
+          this.log(`sync: skipped the file from ${name.slice(0, 16)}: ${err.message}`);
+        }
+      }
+      // Not forgotten - its file may only be on its way - but not listed.
+      for (const [id, r] of Object.entries(this.state.remote)) r.gone = !present.has(id);
+      // A joiner takes the others' settings from the first of their files it
+      // reads, which may be a sync or two after it joined.
+      if (tookIn) this.state.adoptPrefs = false;
       const mine = this.snapshot();
-      this.state.lastMine = { bookmarks: mine.bookmarks.map((b) => b.url), readingList: mine.readingList.map((e) => e.url) };
+      this.state.lastMine = {
+        bookmarks: mine.bookmarks.map((b) => b.url), readingList: mine.readingList.map((e) => e.url), prefs: mine.prefs,
+        names: Object.fromEntries(mine.bookmarks.map((b) => [b.url, [b.title, b.folder]]))
+      };
       // Written only when something in it changed: a synced folder uploads
-      // every write, and a timestamp alone is not news.
-      const body = JSON.stringify({ ...mine, at: 0 });
-      const digest = crypto.createHash('sha256').update(body).digest('hex');
-      if (digest !== this.state.lastWritten) {
-        writeJsonFile(path.join(devicesDir, `${this.state.deviceId}.json`), seal(this.key, mine));
+      // every write, and a timestamp alone is not news - unless the file is
+      // not there.
+      const digest = digestOf(mine);
+      if (digest !== this.state.lastWritten || !names.includes(own)) {
+        // Counted, so a reader can tell a newer file from an older one
+        // whatever this computer's clock says.
+        this.state.seq = (Number(this.state.seq) || 0) + 1;
+        writeJsonFile(path.join(devicesDir, own), seal(this.key, { ...mine, seq: this.state.seq }));
         this.state.lastWritten = digest;
       }
       this.state.lastSync = Date.now();
@@ -355,10 +416,17 @@ class Sync {
     } catch { snap = null; }
     if (!snap || snap.v !== 1 || !Array.isArray(snap.bookmarks)) {
       this.log(`sync: skipped an unreadable file from ${id}`);
-      return;
+      return false;
     }
+    // Entries this version cannot read are passed over, not thrown on.
+    const entries = (list) => (Array.isArray(list) ? list.filter((e) => e && typeof e === 'object' && typeof e.url === 'string') : list);
+    snap.bookmarks = entries(snap.bookmarks);
+    snap.readingList = entries(snap.readingList);
     const seen = this.state.remote[id];
-    if (seen && seen.at >= snap.at) return;
+    // By its count where it has one: a clock put back would make every file
+    // after it look older than the last.
+    const counted = Number.isFinite(snap.seq) && Number.isFinite(seen?.seq);
+    if (seen && (counted ? seen.seq >= snap.seq : seen.at >= snap.at)) return true;
     const before = seen ? seen.snapshot : null;
     const theirs = snap.deleted && typeof snap.deleted === 'object' ? snap.deleted : {};
     const ours = this.state.deleted;
@@ -378,6 +446,7 @@ class Sync {
     const fresh = snap.bookmarks.filter((b) => !have.has(b.url) && !(deletedAt('bookmarks', b.url) > (b.addedAt || 0)));
     if (fresh.length) this.bookmarks.merge(fresh);
     for (const entry of changedEntries(before && before.bookmarks, snap.bookmarks, ['title', 'folder'])) {
+      if (this.changedHere?.bookmarks.has(entry.url)) continue;
       const local = this.bookmarks.all().find((b) => b.url === entry.url);
       if (local) this.bookmarks.update(local.id, { title: entry.title, folder: entry.folder });
     }
@@ -390,11 +459,15 @@ class Sync {
         if (!local || local.addedAt < at) ours.readingList[url] = Math.max(ours.readingList[url] || 0, at);
       }
       for (const entry of snap.readingList) {
-        if (!this.readingList.has(entry.url)) {
+        const local = this.readingList.items.find((e) => e.url === entry.url);
+        if (!local) {
           if (deletedAt('readingList', entry.url) > (entry.addedAt || 0)) continue;
           this.readingList.add(entry.url, entry.title);
+          if (entry.read) this.readingList.markRead(entry.url);
+        } else if (entry.read && !(Number(entry.readAt) > 0 && Number(entry.readAt) < local.addedAt)) {
+          // Read over there - unless it was saved again here since.
+          this.readingList.markRead(entry.url);
         }
-        if (entry.read) this.readingList.markRead(entry.url);
       }
     }
 
@@ -402,12 +475,14 @@ class Sync {
     // computer joins, everything it has.
     const prefs = snap.prefs && typeof snap.prefs === 'object' ? snap.prefs : {};
     for (const key of SYNCED_PREFS) {
-      if (!Object.hasOwn(prefs, key)) continue;
+      if (!Object.hasOwn(prefs, key) || this.changedHere?.prefs.has(key)) continue;
       const changed = before ? JSON.stringify(before.prefs?.[key]) !== JSON.stringify(prefs[key]) : this.state.adoptPrefs;
-      if (changed && JSON.stringify(this.prefs.get(key)) !== JSON.stringify(prefs[key])) this.applyPref(key, prefs[key]);
+      if (changed && JSON.stringify(this.chosen(key)) !== JSON.stringify(prefs[key])) this.applyPref(key, prefs[key]);
     }
 
-    this.state.remote[id] = { at: snap.at, name: String(snap.device?.name || '').slice(0, 60), snapshot: snap };
+    this.state.remote[id] = { at: snap.at, seq: Number.isFinite(snap.seq) ? snap.seq : undefined,
+      name: String(snap.device?.name || '').slice(0, 60), snapshot: snap };
+    return true;
   }
 }
 

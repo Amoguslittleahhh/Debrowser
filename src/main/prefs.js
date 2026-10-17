@@ -585,6 +585,12 @@ class Prefs {
     if (this.light && this.lightApplies(key)) return LIGHT_GRAPHICS[key];
     return this.values[key];
   }
+  /**
+   * A setting as the user left it, without what light graphics decides over
+   * it on this machine: what sync passes on to the others.
+   */
+  chosen(key) { return this.values[key]; }
+
   all() {
     const all = { ...this.values };
     if (this.darkUnlessLight && all.theme === 'system') all.theme = 'dark';
