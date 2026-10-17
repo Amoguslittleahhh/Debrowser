@@ -359,6 +359,21 @@ async function downloadFromStore(target, fetchFn, dir, chromeVersion) {
   return file;
 }
 
+/** The same, from an extension's files before they are written anywhere. */
+function localName(files, manifest) {
+  const raw = String(manifest.name || '');
+  const m = /^__MSG_(.+)__$/.exec(raw);
+  if (!m) return raw;
+  try {
+    const file = files.find((f) => f.name === `_locales/${manifest.default_locale || 'en'}/messages.json`);
+    const messages = JSON.parse(file.data.toString('utf8').replace(/^\uFEFF/, ''));
+    const hit = Object.entries(messages).find(([k]) => k.toLowerCase() === m[1].toLowerCase());
+    return hit ? String(hit[1].message) : raw;
+  } catch {
+    return raw;
+  }
+}
+
 /** "__MSG_name__" names, read from the default locale, as the browser shows them. */
 function displayName(dir, manifest) {
   const raw = String(manifest.name || '');
@@ -1024,8 +1039,10 @@ class Extensions {
     if (!manifest.manifest_version || !manifest.name) throw new Error('manifest.json has no name or version');
     const from = isFirefox(manifest) ? 'firefox' : 'chrome';
     // Named for what it is, so installing it again replaces it.
+    // By its real name, not a "__MSG_extName__" placeholder: uBlock Origin
+    // Lite, Grammarly and AdGuard all have that one, so each replaced the last.
     const key = manifest.browser_specific_settings?.gecko?.id || manifest.applications?.gecko?.id ||
-      manifest.key || `${manifest.name}@${from}`;
+      manifest.key || `${localName(own, manifest)}@${from}`;
     const adapted = adaptManifest(manifest);
     manifest = adapted.manifest;
     const id = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 24);

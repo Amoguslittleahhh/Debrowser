@@ -25,6 +25,7 @@
 ### Fixed
 
 - **Extensions that keep their settings in sync storage now work.** Dark Reader and others store their settings in the browser's sync storage, which wasn't available, so they read nothing and did nothing. It is now kept on this computer, as Chrome does when you aren't signed in.
+- **Adding an extension no longer removes another.** Extensions whose names are translated, such as uBlock Origin Lite and Bitwarden, were stored under the same placeholder name, so adding one replaced the other. Each is now stored under its real name.
 - **Extensions can read their own site's cookies.** Extensions that check whether you're signed in to their service, such as Loom and password managers, stopped with an error. They can now read and set cookies, only for the sites they asked for.
 - **Extensions that did nothing now work.** Many extensions list which servers their own pages may contact, and Debrowser's connection to them wasn't on the list, so they couldn't use anything Debrowser adds for them: their button, their menu items, alarms, notifications. An extension without a popup, such as Claude, also never heard its name chosen in the puzzle menu. And an extension added before an update kept running Debrowser's older support for good; it's now brought up to date each time it starts.
 - **A tab pulled quickly out of the strip comes out.** A quick pull straight down was past the strip before the browser noticed a drag had begun, and the tab stayed where it was. It now comes out however fast it is pulled.
