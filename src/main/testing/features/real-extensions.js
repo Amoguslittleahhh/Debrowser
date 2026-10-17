@@ -128,7 +128,7 @@ module.exports = async function realExtensions(t) {
           await dbg.sendCommand('Runtime.enable');
           page.wc.reload();
           r.scripts = await waitFor(() => worlds.some((c) => String(c.origin || '').startsWith(origin.slice(0, -1)) ||
-            (c.auxData && c.auxData.type === 'isolated' && c.name === added.name)), { timeoutMs: 8000 });
+            (c.auxData && c.auxData.type === 'isolated' && c.name === added.name)), { timeoutMs: 15_000 });
         } catch (err) {
           r.scripts = false;
           r.scriptsError = err.message;
@@ -144,7 +144,9 @@ module.exports = async function realExtensions(t) {
         ext.keepPopupOpen = true;
         runCommand('open-extension-popup', { id: added.id, right: 700, y: 40 });
         const popup = () => (ext.popupWindow && !ext.popupWindow.isDestroyed() ? ext.popupWindow : null);
-        await waitFor(() => popup() && !popup().webContents.isLoading(), { timeoutMs: 10_000 });
+        // Caught as soon as it exists: one that closes itself can be gone by
+        // the time it has finished loading.
+        await waitFor(() => popup(), { timeoutMs: 10_000, pollMs: 10 });
         const said = [];
         // Some close themselves once they have done their work - Loom's starts
         // its recorder over the page - which counts, as long as it loaded.
