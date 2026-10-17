@@ -2270,7 +2270,7 @@ body.calm[data-band="true"][data-layout="left"]::before { transition: none !impo
  * `--omni-side`, and below a width where that would leave it too narrow it goes
  * back to filling the gap.
  */
-body:not([data-layout="left"]) .omnibox { --omni-side: 234px; }
+body:not([data-layout="left"]) .omnibox { --omni-side: 230px; }
 body.incognito .omnibox { --omni-side-extra: 110px; }
 @media (min-width: 900px) {
   body:not([data-layout="left"]) .omnibox,
