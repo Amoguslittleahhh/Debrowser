@@ -934,7 +934,7 @@ async function extensionPage(page, id, dev, back) {
       const name = el('span', 'ext-perm-name', k.label);
       if (!k.applies) {
         pick.disabled = true;
-        name.append(el('span', 'row-hint', 'Not available in Debrowser'));
+        name.append(el('span', 'row-hint', k.note));
       }
       row.append(name, pick);
       return row;

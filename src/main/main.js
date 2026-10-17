@@ -777,7 +777,10 @@ function main() {
    * cannot use this to open a window of its own.
    */
   const autoPictureInPicture = (tab, out) => {
-    if (!tab.isLive || !prefs || prefs.get('autoPip') === false) return;
+    if (!tab.isLive || !prefs) return;
+    // An extension's own page: its site settings first, then the browser's.
+    const own = extensions && /^chrome-extension:/.test(String(tab.url)) ? extensions.siteChoice(tab.url, 'autoPip') : null;
+    if (own === 'block' || (own !== 'allow' && prefs.get('autoPip') === false)) return;
     if (!out) tab.autoPip = false;
     const code = out ? `(() => {
       const v = [...document.querySelectorAll('video')].find((e) => !e.paused && !e.ended && e.readyState >= 2 &&
@@ -1770,6 +1773,8 @@ function main() {
         log
       });
       browsingSetup.push((ses) => blocker.attach(ses));
+      blocker.exempt = (url) => url.startsWith('chrome-extension:') && Boolean(extensions) &&
+        extensions.siteChoice(url, 'ads') === 'allow';
       // After the window is up: a first build parses the lists, which is work
       // no start should wait for. A test starts it once the first tab has
       // painted (below) - sooner than a user's three seconds, but never on top

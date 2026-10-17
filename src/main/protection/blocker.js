@@ -167,6 +167,11 @@ class ContentBlocker {
    */
   activeFor(wc, details = null) {
     if (!this.engine || this.enabled() === false) return false;
+    // An extension's page whose site settings allow intrusive ads.
+    if (this.exempt) {
+      const page = safely(() => details?.frame?.top?.url) || safely(() => (wc && !wc.isDestroyed() ? wc.getURL() : null)) || '';
+      if (this.exempt(String(page))) return false;
+    }
     const host = hostOf(safely(() => details?.frame?.top?.url)) ||
       hostOf(safely(() => (wc && !wc.isDestroyed() ? wc.getURL() : null))) ||
       hostOf(details?.referrer);

@@ -84,9 +84,14 @@ const EXT_SETTINGS = { enabled: true, siteAccess: 'all', sites: [], fileAccess: 
 /**
  * Site settings for an extension's own pages, every one Chrome's page lists,
  * in its order, with Chrome's default. Each names the permission requests
- * it answers, or 'page' for one applied to the page itself as it loads
- * (applyPageSettings), or null for one Debrowser has nothing for - shown,
- * as Chrome shows it, but not offered. A choice left at its default changes
+ * it answers, or how else it is kept: 'page', applied to the page itself
+ * (applyPageSettings, and automatic picture-in-picture in main.js);
+ * 'blocker', the ad blocker skipping its pages when allowed; 'fixed', what
+ * every extension page has whatever is chosen (its own policy refuses http:
+ * content); 'global', set for every page at once (JavaScript security, as
+ * V8's compilers are chosen when the browser starts, for every process); or
+ * null, one Debrowser has nothing for - shown, as Chrome shows it, but not
+ * offered. A choice left at its default changes
  * nothing, so the browser decides as it would.
  */
 const SITE_SETTINGS = [
@@ -98,7 +103,7 @@ const SITE_SETTINGS = [
   ['javascript', 'JavaScript', 'allow', 'page'],
   ['images', 'Images', 'allow', 'page'],
   ['popups', 'Pop-ups and redirects', 'block', 'page'],
-  ['ads', 'Intrusive ads', 'block', null],
+  ['ads', 'Intrusive ads', 'block', 'blocker'],
   ['backgroundSync', 'Background sync', 'allow', ['background-sync', 'periodic-background-sync']],
   ['sound', 'Sound', 'allow', 'page'],
   ['downloads', 'Automatic downloads', 'ask', 'page'],
@@ -110,8 +115,8 @@ const SITE_SETTINGS = [
   ['protectedContent', 'Protected content IDs', 'allow', ['mediaKeySystem']],
   ['clipboard', 'Clipboard', 'ask', ['clipboard-read']],
   ['payment', 'Payment handlers', 'allow', ['payment-handler']],
-  ['insecureContent', 'Insecure content', 'block', null],
-  ['v8', 'JavaScript optimisation and security', 'allow', null],
+  ['insecureContent', 'Insecure content', 'block', 'fixed'],
+  ['v8', 'JavaScript optimisation and security', 'allow', 'global'],
   ['federatedIdentity', 'Third-party sign-in', 'allow', ['identity-credentials-get']],
   ['ar', 'Augmented reality', 'ask', null],
   ['vr', 'Virtual reality', 'ask', null],
@@ -119,8 +124,8 @@ const SITE_SETTINGS = [
   ['deviceUse', 'Your device use', 'ask', ['idle-detection']],
   ['windowManagement', 'Window management', 'ask', ['window-management']],
   ['fonts', 'Fonts', 'ask', ['local-fonts']],
-  ['autoPip', 'Automatic picture-in-picture', 'ask', null],
-  ['scrollZoom', 'Scrolling and zooming shared tabs', 'ask', null],
+  ['autoPip', 'Automatic picture-in-picture', 'ask', 'page'],
+  ['scrollZoom', 'Scrolling and zooming shared tabs', 'ask', ['captured-surface-control']],
   ['webApps', 'Web app installations', 'ask', null],
   ['localNetwork', 'Local network', 'ask', ['local-network-access']],
   ['appsOnDevice', 'Apps on device', 'ask', null]
@@ -1610,7 +1615,12 @@ class Extensions {
   /** Its site settings, every one, as its page lists them. */
   sitePermissions(id) {
     const chosen = this.settingsOf(id).site || {};
-    return SITE_SETTINGS.map(([kind, label, def, how]) => ({ kind, label, def, value: chosen[kind] || def, applies: how !== null }));
+    return SITE_SETTINGS.map(([kind, label, def, how]) => ({ kind, label, def,
+      value: how === 'fixed' || how === 'global' ? def : chosen[kind] || def,
+      applies: how !== null && how !== 'fixed' && how !== 'global',
+      note: how === null ? 'Not available in Debrowser'
+        : how === 'fixed' ? 'Always blocked on extension pages'
+        : how === 'global' ? 'Set for every page with JavaScript security in Settings → Advanced' : '' }));
   }
 
   /** Set one (`kind` null: all back to their defaults, Reset permissions). */
