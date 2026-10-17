@@ -21,6 +21,7 @@ const path = require('path');
 const { ipcMain } = require('electron');
 const pages = require('../../pages');
 const translate = require('../../translate');
+const { isStopped } = require('../../config');
 
 const ROOT = path.join(__dirname, '..', '..', '..', '..');
 const read = (file) => { try { return fs.readFileSync(path.join(ROOT, file), 'utf8'); } catch { return ''; } };
@@ -149,9 +150,14 @@ module.exports = async function settingsUi(t) {
     })()`);
     if (!at || typeof at !== 'object') return String(at);
     await frames(tab);
-    tab.wc.sendInputEvent({ type: 'mouseMove', x: at.x, y: at.y });
-    tab.wc.sendInputEvent({ type: 'mouseDown', button, x: at.x, y: at.y, clickCount: 1 });
-    tab.wc.sendInputEvent({ type: 'mouseUp', button, x: at.x, y: at.y, clickCount: 1 });
+    // The page's points are CSS pixels; the mouse moves in the view's, which
+    // differ by the page's zoom (Settings opens a step up).
+    const zoom = tab.wc.getZoomFactor() || 1;
+    const x = Math.round(at.x * zoom);
+    const y = Math.round(at.y * zoom);
+    tab.wc.sendInputEvent({ type: 'mouseMove', x, y });
+    tab.wc.sendInputEvent({ type: 'mouseDown', button, x, y, clickCount: 1 });
+    tab.wc.sendInputEvent({ type: 'mouseUp', button, x, y, clickCount: 1 });
     await frames(tab);
     return 'clicked';
   }
@@ -333,7 +339,7 @@ module.exports = async function settingsUi(t) {
       `sync-status ${JSON.stringify(status)}, button disabled ${row && row.disabled}, note "${row && row.note}"`);
 
     // A passphrase typed into it stays typed: nothing redraws the row under the user.
-    const typed = await type(settings, '#sync-rows input', 'a long sync passphrase');
+    const typed = await type(settings, 'document.querySelector("#sync-rows input")', 'a long sync passphrase');
     await sleep(1200);
     const held = await js(settings, 'document.querySelector("#sync-rows input").value');
     check('a passphrase typed into the sync field is still there after the page\'s state updates',
@@ -413,6 +419,19 @@ module.exports = async function settingsUi(t) {
     const backOn = await waitFor(() => prefs.get('darkWebsites') === true, { timeoutMs: 2000 });
     check('pressing the words "Dark websites" switches it as the box does',
       byLabel === 'clicked' && off && backOn, `label ${byLabel}, off ${off}, on again ${backOn}`);
+
+    // Kept across a restart: read back from the file by a fresh store, and
+    // shown by Settings opened again.
+    const { Prefs } = require('../../prefs');
+    const onDisk = await waitFor(() => {
+      const again = new Prefs(() => {}, { file: prefs.file, readOnly: true });
+      return again.get('darkWebsites') === true && again.get('translateTo') === 'fr';
+    }, { timeoutMs: 4000 });
+    settings.wc.reload();
+    await waitFor(async () => (await js(settings, 'document.querySelectorAll(".rail-item").length > 5')) === true, { timeoutMs: 8000 });
+    const reopened = await js(settings, `[document.getElementById('pref-darkWebsites')?.checked, document.getElementById('pref-translateTo')?.value]`);
+    check('Dark websites and the translation language are kept on disk, and Settings opened again shows them',
+      onDisk && Array.isArray(reopened) && reopened[0] === true && reopened[1] === 'fr', `on disk ${onDisk}, reopened ${JSON.stringify(reopened)}`);
 
     /* -------------------------------------------------------------- */
     // Bookmarks: importing names Safari, and a Safari profile is shown as one.
@@ -629,16 +648,39 @@ module.exports = async function settingsUi(t) {
         values.postal === HOME.postal && values.email === HOME.email && fillSaid === 'Filled',
       `press ${fillPress}, page ${JSON.stringify(values)}, button ${fillSaid}`);
 
-    // The page it was meant for put to sleep: nothing is filled, and the button says so.
+    // The shop now holds what was filled, so putting it to sleep can only
+    // freeze it: alive, kept as it is, and woken in milliseconds. The user
+    // pressing Fill means it - the page is still there to fill.
+    const workButton = (text) => rowButton('Work', text);
+    const workSays = () => js(pw, `(${rowOf('Work')})?.querySelector('button')?.textContent`);
     runCommand('sleep-tab', { id: shop.id });
-    const asleep = await waitFor(() => !shop.isLive, { timeoutMs: 5000 });
-    await waitFor(async () => Boolean(await js(pw, `(${rowButton('Work', 'Fill')})?.textContent`)), { timeoutMs: 3000 });
-    const sleepPress = await click(pw, rowButton('Work', 'Fill'));
-    await waitFor(async () => (await js(pw, `(${rowButton('Work', 'No page to fill')})?.textContent`)) === 'No page to fill', { timeoutMs: 3000 });
-    const sleepSaid = await js(pw, `(${rowOf('Work')})?.querySelector('button')?.textContent`);
-    check('Fill with no page to fill says so instead of filling some other tab',
-      asleep && sleepPress === 'clicked' && sleepSaid === 'No page to fill', `asleep ${asleep}, press ${sleepPress}, button "${sleepSaid}"`);
+    const frozen = await waitFor(() => shop.isLive && isStopped(shop.tier), { timeoutMs: 5000 });
+    await waitFor(async () => (await workSays()) === 'Fill', { timeoutMs: 3000 });
+    const frozenPress = await click(pw, workButton('Fill'));
+    await waitFor(async () => (await workSays()) !== 'Fill', { timeoutMs: 3000 });
+    const frozenSaid = await workSays();
+    const wokenName = await waitFor(async () => (await t.inTime(js(shop, 'document.getElementById("full").value'), 500, null)) === WORK.name,
+      { timeoutMs: 2000 });
+    check('Fill puts an address into the page the user was on even when the browser has frozen that page in the background',
+      frozen && frozenPress === 'clicked' && frozenSaid === 'Filled' && wokenName,
+      `page ${shop.isLive ? 'alive' : 'gone'} at tier ${shop.tier}, press ${frozenPress}, button "${frozenSaid}", ` +
+      `name field ${wokenName ? 'filled' : 'not filled'}`);
     close(shop);
+
+    // A page whose renderer is gone has nothing to fill, and the user is told
+    // so rather than an older page being filled in its place.
+    const left = await open(t.pageUrl('settings-ui-address.html'));
+    await tabs.activate(pw.id);
+    runCommand('sleep-tab', { id: left.id });
+    const discarded = await waitFor(() => !left.isLive, { timeoutMs: 5000 });
+    await waitFor(async () => (await workSays()) === 'Fill', { timeoutMs: 3000 });
+    const gonePress = await click(pw, workButton('Fill'));
+    await waitFor(async () => (await workSays()) !== 'Fill', { timeoutMs: 3000 });
+    const goneSaid = await workSays();
+    check('Fill with no page left to fill says so instead of filling some other tab',
+      discarded && gonePress === 'clicked' && goneSaid === 'No page to fill',
+      `discarded ${discarded} (tier ${left.tier}), press ${gonePress}, button "${goneSaid}"`);
+    close(left);
 
     /* -------------------------------------------------------------- */
     // Delete: two presses, and a press then a click elsewhere starts over.
@@ -710,20 +752,27 @@ module.exports = async function settingsUi(t) {
     const pwFill = await ask(pw, 'fill-address', { id: 'Via request' });
     const pwDelete = await ask(pw, 'delete-credential', { kind: 'address', id: 'Via request' });
     // Hostile shapes: not a string, too long, a kind that does not exist.
-    const pwOdd = await ask(pw, 'save-address', { label: { toString: 1 }, name: ['a', 'b'], street: 'x'.repeat(5000) });
-    const pwOddKept = credentials.records.address.find((r) => r.label === '[object Object]');
+    const pwOdd = await ask(pw, 'save-address', { label: { toString: 1 }, name: 'Odd Shape' });
+    const pwOddKept = credentials.records.address.find((r) => r.name === 'Odd Shape');
+    const pwLong = await ask(pw, 'save-address', { label: 'Long', name: 'N'.repeat(400), street: 'x'.repeat(5000), postal: '9'.repeat(100) });
+    const pwLongKept = credentials.reveal('address', 'Long');
     const pwBadKind = await ask(pw, 'delete-credential', { kind: 'constructor', id: 'Home' });
     const pwRefused = refusals().filter((l) => lines.indexOf(l) >= mark2);
     check('the passwords page saves, fills and deletes addresses through its requests',
       pwSave === true && typeof pwFill === 'boolean' && pwDelete === true && !credentials.reveal('address', 'Via request') &&
         pwRefused.length === 0,
       `save ${pwSave}, fill ${pwFill}, delete ${pwDelete}${pwRefused.length ? `, refused ${pwRefused.map((l) => l.message).join('; ')}` : ''}`);
-    check('an address sent in an odd shape is stored as plain words of a bounded length, and an unknown kind deletes nothing',
-      (pwOdd === false || (pwOddKept && typeof pwOddKept.name === 'string' && pwOddKept.street.length <= 511)) &&
-        pwBadKind === false && Boolean(credentials.reveal('address', 'Home')),
-      `odd save ${JSON.stringify(pwOdd)} kept ${JSON.stringify(pwOddKept && { name: pwOddKept.name, street: pwOddKept.street.length })}, ` +
+    check('an address whose fields are far too long is kept cut to size, and an unknown kind of record deletes nothing',
+      pwLong === true && pwLongKept && pwLongKept.name.length <= 255 && pwLongKept.street.length <= 511 &&
+        pwLongKept.postal.length <= 31 && pwBadKind === false && Boolean(credentials.reveal('address', 'Home')),
+      `long save ${JSON.stringify(pwLong)} kept ${JSON.stringify(pwLongKept && { name: pwLongKept.name.length, street: pwLongKept.street.length, postal: pwLongKept.postal.length })}, ` +
       `bad kind ${JSON.stringify(pwBadKind)}`);
+    // The house rule (credentials.js remove): a malformed request is answered
+    // with a refusal, never a throw the page cannot tell from a crash.
+    check('an address sent with a field that is not words is refused with an answer, not an error',
+      pwOdd === false && !pwOddKept, `answer ${JSON.stringify(pwOdd)}, kept ${JSON.stringify(pwOddKept || null)}`);
     if (pwOddKept) credentials.remove('address', pwOddKept.label);
+    if (pwLongKept) credentials.remove('address', 'Long');
 
     // But nothing of Settings': no sync, and no settings changed.
     const pwSync = {};
@@ -768,24 +817,29 @@ module.exports = async function settingsUi(t) {
     await waitFor(async () => (await js(page, 'document.getElementById("report").textContent')) !== 'pending', { timeoutMs: 5000 });
     const report = await js(page, 'JSON.parse(document.getElementById("report").textContent)');
     const frameUrls = page.wc.mainFrame.frames.map((f) => f.url);
+    // A refused frame keeps the address it asked for, so what matters is what is in it.
     const frameBridges = await Promise.all(page.wc.mainFrame.frames.map((f) =>
-      t.inTime(f.executeJavaScript('typeof window.debrowser').catch(() => 'unreadable'), 1000, 'no answer')));
+      t.inTime(f.executeJavaScript('typeof window.debrowser + "/" + Boolean(document.getElementById("locked"))')
+        .catch(() => 'unreadable'), 1000, 'no answer')));
     check('a website has no page bridge, no Node, and cannot load the passwords page in a frame or fetch Settings',
       report && report.bridge === 'undefined' && report.require === 'undefined' && report.process === 'undefined' &&
         report.sent.length === 0 && report.fetch === 'refused' && t.senderPage(tabs, page.wc) === null &&
-        frameUrls.every((u) => !/^debrowser:\/\/passwords/.test(u)) && frameBridges.every((b) => b !== 'object'),
+        frameBridges.every((b) => !/^object|true$/.test(b)),
       `report ${JSON.stringify(report)}, frames ${JSON.stringify(frameUrls)}, their bridges ${JSON.stringify(frameBridges)}`);
 
     // What Settings chose is what the page menu offers here: a real right-click.
+    const onPage = await rightClick(page, '#report');
+    const pageItems = (onPage?.items || []).filter((i) => i.id);
+    const darkItem = pageItems.find((i) => i.id === 'toggle-site-dark');
+    const translateItem = pageItems.find((i) => i.id === 'translate-page');
     const model = await rightClick(page, '#full');
     const items = (model?.items || []).filter((i) => i.id);
-    const darkItem = items.find((i) => i.id === 'toggle-site-dark');
-    const translateItem = items.find((i) => i.id === 'translate-page');
     const fillItems = items.filter((i) => i.id === 'fill-address-here').map((i) => i.payload?.id);
+    const said = (list) => list.map((i) => `${i.id}${i.label ? `="${i.label}"` : ''}`).join(', ');
     check('the page menu follows Settings: dark mode on for this site, translation into French, and the saved address to fill',
-      Boolean(model) && darkItem?.label === 'Turn off dark mode on this site' &&
-        translateItem?.label === 'Translate page to French with Google' && (!pw || fillItems.includes('Home')),
-      `items ${items.map((i) => `${i.id}${i.label ? `="${i.label}"` : ''}`).join(', ')}`);
+      Boolean(onPage) && darkItem?.label === 'Turn off dark mode on this site' &&
+        translateItem?.label === 'Translate page to French with Google' && Boolean(model) && (!pw || fillItems.includes('Home')),
+      `page ${said(pageItems)}; field ${said(items)}`);
 
     // The page reaching the channels anyway, right after that right-click,
     // with the vault open and dark mode on: nothing it asks for happens.
@@ -794,6 +848,9 @@ module.exports = async function settingsUi(t) {
     const url = page.wc.getURL();
     const lang = prefs.get('translateTo');
     const records = JSON.stringify(credentials ? credentials.records.address : []);
+    // Only what the page opens counts: earlier suites may have left one.
+    const google = () => tabs.all().filter((x) => /translate\.google/.test(x.url));
+    const googleBefore = new Set(google().map((x) => x.id));
     for (const name of NEW_SHEET_COMMANDS) ipcMain.emit('debrowser:command', asPage, name, { id: 'Home', text: 'bonjour' });
     ipcMain.emit('debrowser:command', asPage, 'set-pref', { key: 'translateTo', value: 'de' });
     const handler = ipcMain._invokeHandlers?.get?.('debrowser:request');
@@ -812,9 +869,12 @@ module.exports = async function settingsUi(t) {
         Array.isArray(fields) && fields.every((v) => v === '') && sitePrefs.get(host, 'dark') === undefined &&
         page.wc.getURL() === url && prefs.get('translateTo') === lang && prefs.get('darkWebsites') === true &&
         JSON.stringify(credentials ? credentials.records.address : []) === records &&
-        tabs.all().every((x) => !/translate\.google/.test(x.url)),
+        google().every((x) => googleBefore.has(x.id)),
       `requests ${typeof handler === 'function' ? JSON.stringify(answers) : 'handler not reachable'}, fields ${JSON.stringify(fields)}, ` +
-      `dark here ${sitePrefs.get(host, 'dark')}, url ${page.wc.getURL() === url ? 'same' : page.wc.getURL()}`);
+      `dark here ${sitePrefs.get(host, 'dark')}, url ${page.wc.getURL() === url ? 'same' : page.wc.getURL()}, ` +
+      `language ${prefs.get('translateTo')} (was ${lang}), dark websites ${prefs.get('darkWebsites')}, ` +
+      `addresses ${JSON.stringify(credentials ? credentials.records.address : []) === records ? 'same' : 'changed'}, ` +
+      `new Google tabs ${google().filter((x) => !googleBefore.has(x.id)).map((x) => x.url.slice(0, 80)).join(' ') || 'none'}`);
     close(page);
 
     // A site typed into the new tab page gets a renderer of its own, with no bridge.

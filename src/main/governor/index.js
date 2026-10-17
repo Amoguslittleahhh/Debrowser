@@ -987,6 +987,19 @@ class Governor {
     return tab.tier;
   }
 
+  /**
+   * Wake a frozen or hibernated tab for something about to be done to its
+   * page, such as filling it from the passwords page. Neither tier lost
+   * anything; the ladder takes it back down in its own time.
+   *
+   * @returns {Promise<string|null>} the tier it is in afterwards
+   */
+  async wake(tab) {
+    if (!tab || !tab.isLive || !isStopped(tab.tier)) return tab ? tab.tier : null;
+    await applyTier(tab, Tier.WARM, this.ctx());
+    return tab.tier;
+  }
+
   /** Called by the tab manager the moment the user switches tabs. */
   async onTabActivated(tab) {
     if (!tab) return;
