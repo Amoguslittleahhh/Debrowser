@@ -4564,6 +4564,19 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         publish();
         break;
 
+      // Extensions are a Lab, managed where the Lab is turned on.
+      case 'open-extensions':
+        if (INCOGNITO) break;
+        openInternalPage(tabs, `${pages.SETTINGS_URL}#labs`);
+        publish();
+        break;
+
+      // The menu's Exit: the whole browser, through the same close-tabs
+      // question a quit from the system gets (before-quit).
+      case 'quit-browser':
+        app.quit();
+        break;
+
       case 'toggle-fullscreen':
         if (!shell.window.isDestroyed()) shell.window.setFullScreen(!shell.window.isFullScreen());
         break;
@@ -5309,7 +5322,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
 
 const INCOGNITO_REFUSED = new Set([
   'new-window', 'move-tab-to-new-window', 'move-tab-to-window', 'tear-tab', 'tear-preview',
-  'extensions-list', 'extension-add', 'extension-remove',
+  'extensions-list', 'extension-add', 'extension-remove', 'open-extensions',
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
   'check-passwords',
   'vault-status', 'vault-unlock', 'vault-lock', 'vault-set', 'vault-remove', 'open-passwords',
@@ -6619,10 +6632,10 @@ function menuModel({ tabs, shell }) {
       { id: 'new-circuit', label: 'New circuit for this tab', accel: accel('new-circuit'), icon: 'reload' },
       { id: 'new-identity', label: 'New identity', accel: accel('new-identity'), icon: 'shield' },
       { id: 'panic', label: 'Close and erase now', accel: accel('panic'), icon: 'close' }
-    ] : [{
-      id: 'new-incognito-window', label: 'New private window',
-      accel: accel('new-incognito-window'), icon: 'shield'
-    }]),
+    ] : [
+      { id: 'new-window', label: 'New window', accel: accel('new-window'), icon: 'plus' },
+      { id: 'new-incognito-window', label: 'New private window', accel: accel('new-incognito-window'), icon: 'shield' }
+    ]),
     { kind: 'separator' },
     { id: 'open-bookmarks', label: 'Bookmarks', accel: accel('open-bookmarks'), icon: 'star' },
     { id: 'open-history', label: 'History', accel: accel('open-history'), icon: 'clock' },
@@ -6630,6 +6643,9 @@ function menuModel({ tabs, shell }) {
     { id: 'open-downloads', label: 'Downloads', accel: accel('open-downloads'), icon: 'download' },
     // Not in a private window, which has no saved passwords to show.
     ...(INCOGNITO ? [] : [{ id: 'open-passwords', label: 'Passwords', icon: 'key' }]),
+    // Only while the Lab is on: with it off there is nothing to manage.
+    ...(!INCOGNITO && shell.prefs?.get('labExtensions') === true
+      ? [{ id: 'open-extensions', label: 'Extensions', icon: 'puzzle' }] : []),
     { kind: 'separator' },
     { kind: 'zoom', label: 'Zoom', value: zoom, enabled: live,
       // What Reset goes back to: the default zoom, which need not be 100%.
@@ -6644,6 +6660,7 @@ function menuModel({ tabs, shell }) {
       kind: 'checkbox',
       checked: full
     },
+    { id: 'find-open', label: 'Find in page\u2026', accel: accel('find-open'), icon: 'search', enabled: live },
     { id: 'save-page', label: 'Save page as\u2026', accel: accel('save-page'), icon: 'download',
       enabled: live && !tabs.activeTab()?.internal },
     { id: 'screenshot-page', label: 'Screenshot page', icon: 'image',
@@ -6674,6 +6691,8 @@ function menuModel({ tabs, shell }) {
     { id: 'open-whats-new', label: 'What’s new', icon: 'notes' },
     { id: 'report-problem', label: 'Report a problem…', icon: 'flag' },
     { id: 'copy-version-info', label: 'Copy version info', icon: 'copy' },
+    // macOS has Quit in its own app menu, as every browser there does.
+    ...(process.platform === 'darwin' ? [] : [{ id: 'quit-browser', label: 'Exit', icon: 'close' }]),
     { kind: 'note', label: `Debrowser ${app.getVersion()} · Chromium ${process.versions.chrome}` }
   ];
 }

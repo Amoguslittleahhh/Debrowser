@@ -1366,6 +1366,78 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     tabs.close(tab.id);
   }
 
+  // The settings no other check names, each turned off and on again against
+  // the live object that reads it: a setting whose switch was disconnected
+  // would show nothing wrong anywhere else.
+  {
+    const { SCHEMA } = require('../prefs');
+    const { LinkCleaner } = require('../protection/link-cleaner');
+    const { HttpsFirst } = require('../protection/https-first');
+    const { Threats } = require('../protection/threats');
+    const kept = {};
+    const set = (key, value) => { if (!(key in kept)) kept[key] = prefs.get(key); prefs.set(key, value); };
+
+    set('cleanLinks', false);
+    const raw = tabs.create({ url: `${pageUrl('idle.html')}?utm_source=smoke&keep=1`, activate: false, realise: true });
+    await waitFor(() => raw.isLive && !raw.wc.isLoading() && /keep=1/.test(raw.wc.getURL()), { timeoutMs: 8000 });
+    const rawUrl = raw.isLive ? raw.wc.getURL() : '';
+    tabs.close(raw.id);
+    const copyKept = LinkCleaner.current?.forCopy('https://example.com/?utm_source=x') === 'https://example.com/?utm_source=x';
+    set('cleanLinks', true);
+    const copyCleaned = LinkCleaner.current?.forCopy('https://example.com/?utm_source=x') === 'https://example.com/';
+    check('with link cleaning off, links keep their tracking; on, they lose it',
+      /utm_source/.test(rawUrl) && copyKept && copyCleaned, `${rawUrl}; copy kept ${copyKept}, cleaned ${copyCleaned}`);
+
+    const judged = {};
+    for (const mode of ['off', 'upgrade', 'strict']) {
+      set('httpsMode', mode);
+      judged[mode] = Boolean(HttpsFirst.current?.judge({ url: `http://${mode}.example.org/`, resourceType: 'mainFrame' })?.redirectURL);
+    }
+    check('"Secure connections" off leaves http alone, and both other choices upgrade it',
+      !judged.off && judged.upgrade && judged.strict, JSON.stringify(judged));
+
+    set('warnDangerousSites', false);
+    const quiet = Threats.current?.verdict('http://evil.test/');
+    set('warnDangerousSites', true);
+    const warned = Threats.current?.verdict('http://evil.test/');
+    check('dangerous-site warnings stop when turned off and come back when on',
+      quiet === null && warned?.kind != null, JSON.stringify({ quiet, warned }));
+
+    const templates = prefs.engines().map(({ id }) => { set('searchEngine', id); return prefs.searchTemplate(); });
+    check('each search engine choice changes where a search goes',
+      new Set(templates).size === templates.length && templates.every((t) => t.includes('%s')), templates.join(' '));
+
+    // Every setting keeps its default, and refuses a value of the wrong kind.
+    const misfits = Object.keys(SCHEMA).filter((key) => {
+      const before = prefs.get(key);
+      const takesDefault = SCHEMA[key].ok(SCHEMA[key].def);
+      const refused = prefs.set(key, () => {}) === false && prefs.get(key) === before;
+      return !takesDefault || !refused;
+    });
+    check('every setting accepts its own default and refuses a value of the wrong kind',
+      misfits.length === 0, misfits.length ? misfits.join(', ') : `${Object.keys(SCHEMA).length} settings`);
+
+    for (const [key, value] of Object.entries(kept)) prefs.set(key, value);
+  }
+
+  // The menu has what every other browser's has: a new window, find, the
+  // extensions when there are any to manage, and a way out.
+  {
+    const ids = () => menuModel({ tabs, shell }).filter((item) => item.id).map((item) => item.id);
+    const wasLab = prefs.get('labExtensions');
+    prefs.set('labExtensions', false);
+    const without = ids();
+    prefs.set('labExtensions', true);
+    const withLab = ids();
+    prefs.set('labExtensions', wasLab);
+    const wantExit = process.platform !== 'darwin';
+    check('the menu offers a new window, find in page, extensions (with the Lab on) and exit',
+      ['new-window', 'find-open'].every((id) => without.includes(id)) &&
+      !without.includes('open-extensions') && withLab.includes('open-extensions') &&
+      without.includes('quit-browser') === wantExit,
+      withLab.join(' / '));
+  }
+
   // Dangerous sites: a listed domain (and its subdomains) is stopped with the
   // warning page in the tab, "open anyway" lets it load; a site one letter
   // from one the user uses often is caught too, and a familiar one is not.
@@ -6346,7 +6418,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       'toggle-fullscreen', 'toggle-devtools', 'reveal-download', 'open-download', 'delete-credential',
       'vault-set', 'vault-remove', 'reveal-credential', 'site-clear-data', 'forget-site', 'delete-space',
       'screenshot-page', 'hide-element', 'inspect', 'view-source', 'report-problem', 'install-browser',
-      'uninstall-browser']);
+      'uninstall-browser', 'quit-browser', 'new-window']);
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'preload', 'chrome-preload.js'), 'utf8');
     const list = src.slice(src.indexOf('const COMMANDS = new Set(['), src.indexOf(']);', src.indexOf('const COMMANDS = new Set([')));
     const commands = [...list.matchAll(/'([a-z0-9-]+)'/g)].map((m) => m[1]).filter((c) => !skip.has(c));
