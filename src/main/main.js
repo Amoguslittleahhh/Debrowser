@@ -55,7 +55,7 @@ const { Archive } = require('./data/archive');
 const reader = require('./reader');
 const readerStore = new reader.ReaderStore();
 const { Credentials, originOf, keystoreCapability } = require('./data/credentials');
-const { Sync } = require('./data/sync');
+const { Sync, MIN_PASSPHRASE } = require('./data/sync');
 const { Bookmarks, findProfiles, readProfile, parseExport } = require('./data/bookmarks');
 const { Session, loadWindowState, saveWindowState } = require('./data/session');
 const { startupTabs, placeKey, reopenable } = require('./startup');
@@ -2297,7 +2297,8 @@ function main() {
     takeDownloads(session.fromPartition(BROWSING_PARTITION));
     wireRequests({ tabs: tabsInUse, shell: shellInUse, windowOps, credentials, vault, bookmarks, history, downloads, prefs, log, context,
       sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts,
-      getArchive: () => archive, getExtensions: () => extensions, getSync: () => sync });
+      getArchive: () => archive, getExtensions: () => extensions, getSync: () => sync,
+      wake: (tab) => (governor ? governor.wake(tab) : null) });
 
     /*
      * The tabs from last time, or one new one.
@@ -5688,7 +5689,7 @@ function pageMay(page, channel, name) {
 function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
                        getReceipts = () => null, getArchive = () => null, getExtensions = () => null,
-                       getSync = () => null, context = { model: null } }) {
+                       getSync = () => null, context = { model: null }, wake = async () => {} }) {
   const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     if (windowOps) windowOps.useSender(event.sender, { views: true });
@@ -6138,18 +6139,23 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       // picks in the system's dialog - the page never names a path - and off.
       case 'sync-status': {
         const sync = getSync();
-        return sync ? sync.status() : { on: false, available: false, reason: 'sync isn’t available here' };
+        return sync ? sync.status() : { on: false, available: false, reason: 'it was not started in this run' };
       }
       case 'sync-start': {
         const sync = getSync();
         if (!sync) return { ok: false, reason: 'Sync isn’t available here.' };
+        // Told before the folder is chosen, not after.
+        const passphrase = typeof payload?.passphrase === 'string' ? payload.passphrase : '';
+        if (passphrase.length < MIN_PASSPHRASE) {
+          return { ok: false, reason: `Choose a passphrase of at least ${MIN_PASSPHRASE} characters.` };
+        }
         const { canceled, filePaths: picked } = await dialog.showOpenDialog(shell.window, {
           title: 'Choose a folder that syncs between your computers',
           buttonLabel: 'Sync here',
           properties: ['openDirectory', 'createDirectory']
         });
         if (canceled || !picked || !picked.length) return { ok: false, cancelled: true };
-        const result = await sync.start(picked[0], String(payload?.passphrase ?? ''));
+        const result = await sync.start(picked[0], passphrase);
         if (result.ok) sync.schedule();
         return result;
       }
@@ -6347,7 +6353,7 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       case 'fill-address': {
         if (!vault.unlocked()) return { locked: true };
         vault.touch();
-        return credentialRequest(command, payload, { tabs, credentials, log });
+        return credentialRequest(command, payload, { tabs, credentials, log, wake });
       }
 
       default:
@@ -6372,7 +6378,10 @@ function fillOnRequest(tab, kind, id, credentials, log) {
 }
 
 /** The saved-record requests, once the vault is known to be unlocked. */
-function credentialRequest(command, payload, { tabs, credentials, log }) {
+async function credentialRequest(command, payload, { tabs, credentials, log, wake = async () => {} }) {
+  // Words only. Anything else from the page is nothing, so a malformed record
+  // is refused with an answer: String() on some objects throws instead.
+  const text = (value) => (typeof value === 'string' ? value : '');
   switch (command) {
     case 'list-credentials': {
       const cap = credentials.capability();
@@ -6393,13 +6402,13 @@ function credentialRequest(command, payload, { tabs, credentials, log }) {
     }
     case 'save-payment':
       return credentials.put('payment', {
-        label: String(payload?.label ?? ''),
-        number: String(payload?.number ?? '').replace(/\s+/g, ''),
-        expiry: String(payload?.expiry ?? ''),
-        holder: String(payload?.holder ?? '')
+        label: text(payload?.label),
+        number: text(payload?.number).replace(/\s+/g, ''),
+        expiry: text(payload?.expiry),
+        holder: text(payload?.holder)
       });
     case 'save-address': {
-      const field = (key, max) => String(payload?.[key] ?? '').trim().slice(0, max);
+      const field = (key, max) => text(payload?.[key]).trim().slice(0, max);
       return credentials.put('address', {
         label: field('label', 127),
         name: field('name', 255),
@@ -6424,6 +6433,10 @@ function credentialRequest(command, payload, { tabs, credentials, log }) {
         .filter((t) => !t.internal)
         .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
       if (!tab || !tab.isLive || !tab.leftAtUrl || originOf(tab.wc.getURL()) !== originOf(tab.leftAtUrl)) return false;
+      // Frozen or hibernated is alive and exactly as the user left it, only
+      // stopped: woken, not reported as no page to fill.
+      if (isStopped(tab.tier)) await wake(tab);
+      if (isStopped(tab.tier)) return false;
       return fillOnRequest(tab, command === 'fill-payment' ? 'payment' : 'address', payload?.id, credentials, log);
     }
     default:
