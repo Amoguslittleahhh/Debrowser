@@ -1,30 +1,147 @@
-/* What's new: one version's notes, set for reading. */
+/*
+ * Release notes, in four designs. Every version is one `.release`: its number
+ * (`.version`) and its changes (`.changes`), one short line each. Legacy sets
+ * each version on a card; Ledger keeps them as rows of an account book;
+ * Paper sets them as a printed page; Grid as a Swiss poster.
+ */
 
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
-main { width: min(720px, 100% - 32px); margin: 0 auto; padding: 48px 0 64px; }
-h1 { margin: 0 0 var(--s6); font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
-body[data-design="paper"] h1 { font-family: var(--font-display); font-weight: 400; }
-.lead { color: var(--text-dim); font-size: 15px; line-height: 1.5; }
-h2 {
-  margin: var(--s7) 0 var(--s3);
-  color: var(--text-dim);
-  font-size: 12px;
+main { width: min(760px, 100% - 32px); margin: 0 auto; padding: 48px 0 72px; }
+header { margin-bottom: var(--s6); }
+h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
+.lead { margin: var(--s2) 0 0; color: var(--text-dim); font-size: var(--fs-lead); line-height: 1.5; }
+
+.update {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3) var(--s4);
+  margin-bottom: var(--s6);
+  padding: var(--s4);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+}
+.update p { flex: 1 1 280px; margin: 0; font-size: var(--fs-body); line-height: 1.5; }
+.primary {
+  height: 32px;
+  padding: 0 var(--s4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-fill);
+  color: #fff;
+  font: inherit;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  cursor: default;
+  transition: filter var(--fast) var(--ease-out);
+}
+.primary:hover { filter: brightness(1.1); }
+.primary:active { filter: brightness(0.94); }
+.primary:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+
+#notes { display: flex; flex-direction: column; }
+.version { display: flex; align-items: baseline; gap: var(--s3); }
+h2 { margin: 0; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.installed {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-text);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+h3 {
+  margin: var(--s4) 0 var(--s1);
+  color: var(--text-dim);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-ul { margin: 0; padding: 0; list-style: none; }
-li {
-  padding: var(--s3) 0;
-  border-top: 1px solid var(--border);
-  font-size: var(--fs-body);
-  line-height: 1.55;
-}
-li strong { font-weight: 600; }
+ul { margin: 0; padding: 0 0 0 18px; }
+li { padding: 2px 0; font-size: var(--fs-body); line-height: 1.5; }
+li::marker { color: var(--text-dim); }
 code {
   padding: 0 4px;
   border-radius: 4px;
-  background: var(--bg-raised);
+  background: var(--bg-input);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.92em;
+}
+
+/* Legacy: a card per version. */
+body[data-design="legacy"] #notes { gap: var(--s4); }
+body[data-design="legacy"] .release {
+  padding: var(--s5) var(--s6);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+}
+body[data-design="legacy"] .changes > section:first-child h3 { margin-top: var(--s3); }
+
+/* Ledger: an account book. The version in the left column, ruled rows. */
+body[data-design="ledger"] .release {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: var(--s5);
+  padding: var(--s5) 0;
+  border-top: 1px solid var(--border);
+}
+body[data-design="ledger"] .release:last-child { border-bottom: 1px solid var(--border); }
+body[data-design="ledger"] .version { flex-direction: column; align-items: flex-start; gap: var(--s2); }
+body[data-design="ledger"] h2 { font-size: 18px; font-weight: 600; }
+body[data-design="ledger"] .changes > section:first-child h3 { margin-top: 3px; }
+body[data-design="ledger"] ul { padding: 0; list-style: none; }
+body[data-design="ledger"] li { padding: 5px 0; border-bottom: 1px solid var(--border-soft); }
+body[data-design="ledger"] li:last-child { border-bottom: 0; }
+body[data-design="ledger"] .update { border-radius: var(--radius-lg); }
+
+/* Paper: a printed page. A serif number over each version, set in one column. */
+body[data-design="paper"] main { width: min(640px, 100% - 32px); }
+body[data-design="paper"] header { text-align: center; padding-bottom: var(--s5); border-bottom: 1px solid var(--border); }
+body[data-design="paper"] h1 { font-family: var(--font-display); font-size: 34px; font-weight: 400; }
+body[data-design="paper"] .release { padding: var(--s6) 0; border-bottom: 1px solid var(--border-soft); }
+body[data-design="paper"] .version { justify-content: center; }
+body[data-design="paper"] h2 { font-family: var(--font-display); font-size: 26px; font-weight: 400; }
+body[data-design="paper"] .installed { background: none; border: 1px solid currentColor; }
+body[data-design="paper"] h3 {
+  margin-top: var(--s5);
+  font-family: var(--font-display);
+  font-size: var(--fs-lead);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+body[data-design="paper"] ul { padding: 0; list-style: none; }
+body[data-design="paper"] li { padding-left: 1.2em; text-indent: -1.2em; font-size: 15px; line-height: 1.6; }
+body[data-design="paper"] li::before { content: "–"; display: inline-block; width: 1.2em; text-indent: 0; color: var(--text-dim); }
+
+/* Grid: a Swiss poster. A heavy rule, a big number, square everything. */
+body[data-design="grid"] main { width: min(880px, 100% - 32px); }
+body[data-design="grid"] h1 { font-size: 44px; font-weight: 700; letter-spacing: -0.04em; text-transform: lowercase; }
+body[data-design="grid"] .release {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--s6);
+  padding: var(--s4) 0 var(--s6);
+  border-top: 3px solid var(--text);
+}
+body[data-design="grid"] .version { flex-direction: column; align-items: flex-start; gap: var(--s2); }
+body[data-design="grid"] h2 { font-size: 40px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+body[data-design="grid"] .installed,
+body[data-design="grid"] h3 { font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+body[data-design="grid"] .installed { padding: 2px 6px; background: var(--text); color: var(--bg); }
+body[data-design="grid"] .changes > section:first-child h3 { margin-top: var(--s1); }
+body[data-design="grid"] h3 { color: var(--text); }
+body[data-design="grid"] ul { padding: 0; list-style: none; }
+body[data-design="grid"] li { padding: 6px 0; border-top: 1px solid var(--border); }
+body[data-design="grid"] .update { border: 0; background: var(--text); color: var(--bg); }
+body[data-design="grid"] .update .primary { background: var(--bg); color: var(--text); }
+
+@media (max-width: 560px) {
+  body[data-design="ledger"] .release,
+  body[data-design="grid"] .release { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  body[data-design="ledger"] .version,
+  body[data-design="grid"] .version { flex-direction: row; align-items: baseline; }
 }

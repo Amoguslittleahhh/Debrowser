@@ -2411,15 +2411,15 @@ function main() {
       painted.then(() => blocker.load());
     }
 
-    // Once after an update, a quiet word and the way to the notes - never a
-    // tab opened by itself. A new install has nothing to compare, so it only
-    // records the version.
+    // Once after an update, the notes open in a tab of their own, in the
+    // design you use. A new install has nothing to compare, so it only records
+    // the version.
     let updatedFrom = null;
     if (!INCOGNITO && !OFFLINE_MODE) {
       const seen = prefs.get('seenVersion');
       if (seen !== app.getVersion()) {
         if (seen) updatedFrom = seen;
-        if (seen) runCommand.toast(`Updated to ${app.getVersion()}`, 'What’s new', () => runCommand('open-whats-new'), 12_000);
+        if (seen) runCommand('open-whats-new');
         prefs.set('seenVersion', app.getVersion());
       }
     }
@@ -5467,7 +5467,7 @@ const PAGE_POLICY = new Map([
     requests: new Set(['reader-article'])
   }],
   ['whats-new', {
-    commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab']),
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'close-tab', 'open-settings']),
     requests: new Set(['whats-new-notes'])
   }],
   ['receipt', {
@@ -5849,8 +5849,18 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       }
 
       // This version's notes, from the packed CHANGELOG.md.
-      case 'whats-new-notes':
-        return WhatsNew.read(app.getAppPath(), app.getVersion());
+      case 'whats-new-notes': {
+        // Every version's notes, and whether a newer one is out but not yet
+        // installed - the one case the page asks you to do something.
+        const update = shell.updater ? shell.updater.snapshot() : null;
+        const waiting = update && update.version && WhatsNew.newer(update.version, app.getVersion()) &&
+          ['available', 'downloading', 'ready'].includes(update.state);
+        return {
+          version: app.getVersion(),
+          versions: WhatsNew.readAll(app.getAppPath()),
+          update: waiting ? { version: update.version, state: update.state } : null
+        };
+      }
 
       // The week's receipt, for its page.
       case 'receipt-week':
