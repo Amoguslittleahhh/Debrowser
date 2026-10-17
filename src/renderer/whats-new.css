@@ -1,8 +1,9 @@
 /*
  * Release notes, in four designs. Every version is one `.release`: its number
- * (`.version`) and its changes (`.changes`), one short line each. Legacy sets
- * each version on a card; Ledger keeps them as rows of an account book;
- * Paper sets them as a printed page; Grid as a Swiss poster.
+ * (`.version`) and its changes (`.changes`), one row each with its kind beside
+ * it, after Zen's release notes. Legacy sets each version on a card; Ledger
+ * keeps them as rows of an account book; Paper sets them as a printed page;
+ * Grid as a Swiss poster.
  */
 
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); }
@@ -40,8 +41,21 @@ h1 { margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; text
 .primary:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 
 #notes { display: flex; flex-direction: column; }
-.version { display: flex; align-items: baseline; gap: var(--s3); }
-h2 { margin: 0; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+/* Zen's listing: the version on a line of its own, then one row per change
+   with its kind beside it in colour. Each kind's colour is mixed toward the
+   text colour so it reads on either theme. */
+body {
+  --k-new: color-mix(in srgb, #2f9e6e 72%, var(--text));
+  --k-improved: color-mix(in srgb, #3b74d9 72%, var(--text));
+  --k-fixed: color-mix(in srgb, #d9603b 74%, var(--text));
+  --k-security: color-mix(in srgb, #d43b4a 76%, var(--text));
+  --k-known: color-mix(in srgb, #c98a12 74%, var(--text));
+  --k-labs: color-mix(in srgb, #9b5bd6 72%, var(--text));
+  --k-other: var(--text-dim);
+}
+.version { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s3); }
+h2 { margin: 0; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .installed {
   padding: 1px 8px;
   border-radius: var(--radius-pill);
@@ -50,17 +64,25 @@ h2 { margin: 0; font-size: 20px; font-weight: 700; font-variant-numeric: tabular
   font-size: var(--fs-micro);
   font-weight: 600;
 }
-h3 {
-  margin: var(--s4) 0 var(--s1);
-  color: var(--text-dim);
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.changes { margin: 0; padding: 0; list-style: none; }
+.changes li {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: var(--s4);
+  padding: 5px 0;
+  font-size: var(--fs-body);
+  line-height: 1.5;
 }
-ul { margin: 0; padding: 0 0 0 18px; }
-li { padding: 2px 0; font-size: var(--fs-body); line-height: 1.5; }
-li::marker { color: var(--text-dim); }
+/* A new kind starts a little apart from the one before, as Zen's groups do. */
+.changes li.first:not(:first-child) { margin-top: var(--s3); }
+.kind { font-weight: 600; overflow-wrap: anywhere; }
+.kind.new { color: var(--k-new); }
+.kind.improved { color: var(--k-improved); }
+.kind.fixed { color: var(--k-fixed); }
+.kind.security { color: var(--k-security); }
+.kind.known, .kind.leaving { color: var(--k-known); }
+.kind.labs { color: var(--k-labs); }
+.kind.other { color: var(--k-other); }
 code {
   padding: 0 4px;
   border-radius: 4px;
@@ -68,6 +90,7 @@ code {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.92em;
 }
+.release { padding: var(--s5) 0 var(--s6); }
 
 /* Legacy: a card per version. */
 body[data-design="legacy"] #notes { gap: var(--s4); }
@@ -77,71 +100,38 @@ body[data-design="legacy"] .release {
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
 }
-body[data-design="legacy"] .changes > section:first-child h3 { margin-top: var(--s3); }
 
-/* Ledger: an account book. The version in the left column, ruled rows. */
-body[data-design="ledger"] .release {
-  display: grid;
-  grid-template-columns: 128px minmax(0, 1fr);
-  gap: var(--s5);
-  padding: var(--s5) 0;
-  border-top: 1px solid var(--border);
-}
-body[data-design="ledger"] .release:last-child { border-bottom: 1px solid var(--border); }
-body[data-design="ledger"] .version { flex-direction: column; align-items: flex-start; gap: var(--s2); }
-body[data-design="ledger"] h2 { font-size: 18px; font-weight: 600; }
-body[data-design="ledger"] .changes > section:first-child h3 { margin-top: 3px; }
-body[data-design="ledger"] ul { padding: 0; list-style: none; }
-body[data-design="ledger"] li { padding: 5px 0; border-bottom: 1px solid var(--border-soft); }
-body[data-design="ledger"] li:last-child { border-bottom: 0; }
+/* Ledger: an account book. Ruled rows, the kind in its own column. */
+body[data-design="ledger"] .release { border-top: 1px solid var(--border); }
+body[data-design="ledger"] .changes li { padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
+body[data-design="ledger"] .changes li:last-child { border-bottom: 0; }
+body[data-design="ledger"] .changes li.first:not(:first-child) { margin-top: 0; border-top: 1px solid var(--border); }
 body[data-design="ledger"] .update { border-radius: var(--radius-lg); }
 
-/* Paper: a printed page. A serif number over each version, set in one column. */
-body[data-design="paper"] main { width: min(640px, 100% - 32px); }
-body[data-design="paper"] header { text-align: center; padding-bottom: var(--s5); border-bottom: 1px solid var(--border); }
+/* Paper: a printed page. Serif version numbers and kinds, one column. */
+body[data-design="paper"] main { width: min(680px, 100% - 32px); }
+body[data-design="paper"] header { padding-bottom: var(--s5); border-bottom: 1px solid var(--border); }
 body[data-design="paper"] h1 { font-family: var(--font-display); font-size: 34px; font-weight: 400; }
-body[data-design="paper"] .release { padding: var(--s6) 0; border-bottom: 1px solid var(--border-soft); }
-body[data-design="paper"] .version { justify-content: center; }
-body[data-design="paper"] h2 { font-family: var(--font-display); font-size: 26px; font-weight: 400; }
+body[data-design="paper"] .release { border-bottom: 1px solid var(--border-soft); }
+body[data-design="paper"] h2 { font-family: var(--font-display); font-size: 24px; font-weight: 400; }
 body[data-design="paper"] .installed { background: none; border: 1px solid currentColor; }
-body[data-design="paper"] h3 {
-  margin-top: var(--s5);
-  font-family: var(--font-display);
-  font-size: var(--fs-lead);
-  font-style: italic;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-}
-body[data-design="paper"] ul { padding: 0; list-style: none; }
-body[data-design="paper"] li { padding-left: 1.2em; text-indent: -1.2em; font-size: 15px; line-height: 1.6; }
-body[data-design="paper"] li::before { content: "–"; display: inline-block; width: 1.2em; text-indent: 0; color: var(--text-dim); }
+body[data-design="paper"] .kind { font-family: var(--font-display); font-size: 15px; font-style: italic; font-weight: 400; }
+body[data-design="paper"] .changes li { font-size: 15px; line-height: 1.6; }
 
-/* Grid: a Swiss poster. A heavy rule, a big number, square everything. */
+/* Grid: a Swiss poster. A heavy rule, a big number, mono kinds, square. */
 body[data-design="grid"] main { width: min(880px, 100% - 32px); }
 body[data-design="grid"] h1 { font-size: 44px; font-weight: 700; letter-spacing: -0.04em; text-transform: lowercase; }
-body[data-design="grid"] .release {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--s6);
-  padding: var(--s4) 0 var(--s6);
-  border-top: 3px solid var(--text);
-}
-body[data-design="grid"] .version { flex-direction: column; align-items: flex-start; gap: var(--s2); }
-body[data-design="grid"] h2 { font-size: 40px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+body[data-design="grid"] .release { padding-top: var(--s3); border-top: 3px solid var(--text); }
+body[data-design="grid"] h2 { font-size: 36px; font-weight: 700; letter-spacing: -0.04em; line-height: 1.1; }
 body[data-design="grid"] .installed,
-body[data-design="grid"] h3 { font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+body[data-design="grid"] .kind { font-family: var(--font-mono); font-size: var(--fs-micro); letter-spacing: 0.08em; text-transform: uppercase; }
 body[data-design="grid"] .installed { padding: 2px 6px; background: var(--text); color: var(--bg); }
-body[data-design="grid"] .changes > section:first-child h3 { margin-top: var(--s1); }
-body[data-design="grid"] h3 { color: var(--text); }
-body[data-design="grid"] ul { padding: 0; list-style: none; }
-body[data-design="grid"] li { padding: 6px 0; border-top: 1px solid var(--border); }
+body[data-design="grid"] .kind { padding-top: 2px; }
+body[data-design="grid"] .changes li { padding: 6px 0; border-top: 1px solid var(--border); }
+body[data-design="grid"] .changes li.first:not(:first-child) { margin-top: 0; border-top-color: var(--text); }
 body[data-design="grid"] .update { border: 0; background: var(--text); color: var(--bg); }
 body[data-design="grid"] .update .primary { background: var(--bg); color: var(--text); }
 
-@media (max-width: 560px) {
-  body[data-design="ledger"] .release,
-  body[data-design="grid"] .release { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
-  body[data-design="ledger"] .version,
-  body[data-design="grid"] .version { flex-direction: row; align-items: baseline; }
+@media (max-width: 520px) {
+  .changes li { grid-template-columns: 84px minmax(0, 1fr); gap: var(--s3); }
 }

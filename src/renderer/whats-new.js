@@ -41,28 +41,35 @@ function el(tag, className, text) {
   return node;
 }
 
+/** The label beside a change, and the colour class it takes. */
+function kind(title) {
+  const known = { New: 'new', Improved: 'improved', Fixed: 'fixed', Security: 'security',
+    'Known issues': 'known', 'In Labs': 'labs', 'Leaving next release': 'leaving', Corrections: 'fixed' };
+  return { label: title || 'Changed', cls: known[title] || 'other' };
+}
+
 function release(notes, installed) {
   const article = el('article', 'release');
-  const side = el('div', 'version');
-  side.append(el('h2', '', notes.version));
-  if (installed) side.append(el('span', 'installed', 'Installed'));
-  const body = el('div', 'changes');
+  const top = el('div', 'version');
+  top.append(el('h2', '', `v${notes.version}`));
+  if (installed) top.append(el('span', 'installed', 'Installed'));
   // The paragraph a version opens with sums it up at length; the lines under
   // it say the same thing shorter, so it is left to the release page.
   const sections = notes.sections.length > 1 && !notes.sections[0].title ? notes.sections.slice(1) : notes.sections;
+  // One row per change, its section named beside it, as Zen lists them.
+  const list = el('ul', 'changes');
   for (const section of sections) {
-    const block = el('section');
-    if (section.title) block.append(el('h3', '', section.title));
-    const list = el('ul');
-    for (const item of section.items) {
-      const li = el('li');
-      li.append(inline(line(item)));
+    const { label, cls } = kind(section.title);
+    section.items.forEach((item, i) => {
+      const li = el('li', i === 0 ? 'first' : '');
+      const tag = el('span', `kind ${cls}`, label);
+      const text = el('span', 'text');
+      text.append(inline(line(item)));
+      li.append(tag, text);
       list.append(li);
-    }
-    block.append(list);
-    body.append(block);
+    });
   }
-  article.append(side, body);
+  article.append(top, list);
   return article;
 }
 
