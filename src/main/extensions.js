@@ -84,8 +84,10 @@ const EXT_SETTINGS = { enabled: true, siteAccess: 'all', sites: [], fileAccess: 
 /**
  * Site settings for an extension's own pages, every one Chrome's page lists,
  * in its order, with Chrome's default. Each names the permission requests
- * it answers; a choice left at its default answers nothing, so the browser
- * decides as it would. Those naming none are kept, as Chrome keeps them.
+ * it answers, or 'page' for one applied to the page itself as it loads
+ * (applyPageSettings), or null for one Debrowser has nothing for - shown,
+ * as Chrome shows it, but not offered. A choice left at its default changes
+ * nothing, so the browser decides as it would.
  */
 const SITE_SETTINGS = [
   ['location', 'Location', 'ask', ['geolocation']],
@@ -93,13 +95,13 @@ const SITE_SETTINGS = [
   ['microphone', 'Microphone', 'ask', ['media:audio']],
   ['sensors', 'Motion sensors', 'allow', ['sensors', 'accelerometer', 'gyroscope', 'magnetometer']],
   ['notifications', 'Notifications', 'ask', ['notifications']],
-  ['javascript', 'JavaScript', 'allow', []],
-  ['images', 'Images', 'allow', []],
-  ['popups', 'Pop-ups and redirects', 'block', []],
-  ['ads', 'Intrusive ads', 'block', []],
+  ['javascript', 'JavaScript', 'allow', 'page'],
+  ['images', 'Images', 'allow', 'page'],
+  ['popups', 'Pop-ups and redirects', 'block', 'page'],
+  ['ads', 'Intrusive ads', 'block', null],
   ['backgroundSync', 'Background sync', 'allow', ['background-sync', 'periodic-background-sync']],
-  ['sound', 'Sound', 'allow', []],
-  ['downloads', 'Automatic downloads', 'ask', []],
+  ['sound', 'Sound', 'allow', 'page'],
+  ['downloads', 'Automatic downloads', 'ask', 'page'],
   ['midi', 'MIDI device control and reprogram', 'ask', ['midi', 'midiSysex']],
   ['usb', 'USB devices', 'ask', ['usb']],
   ['serial', 'Serial ports', 'ask', ['serial']],
@@ -108,21 +110,24 @@ const SITE_SETTINGS = [
   ['protectedContent', 'Protected content IDs', 'allow', ['mediaKeySystem']],
   ['clipboard', 'Clipboard', 'ask', ['clipboard-read']],
   ['payment', 'Payment handlers', 'allow', ['payment-handler']],
-  ['insecureContent', 'Insecure content', 'block', []],
-  ['v8', 'JavaScript optimisation and security', 'allow', []],
+  ['insecureContent', 'Insecure content', 'block', null],
+  ['v8', 'JavaScript optimisation and security', 'allow', null],
   ['federatedIdentity', 'Third-party sign-in', 'allow', ['identity-credentials-get']],
-  ['ar', 'Augmented reality', 'ask', ['ar']],
-  ['vr', 'Virtual reality', 'ask', ['vr']],
-  ['handTracking', 'Hand tracking', 'ask', ['hand-tracking']],
+  ['ar', 'Augmented reality', 'ask', null],
+  ['vr', 'Virtual reality', 'ask', null],
+  ['handTracking', 'Hand tracking', 'ask', null],
   ['deviceUse', 'Your device use', 'ask', ['idle-detection']],
   ['windowManagement', 'Window management', 'ask', ['window-management']],
   ['fonts', 'Fonts', 'ask', ['local-fonts']],
-  ['autoPip', 'Automatic picture-in-picture', 'ask', []],
-  ['scrollZoom', 'Scrolling and zooming shared tabs', 'ask', []],
-  ['webApps', 'Web app installations', 'ask', []],
+  ['autoPip', 'Automatic picture-in-picture', 'ask', null],
+  ['scrollZoom', 'Scrolling and zooming shared tabs', 'ask', null],
+  ['webApps', 'Web app installations', 'ask', null],
   ['localNetwork', 'Local network', 'ask', ['local-network-access']],
-  ['appsOnDevice', 'Apps on device', 'ask', []]
+  ['appsOnDevice', 'Apps on device', 'ask', null]
 ];
+
+/** What "Images: Block" refuses on an extension's page. */
+const IMAGE_PATTERNS = ['*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp', '*.avif', '*.svg', '*.ico', '*.bmp'];
 
 /** A site as typed - "example.com" or a whole address - as its host name, or null. */
 function siteHost(text) {
@@ -1605,7 +1610,7 @@ class Extensions {
   /** Its site settings, every one, as its page lists them. */
   sitePermissions(id) {
     const chosen = this.settingsOf(id).site || {};
-    return SITE_SETTINGS.map(([kind, label, def]) => ({ kind, label, def, value: chosen[kind] || def }));
+    return SITE_SETTINGS.map(([kind, label, def, how]) => ({ kind, label, def, value: chosen[kind] || def, applies: how !== null }));
   }
 
   /** Set one (`kind` null: all back to their defaults, Reset permissions). */
@@ -1633,20 +1638,66 @@ class Extensions {
    * to the browser.
    */
   decidePermission(url, permission, details = {}) {
-    const m = /^chrome-extension:\/\/([a-p]{32})(?:\/|$)/.exec(String(url || ''));
-    if (!m) return null;
-    let id = null;
-    for (const ses of this.sessions) {
-      for (const [folder, loaded] of ses.__debrowserExt || new Map()) if (loaded === m[1]) id = folder;
-    }
+    const id = this.folderOf(url);
     if (!id) return null;
     const media = [...(details.mediaTypes || []), ...(details.mediaType ? [details.mediaType] : [])];
     const asked = permission === 'media' ? (media.length ? media : ['video', 'audio']).map((t) => `media:${t}`) : [permission];
     const chosen = this.settingsOf(id).site || {};
-    const answers = SITE_SETTINGS.filter(([, , , perms]) => perms.some((p) => asked.includes(p))).map(([kind]) => chosen[kind]);
+    const answers = SITE_SETTINGS.filter(([, , , perms]) => Array.isArray(perms) && perms.some((p) => asked.includes(p))).map(([kind]) => chosen[kind]);
     if (!answers.length || answers.some((a) => !a || a === 'ask')) return answers.includes('block') ? false : null;
     if (answers.includes('block')) return false;
     return answers.every((a) => a === 'allow') ? true : null;
+  }
+
+  /** The installed extension a chrome-extension:// address belongs to, or null. */
+  folderOf(url) {
+    const m = /^chrome-extension:\/\/([a-p]{32})(?:\/|$)/.exec(String(url || ''));
+    if (!m) return null;
+    for (const ses of this.sessions) {
+      for (const [folder, loaded] of ses.__debrowserExt || new Map()) if (loaded === m[1]) return folder;
+    }
+    return null;
+  }
+
+  /** The user's own choice for one of its site settings - 'allow', 'block' - or null. */
+  siteChoice(url, kind) {
+    const id = this.folderOf(url);
+    return (id && (this.settingsOf(id).site || {})[kind]) || null;
+  }
+
+  /**
+   * The site settings applied to an extension's page as it starts loading:
+   * Sound by muting it; JavaScript, Images and Pop-ups through the page's
+   * own debugger, before its first script runs - script switched off, image
+   * loads refused, window.open answered with nothing. Untouched unless the
+   * user changed one, and put back when they change it back.
+   */
+  async applyPageSettings(wc, url) {
+    const choice = (kind) => this.siteChoice(url, kind);
+    const sound = choice('sound');
+    if (sound || wc.__debrowserMutedByExt) {
+      wc.setAudioMuted(sound === 'block');
+      wc.__debrowserMutedByExt = sound === 'block';
+    }
+    const js = choice('javascript') === 'block';
+    const images = choice('images') === 'block';
+    const popups = choice('popups') === 'block';
+    if (!js && !images && !popups && !wc.__debrowserPageRules) return;
+    try { if (!wc.debugger.isAttached()) wc.debugger.attach('1.3'); } catch { return; }
+    wc.__debrowserPageRules = true;
+    const send = (method, params) => wc.debugger.sendCommand(method, params).catch(() => null);
+    await send('Emulation.setScriptExecutionDisabled', { value: js });
+    await send('Network.enable');
+    await send('Network.setBlockedURLs', { urls: images ? IMAGE_PATTERNS : [] });
+    if (wc.__debrowserPopupScript) {
+      await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: wc.__debrowserPopupScript });
+      wc.__debrowserPopupScript = null;
+    }
+    if (popups) {
+      await send('Page.enable');
+      const r = await send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.open = () => null;' });
+      wc.__debrowserPopupScript = r && r.identifier;
+    }
   }
 
   /** Change one; what changes what it may reach loads it again. */
