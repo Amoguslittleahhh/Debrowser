@@ -22,7 +22,7 @@ if (require('../terminal/launch').launch()) return;
  */
 
 const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, BrowserWindow, powerMonitor,
-        systemPreferences, shell: electronShell, net: electronNet } = require('electron');
+        systemPreferences, nativeTheme, shell: electronShell, net: electronNet } = require('electron');
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
@@ -1173,9 +1173,12 @@ function main() {
           engineName: prefs ? prefs.engineName() : null,
           fill: fillOffer(params, tab),
           translate: translateOffer(tab),
-          // Dark websites, while it is on: whether it applies on this site.
+          // Dark websites, while it is on: true on a page it darkened, false on
+          // a site it was turned off for, and nothing on a page dark of its own.
           darkHere: !INCOGNITO && !tab.internal && prefs && prefs.get('darkWebsites') === true &&
-            darkPages.hostOf(tab.url) ? darkPages.wanted(prefs, sitePrefs, darkPages.hostOf(tab.url)) : null
+            darkPages.hostOf(tab.url)
+            ? (darkPages.wanted(prefs, sitePrefs, darkPages.hostOf(tab.url)) ? (tab.darkCssKey ? true : null) : false)
+            : null
         }),
         // Kept beside the model rather than in it: an item's payload is what
         // the renderer may send back, and the page's own coordinates are not
@@ -1381,7 +1384,7 @@ function main() {
         break;
       case 'dom-ready':
         if (siteStyles) siteStyles.apply(tab);
-        if (!INCOGNITO) darkPages.apply(tab, prefs, sitePrefs);
+        if (!INCOGNITO) darkPages.apply(tab, prefs, sitePrefs, { newPage: true });
         break;
       case 'peek':
         // Not in a private window: its tabs carry protections a bare view
@@ -2977,6 +2980,16 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
 
   /** Every tab in every window, for what is the browser's rather than a window's. */
   const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
+
+  // Dark websites decide again when the theme changes: a site with a dark
+  // design of its own turns dark with it, and darkened it would turn light.
+  let darkRecheck = null;
+  const recheckDark = () => {
+    if (INCOGNITO || !prefs || prefs.get('darkWebsites') !== true) return;
+    clearTimeout(darkRecheck);
+    darkRecheck = setTimeout(() => { for (const tab of everyTab()) darkPages.recheck(tab, prefs, sitePrefs); }, 300);
+  };
+  nativeTheme.on('updated', recheckDark);
   /** A tab by id in this window, or failing that in any. */
   const tabAnywhere = (id) => tabs.byId(id) || (windowOps ? windowOps.all.byId(id) : null);
 
@@ -4746,7 +4759,8 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
         if (payload.key === 'secureDns') applySecureDns(prefs, log);
         // Dark websites: open pages change now rather than on their next load.
-        if (payload.key === 'darkWebsites') {
+        if (payload.key === 'theme') recheckDark();
+        if (payload.key === 'darkWebsites' && !INCOGNITO) {
           for (const tab of everyTab()) {
             if (payload.value === true) darkPages.apply(tab, prefs, sitePrefs);
             else darkPages.remove(tab);

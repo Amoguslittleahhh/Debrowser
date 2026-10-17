@@ -79,7 +79,11 @@ function readHistory(profile) {
       firefox: `SELECT url, title, visit_count AS visits, last_visit_date / 1000 AS at FROM moz_places
                 WHERE visit_count > 0 AND hidden = 0 AND last_visit_date IS NOT NULL
                 ORDER BY last_visit_date DESC LIMIT ${MAX_HISTORY}`,
-      safari: `SELECT i.url AS url, v.title AS title, i.visit_count AS visits, MAX(v.visit_time) AS at
+      // The title from the latest visit that had one: a failed load or a
+      // redirect is recorded with none, and the page was still called that.
+      safari: `SELECT i.url AS url, i.visit_count AS visits, MAX(v.visit_time) AS at,
+                 (SELECT t.title FROM history_visits t WHERE t.history_item = i.id AND t.title IS NOT NULL AND t.title <> ''
+                  ORDER BY t.visit_time DESC LIMIT 1) AS title
                FROM history_items i JOIN history_visits v ON v.history_item = i.id
                GROUP BY i.id ORDER BY at DESC LIMIT ${MAX_HISTORY}`,
       chromium: `SELECT url, title, visit_count AS visits, last_visit_time / 1000 AS at FROM urls
@@ -160,10 +164,16 @@ function parseBinaryPlist(buf) {
   };
   const offsets = Array.from({ length: count }, (_, i) => uint(tableAt + i * offsetSize, offsetSize));
   const seen = new Set();
+  const need = (at, n) => { if (at + n > buf.length) throw new Error('damaged property list'); };
+  // An object is read once for each reference to it, and a file never holds
+  // more references than bytes. One whose arrays hold the same child twice,
+  // level under level, would otherwise be read 2^levels times.
+  let budget = buf.length;
 
   const read = (ref) => {
-    if (ref >= count || seen.has(ref)) throw new Error('damaged property list');
+    if (ref >= count || seen.has(ref) || --budget < 0) throw new Error('damaged property list');
     const at = offsets[ref];
+    need(at, 1);
     const marker = buf[at];
     const kind = marker >> 4;
     let info = marker & 0x0f;
@@ -181,10 +191,11 @@ function parseBinaryPlist(buf) {
       case 0x1: return uint(start, 1 << info);
       case 0x2: return info === 2 ? buf.readFloatBE(start) : buf.readDoubleBE(start);
       case 0x3: return new Date(buf.readDoubleBE(start) * 1000 + SAFARI_EPOCH_OFFSET_MS);
-      case 0x4: { const n = length(); return buf.subarray(start, start + n); }
-      case 0x5: { const n = length(); return buf.toString('latin1', start, start + n); }
+      case 0x4: { const n = length(); need(start, n); return buf.subarray(start, start + n); }
+      case 0x5: { const n = length(); need(start, n); return buf.toString('latin1', start, start + n); }
       case 0x6: {
         const n = length();
+        need(start, n * 2);
         const out = Buffer.from(buf.subarray(start, start + n * 2));
         out.swap16();
         return out.toString('utf16le');
@@ -202,7 +213,11 @@ function parseBinaryPlist(buf) {
         const out = {};
         for (let i = 0; i < n; i++) {
           const key = read(uint(start + i * refSize, refSize));
-          out[String(key)] = read(uint(start + (n + i) * refSize, refSize));
+          // Defined, not assigned: a key named __proto__ is the file's own key,
+          // not this object's prototype.
+          Object.defineProperty(out, String(key), {
+            value: read(uint(start + (n + i) * refSize, refSize)), enumerable: true, writable: true, configurable: true
+          });
         }
         seen.delete(ref);
         return out;

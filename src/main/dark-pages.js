@@ -19,32 +19,95 @@
  * on it can measure.
  */
 
+/** Marks a picture set by a style sheet, which the page's own markup does not show. */
+const KEEP = 'data-debrowser-dark-keep';
+
 /**
  * The filter on the root element. The specification exempts the root from the
  * rule that a filter makes a containing block for fixed elements, so a fixed
  * header stays fixed - on any other element this would break them.
+ *
+ * An author sheet, though a user one would outrank the page's own important
+ * rules: Electron's removeInsertedCSS only finds author sheets, and a user one
+ * could never be taken off again. The `:not(#\#)` raises it over the page's
+ * ordinary rules. Pictures are turned back once, at the outermost: one inside
+ * a <picture>, or inside a marked element, would otherwise be turned twice.
  */
+const OUTSIDE = `:not(picture *):not([${KEEP}] *)`;
 const CSS = `
-html {
+html:not(#\\#) {
   filter: invert(1) hue-rotate(180deg) brightness(0.94) !important;
   background-color: #fff !important;
 }
-img, video, picture, canvas, embed, object, iframe, svg image,
-[style*="background-image"], [data-debrowser-dark-keep] {
+:is(img, video, picture, canvas, embed, object, iframe, svg image, [${KEEP}])${OUTSIDE}:not(#\\#) {
   filter: invert(1) hue-rotate(180deg) !important;
 }
 `;
 
-/** True when the page, as drawn, is light: its root or body background is mostly white. */
+/**
+ * True when the page, as drawn, is light. What is drawn at a few points of the
+ * window, down to the first element with a background: a single-page app paints
+ * on its #app or #root, not on html or body. Colours go through a canvas, as
+ * computed styles keep oklch(), lab() and color() in their own notation. Where
+ * nothing paints a background, not even the root or the body, the colour
+ * scheme decides it - which the text, drawn in the scheme's colours, shows.
+ */
 const IS_LIGHT = `(() => {
-  const shade = (el) => {
-    if (!el) return null;
-    const parts = (getComputedStyle(el).backgroundColor.match(/[\\d.]+/g) || []).map(Number);
-    if (parts.length < 3 || (parts.length > 3 && parts[3] < 0.1)) return null;
-    return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) / 255;
+  const ctx = new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true });
+  const shade = (colour) => {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = '#0000';
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    return a < 26 ? null : (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   };
-  const shadeOf = shade(document.documentElement) ?? shade(document.body) ?? 1;
-  return shadeOf > 0.55;
+  const painted = (el) => {
+    for (; el; el = el.parentElement) {
+      const s = shade(getComputedStyle(el).backgroundColor);
+      if (s !== null) return s;
+    }
+    return null;
+  };
+  const root = document.documentElement;
+  const body = document.body || root;
+  // The canvas takes the root's background, or the body's when the root has none.
+  const text = shade(getComputedStyle(body).color);
+  const canvas = shade(getComputedStyle(root).backgroundColor) ?? shade(getComputedStyle(body).backgroundColor) ??
+    (text === null ? 1 : 1 - text);
+  const w = innerWidth, h = innerHeight;
+  const points = w && h ? [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]] : [];
+  const shades = points.map(([x, y]) => painted(document.elementFromPoint(w * x, h * y)) ?? canvas);
+  if (!shades.length) shades.push(canvas);
+  return shades.reduce((a, b) => a + b, 0) / shades.length > 0.55;
+})()`;
+
+/**
+ * Marks the pictures a style sheet sets, now and as the page adds them, so they
+ * are turned back too. Not every one: an element with words of its own is only
+ * marked when its picture covers it, as a hero image does - a small icon beside
+ * the words would turn them back as well, dark on the darkened page.
+ */
+const MARK = `(() => {
+  if (window.__debrowserDarkKeep) return;
+  window.__debrowserDarkKeep = true;
+  const root = document.documentElement;
+  const mark = (nodes) => {
+    const keep = [];
+    for (const node of nodes) {
+      if (node.nodeType !== 1) continue;
+      for (const el of [node, ...node.querySelectorAll('*')]) {
+        if (el === root || el === document.body || el.hasAttribute('${KEEP}')) continue;
+        const style = getComputedStyle(el);
+        if (!style.backgroundImage.includes('url(')) continue;
+        if (!el.textContent.trim() || /cover|contain/.test(style.backgroundSize)) keep.push(el);
+      }
+    }
+    for (const el of keep) el.setAttribute('${KEEP}', '');
+  };
+  mark([root]);
+  new MutationObserver((records) => mark(records.flatMap((r) => [...r.addedNodes])))
+    .observe(root, { childList: true, subtree: true });
 })()`;
 
 /** Whether dark websites apply to this host: on in Settings, and not turned off there. */
@@ -62,29 +125,54 @@ function hostOf(url) {
   }
 }
 
+const usable = (tab) => tab && !tab.internal && tab.isLive && !tab.wc.isDestroyed();
+
 /**
  * Darken the tab's page, if it should be and is not already. Called on every
- * `dom-ready`; the inserted sheet goes with the document, so each new page is
- * decided afresh.
+ * `dom-ready` with `newPage`, as the inserted sheet goes with the document and
+ * each new page is decided afresh; and when the setting or the site's choice
+ * changes. `darkGen` counts the decisions: one overtaken while it waited on the
+ * page - switched off again, or the page gone - does nothing.
  */
-async function apply(tab, prefs, sitePrefs) {
-  if (!tab || tab.internal || !tab.isLive || tab.wc.isDestroyed()) return;
-  tab.darkCssKey = null;   // the last page's sheet went with it
-  const host = hostOf(tab.wc.getURL());
-  if (!host || !wanted(prefs, sitePrefs, host)) return;
+async function apply(tab, prefs, sitePrefs, { newPage = false } = {}) {
+  if (!usable(tab)) return;
+  if (newPage) tab.darkCssKey = null;
+  if (tab.darkCssKey) return;
+  const gen = tab.darkGen = (tab.darkGen || 0) + 1;
+  const still = () => gen === tab.darkGen && usable(tab) && wanted(prefs, sitePrefs, hostOf(tab.wc.getURL()));
+  if (!hostOf(tab.wc.getURL()) || !still()) return;
   try {
     const light = await tab.wc.executeJavaScriptInIsolatedWorld(1002, [{ code: IS_LIGHT }]);
-    if (light !== true || tab.wc.isDestroyed()) return;
-    tab.darkCssKey = await tab.wc.insertCSS(CSS, { cssOrigin: 'user' });
+    if (light !== true || !still()) return;
+    const key = await tab.wc.insertCSS(CSS, { cssOrigin: 'author' });
+    if (!still()) {
+      if (!tab.wc.isDestroyed()) tab.wc.removeInsertedCSS(key).catch(() => {});
+      return;
+    }
+    tab.darkCssKey = key;
+    tab.wc.executeJavaScriptInIsolatedWorld(1002, [{ code: MARK }]).catch(() => {});
   } catch { /* gone, or a page that cannot be styled */ }
 }
 
-/** Take the darkening off the tab's current page, if it has it. */
+/** Take the darkening off the tab's current page, and stop any decision still being made. */
 async function remove(tab) {
-  if (!tab || !tab.darkCssKey || !tab.isLive || tab.wc.isDestroyed()) return;
+  if (!tab) return;
+  tab.darkGen = (tab.darkGen || 0) + 1;
   const key = tab.darkCssKey;
   tab.darkCssKey = null;
+  if (!key || !tab.isLive || tab.wc.isDestroyed()) return;
   await tab.wc.removeInsertedCSS(key).catch(() => {});
 }
 
-module.exports = { apply, remove, wanted, hostOf, CSS };
+/**
+ * Decide again, as the page sees it now: after the theme changes, a page with
+ * a dark design of its own may have turned dark, and one darkened before would
+ * then be inverted back to light.
+ */
+async function recheck(tab, prefs, sitePrefs) {
+  if (!usable(tab) || !wanted(prefs, sitePrefs, hostOf(tab.wc.getURL()))) return;
+  await remove(tab);
+  await apply(tab, prefs, sitePrefs);
+}
+
+module.exports = { apply, remove, recheck, wanted, hostOf, CSS, KEEP };
