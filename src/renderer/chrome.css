@@ -1137,14 +1137,15 @@ body[data-layout="left"] .tab.active { background: var(--bg-input); }
  * reads as a sheet laid on the side either way; window.js paints the
  * frame in the same tone (`sideFor` in palette.js, which has to agree).
  *
- * Only the default strip: a colour chosen in Settings is used as it is.
+ * Only the default strip, and only pinned: a colour chosen in Settings is
+ * used as it is, and the strip tucked away keeps the theme's own surface.
  *
  * What sat on the old surface is moved with it: secondary text is inked
  * darker, to keep 7:1 on the deeper tone, and the address bar and the open
  * tab are raised clear of it - in a dark theme `--bg-input` was within a
  * shade of the new column, and both all but vanished into it.
  */
-body[data-layout="left"]:not([data-strip-tone]) {
+body[data-layout="left"]:not([data-strip-tone]):not([data-detached="true"]) {
   --strip: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, var(--text) 7%, var(--bg)));
   --side-dim: color-mix(in srgb, var(--text) 35%, var(--text-dim));
   --side-raised: light-dark(var(--bg-raised), color-mix(in srgb, var(--text) 15%, var(--bg)));
@@ -1152,21 +1153,21 @@ body[data-layout="left"]:not([data-strip-tone]) {
 /* The designs' own pages sit on the raised `--bg-input` (newtab.css), which in
    a dark theme is the lighter way, so there the side steps down instead; and
    Grid's light page is grey, not white, so its side goes a step deeper. */
-body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"]:not([data-strip-tone]) {
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"]:not([data-strip-tone]):not([data-detached="true"]) {
   --strip: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
   --side-raised: light-dark(var(--bg-raised), var(--bg-input));
 }
-body[data-design="grid"][data-layout="left"]:not([data-strip-tone]) {
+body[data-design="grid"][data-layout="left"]:not([data-strip-tone]):not([data-detached="true"]) {
   --strip: light-dark(color-mix(in srgb, var(--text) 16%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
 }
-body[data-layout="left"]:not([data-strip-tone]) :is(.toolbar, .tabstrip, .findbar) { --text-dim: var(--side-dim); }
-body[data-layout="left"]:not([data-strip-tone]) .omnibox { background: var(--side-raised); }
-body[data-layout="left"]:not([data-strip-tone]) .omnibox:hover {
+body[data-layout="left"]:not([data-strip-tone]):not([data-detached="true"]) :is(.toolbar, .tabstrip, .findbar) { --text-dim: var(--side-dim); }
+body[data-layout="left"]:not([data-strip-tone]):not([data-detached="true"]) .omnibox { background: var(--side-raised); }
+body[data-layout="left"]:not([data-strip-tone]):not([data-detached="true"]) .omnibox:hover {
   background: color-mix(in srgb, var(--accent) 6%, var(--side-raised));
 }
 /* Paper marks the open tab with a rule and Grid inverts it; neither has a
    surface to raise. */
-body[data-layout="left"]:not([data-strip-tone]):not([data-design="paper"]):not([data-design="grid"]) .tab.active {
+body[data-layout="left"]:not([data-strip-tone]):not([data-detached="true"]):not([data-design="paper"]):not([data-design="grid"]) .tab.active {
   background: var(--side-raised);
 }
 
