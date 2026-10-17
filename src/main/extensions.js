@@ -122,6 +122,65 @@ function readZip(buf) {
 }
 
 /** The zip inside a `.crx`: version 2 and 3 headers both name their own length. */
+/**
+ * The public key a .crx (version 3) was signed with, as a manifest's "key":
+ * with it Chromium gives the extension the same ID it has in Chrome and on
+ * the store, rather than one made up from where its folder is. Null for
+ * anything else.
+ */
+function crxKey(buf) {
+  if (buf.toString('latin1', 0, 4) !== 'Cr24' || buf.readUInt32LE(4) !== 3) return null;
+  const header = buf.subarray(12, 12 + buf.readUInt32LE(8));
+  // A protobuf, read by hand: CrxFileHeader { 2: AsymmetricKeyProof { 1: public_key } ...,
+  // 10000: signed_header_data (SignedData { 1: crx_id }) }.
+  const fields = (b) => {
+    const out = [];
+    let i = 0;
+    const varint = () => {
+      let v = 0;
+      let shift = 0;
+      for (;;) {
+        const byte = b[i++];
+        v += (byte & 0x7f) * 2 ** shift;
+        if (!(byte & 0x80)) return v;
+        shift += 7;
+      }
+    };
+    while (i < b.length) {
+      const tag = varint();
+      const type = tag % 8;
+      if (type === 2) {
+        const len = varint();
+        out.push({ field: Math.floor(tag / 8), data: b.subarray(i, i + len) });
+        i += len;
+      } else if (type === 0) varint();
+      else return out;
+    }
+    return out;
+  };
+  try {
+    const top = fields(header);
+    const signed = top.find((f) => f.field === 10000);
+    const crxId = signed && fields(signed.data).find((f) => f.field === 1);
+    const keys = top.filter((f) => f.field === 2).map((f) => fields(f.data).find((g) => g.field === 1)).filter(Boolean)
+      .map((f) => f.data);
+    const own = keys.find((k) => crxId && crypto.createHash('sha256').update(k).digest().subarray(0, 16).equals(crxId.data));
+    return own ? own.toString('base64') : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The ID Chrome gives the extension with this manifest key: its store ID. */
+function idFromKey(key) {
+  try {
+    return [...crypto.createHash('sha256').update(Buffer.from(key, 'base64')).digest().subarray(0, 16)]
+      .map((b) => String.fromCharCode(97 + (b >> 4)) + String.fromCharCode(97 + (b & 15))).join('');
+  } catch {
+    return null;
+  }
+}
+
 function crxZip(buf) {
   if (buf.toString('latin1', 0, 4) !== 'Cr24') return buf;
   const version = buf.readUInt32LE(4);
@@ -231,9 +290,36 @@ function adaptManifest(manifest) {
       if (Array.isArray(cs.js) && String(cs.world || '').toUpperCase() !== 'MAIN') cs.js = [COMPAT_FILE, ...cs.js];
     }
   }
+  // Keyboard commands named with anything but letters, digits and "_" -
+  // Firefox allows "add-site-p1", Chromium refuses to load the extension.
+  if (out.commands && typeof out.commands === 'object') {
+    out.commands = Object.fromEntries(Object.entries(out.commands).map(([k, v]) =>
+      [/^_execute_/.test(k) ? k : k.replace(/[^A-Za-z0-9_]/g, '_'), v]));
+    // Chromium takes at most four suggested keys and refuses more; the rest
+    // stay as commands without a key, as Chrome lists them.
+    let keyed = 0;
+    for (const v of Object.values(out.commands)) {
+      if (v && v.suggested_key && ++keyed > 4) delete v.suggested_key;
+    }
+  }
   delete out.browser_specific_settings;
   delete out.applications;
   return { manifest: out, worker, background, backgroundHtml };
+}
+
+/**
+ * A locale's messages with names Chromium accepts: Firefox allows
+ * "moz-vpn-connected", Chromium refuses to load the whole extension over it.
+ * The layer looks names up the same way (extension-compat.js, i18n).
+ */
+function adaptMessages(data) {
+  try {
+    const messages = JSON.parse(data.toString('utf8').replace(/^\uFEFF/, ''));
+    if (!Object.keys(messages).some((k) => /[^A-Za-z0-9_]/.test(k))) return data;
+    return JSON.stringify(Object.fromEntries(Object.entries(messages).map(([k, v]) => [k.replace(/[^A-Za-z0-9_]/g, '_'), v])));
+  } catch {
+    return data;
+  }
 }
 
 /** An extension page with the context and the layer loaded before anything else on it. */
@@ -1019,6 +1105,7 @@ class Extensions {
    */
   install(source) {
     let files;
+    let signedKey = null;
     const stat = fs.statSync(source);
     if (stat.isDirectory()) {
       files = [];
@@ -1031,7 +1118,9 @@ class Extensions {
       };
       walk(source, '');
     } else {
-      files = readZip(crxZip(fs.readFileSync(source)));
+      const buf = fs.readFileSync(source);
+      signedKey = crxKey(buf);
+      files = readZip(crxZip(buf));
     }
     const base = rootOf(files);
     const own = files.filter((f) => f.name.startsWith(base)).map((f) => ({ name: f.name.slice(base.length), data: f.data }));
@@ -1043,8 +1132,28 @@ class Extensions {
     // Lite, Grammarly and AdGuard all have that one, so each replaced the last.
     const key = manifest.browser_specific_settings?.gecko?.id || manifest.applications?.gecko?.id ||
       manifest.key || `${localName(own, manifest)}@${from}`;
+    // After the name above, so a copy added before this keeps its folder.
+    if (signedKey && !manifest.key) manifest.key = signedKey;
+    const original = manifest;
     const adapted = adaptManifest(manifest);
     manifest = adapted.manifest;
+    // A "__MSG_name__" the default locale does not define: Firefox shows
+    // nothing, Chromium refuses the extension. Defined, empty but for its name.
+    if (manifest.default_locale) {
+      const file = own.find((f) => f.name === `_locales/${manifest.default_locale}/messages.json`);
+      if (file) {
+        try {
+          const messages = JSON.parse(file.data.toString('utf8').replace(/^\uFEFF/, ''));
+          const known = new Set(Object.keys(messages).map((k) => k.toLowerCase()));
+          const used = [...JSON.stringify(manifest).matchAll(/__MSG_(\w+?)__/g)].map((m) => m[1]);
+          const missing = used.filter((n) => !known.has(n.toLowerCase()) && !/^@@/.test(n));
+          if (missing.length) {
+            for (const n of missing) messages[n] = { message: n };
+            file.data = Buffer.from(JSON.stringify(messages));
+          }
+        } catch { /* left as it is */ }
+      }
+    }
     const id = crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 24);
     const dir = path.join(this.root, id);
     const temp = `${dir}.part`;
@@ -1054,6 +1163,7 @@ class Extensions {
       if (!target.startsWith(temp + path.sep)) throw new Error(`unsafe path: ${f.name}`);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, f.name === 'manifest.json' ? JSON.stringify(manifest, null, 2)
+        : /^_locales\/[^/]+\/messages\.json$/.test(f.name) ? adaptMessages(f.data)
         : /\.html?$/i.test(f.name) ? adaptPage(f.data.toString('utf8')) : f.data);
     }
     fs.writeFileSync(path.join(temp, COMPAT_FILE), COMPAT_SOURCE());
@@ -1067,7 +1177,9 @@ class Extensions {
     // Through adaptPage, so the layer and the context load first, as on every page.
     if (adapted.backgroundHtml) fs.writeFileSync(path.join(temp, BACKGROUND_FILE), adaptPage(adapted.backgroundHtml));
     fs.writeFileSync(path.join(temp, META_FILE), JSON.stringify({ from, addedAt: Date.now(), source: path.basename(source),
-      background: adapted.background, token }));
+      background: adapted.background, token,
+      // A Firefox add-on's own ID, which adaptManifest takes out of the manifest.
+      geckoId: original.browser_specific_settings?.gecko?.id || original.applications?.gecko?.id || null }));
     // What the extension built up while running - its own request rules, the
     // rulesets it switched, its alarms - survives an update, as in Chrome.
     for (const kept of KEPT_FILES) {
@@ -1126,6 +1238,13 @@ class Extensions {
    */
   async attach(ses) {
     this.sessions.add(ses);
+    // Errors from extensions' service workers, for their developer details.
+    if (!ses.__debrowserErrorWatch && ses.serviceWorkers) {
+      ses.__debrowserErrorWatch = true;
+      ses.serviceWorkers.on('console-message', (_e, d) => {
+        if (d && d.level >= 3) this.noteError(ses, d.sourceUrl, d.message, d.lineNumber);
+      });
+    }
     const results = [];
     for (const ext of this.list()) results.push(await this.loadInto(ses, ext));
     return results;
@@ -1236,6 +1355,9 @@ class Extensions {
     const { WebContentsView } = require('electron');
     const view = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true } });
     (ses.__debrowserBg ||= new Map()).set(ext.id, view);
+    view.webContents.on('console-message', (e) => {
+      if (e.level === 'error') this.noteError(ses, e.sourceId || `chrome-extension://${loadedId}/`, e.message, e.lineNumber);
+    });
     view.webContents.loadURL(`chrome-extension://${loadedId}/${ext.background}`)
       .then(() => { if (Number.isInteger(this.activeTab)) this.tellBackground(view, this.activeTab); })
       .catch((err) => {
@@ -1283,6 +1405,99 @@ class Extensions {
     }
   }
 
+  /* -- Developer details, per extension (Settings → Extensions). -- */
+
+  /** An error an extension's own code logged or threw: the last 100 are kept, newest last. */
+  noteError(ses, sourceUrl, message, line) {
+    const m = /^chrome-extension:\/\/([a-p]{32})\//.exec(String(sourceUrl || ''));
+    if (!m) return;
+    const entry = [...(ses.__debrowserExt || new Map())].find(([, loaded]) => loaded === m[1]);
+    if (!entry) return;
+    const list = (this.logged ||= new Map()).get(entry[0]) || [];
+    list.push({ at: Date.now(), message: String(message || '').slice(0, 2000), source: String(sourceUrl).slice(0, 300),
+      line: Number(line) || 0 });
+    this.logged.set(entry[0], list.slice(-100));
+  }
+
+  /** What Chrome's developer mode shows for one, and a little more. */
+  details(id) {
+    const ext = this.list().find((e) => e.id === id);
+    if (!ext) return null;
+    let manifest = {};
+    try { manifest = JSON.parse(fs.readFileSync(path.join(ext.dir, 'manifest.json'), 'utf8')); } catch { /* listed, so readable */ }
+    const ses = [...this.sessions][0];
+    const loaded = ses ? this.loadedId(ses, id) : null;
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(path.join(ext.dir, META_FILE), 'utf8')); } catch { /* none */ }
+    const gecko = meta.geckoId || null;
+    const options = (manifest.options_ui && manifest.options_ui.page) || manifest.options_page || null;
+    let running = false;
+    if (ses && loaded && ext.worker) {
+      running = Object.values(ses.serviceWorkers.getAllRunning?.() || {})
+        .some((w) => String(w.scope || '').startsWith(`chrome-extension://${loaded}/`));
+    } else if (ses && ses.__debrowserBg?.get(id)) running = !ses.__debrowserBg.get(id).webContents.isDestroyed();
+    return {
+      id: loaded || (manifest.key ? idFromKey(manifest.key) : null),
+      storeId: manifest.key ? idFromKey(manifest.key) : null,
+      geckoId: gecko,
+      folderId: id,
+      name: ext.name,
+      version: ext.version,
+      description: String(manifest.description || '').startsWith('__MSG_') ? '' : String(manifest.description || ''),
+      manifestVersion: ext.manifestVersion,
+      from: ext.from,
+      dir: ext.dir,
+      addedAt: ext.addedAt,
+      loaded: Boolean(loaded),
+      background: ext.worker ? 'service worker' : ext.background ? 'background page' : null,
+      running,
+      popup: ext.popup,
+      options: options ? String(options).replace(/^\/+/, '') : null,
+      sidePanel: ext.sidePanel,
+      permissions: ext.permissions.filter((p) => !p.includes('://') && p !== '<all_urls>'),
+      hosts: ext.hosts,
+      optionalPermissions: [...(manifest.optional_permissions || []), ...(manifest.optional_host_permissions || [])].map(String),
+      contentScripts: (manifest.content_scripts || []).map((cs) => ({ matches: cs.matches || [], js: (cs.js || []).length,
+        css: (cs.css || []).length, world: cs.world || 'ISOLATED' })),
+      commands: Object.entries(manifest.commands || {}).map(([name, c]) => ({ name,
+        key: (c && c.suggested_key && (c.suggested_key.default || Object.values(c.suggested_key)[0])) || '' })),
+      rules: (manifest.declarative_net_request?.rule_resources || []).map((r) => r.id),
+      webAccessible: (manifest.web_accessible_resources || []).reduce((n, w) => n + (Array.isArray(w) ? 1 : (w.resources || []).length), 0),
+      csp: typeof manifest.content_security_policy === 'string' ? manifest.content_security_policy
+        : manifest.content_security_policy?.extension_pages || null,
+      startError: this.errors?.[id] || null,
+      errors: (this.logged?.get(id) || []).slice(-50)
+    };
+  }
+
+  /** Start it again from its files, as Chrome's Reload does. */
+  async reload(id) {
+    this.unloadEverywhere(id);
+    if (this.errors) delete this.errors[id];
+    this.cached = null;
+    return this.loadEverywhere(id);
+  }
+
+  /**
+   * Its background's developer tools: the hosted page's own, or the service
+   * worker's, opened through its relay page, which the worker controls.
+   */
+  inspectBackground(id) {
+    const ext = this.list().find((e) => e.id === id);
+    const ses = [...this.sessions][0];
+    const loaded = ses && ext && this.loadedId(ses, id);
+    if (!loaded) return false;
+    const host = ses.__debrowserBg?.get(id);
+    if (host && !host.webContents.isDestroyed()) {
+      host.webContents.openDevTools({ mode: 'detach' });
+      return true;
+    }
+    if (!ext.worker) return false;
+    const relay = this.ensureRelay(ses, ext, loaded);
+    relay.ready.then(() => { if (!relay.view.webContents.isDestroyed()) relay.view.webContents.inspectServiceWorker(); });
+    return true;
+  }
+
   /** Out of every session, for extensions being turned off. Copies stay on disk. */
   detachAll() {
     for (const ext of this.list()) this.unloadEverywhere(ext.id);
@@ -1290,4 +1505,4 @@ class Extensions {
 }
 
 module.exports = {
-  allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, iconOf, matchesPattern, storeTarget, downloadFromStore, COMPAT_FILE };
+  allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, iconOf, matchesPattern, crxKey, idFromKey, storeTarget, downloadFromStore, COMPAT_FILE };

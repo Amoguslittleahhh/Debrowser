@@ -734,6 +734,83 @@ function buildAll(state = {}) {
 }
 
 /*
+ * One extension's developer details, as Chrome's developer mode has them and
+ * more: its IDs, what it runs, its permissions and the parts of its manifest,
+ * the errors its own code logged, and the tools - inspect its background or
+ * popup, open its options or manifest, reload it, show its folder.
+ */
+async function extensionDetails(panel, id, rerender) {
+  const d = await api.request('extension-details', { id });
+  if (!d) { panel.replaceChildren(document.createTextNode('This extension is no longer installed.')); return; }
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  };
+  const facts = el('dl', 'ext-facts');
+  const fact = (term, value, mono = false) => {
+    if (value === null || value === undefined || value === '' || (Array.isArray(value) && !value.length)) return;
+    facts.append(el('dt', '', term), el('dd', mono ? 'mono' : '', Array.isArray(value) ? value.join(', ') : String(value)));
+  };
+  fact('ID', d.storeId || d.geckoId || d.id, true);
+  if (d.id && d.id !== (d.storeId || d.geckoId)) fact('Running as', `chrome-extension://${d.id}/`, true);
+  fact('Version', d.version);
+  fact('Manifest', `Version ${d.manifestVersion}`);
+  fact('From', d.from === 'firefox' ? 'Firefox Add-ons or a .xpi' : 'Chrome Web Store, Edge Add-ons or a .crx');
+  fact('Description', d.description);
+  fact('Background', d.background ? `${d.background}, ${d.running ? 'running' : 'stopped'}` : 'none');
+  fact('Popup', d.popup, true);
+  fact('Options page', d.options, true);
+  fact('Side panel', d.sidePanel, true);
+  fact('Permissions', d.permissions, true);
+  fact('Site access', d.hosts, true);
+  fact('Optional', d.optionalPermissions, true);
+  fact('Content scripts', d.contentScripts.map((c) => `${c.matches.join(' ')} (${c.js} script, ${c.css} style${c.world === 'MAIN' ? ', page world' : ''})`), true);
+  fact('Keyboard shortcuts', d.commands.map((c) => (c.key ? `${c.name}: ${c.key}` : c.name)), true);
+  fact('Request rule sets', d.rules, true);
+  fact('Files pages may load', d.webAccessible ? String(d.webAccessible) : '');
+  fact('Page policy', d.csp, true);
+  fact('Folder', d.dir, true);
+  fact('Added', d.addedAt ? new Date(d.addedAt).toLocaleString() : '');
+
+  const tools = el('div', 'ext-tools');
+  const status = el('span', 'row-hint', '');
+  const tool = (label, action, enabled = true) => {
+    if (!enabled) return;
+    const b = smallButton(label);
+    b.addEventListener('click', async () => {
+      const r = await api.request('extension-dev', { id, action });
+      status.textContent = r && r.ok ? (action === 'reload' ? 'Reloaded.' : action === 'copy-id' ? 'ID copied.' : '')
+        : (r && r.error) || 'That didn’t work while it isn’t running.';
+      if (action === 'reload' || action === 'clear-errors') extensionDetails(panel, id, rerender);
+    });
+    tools.append(b);
+  };
+  tool('Copy ID', 'copy-id');
+  tool(d.background === 'service worker' ? 'Inspect service worker' : 'Inspect background page', 'inspect-background', Boolean(d.background));
+  tool('Inspect popup', 'inspect-popup', Boolean(d.popup));
+  tool('Options', 'options', Boolean(d.options));
+  tool('View manifest', 'manifest');
+  tool('Reload', 'reload');
+  tool('Show folder', 'reveal');
+
+  const errors = el('div', 'ext-errors');
+  const list = [...(d.startError ? [{ message: `It didn’t start: ${d.startError}`, source: '', line: 0 }] : []), ...d.errors];
+  errors.append(el('span', 'row-label', list.length ? `Errors (${list.length})` : 'No errors'));
+  if (list.length) {
+    const ul = el('ul', 'mono');
+    for (const e of list.slice().reverse()) {
+      const where = e.source ? ` (${e.source.replace(/^chrome-extension:\/\/[a-p]+\//, '')}${e.line ? `:${e.line}` : ''})` : '';
+      ul.append(el('li', '', `${e.message}${where}`));
+    }
+    errors.append(ul);
+    tool('Clear errors', 'clear-errors');
+  }
+  panel.replaceChildren(facts, tools, status, errors);
+}
+
+/*
  * Extensions: each installed one - its name, where it came from, and
  * Remove - then Add, from a packed file (.crx, .xpi, .zip) or an unpacked
  * folder. Shown while they are on; the browser picks the file, so this
@@ -751,10 +828,10 @@ function extensionRows(host) {
     box.hidden = !toggle();
     if (box.hidden) return;
     const res = await api.request('extensions-list');
-    const rows = ((res && res.items) || []).map((ext) => {
+    const rows = ((res && res.items) || []).flatMap((ext) => {
       const where = ext.from === 'firefox' ? 'Firefox' : 'Chrome';
       const { row, control } = simpleRow(`${ext.name} ${ext.version}`,
-        ext.error ? `${where} extension. It didn’t start: ${ext.error}` : `${where} extension`);
+        ext.error ? `${where} extension. It didn’t start: ${ext.error}` : `${where} extension${ext.publicId ? ` · ID ${ext.publicId}` : ''}`);
       // Its own logo before its name, as Chrome lists them.
       if (typeof ext.icon === 'string' && /^data:image\//.test(ext.icon)) {
         const img = document.createElement('img');
@@ -768,8 +845,19 @@ function extensionRows(host) {
         await api.request('extension-remove', { id: ext.id });
         render();
       });
-      control.append(remove);
-      return row;
+      // Developer details: everything Chrome's developer mode has for it.
+      const more = smallButton('Details');
+      more.setAttribute('aria-expanded', 'false');
+      const panel = document.createElement('div');
+      panel.className = 'row ext-dev';
+      panel.hidden = true;
+      more.addEventListener('click', () => {
+        panel.hidden = !panel.hidden;
+        more.setAttribute('aria-expanded', String(!panel.hidden));
+        if (!panel.hidden) extensionDetails(panel, ext.id, render);
+      });
+      control.prepend(more);
+      return [row, panel];
     });
     const { row: addRow, note, control } = simpleRow('Add an extension',
       'A .crx from Chrome, a .xpi from Firefox, or an unpacked folder.');

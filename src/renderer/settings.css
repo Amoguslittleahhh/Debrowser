@@ -801,3 +801,13 @@ input[type="range"]:disabled { opacity: 0.4; }
   vertical-align: -3px;
   object-fit: contain;
 }
+
+/* An extension's developer details, under its row. */
+.row.ext-dev { display: grid; gap: var(--s3); align-items: start; background: var(--bg); }
+.ext-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px var(--s4); margin: 0; font-size: var(--fs-small); }
+.ext-facts dt { color: var(--text-dim); }
+.ext-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ext-dev .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.ext-tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.ext-errors ul { margin: 4px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; color: var(--text-dim); }
+.ext-errors li + li { margin-top: 2px; }
