@@ -296,6 +296,9 @@ const COMMANDS = new Set([
   'extension-remove',
   'extension-details',
   'extension-dev',
+  'extension-setting',
+  'extension-site-permissions',
+  'extension-icon',
   'forget-site',
   'recent-pages',
   'hide-continue-card'

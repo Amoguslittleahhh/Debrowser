@@ -266,6 +266,10 @@ const SCHEMA = {
   // `labExtensions` with a new default: every profile saves every value. Off:
   // none are loaded. On with none installed costs nothing.
   extensions: { def: true, ok: (v) => typeof v === 'boolean' },
+  // Developer mode on Settings → Extensions, as Chrome has it: each one's IDs,
+  // manifest, views to inspect and errors. Off, its details are what anyone
+  // needs - what it is, what it may reach, its settings.
+  extensionsDeveloperMode: { def: false, ok: (v) => typeof v === 'boolean' },
 
   // Where a tab opened from a link lands. 'after-current' keeps a page's
   // spawned tabs beside it rather than at the far end of a long strip.

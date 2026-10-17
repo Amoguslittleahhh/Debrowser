@@ -73,6 +73,71 @@ const LAYER_FILE = 'debrowser-layer.txt';
 /** State an extension builds up while running, carried over when it is updated. */
 const KEPT_FILES = ['debrowser-dnr.json', 'debrowser-alarms.json'];
 
+/**
+ * Each extension's own settings, as Chrome's details page has them: which
+ * sites it may reach, whether it is pinned beside the puzzle button, whether
+ * it may read file:// pages, and whether its errors are kept.
+ */
+const EXT_SETTINGS = { siteAccess: 'all', sites: [], fileAccess: false, collectErrors: true, pinned: false };
+
+/** A site as typed - "example.com" or a whole address - as its host name, or null. */
+function siteHost(text) {
+  let t = String(text || '').trim().toLowerCase().replace(/^\*\./, '');
+  if (!t) return null;
+  if (!/^[a-z]+:\/\//.test(t)) t = `https://${t}`;
+  let host;
+  try { host = new URL(t).hostname; } catch { return null; }
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(host) && (host.includes('.') || host === 'localhost') ? host : null;
+}
+
+/**
+ * Its manifest's reach, narrowed to the sites the user allows: "click" keeps
+ * none, "specific" keeps what fell on those sites. A pattern covering a whole
+ * allowed site becomes that site; one inside an allowed site is kept as it is.
+ */
+function restrictAccess(orig, settings) {
+  if (settings.siteAccess === 'all') return orig;
+  const allowed = settings.siteAccess === 'specific' ? settings.sites : [];
+  const isHost = (p) => p === '<all_urls>' || String(p).includes('://');
+  const narrow = (list) => [...new Set((list || []).filter(isHost).flatMap((p) => allowed.flatMap((h) => {
+    if (matchesPattern(p, `https://${h}/`) || matchesPattern(p, `http://${h}/`)) {
+      const scheme = p === '<all_urls>' ? '*' : String(p).split('://')[0];
+      return [`${scheme}://${h}/*`, `${scheme}://*.${h}/*`];
+    }
+    const m = /^[^:]+:\/\/(?:\*\.)?([^/]+)/.exec(String(p));
+    return m && (m[1] === h || m[1].endsWith(`.${h}`)) ? [p] : [];
+  })))];
+  return {
+    host_permissions: orig.host_permissions && narrow(orig.host_permissions),
+    permissions: orig.permissions && [...orig.permissions.filter((p) => !isHost(p)), ...narrow(orig.permissions)],
+    content_scripts: orig.content_scripts && orig.content_scripts
+      .map((cs) => ({ ...cs, matches: narrow(cs.matches) })).filter((cs) => cs.matches.length)
+  };
+}
+
+/** Where it came from, by the file or folder it was added from (a store's download is named for the store). */
+function sourceOf(meta, from) {
+  const m = /^(chrome|edge|firefox)-(.+)\.(crx|xpi)$/.exec(String(meta.source || ''));
+  if (m) {
+    const id = m[2];
+    return m[1] === 'chrome' ? { label: 'Chrome Web Store', url: `https://chromewebstore.google.com/detail/${id}` }
+      : m[1] === 'edge' ? { label: 'Edge Add-ons', url: `https://microsoftedge.microsoft.com/addons/detail/${id}` }
+      : { label: 'Firefox Add-ons', url: `https://addons.mozilla.org/firefox/addon/${encodeURIComponent(id)}/` };
+  }
+  if (/\.(crx|xpi|zip)$/i.test(String(meta.source || ''))) return { label: `A ${from === 'firefox' ? 'Firefox' : 'Chrome'} extension file`, url: null };
+  return { label: meta.source ? 'An unpacked folder' : 'Unknown', url: null };
+}
+
+/** The size of a folder on disk, in bytes. */
+function folderSize(dir) {
+  let n = 0;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name);
+    try { n += e.isDirectory() ? folderSize(f) : fs.statSync(f).size; } catch { /* gone */ }
+  }
+  return n;
+}
+
 /* ---- Unpacking ------------------------------------------------------------ */
 
 /**
@@ -1169,7 +1234,8 @@ class Extensions {
     fs.writeFileSync(path.join(temp, COMPAT_FILE), COMPAT_SOURCE());
     // Kept across reinstalls, so a page open on the old copy keeps working.
     let token = null;
-    try { token = JSON.parse(fs.readFileSync(path.join(dir, META_FILE), 'utf8')).token; } catch { /* new */ }
+    let settings;
+    try { ({ token, settings } = JSON.parse(fs.readFileSync(path.join(dir, META_FILE), 'utf8'))); } catch { /* new */ }
     token = token || crypto.randomBytes(24).toString('hex');
     fs.writeFileSync(path.join(temp, CONTEXT_FILE), contextSource(null, token));
     fs.writeFileSync(path.join(temp, RELAY_FILE), adaptPage('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>\n'));
@@ -1178,6 +1244,9 @@ class Extensions {
     if (adapted.backgroundHtml) fs.writeFileSync(path.join(temp, BACKGROUND_FILE), adaptPage(adapted.backgroundHtml));
     fs.writeFileSync(path.join(temp, META_FILE), JSON.stringify({ from, addedAt: Date.now(), source: path.basename(source),
       background: adapted.background, token,
+      // Its settings survive an update, as in Chrome; the site access they
+      // set is applied to the new manifest when it loads.
+      ...(settings ? { settings } : {}),
       // A Firefox add-on's own ID, which adaptManifest takes out of the manifest.
       geckoId: original.browser_specific_settings?.gecko?.id || original.applications?.gecko?.id || null }));
     // What the extension built up while running - its own request rules, the
@@ -1189,6 +1258,7 @@ class Extensions {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.renameSync(temp, dir);
     this.cached = null;
+    this.settingCache?.delete(id);
     this.log(`extensions: installed ${manifest.name} (${from})`);
     return this.list().find((e) => e.id === id);
   }
@@ -1299,7 +1369,7 @@ class Extensions {
     try {
       await ses.clearStorageData({ origin: `chrome-extension://${loaded.id}`, storages: ['serviceworkers'] });
       api.removeExtension(loaded.id);
-      const again = await api.loadExtension(ext.dir, { allowFileAccess: false });
+      const again = await api.loadExtension(ext.dir, { allowFileAccess: this.settingsOf(ext.id).fileAccess });
       fs.writeFileSync(path.join(ext.dir, LAYER_FILE), stamp);
       return again;
     } catch (err) {
@@ -1311,9 +1381,10 @@ class Extensions {
   async loadInto(ses, ext) {
     if (ses.__debrowserExt?.has(ext.id)) return { id: ext.id, ok: true };
     this.refresh(ext);
+    this.applyAccess(ext);
     try {
       const api = ses.extensions || ses;
-      let loaded = await api.loadExtension(ext.dir, { allowFileAccess: false });
+      let loaded = await api.loadExtension(ext.dir, { allowFileAccess: this.settingsOf(ext.id).fileAccess });
       const stale = this.staleWorker(ext);
       if (stale) loaded = await this.freshWorker(ses, ext, loaded, stale);
       (ses.__debrowserExt ||= new Map()).set(ext.id, loaded.id);
@@ -1412,7 +1483,7 @@ class Extensions {
     const m = /^chrome-extension:\/\/([a-p]{32})\//.exec(String(sourceUrl || ''));
     if (!m) return;
     const entry = [...(ses.__debrowserExt || new Map())].find(([, loaded]) => loaded === m[1]);
-    if (!entry) return;
+    if (!entry || !this.settingsOf(entry[0]).collectErrors) return;
     const list = (this.logged ||= new Map()).get(entry[0]) || [];
     list.push({ at: Date.now(), message: String(message || '').slice(0, 2000), source: String(sourceUrl).slice(0, 300),
       line: Number(line) || 0 });
@@ -1465,12 +1536,74 @@ class Extensions {
       webAccessible: (manifest.web_accessible_resources || []).reduce((n, w) => n + (Array.isArray(w) ? 1 : (w.resources || []).length), 0),
       csp: typeof manifest.content_security_policy === 'string' ? manifest.content_security_policy
         : manifest.content_security_policy?.extension_pages || null,
+      size: (() => { try { return folderSize(ext.dir); } catch { return 0; } })(),
+      source: sourceOf(meta, ext.from),
+      settings: this.settingsOf(id),
       startError: this.errors?.[id] || null,
       errors: (this.logged?.get(id) || []).slice(-50)
     };
   }
 
   /** Start it again from its files, as Chrome's Reload does. */
+  /* -- Its own settings (Settings → Extensions → Details). -- */
+
+  settingsOf(id) {
+    const cache = (this.settingCache ||= new Map());
+    if (!cache.has(id)) {
+      let meta = {};
+      try { meta = JSON.parse(fs.readFileSync(path.join(this.root, id, META_FILE), 'utf8')); } catch { /* none */ }
+      cache.set(id, { ...EXT_SETTINGS, ...(meta.settings || {}) });
+    }
+    return { ...cache.get(id) };
+  }
+
+  /** Change one; what changes what it may reach loads it again. */
+  async setSetting(id, key, value) {
+    const ext = this.list().find((e) => e.id === id);
+    if (!ext || !Object.hasOwn(EXT_SETTINGS, key)) return null;
+    const v = key === 'siteAccess' ? (['all', 'specific', 'click'].includes(value) ? value : 'all')
+      : key === 'sites' ? [...new Set((Array.isArray(value) ? value : []).map(siteHost).filter(Boolean))].slice(0, 100)
+      : value === true;
+    const file = path.join(ext.dir, META_FILE);
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* none */ }
+    meta.settings = { ...EXT_SETTINGS, ...(meta.settings || {}), [key]: v };
+    fs.writeFileSync(file, JSON.stringify(meta));
+    this.settingCache?.delete(id);
+    if (key === 'collectErrors' && !v) this.logged?.delete(id);
+    if (key === 'pinned' && this.hooks.pinsChanged) this.hooks.pinsChanged();
+    if (key === 'siteAccess' || key === 'sites' || key === 'fileAccess') await this.reload(id);
+    return this.settingsOf(id);
+  }
+
+  /**
+   * Write its manifest's reach as its site access says. The manifest's own
+   * lists are kept in its meta the first time it is narrowed, so "On all
+   * sites" gives back exactly what it shipped with; an update brings a new
+   * manifest and a fresh meta, and so its own lists again.
+   */
+  applyAccess(ext) {
+    const file = path.join(ext.dir, 'manifest.json');
+    const metaFile = path.join(ext.dir, META_FILE);
+    try {
+      let meta = {};
+      try { meta = JSON.parse(fs.readFileSync(metaFile, 'utf8')); } catch { /* none */ }
+      const settings = { ...EXT_SETTINGS, ...(meta.settings || {}) };
+      if (!meta.access && settings.siteAccess === 'all') return;
+      const before = fs.readFileSync(file, 'utf8');
+      const manifest = JSON.parse(before);
+      if (!meta.access) {
+        meta.access = { host_permissions: manifest.host_permissions, permissions: manifest.permissions,
+          content_scripts: manifest.content_scripts };
+        fs.writeFileSync(metaFile, JSON.stringify(meta));
+      }
+      const after = JSON.stringify({ ...manifest, ...restrictAccess(meta.access, settings) }, null, 2);
+      if (after !== before) { fs.writeFileSync(file, after); this.cached = null; }
+    } catch (err) {
+      this.log(`extensions: ${ext.name}'s site access could not be set: ${err.message}`);
+    }
+  }
+
   async reload(id) {
     this.unloadEverywhere(id);
     if (this.errors) delete this.errors[id];
@@ -1505,4 +1638,5 @@ class Extensions {
 }
 
 module.exports = {
+  restrictAccess, siteHost,
   allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, iconOf, matchesPattern, crxKey, idFromKey, storeTarget, downloadFromStore, COMPAT_FILE };

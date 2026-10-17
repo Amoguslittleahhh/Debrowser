@@ -1795,6 +1795,7 @@ function renderMeter(state) {
   document.getElementById('meter-leaf').toggleAttribute('hidden', !state.saver);
   const showExtensions = Number(state.extensionCount) > 0;
   if (extensionsBtn.hidden === showExtensions) extensionsBtn.hidden = !showExtensions;
+  drawPinned(showExtensions && Array.isArray(state.pinnedExtensions) ? state.pinnedExtensions : []);
   el.meter.title = (state.saver ? 'Battery mode: tabs sleep sooner to save power\n' : '') +
     `${shownMB} MB of ${state.budgetMB} MB budget\n` +
     `${state.liveTabs} tabs holding a renderer ` +
@@ -1860,6 +1861,40 @@ el.star.addEventListener('click', async () => {
 el.meter.addEventListener('click', () => api.send('toggle-panel'));
 // Extensions: the list, and each one's popup, hang off this button.
 const extensionsBtn = document.getElementById('extensions');
+
+/*
+ * Extensions pinned beside the puzzle button: each its logo, a click opening
+ * its popup as the menu does. Drawn again only when the list changes; each
+ * logo is asked for once.
+ */
+const pinnedBox = document.getElementById('pinned-extensions');
+const pinnedIcons = new Map();
+let pinnedKey = '';
+function drawPinned(list) {
+  const key = JSON.stringify(list);
+  if (key === pinnedKey) return;
+  pinnedKey = key;
+  pinnedBox.hidden = !list.length;
+  pinnedBox.replaceChildren(...list.map((e) => {
+    const b = document.createElement('button');
+    b.className = 'icon-btn pinned-ext';
+    b.title = e.name;
+    b.setAttribute('aria-label', e.name);
+    const img = document.createElement('img');
+    img.alt = '';
+    const paint = (src) => { if (typeof src === 'string' && /^data:image\//.test(src)) img.src = src; };
+    if (pinnedIcons.has(e.id)) paint(pinnedIcons.get(e.id));
+    else api.request('extension-icon', { id: e.id }).then((r) => { pinnedIcons.set(e.id, r && r.icon); paint(r && r.icon); });
+    b.append(img);
+    b.addEventListener('click', () => {
+      const box = b.getBoundingClientRect();
+      api.send(e.popup ? 'open-extension-popup' : 'click-extension',
+        { id: e.id, x: Math.round(box.left), y: Math.round(box.bottom), right: Math.round(box.right) });
+    });
+    return b;
+  }));
+  requestAnimationFrame(fitOmnibox);
+}
 extensionsBtn.addEventListener('click', () => {
   const box = extensionsBtn.getBoundingClientRect();
   api.send('extensions-menu', { x: Math.round(box.left), y: Math.round(box.bottom), right: Math.round(box.right) });

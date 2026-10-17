@@ -134,7 +134,7 @@ const { resolveShortcut } = require('./site-shortcuts');
 const palette = require('./palette');
 const uninstall = require('./setup/uninstall');
 const installer = require('./setup/install');
-const { SitePermissions, PermissionAsks } = require('./site-permissions');
+const { SitePermissions, PermissionAsks, KINDS: SITE_KINDS, permissionOrigin } = require('./site-permissions');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
 
@@ -881,7 +881,10 @@ function main() {
     ...(!INCOGNITO && systemAccentNow ? { systemAccent: systemAccentNow } : {}),
     ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {}),
     // The toolbar's puzzle button, while extensions are on and something is installed.
-    ...(extensions && prefs && prefs.get('extensions') === true ? { extensionCount: extensions.list().length } : {})
+    ...(extensions && prefs && prefs.get('extensions') === true ? { extensionCount: extensions.list().length,
+      // The ones pinned beside it, each its own button; the logos are asked for once.
+      pinnedExtensions: extensions.list().filter((e) => extensions.settingsOf(e.id).pinned)
+        .map((e) => ({ id: e.id, name: e.name, popup: Boolean(e.popup) })) } : {})
   });
 
   /**
@@ -1677,7 +1680,7 @@ function main() {
       });
       forEachManager((m) => {
         m.askPermission = (wc, kinds, details, callback) => permissionAsks.request(wc, kinds, details, callback);
-        m.permissionGranted = (origin, kinds) => sitePermissions.decide(originOf(origin), kinds) === 'allow';
+        m.permissionGranted = (origin, kinds) => sitePermissions.decide(permissionOrigin(origin), kinds) === 'allow';
       });
       // Permissions a site has not used in three months go by themselves,
       // checked at start and daily after.
@@ -1772,6 +1775,8 @@ function main() {
       extensions = new Extensions(OFFLINE_MODE && !process.env.DEBROWSER_EXT_DIR
         ? path.join(app.getPath('temp'), `debrowser-ext-${process.pid}`)
         : process.env.DEBROWSER_EXT_DIR || path.join(app.getPath('userData'), 'extensions'), log, {
+        // One pinned or unpinned beside the puzzle button.
+        pinsChanged: () => publish(),
         // What an extension may ask of the browser through the bridge.
         openTab: (url, active) => {
           if (!/^(https?|chrome-extension):/i.test(url)) throw new Error('only web pages and the extension’s own');
@@ -5515,6 +5520,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
 const INCOGNITO_REFUSED = new Set([
   'new-window', 'move-tab-to-new-window', 'move-tab-to-window', 'tear-tab', 'tear-preview',
   'extensions-list', 'extension-add', 'extension-remove', 'extension-details', 'extension-dev', 'open-extensions',
+  'extension-setting', 'extension-site-permissions', 'extension-icon',
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
   'save-address', 'fill-address', 'fill-card-here', 'fill-address-here',
   'translate-page', 'translate-selection', 'toggle-site-dark',
@@ -5530,6 +5536,8 @@ const INCOGNITO_REFUSED = new Set([
 
 const CHROME_REQUESTS = new Set([
   'list-bookmarks', 'toggle-bookmark', 'remove-bookmark',
+  // A pinned extension's logo, for its button beside the puzzle.
+  'extension-icon',
   // The address bar's list: open tabs, bookmarks and history matching what is
   // typed - the user's own, shown to the user, in the bar they are typing into.
   'suggest',
@@ -6253,8 +6261,39 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
           case 'reveal': electronShell.showItemInFolder(path.join(info.dir, 'manifest.json')); return { ok: true };
           case 'copy-id': clipboard.writeText(String(info.storeId || info.geckoId || info.id || '')); return { ok: true };
           case 'clear-errors': ext.logged?.delete(id); return { ok: true };
+          case 'store': {
+            if (!info.source.url) return { ok: false };
+            openLinkTab(tabs, prefs, tabs.activeTab(), info.source.url, { foreground: true });
+            return { ok: true };
+          }
           default: return { ok: false };
         }
+      }
+
+      // Its own settings, as Chrome's details page has them (extensions.js).
+      case 'extension-setting': {
+        const ext = getExtensions();
+        const settings = ext && await ext.setSetting(String(payload?.id || ''), String(payload?.key || ''), payload?.value);
+        return settings ? { ok: true, settings } : { ok: false };
+      }
+      case 'extension-icon': {
+        const ext = getExtensions();
+        return { icon: (ext && ext.iconData(String(payload?.id || ''))) || null };
+      }
+      // Its site settings: what its own pages may use, kept for its address
+      // as for any site's, and Reset permissions, which forgets them all.
+      case 'extension-site-permissions': {
+        const ext = getExtensions();
+        const info = ext && ext.details(String(payload?.id || ''));
+        if (!info || !info.id || !sitePermissions) return { ok: false };
+        const origin = `chrome-extension://${info.id}`;
+        const kinds = Object.keys(SITE_KINDS);
+        if (payload?.reset === true) for (const k of kinds) sitePermissions.set(origin, k, null);
+        else if (kinds.includes(payload?.kind)) {
+          sitePermissions.set(origin, payload.kind, payload.value === 'allow' || payload.value === 'block' ? payload.value : null);
+        }
+        const now = sitePermissions.forOrigin(origin);
+        return { ok: true, kinds: kinds.map((k) => ({ kind: k, label: SITE_KINDS[k], value: now[k] || 'ask' })) };
       }
 
       // An exported file the user picks. Read in main rather than in the
