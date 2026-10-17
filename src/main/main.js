@@ -883,7 +883,7 @@ function main() {
     // The toolbar's puzzle button, while extensions are on and something is installed.
     ...(extensions && prefs && prefs.get('extensions') === true ? { extensionCount: extensions.list().length,
       // The ones pinned beside it, each its own button; the logos are asked for once.
-      pinnedExtensions: extensions.list().filter((e) => extensions.settingsOf(e.id).pinned)
+      pinnedExtensions: extensions.list().filter((e) => extensions.settingsOf(e.id).pinned && extensions.settingsOf(e.id).enabled)
         .map((e) => ({ id: e.id, name: e.name, popup: Boolean(e.popup) })) } : {})
   });
 
@@ -3942,7 +3942,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         const store = here && storeTarget(here.url);
         // Its badge beside its name - uBlock's blocked count, a mail checker's unread.
         const label = (e) => (ext.badges?.get(e.id) ? `${e.name}  ·  ${ext.badges.get(e.id)}` : e.name);
-        const items = ext.list().map((e) => (shell.extPanel && shell.extPanel.extId === e.id && shell.extPanelShown()
+        const items = ext.list().filter((e) => ext.settingsOf(e.id).enabled).map((e) => (shell.extPanel && shell.extPanel.extId === e.id && shell.extPanelShown()
           // Its side panel is open here: the same place closes it.
           ? { id: 'close-extension-panel', label: `Close ${e.name}`, icon: 'close', payload: { id: e.id } }
           : e.popup
@@ -6204,6 +6204,7 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
         return { items: ext.list().map(({ id, name, version, from }) => {
           const d = ext.details(id);
           return { id, name, version, from, icon: ext.iconData(id), publicId: d && (d.storeId || d.geckoId || d.id),
+            off: !ext.settingsOf(id).enabled,
             error: ext.errors?.[id] || null };
         }) };
       }
@@ -6233,7 +6234,8 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       // (its ID, views to inspect, errors, Reload) and its manifest's parts.
       case 'extension-details': {
         const ext = getExtensions();
-        return (ext && ext.details(String(payload?.id || ''))) || null;
+        const d = ext && ext.details(String(payload?.id || ''));
+        return d ? { ...d, icon: ext.iconData(d.folderId) } : null;
       }
       case 'extension-dev': {
         const ext = getExtensions();
