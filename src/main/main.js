@@ -4858,12 +4858,21 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
           const info = page && describeWebApp(page);
           if (!info) { runCommand.toast('This page can’t be installed as an app'); return; }
           let png = null;
+          // Fetched by the page itself, as it fetched the manifest: the
+          // site's own cookies and origin, and no request from elsewhere.
           const tryIcon = async (url) => {
-            if (!url) return null;
+            if (!url || tab.wc.isDestroyed()) return null;
             try {
-              const res = await tab.wc.session.fetch(url);
-              if (!res.ok) return null;
-              const img = nativeImage.createFromBuffer(Buffer.from(await res.arrayBuffer()));
+              const b64 = await tab.wc.executeJavaScriptInIsolatedWorld(1003, [{ code: `(async () => {
+                const res = await fetch(${JSON.stringify(url)}, { credentials: 'include' });
+                if (!res.ok) return null;
+                const bytes = new Uint8Array(await res.arrayBuffer());
+                let s = '';
+                for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+                return btoa(s);
+              })()` }], true);
+              if (!b64) return null;
+              const img = nativeImage.createFromBuffer(Buffer.from(b64, 'base64'));
               return img.isEmpty() ? null : img.resize({ width: 256, height: 256, quality: 'best' }).toPNG();
             } catch { return null; }
           };
