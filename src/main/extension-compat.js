@@ -577,6 +577,105 @@
     }, true);
   }
 
+  // storage.session in a background page: Firefox has it in every version of
+  // the manifest, Chromium only in V3, and Ghostery stopped without it. Kept
+  // in this page's memory, which for a background page is what "session" means.
+  if (c.storage && !c.storage.session) {
+    const data = new Map();
+    const changed = event('storage.session.onChanged');
+    const pick = (keys) => (keys === null || keys === undefined ? [...data.keys()]
+      : typeof keys === 'string' ? [keys] : Array.isArray(keys) ? keys : Object.keys(keys));
+    const clone = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+    define(c.storage, 'session', {
+      get: (keys, cb) => {
+        if (typeof keys === 'function') { cb = keys; keys = null; }
+        const out = keys && typeof keys === 'object' && !Array.isArray(keys) ? { ...keys } : {};
+        for (const k of pick(keys)) if (data.has(k)) out[k] = clone(data.get(k));
+        return answer(Promise.resolve(out), cb);
+      },
+      set: (items, cb) => {
+        for (const [k, v] of Object.entries(items || {})) data.set(k, clone(v));
+        return answer(Promise.resolve(), cb);
+      },
+      remove: (keys, cb) => { for (const k of pick(keys)) data.delete(k); return answer(Promise.resolve(), cb); },
+      clear: (cb) => { data.clear(); return answer(Promise.resolve(), cb); },
+      getBytesInUse: (keys, cb) => answer(Promise.resolve(0), typeof keys === 'function' ? keys : cb),
+      setAccessLevel: (d, cb) => answer(Promise.resolve(), cb),
+      onChanged: changed,
+      QUOTA_BYTES: 10485760
+    }, true);
+  }
+
+  // scripting in a V2 background page: Firefox has it there, Chromium only in
+  // V3. Built on tabs.executeScript and insertCSS, which V2 does have.
+  if (!c.scripting && c.tabs && typeof c.tabs.executeScript === 'function') {
+    const run = (tabId, details) => new Promise((resolve, reject) => {
+      c.tabs.executeScript(tabId, details, (res) => {
+        const err = c.runtime && c.runtime.lastError;
+        if (err) reject(new Error(err.message)); else resolve(res || []);
+      });
+    });
+    const css = (method, tabId, details) => new Promise((resolve, reject) => {
+      if (typeof c.tabs[method] !== 'function') { resolve(); return; }
+      c.tabs[method](tabId, details, () => {
+        const err = c.runtime && c.runtime.lastError;
+        if (err) reject(new Error(err.message)); else resolve();
+      });
+    });
+    const each = async (inj, fn) => {
+      const target = inj.target || {};
+      const base = { allFrames: Boolean(target.allFrames), ...(Array.isArray(target.frameIds) && target.frameIds.length === 1 ? { frameId: target.frameIds[0] } : {}) };
+      if (Array.isArray(inj.files) && inj.files.length) {
+        let last = [];
+        for (const file of inj.files) last = await fn(target.tabId, { ...base, file });
+        return last;
+      }
+      return fn(target.tabId, base);
+    };
+    define(c, 'scripting', {
+      executeScript: (inj, cb) => answer(each(inj || {}, (tabId, d) => run(tabId, d.file ? d
+        : { ...d, code: `(${String(inj.func || inj.function)})(...${JSON.stringify(inj.args || [])})` }))
+        .then((res) => (res || []).map((result, i) => ({ frameId: i, result }))), cb),
+      insertCSS: (inj, cb) => answer(each(inj || {}, (tabId, d) => css('insertCSS', tabId, d.file ? d : { ...d, code: String(inj.css || '') })), cb),
+      removeCSS: (inj, cb) => answer(each(inj || {}, (tabId, d) => css('removeCSS', tabId, d.file ? d : { ...d, code: String(inj.css || '') })), cb),
+      ExecutionWorld: { ISOLATED: 'ISOLATED', MAIN: 'MAIN' }
+    }, true);
+  }
+  if (c.extension) {
+    define(c.extension, 'isAllowedIncognitoAccess', (cb) => answer(Promise.resolve(false), cb));
+    define(c.extension, 'isAllowedFileSchemeAccess', (cb) => answer(Promise.resolve(false), cb));
+  }
+
+  // storage.managed: settings an administrator set by policy. Electron's
+  // answers every call with "not available"; there is no policy here, so it
+  // is empty, which is what Chrome says on a computer without one.
+  if (c.storage) {
+    define(c.storage, 'managed', {
+      get: (keys, cb) => answer(Promise.resolve({}), typeof keys === 'function' ? keys : cb),
+      getBytesInUse: (keys, cb) => answer(Promise.resolve(0), typeof keys === 'function' ? keys : cb),
+      onChanged: event('storage.managed.onChanged')
+    }, true);
+  }
+
+  // Registered content scripts, which Electron's scripting lacks: none are
+  // registered, and registering one is accepted, so an extension that reads
+  // or sets them at start goes on starting.
+  if (c.scripting) {
+    define(c.scripting, 'getRegisteredContentScripts', (f, cb) =>
+      answer(Promise.resolve([]), typeof f === 'function' ? f : cb));
+    for (const n of ['registerContentScripts', 'unregisterContentScripts', 'updateContentScripts']) {
+      define(c.scripting, n, (d, cb) => answer(Promise.resolve(), typeof d === 'function' ? d : cb));
+    }
+  }
+
+  // Message names as installed: anything but letters, digits and "_" became
+  // "_" (extensions.js, adaptMessages), so Firefox's "moz-vpn-connected" is
+  // found again under the name it was stored as.
+  if (c.i18n && typeof c.i18n.getMessage === 'function') {
+    const getMessage = c.i18n.getMessage.bind(c.i18n);
+    define(c.i18n, 'getMessage', (name, ...rest) => getMessage(String(name).replace(/[^A-Za-z0-9_@]/g, '_'), ...rest), true);
+  }
+
   // The browsing session's cookies, for an extension that asked for them and
   // only on the sites it may reach: password managers, coupon finders and
   // screen recorders read their own site's sign-in this way. Its own pages

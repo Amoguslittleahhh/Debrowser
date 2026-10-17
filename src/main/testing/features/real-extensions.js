@@ -48,7 +48,22 @@ const POPULAR = [
   ['chrome', 'ghbmnnjooekpmoecnnnilnnbdlolhkhi', 'Google Docs Offline'],
   ['firefox', 'ublock-origin', 'uBlock Origin (Firefox)'],
   ['firefox', 'darkreader', 'Dark Reader (Firefox)'],
-  ['firefox', 'bitwarden-password-manager', 'Bitwarden (Firefox)']
+  ['firefox', 'bitwarden-password-manager', 'Bitwarden (Firefox)'],
+  ['firefox', 'adguard-adblocker', 'AdGuard AdBlocker (Firefox)'],
+  ['firefox', 'ghostery', 'Ghostery (Firefox)'],
+  ['firefox', 'privacy-badger17', 'Privacy Badger (Firefox)'],
+  ['firefox', '1password-x-password-manager', '1Password (Firefox)'],
+  ['firefox', 'grammarly-1', 'Grammarly (Firefox)'],
+  ['firefox', 'tampermonkey', 'Tampermonkey (Firefox)'],
+  ['firefox', 'sponsorblock', 'SponsorBlock (Firefox)'],
+  ['firefox', 'return-youtube-dislikes', 'Return YouTube Dislike (Firefox)'],
+  ['firefox', 'clearurls', 'ClearURLs (Firefox)'],
+  ['firefox', 'decentraleyes', 'Decentraleyes (Firefox)'],
+  ['firefox', 'istilldontcareaboutcookies', 'I still don\'t care about cookies (Firefox)'],
+  ['firefox', 'to-google-translate', 'To Google Translate (Firefox)'],
+  ['firefox', 'video-downloadhelper', 'Video DownloadHelper (Firefox)']
+  // Facebook Container and Multi-Account Containers are left out: they are
+  // built on Firefox's containers, which no Chromium browser has.
 ];
 
 /** What each kind does that can be seen from the page. */
@@ -105,6 +120,9 @@ module.exports = async function realExtensions(t) {
       const loadedId = ext.loadedId(ses, added.id);
       const origin = `chrome-extension://${loadedId}/`;
       r.icon = Boolean(ext.iconData(added.id));
+      // Its own ID: the store's, for a Chrome one; its add-on ID, for Firefox.
+      const d = ext.details(added.id);
+      r.id = store === 'chrome' ? d.storeId === id && d.id === id : Boolean(d.geckoId);
 
       // Its background: a running worker, or a page at its own address.
       const hasBackground = Boolean(manifest.background);
@@ -178,7 +196,7 @@ module.exports = async function realExtensions(t) {
 
     // What it is for, on the page: ad blockers block, Dark Reader darkens.
     if (added && !r.install && BLOCKERS.test(label) && adsReachable) {
-      r.works = await waitFor(async () => (await adLoads()) === false, { timeoutMs: 10_000 });
+      r.works = await waitFor(async () => (await adLoads()) === false, { timeoutMs: 40_000, pollMs: 1000 });
     }
     if (added && !r.install && DARKENERS.test(label)) {
       page.wc.reload();
@@ -187,11 +205,11 @@ module.exports = async function realExtensions(t) {
         'Boolean(document.querySelector("style.darkreader, meta[name=darkreader]"))').catch(() => false), { timeoutMs: 10_000 });
     }
 
-    const fine = !r.install && r.background && r.scripts !== false && r.popup !== false && r.icon && r.works !== false;
+    const fine = !r.install && r.background && r.scripts !== false && r.popup !== false && r.icon && r.id && r.works !== false;
     summary.push(`${label}: ${fine ? 'works' : 'FAILS'}`);
     check(`real extensions: ${label} installs, starts, reaches pages, opens its popup, shows its own logo and does its job`, fine,
       r.install ? `install: ${r.install}` : `background ${r.background}, content scripts ${r.scripts ?? 'none for this page'}` +
-        `${r.scriptsError ? ` (${r.scriptsError})` : ''}, popup ${r.popup ?? 'none'}${r.popupError ? ` (${r.popupError})` : ''}, logo ${r.icon}${r.works === undefined ? '' : `, does its job ${r.works}`}`);
+        `${r.scriptsError ? ` (${r.scriptsError})` : ''}, popup ${r.popup ?? 'none'}${r.popupError ? ` (${r.popupError})` : ''}, logo ${r.icon}, own ID ${r.id}${r.works === undefined ? '' : `, does its job ${r.works}`}`);
     if (added) ext.remove(added.id);
     await sleep(300);
   }

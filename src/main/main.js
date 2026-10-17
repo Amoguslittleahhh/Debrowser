@@ -5514,7 +5514,7 @@ const PAGE_COMMON_COMMANDS = ['page-dirty', 'zoom'];
 
 const INCOGNITO_REFUSED = new Set([
   'new-window', 'move-tab-to-new-window', 'move-tab-to-window', 'tear-tab', 'tear-preview',
-  'extensions-list', 'extension-add', 'extension-remove', 'open-extensions',
+  'extensions-list', 'extension-add', 'extension-remove', 'extension-details', 'extension-dev', 'open-extensions',
   'list-credentials', 'delete-credential', 'reveal-credential', 'save-payment', 'fill-payment', 'import-logins-file',
   'save-address', 'fill-address', 'fill-card-here', 'fill-address-here',
   'translate-page', 'translate-selection', 'toggle-site-dark',
@@ -6193,8 +6193,11 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       case 'extensions-list': {
         const ext = getExtensions();
         if (!ext) return { items: [] };
-        return { items: ext.list().map(({ id, name, version, from }) =>
-          ({ id, name, version, from, icon: ext.iconData(id), error: ext.errors?.[id] || null })) };
+        return { items: ext.list().map(({ id, name, version, from }) => {
+          const d = ext.details(id);
+          return { id, name, version, from, icon: ext.iconData(id), publicId: d && (d.storeId || d.geckoId || d.id),
+            error: ext.errors?.[id] || null };
+        }) };
       }
       case 'extension-add': {
         const ext = getExtensions();
@@ -6216,6 +6219,42 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       case 'extension-remove': {
         const ext = getExtensions();
         return { ok: Boolean(ext && ext.remove(payload?.id)) };
+      }
+
+      // Developer details, per extension: what Chrome's developer mode shows
+      // (its ID, views to inspect, errors, Reload) and its manifest's parts.
+      case 'extension-details': {
+        const ext = getExtensions();
+        return (ext && ext.details(String(payload?.id || ''))) || null;
+      }
+      case 'extension-dev': {
+        const ext = getExtensions();
+        const id = String(payload?.id || '');
+        const info = ext && ext.details(id);
+        if (!info) return { ok: false };
+        const page = (file) => {
+          if (!info.loaded || !file) return null;
+          const tab = openLinkTab(tabs, prefs, tabs.activeTab(), `chrome-extension://${info.id}/${file}`, { foreground: true });
+          return tab;
+        };
+        switch (payload?.action) {
+          case 'inspect-background': return { ok: ext.inspectBackground(id) };
+          case 'inspect-popup': {
+            const tab = page(info.popup);
+            if (tab) tab.wc.once('did-finish-load', () => { if (!tab.wc.isDestroyed()) tab.wc.openDevTools({ mode: 'detach' }); });
+            return { ok: Boolean(tab) };
+          }
+          case 'options': return { ok: Boolean(page(info.options)) };
+          case 'manifest': return { ok: Boolean(page('manifest.json')) };
+          case 'reload': {
+            const [r] = await ext.reload(id);
+            return { ok: Boolean(r && r.ok), error: r && r.error };
+          }
+          case 'reveal': electronShell.showItemInFolder(path.join(info.dir, 'manifest.json')); return { ok: true };
+          case 'copy-id': clipboard.writeText(String(info.storeId || info.geckoId || info.id || '')); return { ok: true };
+          case 'clear-errors': ext.logged?.delete(id); return { ok: true };
+          default: return { ok: false };
+        }
       }
 
       // An exported file the user picks. Read in main rather than in the

@@ -4,6 +4,7 @@
 
 ### New
 
+- **Developer details for each extension.** Settings > Extensions shows each extension's ID beside its name, and Details opens everything Chrome's developer mode has and more: the ID, version, manifest version, background and whether it's running, popup, options page, permissions, site access, content scripts, keyboard shortcuts, request rule sets and page policy, the errors its own code has logged, and tools to inspect its service worker, background page or popup, open its options or manifest, reload it, copy its ID and show its folder.
 - **Extensions are out of Labs.** Chrome and Firefox extensions now have their own section in Settings and are on by default. The widely used ones were each installed and tried: uBlock Origin and uBlock Origin Lite, AdGuard, Adblock Plus, AdBlock, Ghostery, Privacy Badger, Bitwarden, LastPass, 1Password, Dark Reader, Grammarly, Claude, Google Translate, McAfee WebAdvisor, Honey, Tampermonkey, React Developer Tools, ColorZilla, Loom and Google Docs Offline. Each starts, reaches the pages it should, opens from the puzzle button, and the ad blockers block ads and Dark Reader darkens pages. With none installed, extensions cost nothing.
 - **Sync between your computers.** Settings > Sync keeps your bookmarks, reading list and settings the same on each computer, through a folder you already sync, such as iCloud Drive, OneDrive, Dropbox, Google Drive or Syncthing. It is encrypted with a passphrase you choose, so whoever stores the folder can't read it. A bookmark deleted on one computer goes from the others too. Passwords and cards stay on each computer.
 - **Fill addresses and cards from the field.** Right-click a field on a checkout page to fill a saved card or address. Addresses are new: add them in Passwords, beside your cards. Only fields you can see are filled, and nothing is filled until you choose it.
@@ -15,6 +16,7 @@
 
 ### Improved
 
+- **Extensions keep the ID they have in Chrome.** An extension from the Chrome Web Store now runs under its store ID, as in Chrome, rather than one made up for it, so extensions that talk to themselves or to a site by their ID work. Firefox add-ons show their own add-on ID.
 - **Extensions and downloads sit beside the address bar.** The puzzle button and the downloads button were inside the address bar with the page's own buttons. They now sit in the toolbar just after it, as in Chrome, since they act on the browser rather than the page.
 - **Each extension shows its own logo.** The puzzle menu and the list in Settings show each extension's own icon beside its name, where every one used to get the same puzzle piece.
 - **The menu has what other browsers' menus have.** It now lists New window, Find in page and, on Windows and Linux, Exit, which closes the whole browser and asks first if you've set it to. With extensions on, Extensions takes you to where they're managed. The keyboard shortcuts were already there; now the menu shows them too.
@@ -24,6 +26,7 @@
 
 ### Fixed
 
+- **More Firefox add-ons work.** Tested with 16 of the most used, including uBlock Origin, Bitwarden, 1Password, Grammarly, Privacy Badger, SponsorBlock, Tampermonkey and Video DownloadHelper. Add-ons that name keyboard shortcuts or messages with hyphens, set more than four shortcuts, or use storage or scripting the way only Firefox allows used to fail to load or stop at start.
 - **Extensions that keep their settings in sync storage now work.** Dark Reader and others store their settings in the browser's sync storage, which wasn't available, so they read nothing and did nothing. It is now kept on this computer, as Chrome does when you aren't signed in.
 - **Adding an extension no longer removes another.** Extensions whose names are translated, such as uBlock Origin Lite and Bitwarden, were stored under the same placeholder name, so adding one replaced the other. Each is now stored under its real name.
 - **Extensions can read their own site's cookies.** Extensions that check whether you're signed in to their service, such as Loom and password managers, stopped with an error. They can now read and set cookies, only for the sites they asked for.
@@ -40,6 +43,10 @@
 - **Private windows: nothing you visit is left in a temporary log.** The log a private window writes while it starts named addresses it refused. It no longer names them, it's deleted when the window closes cleanly, and any left behind by a crash are removed the next time Debrowser starts.
 - **Private windows: stronger protection against canvas and audio fingerprinting.** A page could undo the small changes made to what it reads from a canvas or from audio, and so read your computer's real fingerprint. The changes can no longer be read out or cancelled, and they now also cover video frames made from a canvas and every kind of audio analyser reading.
 - **Private windows: photos and videos that can't be cleaned aren't uploaded without asking.** A phone video, a HEIC or TIFF photo, or a slightly damaged JPEG went up with its location and time still in it. HEIC and AVIF photos you drag in are now cleaned too, and for a file that can't be, Debrowser asks before uploading it, or, if you dragged or pasted it, doesn't add it and tells you why.
+
+### Known issues
+
+- **Firefox's AdGuard and Ghostery don't block ads yet.** They start and their popups open, but ads still load. Their Chrome versions block normally. Facebook Container and Multi-Account Containers can't work, since they're built on Firefox's containers, which no Chromium browser has.
 
 ## 2.4.0
 

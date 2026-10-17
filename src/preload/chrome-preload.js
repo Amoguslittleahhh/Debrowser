@@ -294,6 +294,8 @@ const COMMANDS = new Set([
   'extensions-list',
   'extension-add',
   'extension-remove',
+  'extension-details',
+  'extension-dev',
   'forget-site',
   'recent-pages',
   'hide-continue-card'
