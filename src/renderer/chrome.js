@@ -1896,7 +1896,7 @@ function fitOmnibox() {
     bar.style.removeProperty('--omni-fit');
     return;
   }
-  const gap = 12;
+  const gap = 6;
   let left = 0;
   let right = window.innerWidth;
   for (const child of toolbar.children) {
