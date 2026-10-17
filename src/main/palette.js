@@ -40,26 +40,6 @@ function paletteFor(design, light) {
   return light ? set.light : set.dark;
 }
 
-/**
- * The side strip's own tone, as chrome.css mixes it for the default strip down
- * the side: a step away from the page - deeper in light; in dark, lighter than
- * Legacy's pages, which are `bg`, and darker than the designs', which are
- * raised - so the page's card stands off it. Kept equal to the stylesheet,
- * which paints the column; this paints the window round the card.
- */
-function sideFor(design, light) {
-  const p = paletteFor(design, light);
-  if (light) return mix(p.text, p.bg, design === 'grid' ? 0.16 : 0.09);
-  return DESIGNS[design] && design !== 'legacy' ? mix('#000000', p.bg, 0.35) : mix(p.text, p.bg, 0.07);
-}
-
-/** `share` of `a` in `b`, as CSS color-mix in srgb. */
-function mix(a, b, share) {
-  const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-  const [x, y] = [rgb(a), rgb(b)];
-  return `#${y.map((v, i) => Math.round(x[i] * share + v * (1 - share)).toString(16).padStart(2, '0')).join('')}`;
-}
-
 const DEFAULT_ACCENT = '#2f857b';
 
 /** Answers {light, accent, design} for the window. Set by main.js once the window exists. */
@@ -93,4 +73,4 @@ function surfaceFor(url) {
   return design !== 'legacy' && pages.pageName(url) === 'newtab' ? p.raised : p.bg;
 }
 
-module.exports = { PALETTES, DESIGNS, paletteFor, sideFor, useTheme, current, surfaceFor };
+module.exports = { PALETTES, DESIGNS, paletteFor, useTheme, current, surfaceFor };

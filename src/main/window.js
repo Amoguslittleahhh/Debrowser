@@ -15,7 +15,7 @@
  */
 
 const path = require('path');
-const { paletteFor, sideFor } = require('./palette');
+const { paletteFor } = require('./palette');
 const { BaseWindow, WebContentsView, ImageView, nativeImage, nativeTheme,
         shell, systemPreferences, screen } = require('electron');
 const { INCOGNITO } = require('./incognito/mode');
@@ -2339,12 +2339,7 @@ class BrowserShell {
     // the window buttons in a dark box of their own. Tinted like the strip, it
     // is one surface with it.
     const opacity = this.prefs.get('windowOpacity');
-    //
-    // Opaque, down the side, it is the strip's colour as well: the frame round
-    // the page's card is the sidebar's surface carried round it, which is what
-    // sets the card off.
-    const windowBg = !this.vertical() ? sheer
-      : !translucent ? this.stripColour()
+    const windowBg = !translucent || !this.vertical() ? sheer
       : this.seeThrough() ? withAlpha(this.stripColour(), opacity, 'argb') : this.stripColour();
     try {
       this.window.setBackgroundColor(windowBg);
@@ -2431,11 +2426,7 @@ class BrowserShell {
   stripColour() {
     const choice = this.prefs ? this.prefs.get('tabBarColor') : 'default';
     if (choice === 'mirror') return this.prefs.get('accent');
-    if (choice === 'default') {
-      // Tucked away at the side, the default is a tone of its own (`sideFor`).
-      return this.detached()
-        ? sideFor(this.prefs ? this.prefs.get('design') : 'legacy', this.lightTheme()) : this.surface();
-    }
+    if (choice === 'default') return this.surface();
     return choice;
   }
 

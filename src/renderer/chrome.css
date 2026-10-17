@@ -1127,19 +1127,18 @@ body[data-layout="left"] .tab.active::before {
 body[data-layout="left"] .tab.active { background: var(--bg-input); }
 
 /*
- * The column in a tone of its own, set off from the page beside it.
+ * The tucked-away panel in a tone of its own, set off from the page under it.
  *
- * It was the theme's `--bg`, and so was the window round the page's card, so
- * strip, frame and - on most of our own pages - the page itself were one
- * colour, the tabs floating in it with nothing to say where the sidebar
- * ended. It steps away from the page: deeper in a light theme, and in a dark
- * one lighter than Legacy's pages or darker than the designs', so the page
- * reads as a sheet laid on the side either way; window.js paints the
- * frame in the same tone (`sideFor` in palette.js, which has to agree).
+ * It was the theme's `--bg`, and so - on most of our own pages - was the
+ * page it slides out over, the tabs floating on it with nothing to say where
+ * the panel ended. It steps away from the page: deeper in a light theme, and in a dark
+ * one lighter than Legacy's pages or darker than the designs', so the panel
+ * reads as laid over the page either way.
  *
- * Only the default strip, and only tucked away, where the panel slides out
- * over the page and has to stand off it: a colour chosen in Settings is used
- * as it is, and the column pinned beside the page keeps the theme's surface.
+ * Only the default strip, and only the panel that slides out when the tabs
+ * are tucked away: a colour chosen in Settings is used as it is, and the
+ * column pinned beside the page, the band across the top and the window
+ * round the page keep the theme's surface.
  *
  * What sat on the old surface is moved with it: secondary text is inked
  * darker, to keep 7:1 on the deeper tone, and the address bar and the open
@@ -1147,7 +1146,7 @@ body[data-layout="left"] .tab.active { background: var(--bg-input); }
  * shade of the new column, and both all but vanished into it.
  */
 body[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
-  --strip: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, var(--text) 7%, var(--bg)));
+  --side: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, var(--text) 7%, var(--bg)));
   --side-dim: color-mix(in srgb, var(--text) 35%, var(--text-dim));
   --side-raised: light-dark(var(--bg-raised), color-mix(in srgb, var(--text) 15%, var(--bg)));
 }
@@ -1155,15 +1154,22 @@ body[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
    a dark theme is the lighter way, so there the side steps down instead; and
    Grid's light page is grey, not white, so its side goes a step deeper. */
 body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
-  --strip: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
+  --side: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
   --side-raised: light-dark(var(--bg-raised), var(--bg-input));
 }
 body[data-design="grid"][data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
-  --strip: light-dark(color-mix(in srgb, var(--text) 16%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
+  --side: light-dark(color-mix(in srgb, var(--text) 16%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
 }
-body[data-layout="left"]:not([data-strip-tone])[data-detached="true"] :is(.toolbar, .tabstrip, .findbar) { --text-dim: var(--side-dim); }
-body[data-layout="left"]:not([data-strip-tone])[data-detached="true"] .omnibox { background: var(--side-raised); }
-body[data-layout="left"]:not([data-strip-tone])[data-detached="true"] .omnibox:hover {
+/* Only the panel takes it. Floating free, the whole view is the panel; under
+   the band across the top it is the tabs and the card behind them, and the
+   band itself - the address bar's row - stays the theme's own surface. */
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) { --strip: var(--side); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"][data-band="true"] :is(.tabstrip, .findbar) { --strip: var(--side); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"][data-band="true"]::before { background: var(--side); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) :is(.toolbar, .tabstrip, .findbar),
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"][data-band="true"] :is(.tabstrip, .findbar) { --text-dim: var(--side-dim); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) .omnibox { background: var(--side-raised); }
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-band="true"]) .omnibox:hover {
   background: color-mix(in srgb, var(--accent) 6%, var(--side-raised));
 }
 /* Paper marks the open tab with a rule and Grid inverts it; neither has a
