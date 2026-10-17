@@ -40,7 +40,8 @@ const TYPES = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.pdf': 'application/pdf',
-  '.js': 'text/javascript; charset=utf-8'
+  '.js': 'text/javascript; charset=utf-8',
+  '.webmanifest': 'application/manifest+json'
 };
 
 const contentType = (name) => TYPES[path.extname(name).toLowerCase()] || 'text/plain; charset=utf-8';

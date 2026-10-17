@@ -43,6 +43,7 @@ const COMMANDS = [
   { title: 'Reader view', command: 'reader-view', keywords: 'read article clean', needsTab: true },
   { title: 'Find in page', command: 'find-open', keywords: 'search' },
   { title: 'Save page', command: 'save-page', keywords: 'download' },
+  { title: 'Install this site as an app', command: 'install-web-app', keywords: 'pwa app shortcut desktop', needsTab: true, normalOnly: true },
   { title: 'Screenshot the whole page', command: 'screenshot-page', keywords: 'capture image picture', needsTab: true },
   { title: 'Print', command: 'print' },
   { title: 'Release Notes', command: 'open-whats-new', keywords: 'changelog release notes update what’s new whats new' },

@@ -126,7 +126,7 @@ const SITE_SETTINGS = [
   ['fonts', 'Fonts', 'ask', ['local-fonts']],
   ['autoPip', 'Automatic picture-in-picture', 'ask', 'page'],
   ['scrollZoom', 'Scrolling and zooming shared tabs', 'ask', ['captured-surface-control']],
-  ['webApps', 'Web app installations', 'ask', null],
+  ['webApps', 'Web app installations', 'ask', 'page'],
   ['localNetwork', 'Local network', 'ask', ['local-network-access']],
   ['appsOnDevice', 'Apps on device', 'ask', null]
 ];
