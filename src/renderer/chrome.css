@@ -2487,8 +2487,8 @@ body[data-windows="several"] .strip-count::before {
   vertical-align: 0;
 }
 
-/* The puzzle and downloads buttons, beside the address bar: kept together as
-   one pair, a little nearer each other than the toolbar's gap and set a step
-   in from the meter, so they read as belonging to the field they follow. */
+/* The puzzle and downloads buttons: kept together as one pair, a little
+   nearer each other than the toolbar's gap, and tucked up against the memory
+   meter (the task manager) they sit beside. */
 .toolbar > #extensions { margin-right: -4px; }
-.toolbar > #downloads { margin-right: 8px; }
+.toolbar > #downloads { margin-right: -10px; }
