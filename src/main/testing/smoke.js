@@ -95,7 +95,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
                           openInternalPage, senderPage, bookmarks,
                           runCommand = () => {}, history = null, context = { model: null },
                           credentials = null, vault = null, blocker = null, sitePrefs = null, spaces = null, passkeys = null,
-                          getExtensions = () => null, windowOps = null }) {
+                          getExtensions = () => null, windowOps = null, readingList = null, getSync = () => null }) {
   console.log('\n=== Debrowser smoke test ===\n');
   // Every uncaught error in the browser's own pages, for the whole run. A page
   // that throws half-way through drawing looks finished in a screenshot -
@@ -309,6 +309,21 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     await checkWindows();
     const failedOnly = results.filter((r) => !r.passed);
     console.log(`\n=== ${results.length - failedOnly.length}/${results.length} checks passed ===\n`);
+    if (fixtures) await fixtures.close();
+    app.exit(failedOnly.length ? 1 : 0);
+    return;
+  }
+
+  // The newer features' own checks (smoke-features.js), alone:
+  // DEBROWSER_SMOKE_ONLY=features, optionally DEBROWSER_SMOKE_FEATURE=<name>.
+  const featureKit = () => ({ check, waitFor, inTime, sleep, pageUrl: (name) => pageUrl(name), tabs, shell, windowOps,
+    prefs, runCommand, context, credentials, vault, bookmarks, history, sitePrefs, readingList, getSync, contextMenu, app,
+    openInternalPage, senderPage, menuModel });
+  if (process.env.DEBROWSER_SMOKE_ONLY === 'features') {
+    await require('./smoke-features').runFeatures(featureKit());
+    const failedOnly = results.filter((r) => !r.passed);
+    console.log(`\n=== ${results.length - failedOnly.length}/${results.length} checks passed ===\n`);
+    for (const f of failedOnly) console.log(`  - ${f.name}${f.detail ? ` (${f.detail})` : ''}`);
     if (fixtures) await fixtures.close();
     app.exit(failedOnly.length ? 1 : 0);
     return;
@@ -6628,6 +6643,10 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         lit[0].ch === 'x' && lit[0].bg.join() === '255,150,50' && lit[0].fg.join() === '0,0,0',
       `cells ${JSON.stringify(cells.map((c) => c.ch))}; keys ${kinds.join(' ')}; rest ${JSON.stringify(events.rest)}`);
   }
+
+  /* ---------------------------------------------------------------- */
+  console.log('\nThe newer features\n');
+  await require('./smoke-features').runFeatures(featureKit());
 
   check('no page of the browser\'s own threw an uncaught error during the run',
     pageErrors.length === 0, pageErrors.length ? pageErrors.slice(0, 5).join(' | ') : 'none');

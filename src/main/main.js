@@ -2504,7 +2504,7 @@ function main() {
       });
     } else if (SMOKE_TEST) {
       runSmokeTest({ tabs: tabsInUse, governor, shell: shellInUse, windowOps, prefs, bookmarks, runCommand, history, context, credentials, vault,
-        blocker, sitePrefs, spaces, passkeys, getExtensions: () => extensions });
+        blocker, sitePrefs, spaces, passkeys, getExtensions: () => extensions, readingList, getSync: () => sync });
     } else if (SPEED_TEST) {
       // Startup, from this process starting to the first tab drawn.
       const startedAt = Date.now() - process.uptime() * 1000;
@@ -7107,7 +7107,7 @@ function applySecureDns(prefs, log) {
 /* ------------------------------------------------------------------ */
 
 function runSmokeTest({ tabs, governor, shell, windowOps, prefs, bookmarks, runCommand, history, context, credentials, vault,
-                       blocker, sitePrefs, spaces, passkeys, getExtensions = () => null }) {
+                       blocker, sitePrefs, spaces, passkeys, getExtensions = () => null, readingList = null, getSync = () => null }) {
   const { runSmoke } = require('./testing/smoke');
   runSmoke({ tabs, governor, shell, windowOps, app, cfg, prefs, menuModel, toggleDevTools, openInternalPage, bookmarks,
             senderPage: (t, sender) => senderPage(t, shell, sender),
@@ -7116,7 +7116,7 @@ function runSmokeTest({ tabs, governor, shell, windowOps, prefs, bookmarks, runC
             // into their parts.
             runCommand: (command, payload, sender = null) => runCommand(command, payload, sender),
             history, context, credentials, vault, blocker, sitePrefs, spaces, passkeys,
-            getExtensions }).then((code) => {
+            getExtensions, readingList, getSync }).then((code) => {
     app.exit(code);
   }).catch((err) => {
     console.error('[smoke] failed:', err.stack || err.message);
