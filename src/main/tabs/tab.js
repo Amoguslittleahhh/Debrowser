@@ -1150,6 +1150,9 @@ class Tab {
       // read for twenty minutes was otherwise "idle twenty minutes" the instant
       // you switched away, and discarded on the next tick.
       if (this.everVisible) this.lastActiveAt = Date.now();
+      // Where the page was when the user looked away from it: the passwords
+      // page's Fill puts a card only into that (main.js, credentialRequest).
+      if (this.everVisible && this.isLive) this.leftAtUrl = this.wc.getURL();
     }
     if (this.view) this.view.setVisible(visible);
   }

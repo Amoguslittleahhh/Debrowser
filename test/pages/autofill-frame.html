@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout: card in a frame</title>
+  <!--
+    A card form the way most shops show one: a payment page of its own, in a
+    frame from another address (pay.<this host>; the same site, so the test's
+    injected clicks reach it as a person's would). The shop's page itself has
+    no card fields.
+  -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    iframe { display: block; width: 420px; height: 360px; border: 1px solid #999; }
+  </style>
+</head>
+<body>
+  <p>Pay with the form below, from our payment provider.</p>
+  <iframe id="provider" title="Payment"></iframe>
+  <script>
+    const there = new URL(location.href);
+    there.hostname = `pay.${location.hostname}`;
+    there.pathname = '/autofill-card.html';
+    document.getElementById('provider').src = there.href;
+  </script>
+</body>
+</html>

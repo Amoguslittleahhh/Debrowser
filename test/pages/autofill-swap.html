@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout that moves</title>
+  <!--
+    A card form that, a moment after it is right-clicked, sends the tab to a
+    different site with card fields of its own - while the browser's menu,
+    with "Fill card" in it, is still open over the page.
+  -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    input { display: block; margin: 4px 0 12px; padding: 6px; width: 300px; font: inherit; }
+  </style>
+</head>
+<body>
+  <form onsubmit="return false">
+    <label for="number">Card number</label><input id="number" autocomplete="cc-number">
+  </form>
+  <script>
+    // ?to=same-site moves to another host of this same site instead.
+    document.addEventListener('contextmenu', () => {
+      const away = new URL(location.href);
+      away.hostname = away.searchParams.get('to') === 'same-site' ? `other.${location.hostname}` : 'elsewhere.test';
+      away.pathname = '/autofill-card.html';
+      away.search = '';
+      setTimeout(() => { location.href = away.href; }, 1200);
+    });
+  </script>
+</body>
+</html>

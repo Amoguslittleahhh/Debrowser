@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A page to translate</title>
+<style>
+  body { font: 16px/1.5 sans-serif; margin: 24px; max-width: 720px; }
+  #blank { height: 160px; }
+  input { width: 240px; }
+</style>
+</head>
+<body>
+<h1 id="title">A page to translate</h1>
+<div id="blank"></div>
+<p id="quotes">He said “bonjour” and then "au revoir" - it's done &amp; dusted.</p>
+<p id="lines">First line of the poem<br>second line of the poem<br>third line</p>
+<p><input id="field" value="words in a field"></p>
+<p id="long"></p>
+<script>
+  // Over 6,000 characters of ordinary words, made here so the file stays small.
+  const words = 'the quick brown fox jumps over the lazy dog while the river runs on ';
+  document.getElementById('long').textContent = words.repeat(100).slice(0, 6500).trim();
+</script>
+</body>
+</html>

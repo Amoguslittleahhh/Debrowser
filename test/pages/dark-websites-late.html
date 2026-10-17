@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Dark websites: a dark style sheet that is slow to arrive</title>
+  <!-- Served by the test itself, which holds the style sheet back a moment:
+       a page whose look is in a file that arrives after the page is parsed. -->
+  <link rel="stylesheet" href="dark-websites-late.css">
+  <style>
+    body { margin: 0; padding: 24px; font: 16px/1.5 sans-serif; }
+    #glyph { display: inline-block; font-size: 96px; line-height: 1; }
+  </style>
+</head>
+<body>
+  <div id="glyph">&#x2588;&#x2588;</div>
+  <h1>Dark, once its style sheet arrives</h1>
+  <p>No script holds the page up, so it is parsed before its colours come.</p>
+</body>
+</html>

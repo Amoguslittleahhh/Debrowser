@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" style="filter: none !important">
+<head>
+  <meta charset="utf-8">
+  <title>Dark websites: a page that pushes back</title>
+  <style>
+    html { background: #fff; color: #111; filter: none !important; }
+    body { margin: 0; padding: 24px; font: 16px/1.5 sans-serif; }
+  </style>
+  <script>
+    // What a page can see of it, and its tries at taking it off or at
+    // reaching the browser's own switch.
+    window.seen = [];
+    const look = () => window.seen.push(getComputedStyle(document.documentElement).filter);
+    setInterval(look, 100);
+    window.reached = typeof window.debrowser !== 'undefined';
+    window.addEventListener('load', () => {
+      document.documentElement.style.setProperty('filter', 'none', 'important');
+      for (const sheet of document.styleSheets) {
+        try { for (let i = sheet.cssRules.length - 1; i >= 0; i--) if (/invert/.test(sheet.cssRules[i].cssText)) sheet.deleteRule(i); } catch { /* not ours to read */ }
+      }
+      for (let i = 0; i < 5; i++) document.body.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 40 }));
+    });
+  </script>
+</head>
+<body>
+  <p>Light, and trying to stay that way.</p>
+</body>
+</html>

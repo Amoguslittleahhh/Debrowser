@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checkout that leaves when you look away</title>
+  <!--
+    A card form that, the moment its tab is hidden - the user has gone to the
+    passwords page to press Fill - sends itself to a different site with card
+    fields of its own. The user, looking at the passwords page, sees none of it.
+  -->
+  <style>
+    body { margin: 0; padding: 24px; font: 15px system-ui; background: #fff; color: #111; }
+    input { display: block; margin: 4px 0 12px; padding: 6px; width: 300px; font: inherit; }
+  </style>
+</head>
+<body>
+  <form onsubmit="return false">
+    <label for="number">Card number</label><input id="number" autocomplete="cc-number">
+  </form>
+  <script>
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'hidden') return;
+      const away = new URL(location.href);
+      away.hostname = 'elsewhere.test';
+      away.pathname = '/autofill-card.html';
+      location.href = away.href;
+    });
+  </script>
+</body>
+</html>
