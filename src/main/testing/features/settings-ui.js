@@ -114,7 +114,9 @@ module.exports = async function settingsUi(t) {
     /\/src\/renderer\/|^debrowser:/.test(l.source));
   const refusals = () => lines.filter((l) => /refusing unknown (command|request)/.test(l.message));
 
-  const js = (tab, code) => tab.wc.executeJavaScript(code).catch((err) => `threw ${err.message}`);
+  // Bounded: a page the browser has frozen in the background never answers,
+  // and an unbounded wait hung the whole suite on a slow Windows runner.
+  const js = (tab, code) => t.inTime(tab.wc.executeJavaScript(code).catch((err) => `threw ${err.message}`), 15_000, 'timed out');
   const ask = (tab, command, payload) => js(tab,
     `window.debrowser.request(${JSON.stringify(command)}, ${JSON.stringify(payload ?? null)})`);
   const tell = (tab, command, payload) => js(tab,
@@ -127,6 +129,12 @@ module.exports = async function settingsUi(t) {
     await loaded(tab, url.split('/').pop().split('#')[0]);
     if (activate) await tabs.activate(tab.id);
     return tab;
+  };
+  /** Brings a page to the front, so it is awake to answer, as a user would by switching to it. */
+  const wake = async (tab) => {
+    if (!tab.isLive) tab.realise();
+    await tabs.activate(tab.id);
+    await waitFor(() => tab.isLive && !tab.loading, { timeoutMs: 10_000 }).catch(() => {});
   };
   const close = (tab) => { if (tab && tabs.all().includes(tab)) tabs.close(tab.id); };
   const frames = (tab) => t.inTime(js(tab, 'new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))'), 500);
@@ -714,6 +722,7 @@ module.exports = async function settingsUi(t) {
   /* ================================================================ */
 
   async function permissionChecks(settings, pw) {
+    await wake(settings);
     // The refusal is seen: the bridge warns for a name it does not know.
     const mark = lines.length;
     await tell(settings, 'settings-ui-not-a-command');
@@ -747,6 +756,7 @@ module.exports = async function settingsUi(t) {
       `delete ${JSON.stringify(settingsDelete)}, addresses ${count} -> ${credentials.records.address.length}`);
 
     // The passwords page may, each request crossing the bridge.
+    await wake(pw);
     const mark2 = lines.length;
     const pwSave = await ask(pw, 'save-address', { label: 'Via request', name: 'Request Person', street: '' });
     const pwFill = await ask(pw, 'fill-address', { id: 'Via request' });
@@ -811,6 +821,7 @@ module.exports = async function settingsUi(t) {
   /* ================================================================ */
 
   async function websiteChecks(pw) {
+    await wake(pw);
     const page = await open(t.pageUrl('settings-ui-hostile.html'));
     const host = new URL(page.wc.getURL()).hostname;
     hosts.add(host);
@@ -930,6 +941,7 @@ module.exports = async function settingsUi(t) {
   /* ================================================================ */
 
   async function sheetChecks(settings) {
+    await wake(settings);
     // Over Settings, so none of them has a page to act on: what is checked is
     // that each crosses the bridge, not what it then does.
     await tabs.activate(settings.id);
