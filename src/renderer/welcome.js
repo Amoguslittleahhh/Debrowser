@@ -250,7 +250,7 @@ window.addEventListener('focus', () => { if (STEPS[step] === 'browsing') refresh
 /* What was chosen                                                   */
 /* ---------------------------------------------------------------- */
 
-const DESIGNS = { ledger: 'Ledger', paper: 'Paper', grid: 'Grid', legacy: 'Legacy' };
+const DESIGNS = { ledger: 'Ledger', paper: 'Paper', grid: 'Grid', calm: 'Calm', legacy: 'Legacy' };
 const THEMES = { system: 'light or dark with your system', light: 'light', dark: 'dark' };
 
 /** The last step reads back what the browser now has - not what was clicked. */

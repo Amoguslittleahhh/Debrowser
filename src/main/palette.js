@@ -31,6 +31,10 @@ const DESIGNS = {
   grid: {
     light: { bg: '#ffffff', raised: '#ffffff', text: '#0f0f0f', dim: '#595959', border: '#cfcfcf' },
     dark: { bg: '#0a0a0a', raised: '#111111', text: '#f2f2f2', dim: '#8c8c8c', border: '#3a3a3a' }
+  },
+  calm: {
+    light: { bg: '#e8e6e2', raised: '#f8f7f4', text: '#1a1917', dim: '#45433f', border: '#d3d0c9' },
+    dark: { bg: '#191918', raised: '#212120', text: '#ebe9e4', dim: '#b6b3ac', border: '#353532' }
   }
 };
 

@@ -450,6 +450,47 @@ body[data-design="grid"][data-theme="light"] {
 }
 
 /*
+ * Calm: muted, slightly warm neutrals and soft corners, after the quieter
+ * browsers (Arc, Zen). Its one mark of its own is the frame: the strip, the
+ * sidebar and the gap around the page are faintly tinted by the accent, so
+ * the colour theme reads as the window's rather than as a few buttons'. The
+ * page itself stays neutral. Secondary text is darker than in the other
+ * designs, for 7:1 on its own background.
+ *
+ * Its face is the system's own on every platform: Segoe UI Variable on
+ * Windows 11, which has a real semibold (Calibri does not), the desktop's face
+ * on Linux, and San Francisco on the Mac from the rule above.
+ */
+body[data-design="calm"] {
+  color-scheme: dark;
+  --bg: #191918; --bg-raised: #212120; --bg-input: #292927;
+  --border: #353532; --border-soft: #262624;
+  --text: #ebe9e4; --text-dim: #b6b3ac;
+  --radius-sm: 8px; --radius: 10px; --radius-lg: 14px;
+  --strip: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+@media (prefers-color-scheme: light) {
+  body[data-design="calm"]:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #e8e6e2; --bg-raised: #f8f7f4; --bg-input: #ffffff;
+    --border: #d3d0c9; --border-soft: #e1ded8;
+    --text: #1a1917; --text-dim: #45433f;
+    --strip: color-mix(in srgb, var(--accent) 16%, var(--bg));
+  }
+}
+body[data-design="calm"][data-theme="light"] {
+  color-scheme: light;
+  --bg: #e8e6e2; --bg-raised: #f8f7f4; --bg-input: #ffffff;
+  --border: #d3d0c9; --border-soft: #e1ded8;
+  --text: #1a1917; --text-dim: #45433f;
+  --strip: color-mix(in srgb, var(--accent) 16%, var(--bg));
+}
+body[data-design="calm"]:not([data-platform="darwin"]) {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, Inter, Cantarell, Ubuntu,
+             "Noto Sans", Aptos, Calibri, Carlito, sans-serif;
+}
+
+/*
  * Anything defined in terms of another custom property belongs on <body>, not
  * on :root, and this is not a detail.
  *

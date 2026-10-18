@@ -842,3 +842,76 @@ body[data-subpage] main > section.ext-subpage { display: block !important; }
 .ext-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .ext-page .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .ext-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+
+/*
+ * On and off as a switch, in every design but Legacy.
+ *
+ * Still a real checkbox underneath - focus, Space and the label's click all
+ * work as before, and the element carries role="switch" (settings.js) - only
+ * drawn as the control people expect for a setting that takes effect at once.
+ */
+body:not([data-design="legacy"]) input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+  transition: background-color var(--fast) var(--ease);
+}
+body:not([data-design="legacy"]) input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: translate 200ms var(--ease-out);
+}
+body:not([data-design="legacy"]) input[type="checkbox"]:checked { background: var(--accent-fill); }
+body:not([data-design="legacy"]) input[type="checkbox"]:checked::before { translate: 14px 0; }
+
+/* Remove shows on the row the pointer is over, or with keyboard focus. Where
+   there is no pointer to hover with, it stays, since it could not be reached. */
+@media (hover: hover) {
+  body:not([data-design="legacy"]) .ghost-btn.reveal { opacity: 0; transition: opacity var(--fast) var(--ease); }
+  body:not([data-design="legacy"]) .row:hover .ghost-btn.reveal,
+  body:not([data-design="legacy"]) .ghost-btn.reveal:focus-visible { opacity: 1; }
+}
+
+/* Calm: grouped cards on a hairline instead of a border, dividers that start
+   under the text, no rule under the header, and the current section filled. */
+body[data-design="calm"] header { border-bottom-color: transparent; }
+body[data-design="calm"] h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+body[data-design="calm"] .rows {
+  border-color: transparent;
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--text) 14%, transparent), 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+body[data-design="calm"] .row + .row { border-top: 0; position: relative; }
+body[data-design="calm"] .row + .row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--s4);
+  right: 0;
+  border-top: 0.5px solid color-mix(in srgb, var(--text) 13%, transparent);
+}
+body[data-design="calm"] .row-label { font-weight: 500; }
+body[data-design="calm"] .rail-item { border-radius: var(--radius); }
+body[data-design="calm"] .rail-item.current { background: var(--accent-fill); color: #fff; box-shadow: none; font-weight: 600; }
+body[data-design="calm"] .rail-item.current svg { color: #fff; }
+body[data-design="calm"] .ghost-btn { border-color: transparent; background: color-mix(in srgb, var(--text) 7%, transparent); border-radius: var(--radius); }
+body[data-design="calm"] .ghost-btn:hover { background: color-mix(in srgb, var(--text) 12%, transparent); border-color: transparent; }
+body[data-design="calm"] .ghost-btn.reveal { background: none; color: var(--accent-text); }
+body[data-design="calm"] .ghost-btn.danger:hover { color: var(--crit); }
+body[data-design="calm"] :is(select, input[type="text"], input[type="number"], input[type="password"], textarea) {
+  border-color: transparent;
+  background-color: color-mix(in srgb, var(--text) 6%, var(--bg-raised));
+  border-radius: var(--radius);
+}
+body[data-design="calm"] header #q { border-radius: var(--radius-pill); }

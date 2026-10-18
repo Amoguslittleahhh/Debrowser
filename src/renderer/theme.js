@@ -424,7 +424,9 @@ function applyThemePrefs(prefs) {
 
   const flags = {
     theme: prefs.theme,
-    design: prefs.design || 'legacy',
+    // The new tab page is frozen (CLAUDE.md) and its stylesheet names the
+    // designs it was drawn for, so under Calm it keeps Ledger's page exactly.
+    design: prefs.design === 'calm' && document.getElementById('wordmark') ? 'ledger' : (prefs.design || 'legacy'),
     tabs: prefs.tabWidth,
     // Which way the chrome is laid out. The main process has already given the
     // view the matching rectangle; this is the stylesheet's half of the same
