@@ -21,6 +21,7 @@
 ### Improved
 
 - **Settings use switches.** On-and-off settings are switches instead of checkboxes in every design but Legacy, and a list's Remove buttons appear on the row you point at, so a list of extensions or apps is no longer a column of Remove buttons.
+- **Ledger's Settings look more finished.** Settings in Ledger now groups each section into a card on a fine outline, with dividers that start under the text, softer fields and buttons, a rounded search field, and the current section filled with your accent colour.
 - **Background tabs use less memory when you have several of one site open.** Debrowser was watching every background tab that shares its process with tabs of the same site, to tell which of them was busy, at about 0.7 MB a tab kept until the tab closed - and what it read was the whole process, the same for every tab, so it could not tell. It no longer watches them. A background tab is also no longer stopped because the tab of the same site in front of you is the busy one.
 - **Extensions keep the ID they have in Chrome.** An extension from the Chrome Web Store now runs under its store ID, as in Chrome, rather than one made up for it, so extensions that talk to themselves or to a site by their ID work. Firefox add-ons show their own add-on ID.
 - **Extensions and downloads sit beside the address bar.** The puzzle button and the downloads button were inside the address bar with the page's own buttons. They now sit in the toolbar just after it, as in Chrome, since they act on the browser rather than the page.
