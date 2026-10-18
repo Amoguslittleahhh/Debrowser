@@ -529,6 +529,41 @@
   }
 
   /*
+   * Native messaging: a program on the computer, through the browser, which
+   * finds it as Chrome would (native-messaging.js). Each port's calls go in
+   * order, so nothing posted is lost while the program starts.
+   */
+  if (c.runtime && token && (manifest.permissions || []).includes('nativeMessaging')) {
+    const ports = new Map();
+    event('native.onMessage').addListener((id, msg) => { const p = ports.get(id); if (p) p.onMessage.fire(msg, p); });
+    event('native.onDisconnect').addListener((id, error) => {
+      const p = ports.get(id);
+      if (!p) return;
+      ports.delete(id);
+      if (error) p.error = { message: String(error) };
+      p.onDisconnect.fire(p);
+    });
+    const portId = () => (g.crypto && g.crypto.randomUUID ? g.crypto.randomUUID() : String(Math.random()).slice(2));
+    define(c.runtime, 'connectNative', (name) => {
+      const id = portId();
+      let queue = call('native.connect', { id, name: String(name) });
+      const port = {
+        name: String(name), sender: undefined, onMessage: event(), onDisconnect: event(),
+        postMessage: (msg) => { queue = queue.then(() => call('native.post', { id, msg }), () => {}); },
+        disconnect: () => { if (ports.delete(id)) queue = queue.then(() => call('native.disconnect', { id }), () => {}); }
+      };
+      ports.set(id, port);
+      queue.catch((e) => {
+        if (!ports.delete(id)) return;
+        port.error = { message: String((e && e.message) || e) };
+        port.onDisconnect.fire(port);
+      });
+      return port;
+    }, true);
+    define(c.runtime, 'sendNativeMessage', (name, msg, cb) => answer(call('native.send', { name: String(name), msg }), cb), true);
+  }
+
+  /*
    * The debugger: Chrome's DevTools protocol on a tab, for extensions that
    * declare the permission - Claude reads and operates pages through it. The
    * browser attaches to the tab and says so, as Chrome's bar across the top
