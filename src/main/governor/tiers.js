@@ -137,9 +137,13 @@ async function promote(tab, target, ctx) {
   }
 
   // The foreground tab needs no instrumentation: nothing freezes, collects or
-  // measures it. Detaching releases the protocol agents Chromium instantiated
-  // inside that renderer, which are not free - and it guarantees the governor
-  // has no channel open to the one page the user is actually looking at.
+  // measures it. Detaching stops the protocol agents Chromium instantiated
+  // inside that renderer from doing any more work, and it guarantees the
+  // governor has no channel open to the one page the user is actually looking
+  // at. It does not hand their memory back: measured, five tabs attached once
+  // and detached settled where five left attached did (365-366MB against
+  // 362MB untouched). The memory is spent at the first attach, which is why
+  // the governor attaches as rarely as it can (samplePerTabMetrics).
   if (target === Tier.ACTIVE && tab.cdp) {
     tab.cdp.detach();
   }
@@ -222,9 +226,10 @@ async function demote(tab, target, ctx) {
     }
 
     // A frozen page stays frozen after the debugger goes away, so there is no
-    // reason to keep a session open on it. Detaching returns the protocol
-    // agents' memory and leaves nothing attached to the long tail of tabs that
-    // spend most of their life in this state. Unfreezing re-attaches on demand.
+    // reason to keep a session open on it, and nothing is left attached to the
+    // long tail of tabs that spend most of their life in this state. (It
+    // does not return the ~0.7MB the attach cost the renderer - see promote.)
+    // Unfreezing re-attaches on demand.
     tab.cdp.detach();
   }
 

@@ -50,9 +50,6 @@ const platform = require('../platform');
 /** Exponential smoothing factor for per-process samples. */
 const EMA_ALPHA = 0.35;
 
-/** Overhead attributed to a renderer regardless of page content. */
-const RENDERER_BASE_MB = 12;
-
 /**
  * How far below summed working set a proportional total must land to be
  * believed, and how many processes must be running before the question is
@@ -360,27 +357,28 @@ class Metrics {
         continue;
       }
 
-      // Shared renderer: split by JS heap over a per-tab base.
-      const weights = tabs.map((tab) => RENDERER_BASE_MB + (tab.jsHeapMB || 0));
-      const weightSum = weights.reduce((a, b) => a + b, 0) || tabs.length;
-
-      tabs.forEach((tab, i) => {
-        const share = weights[i] / weightSum;
+      // Shared renderer: split evenly. Nothing the browser can read says more:
+      // the renderer's heap and main-thread time read the same from every
+      // page in it (governor/index.js, samplePerTabMetrics), so the per-page
+      // weights and CPU this once took from them were the renderer's figures
+      // under each tab's name, and every tab of a busy renderer read as the
+      // busy one.
+      //
+      // CPU for decisions is the share, with one exception. A renderer that
+      // holds the page in front is as likely busy with that page as with any
+      // other, and freezing costs a quiet page memory, so its hidden tabs are
+      // left alone rather than frozen for what the page in front is doing.
+      const share = 1 / tabs.length;
+      const front = tabs.some((tab) => tab.visible);
+      for (const tab of tabs) {
         tab.rssMB = proc.rssMB * share;
         tab.memNowMB = proc.memNowMB * share;
         tab.privateMB = proc.privateMB == null ? null : proc.privateMB * share;
         tab.sharesProcess = true;
         tab.processTabCount = tabs.length;
-
-        // CPU is *not* shared out proportionally when we can do better. A
-        // proportional split says every tab in a shared renderer is equally
-        // busy, which made the governor freeze quiet tabs that happened to
-        // share a process with a busy one. `taskCpu` is that page's own
-        // main-thread time, measured per document over CDP; fall back to the
-        // split only until the first sample lands.
-        tab.cpu = tab.taskCpu != null ? tab.taskCpu : proc.cpu * share;
-        tab.cpuNow = tab.taskCpu != null ? tab.taskCpu : proc.cpuNow * share;
-      });
+        tab.cpu = front && !tab.visible ? 0 : proc.cpu * share;
+        tab.cpuNow = proc.cpuNow * share;
+      }
     }
 
     // Tabs with no live renderer (discarded) hold no resident memory.

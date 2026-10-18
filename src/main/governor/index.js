@@ -33,8 +33,6 @@ const { Tier, Pressure, tierRank, TIER_ORDER, isStopped, MB } = require('../conf
 const { Metrics } = require('./metrics');
 const { BoostController } = require('./boost');
 const { applyTier, refreshPriority } = require('./tiers');
-/** Logical processors, for CPU figures as a share of the whole machine. */
-const CORES = Math.max(1, require('os').cpus().length);
 const { HeapLimiter } = require('./heap-limit');
 const { readProcessMemory } = require('../memory');
 const platform = require('../platform');
@@ -248,20 +246,36 @@ class Governor {
   }
 
   /**
-   * Per-tab heap and CPU, for tabs that share a renderer with another tab.
+   * Per-tab heap, for the heap limiter (heap-limit.js), and only for tabs it
+   * might collect.
    *
-   * Only those tabs: where a tab owns its process outright, the process figures
-   * *are* the tab's figures and asking the page is pure cost - enabling the
-   * Performance domain instantiates instrumentation inside the renderer, and
-   * sampling every tab measured at ~8MB per tab, a governor spending more
-   * memory measuring than it saves.
+   * This used to read every tab that shares a renderer as well, to split the
+   * renderer's memory and CPU between its tabs - and the reading cannot do
+   * that. Both figures are the renderer's, not the page's: measured, a page
+   * spinning its main thread and an idle one in the same renderer read the
+   * same 2.355s of task time over the same 3s and the same 9.6MB of heap.
+   * `Performance.getMetrics` counts every task on the renderer's main thread
+   * and reports its one V8 heap, whichever page asks. So every hidden tab of
+   * a busy renderer read as busy - the page in front, sharing its renderer
+   * with them, made them all freeze candidates - which is what the reading
+   * was there to prevent; and every tab read cost a debugger session and the
+   * Performance domain in the renderer that stays after a detach: five hidden
+   * same-site tabs settled at 330MB read and 327MB unread, about 0.7MB a tab.
+   * The split is by even share instead (metrics.js, attribute), which says
+   * as much as the reading did and costs nothing.
    *
-   * Frozen tabs are skipped as well. Their CPU is zero by construction, and
-   * asking would re-attach a debugger session that was deliberately detached.
+   * Where a tab owns its process outright, the process figures *are* the
+   * tab's, and asking the page is pure cost - enabling the Performance domain
+   * instantiates instrumentation inside the renderer, and sampling every tab
+   * measured at ~8MB per tab, a governor spending more memory measuring than
+   * it saves.
+   *
+   * Frozen tabs are skipped as well: asking would re-attach a debugger session
+   * that was deliberately detached.
    */
   async samplePerTabMetrics() {
+    if (!this.cfg.heapLimit.enabled) return;
     const now = Date.now();
-    const heapEnabled = this.cfg.heapLimit.enabled;
 
     for (const tab of this.tabs.all()) {
       if (!tab.isLive || !tab.cdp) continue;
@@ -270,43 +284,11 @@ class Governor {
       // Nor to the page in front: measuring re-attaches the debugger and turns
       // on Performance, the instrumentation tiers.js detaches from it.
       if (tab.visible) continue;
-
-      // Two consumers want this reading, and it costs a CDP round trip, so it
-      // is taken once here for both: attribution needs a per-tab heap only when
-      // tabs share a process, and the heap limiter needs one for any tab it
-      // might collect. An earlier version had the limiter fetch its own, which
-      // meant two identical Performance.getMetrics calls to the same renderer
-      // in one tick - in the pass whose own comment says to minimise exactly
-      // that traffic.
-      const forAttribution = tab.sharesProcess;
-      const forHeapLimit = heapEnabled && this.heapLimiter.worthMeasuring(tab);
-      if (!forAttribution && !forHeapLimit) continue;
+      if (!this.heapLimiter.worthMeasuring(tab)) continue;
 
       const metrics = await tab.cdp.pageMetrics();
-      if (!metrics) continue;
-
-      if (forHeapLimit && metrics.jsHeapBytes != null) {
+      if (metrics && metrics.jsHeapBytes != null) {
         this.heapLimiter.observe(tab, metrics.jsHeapBytes, now, metrics.jsHeapTotalBytes);
-      }
-
-      if (metrics.jsHeapBytes != null) tab.jsHeapMB = metrics.jsHeapBytes / MB;
-
-      // Differentiate cumulative task time into a percentage of the whole
-      // machine - the unit `getAppMetrics` reports every other CPU figure in
-      // (measured: a renderer spinning one core of four reads 24.7). As a
-      // percentage of one core, a tab sharing a process read four times
-      // busier than a tab with its own, on a four-core machine, in the same
-      // column - and was frozen four times sooner for it.
-      if (metrics.taskDurationSec != null) {
-        if (tab.lastTaskSec != null && tab.lastTaskAt) {
-          const elapsedSec = (now - tab.lastTaskAt) / 1000;
-          if (elapsedSec > 0) {
-            const busySec = Math.max(0, metrics.taskDurationSec - tab.lastTaskSec);
-            tab.taskCpu = (busySec / elapsedSec) * 100 / CORES;
-          }
-        }
-        tab.lastTaskSec = metrics.taskDurationSec;
-        tab.lastTaskAt = now;
       }
     }
   }

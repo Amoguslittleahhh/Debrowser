@@ -19,6 +19,7 @@
 
 ### Improved
 
+- **Background tabs use less memory when you have several of one site open.** Debrowser was watching every background tab that shares its process with tabs of the same site, to tell which of them was busy, at about 0.7 MB a tab kept until the tab closed - and what it read was the whole process, the same for every tab, so it could not tell. It no longer watches them. A background tab is also no longer stopped because the tab of the same site in front of you is the busy one.
 - **Extensions keep the ID they have in Chrome.** An extension from the Chrome Web Store now runs under its store ID, as in Chrome, rather than one made up for it, so extensions that talk to themselves or to a site by their ID work. Firefox add-ons show their own add-on ID.
 - **Extensions and downloads sit beside the address bar.** The puzzle button and the downloads button were inside the address bar with the page's own buttons. They now sit in the toolbar just after it, as in Chrome, since they act on the browser rather than the page.
 - **Each extension shows its own logo.** The puzzle menu and the list in Settings show each extension's own icon beside its name, where every one used to get the same puzzle piece.

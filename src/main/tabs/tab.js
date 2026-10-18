@@ -260,12 +260,7 @@ class Tab {
     this.rssMB = 0;
     this.privateMB = 0;
     this.cpu = 0;
-    this.jsHeapMB = 0;
     this.sharesProcess = false;
-    /** This page's own CPU, differenced from CDP TaskDuration. Null until sampled. */
-    this.taskCpu = null;
-    this.lastTaskSec = null;
-    this.lastTaskAt = 0;
 
     /**
      * Heap state for the square-root heap limit rule (governor/heap-limit.js):
@@ -916,10 +911,6 @@ class Tab {
     // gone, so it already answers null.
     this.rssMB = 0;
     this.cpu = 0;
-    this.jsHeapMB = 0;
-    this.taskCpu = null;
-    this.lastTaskSec = null;
-    this.lastTaskAt = 0;
     // A new renderer means a new heap; none of the rule's estimates carry over.
     this.resetHeapState();
     this.boosted = false;

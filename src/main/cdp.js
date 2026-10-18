@@ -180,21 +180,15 @@ class CdpSession {
   }
 
   /**
-   * Per-page heap size and cumulative CPU time.
+   * The renderer's V8 heap: used and committed.
    *
-   * Both matter because a process figure cannot be divided up honestly. When
-   * several tabs share a renderer - the default, since one renderer per *site*
-   * is the largest memory saving available - asking the OS how much memory or
-   * CPU "that tab" used has no answer. These two metrics are per-document, so
-   * they give the governor something real to work from:
-   *
-   *   JSHeapUsedSize  splits the process's memory between its tabs by weight
-   *   TaskDuration    cumulative seconds of main-thread work for this page;
-   *                   differenced over wall time it yields that page's own CPU
-   *
-   * Without the second one, a single busy tab in a shared renderer makes every
-   * tab in that renderer look equally busy, and the governor starts freezing
-   * pages that were doing nothing at all.
+   * The renderer's, not the page's, whatever the name says. Measured, a page
+   * spinning its main thread and an idle one sharing a renderer read the same
+   * heap (9.6MB each) and the same task time (2.355s each over 3s), because
+   * the renderer has one V8 heap and one main thread and these report them.
+   * This was once read as per-document, to split a shared renderer between
+   * its tabs, and told every tab of a busy renderer that it was the busy one.
+   * The heap limiter is its one reader now.
    */
   async pageMetrics() {
     if (!(await this.enable('Performance'))) return null;
@@ -207,8 +201,7 @@ class CdpSession {
       // can hand back, and it is often most of what a renderer is holding: a
       // page can show 1MB used against 20MB+ of committed pages.
       jsHeapBytes: value('JSHeapUsedSize') ?? null,
-      jsHeapTotalBytes: value('JSHeapTotalSize') ?? null,
-      taskDurationSec: value('TaskDuration') ?? null
+      jsHeapTotalBytes: value('JSHeapTotalSize') ?? null
     };
   }
 

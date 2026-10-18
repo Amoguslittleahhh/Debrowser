@@ -845,9 +845,10 @@ tried, measured and removed — live on the `claude/research-build` branch.
   password or payment field are never photographed, the images live in the OS
   temp directory, and they are deleted on close, on quit and again on startup.
 - Per-tab CPU is exact only when a tab owns its renderer. With one-renderer-
-  per-site (the default) several same-site tabs share one, and a page's own CPU
-  is read per-document over CDP — which covers its main thread but not its Web
-  Workers. A worker busy in a shared renderer is therefore not a freeze trigger.
+  per-site (the default) several same-site tabs share one, and nothing Chromium
+  reports splits a renderer between its pages, so each tab is shown an even
+  share. A background tab is not frozen for CPU while a tab of the same site is
+  in front, since that tab may be the busy one.
 - **The memory figure is measured per platform, and each measure is named.**
   Linux reads a real proportional figure (Pss) from `smaps_rollup`. Windows and
   macOS have no such thing, so a small native helper ships beside the app and
