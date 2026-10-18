@@ -2528,3 +2528,10 @@ body[data-band="true"][data-layout="left"]:not([data-design="legacy"]):not([data
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 body[data-band="true"][data-layout="left"]:not([data-design="legacy"]) .toolbar .meter { color: var(--text-dim); }
+
+/* Calm's floating sidebar is a raised panel in the frame's own tint, rather
+   than the near-black step-down the other designs use. */
+body[data-design="calm"][data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
+  --side: light-dark(color-mix(in srgb, var(--accent) 10%, var(--bg-raised)),
+                     color-mix(in srgb, var(--accent) 12%, var(--bg-raised)));
+}
