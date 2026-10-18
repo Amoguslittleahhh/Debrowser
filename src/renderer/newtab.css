@@ -544,3 +544,8 @@ body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-desig
   min-height: 0;
   font-size: 12px;
 }
+
+/* Calm (the owner's ask, 2026-10-18): no most-used row under the field. The
+   group is centred on its own measured height (--fit), so the mark and the
+   field come down into the room the row took. */
+body[data-look="calm"] .tiles:not([hidden]) { display: none; }

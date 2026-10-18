@@ -2454,8 +2454,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     // "continue.test"); Legacy keeps its own list of hostnames.
     // With "Continue with these tabs" showing (history was planted above), the
     // favourites stay, as one row under the field, named for the site.
-    check('the new designs show the mark in the chosen accent, and favourites by name above Continue; Legacy keeps its list',
-      fresh.every((d) => seen[d].brand && seen[d].tiles && seen[d].card && seen[d].dot === 'rgb(176, 48, 106)' &&
+    // Calm alone has no favourites row (the owner's ask).
+    check('the new designs show the mark in the chosen accent, and favourites by name above Continue; Calm has none; Legacy keeps its list',
+      fresh.every((d) => seen[d].brand && seen[d].tiles === (d !== 'calm') && seen[d].card && seen[d].dot === 'rgb(176, 48, 106)' &&
         seen[d].label.split(',').includes('continue')) &&
       !seen.legacy.brand && seen.legacy.label.split(',').includes('continue.test'),
       fresh.map((d) => `${d}: mark=${seen[d].brand} dot=${seen[d].dot} favourites=${seen[d].label}`).join(', ') +
