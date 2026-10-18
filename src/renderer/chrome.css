@@ -2508,3 +2508,23 @@ body[data-design="calm"][data-layout="left"] .toolbar {
 }
 body[data-design="calm"][data-layout="left"] .omnibox { height: 36px; border-radius: var(--radius); }
 body[data-design="calm"][data-layout="left"] .tabstrip { padding: 0 10px 10px; }
+
+/*
+ * The band across the top, finished: the address is a soft filled field rather
+ * than an outlined box, so the band reads as one quiet surface with the page's
+ * address in it. It firms up into a field with a ring when typed in. Grid
+ * keeps its ruled box; Legacy stays as it was.
+ */
+body[data-band="true"][data-layout="left"]:not([data-design="legacy"]):not([data-design="grid"]) .omnibox {
+  height: 30px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+body[data-band="true"][data-layout="left"]:not([data-design="legacy"]):not([data-design="grid"]) .omnibox:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+body[data-band="true"][data-layout="left"]:not([data-design="legacy"]):not([data-design="grid"]) .omnibox:has(#url:focus) {
+  background: var(--bg-input);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+body[data-band="true"][data-layout="left"]:not([data-design="legacy"]) .toolbar .meter { color: var(--text-dim); }
