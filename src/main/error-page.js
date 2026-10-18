@@ -141,7 +141,8 @@ const LOOKS = {
   legacy: { body: FACES.ui, title: FACES.ui, weight: 600, radius: 6, tile: 12 },
   ledger: { body: FACES.ui, title: FACES.ui, weight: 600, radius: 8, tile: 14 },
   paper: { body: FACES.ui, title: FACES.serif, weight: 400, radius: 4, tile: 8 },
-  grid: { body: FACES.grotesk, title: FACES.grotesk, weight: 600, radius: 0, tile: 0 }
+  grid: { body: FACES.grotesk, title: FACES.grotesk, weight: 600, radius: 0, tile: 0 },
+  calm: { body: FACES.ui, title: FACES.ui, weight: 600, radius: 10, tile: 14 }
 };
 
 /** The page-side script. Serialised: it must not reference anything outside itself. */

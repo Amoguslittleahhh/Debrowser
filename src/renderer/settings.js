@@ -76,6 +76,7 @@ const SECTIONS = {
         { value: 'ledger', name: 'Ledger' },
         { value: 'paper', name: 'Paper' },
         { value: 'grid', name: 'Grid' },
+        { value: 'calm', name: 'Calm' },
         { value: 'legacy', name: 'Legacy design' }
       ]
     },
@@ -851,6 +852,7 @@ async function extensionPage(page, id, dev, back) {
   const toggle = (key, { disabled = false, checked, after } = {}) => {
     const box = document.createElement('input');
     box.type = 'checkbox';
+    box.setAttribute('role', 'switch');
     box.checked = checked ?? d.settings[key] === true;
     box.disabled = disabled;
     box.addEventListener('change', async () => {
@@ -1460,6 +1462,7 @@ function buildControl(spec) {
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.addEventListener('change', () => save(spec.key, box.checked));
+      box.setAttribute('role', 'switch');
       return {
         node: box,
         input: box,
@@ -1911,6 +1914,9 @@ function smallButton(text, className = 'ghost-btn') {
   b.type = 'button';
   b.className = className;
   b.textContent = text;
+  // A row's Remove waits for the pointer (settings.css), so the one action a
+  // list leads with is not the destructive one repeated down every row.
+  if (text === 'Remove') b.classList.add('reveal');
   return b;
 }
 

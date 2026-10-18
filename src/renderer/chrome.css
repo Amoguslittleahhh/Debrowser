@@ -1153,7 +1153,7 @@ body[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
 /* The designs' own pages sit on the raised `--bg-input` (newtab.css), which in
    a dark theme is the lighter way, so there the side steps down instead; and
    Grid's light page is grey, not white, so its side goes a step deeper. */
-body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"], [data-design="calm"])[data-layout="left"]:not([data-strip-tone])[data-detached="true"] {
   --side: light-dark(color-mix(in srgb, var(--text) 9%, var(--bg)), color-mix(in srgb, #000 35%, var(--bg)));
   --side-raised: light-dark(var(--bg-raised), var(--bg-input));
 }
@@ -1174,7 +1174,7 @@ body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-
 }
 /* Paper marks the open tab with a rule and Grid inverts it; neither has a
    surface to raise. */
-body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-design="paper"]):not([data-design="grid"]) .tab.active {
+body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-design="paper"]):not([data-design="grid"], [data-design="calm"]) .tab.active {
   background: var(--side-raised);
 }
 
@@ -1886,7 +1886,7 @@ body[data-layout="left"][data-translucent="on"] .tabstrip { background: transpar
  * under it; the memory figure goes to the foot, beside the pin, where the
  * mockups keep it out of the way of the tabs.
  */
-body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"] .meter {
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"], [data-design="calm"])[data-layout="left"] .meter {
   position: fixed;
   right: 12px;
   bottom: 12px;
@@ -1895,10 +1895,10 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[dat
   width: auto;
   padding: 0;
 }
-body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"] .meter-bar { flex: none; width: 56px; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"], [data-design="calm"])[data-layout="left"] .meter-bar { flex: none; width: 56px; }
 /* Not in the band across the top, which is a toolbar the meter belongs on,
    out or in: hiding it there made the task manager blink with the panel. */
-body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"])[data-layout="left"][data-sidebar-open="false"]:not([data-pinned="true"]):not([data-band="true"]) .meter { visibility: hidden; }
+body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"], [data-design="calm"])[data-layout="left"][data-sidebar-open="false"]:not([data-pinned="true"]):not([data-band="true"]) .meter { visibility: hidden; }
 
 /* Ledger: chips on a sage column, the open tab raised like a card. */
 body[data-design="ledger"][data-layout="left"] .toolbar { padding: calc(env(titlebar-area-y, 0px) + 12px) 10px 10px; row-gap: 12px; }
@@ -1956,35 +1956,35 @@ body[data-design="grid"][data-layout="left"] .meter { font-family: var(--font-mo
  * Chrome leaves alone: the tab's corners, how the open one is marked, the
  * type. Legacy keeps its own rules above.
  */
-:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) {
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"], body[data-design="calm"]):not([data-layout="left"]) {
   --bar: var(--tint-2);
   --foot: 8px;
 }
-:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .bookmarks {
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"], body[data-design="calm"]):not([data-layout="left"]) .bookmarks {
   background: var(--bar);
 }
 /* One surface, one edge: with the bookmarks bar showing, the toolbar's own
    bottom line went across the middle of it and the window read as three
    stacked strips. The bar's line under both is the only one, as Safari draws
    its favourites bar as part of the toolbar. */
-:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]).with-bookmarks .toolbar {
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"], body[data-design="calm"]):not([data-layout="left"]).with-bookmarks .toolbar {
   border-bottom-color: transparent;
 }
-:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab {
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"], body[data-design="calm"]):not([data-layout="left"]) .tab {
   height: 34px;
   border-radius: var(--radius) var(--radius) 0 0;
 }
-:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab:hover:not(.active) {
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"], body[data-design="calm"]):not([data-layout="left"]) .tab:hover:not(.active) {
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
-:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab.active {
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"], body[data-design="calm"]):not([data-layout="left"]) .tab.active {
   background: var(--bar);
   color: var(--text);
   font-weight: 500;
 }
 /* The separators come back: without them equal-width tabs read as captions
    floating at intervals. */
-:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"]):not([data-layout="left"]) .tab + .tab::after {
+:is(body[data-design="ledger"], body[data-design="paper"], body[data-design="grid"], body[data-design="calm"]):not([data-layout="left"]) .tab + .tab::after {
   display: block;
 }
 /* The feet: the open tab curving out into the toolbar on both sides. */
@@ -2495,3 +2495,7 @@ body[data-windows="several"] .strip-count::before {
 .pinned-extensions[hidden] { display: none; }
 .pinned-ext img { width: 16px; height: 16px; object-fit: contain; }
 .toolbar > #downloads { margin-right: -10px; }
+
+/* Calm down the side: a little air between the address and the first tab, so
+   the active tab reads as sitting in the list rather than under the field. */
+body[data-design="calm"][data-layout="left"] .tabs { padding-top: 6px; }

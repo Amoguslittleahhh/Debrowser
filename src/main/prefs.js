@@ -67,7 +67,7 @@ const SCHEMA = {
    * 'legacy' is how the browser looked up to 1.7, kept because a look someone
    * is used to is not something an update should take away.
    */
-  design:       { def: 'ledger', ok: (v) => ['ledger', 'paper', 'grid', 'legacy'].includes(v) },
+  design:       { def: 'ledger', ok: (v) => ['ledger', 'paper', 'grid', 'calm', 'legacy'].includes(v) },
   // "Continue with these tabs" under the new tab page's search. Its own menu
   // turns it off; Settings turns it back on. Never shown in a private window,
   // which keeps no history for it to come from.

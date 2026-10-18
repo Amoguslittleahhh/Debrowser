@@ -2422,7 +2422,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     history.items.unshift(planted);
 
     const seen = {};
-    for (const design of ['ledger', 'paper', 'grid', 'legacy']) {
+    for (const design of ['ledger', 'paper', 'grid', 'calm', 'legacy']) {
       runCommand('set-pref', { key: 'design', value: design });
       await waitFor(async () => (await chrome.executeJavaScript('document.body.dataset.design')) === design,
         { timeoutMs: 5000 });
@@ -2446,9 +2446,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       seen[design].chrome = await chrome.executeJavaScript('document.body.dataset.design');
       tabs.close(page.id);
     }
-    const fresh = ['ledger', 'paper', 'grid'];
+    const fresh = ['ledger', 'paper', 'grid', 'calm'];
     check('every design reaches the chrome and the new tab page',
-      Object.entries(seen).every(([d, r]) => r && r.design === d && r.chrome === d),
+      Object.entries(seen).every(([d, r]) => r && r.design === (d === 'calm' ? 'ledger' : d) && r.chrome === d),
       Object.entries(seen).map(([d, r]) => `${d}: page=${r?.design} chrome=${r?.chrome}`).join(', '));
     // Favourites in the new designs, named for the site ("continue", not
     // "continue.test"); Legacy keeps its own list of hostnames.
