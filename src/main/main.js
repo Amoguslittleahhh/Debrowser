@@ -4892,6 +4892,16 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
           openInBrowser: (url) => {
             openLinkTab(tabs, prefs, tabs.activeTab(), url, { foreground: true });
             if (shell && !shell.window.isDestroyed()) shell.window.focus();
+          },
+          // From the ⋯ menu in its title bar, asked first as Edge asks.
+          uninstall: (id) => {
+            const one = apps.byId(id);
+            const owner = apps.windows.get(id);
+            if (!one) return;
+            dialog.showMessageBox(owner && !owner.isDestroyed() ? owner : undefined, {
+              type: 'question', buttons: ['Uninstall', 'Cancel'], defaultId: 1, cancelId: 1,
+              message: `Uninstall ${one.name}?`, detail: 'Its window and shortcuts are removed. What you saved on the site stays in Debrowser.'
+            }).then(({ response }) => { if (response === 0) { apps.remove(id); publish(); } }).catch(() => {});
           }
         });
         break;
