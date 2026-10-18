@@ -2499,3 +2499,12 @@ body[data-windows="several"] .strip-count::before {
 /* Calm down the side: a little air between the address and the first tab, so
    the active tab reads as sitting in the list rather than under the field. */
 body[data-design="calm"][data-layout="left"] .tabs { padding-top: 6px; }
+/* The toolbar above the tabs is part of the same tinted column: transparent, it
+   showed the untinted window colour as a band across the top of the sidebar. */
+body[data-design="calm"][data-layout="left"] .toolbar {
+  padding: calc(env(titlebar-area-y, 0px) + 12px) 10px 10px;
+  row-gap: 12px;
+  background: color-mix(in srgb, var(--strip) calc(var(--strip-alpha, 1) * 100%), transparent);
+}
+body[data-design="calm"][data-layout="left"] .omnibox { height: 36px; border-radius: var(--radius); }
+body[data-design="calm"][data-layout="left"] .tabstrip { padding: 0 10px 10px; }
