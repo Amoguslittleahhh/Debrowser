@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Windows: no more "Bogus ed25519 key in microdesc" in a private window.** With "Remember Tor between sessions" on (the default), Debrowser kept a copy of a file Tor was still writing when it was closed, and the next private window read the half-written entry back and showed Tor's complaint about it as if Tor could not connect. That file is no longer kept, and a complaint about one bad relay description is no longer shown as a problem.
+
 ### Improved
 
 - **Extensions and downloads beside the memory meter.** With the tabs down the side and the sidebar tucked away, the extensions and downloads buttons sat at the far left, ahead of back and forward. They now sit on the right, beside the memory meter, and the address bar is a little shorter to make room.

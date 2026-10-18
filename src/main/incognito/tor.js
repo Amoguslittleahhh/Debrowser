@@ -304,7 +304,10 @@ class Tor {
       // and Tor's own last complaint usually names the reason.
       const message = text.replace(/^.*\[(warn|err)\]\s*/, '');
       // A transport program that ended cleanly was replaced (fallBack), not lost.
-      if (!/running Tor as root|GeoIP|died in state Completed|terminated with status code 0/i.test(message)) {
+      // One bad descriptor (Tor's "Bogus ed25519 key in microdesc", "Unable
+      // to parse microdescriptor") is dropped and fetched again; it says
+      // nothing about why Tor would not connect.
+      if (!/running Tor as root|GeoIP|died in state Completed|terminated with status code 0|in microdesc|microdescriptor/i.test(message)) {
         this.status.warning = message;
       }
       // Once: Tor logs a taken port several times, and each report moved the
