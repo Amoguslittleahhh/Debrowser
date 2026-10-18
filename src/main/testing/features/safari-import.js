@@ -548,7 +548,9 @@ module.exports = async function safariImport(t) {
     const settings = tabs.create({ url: pages.SETTINGS_URL, activate: true, realise: true });
     const js = (code) => inTime(settings.wc.executeJavaScript(code), 5000, null);
     const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    // os.homedir() reads HOME, but USERPROFILE on Windows: both are pointed at the stand-in.
     const realHome = process.env.HOME;
+    const realProfile = process.env.USERPROFILE;
     const savedBefore = new Set(bookmarks.all().map((b) => b.url));
     const pagesBefore = new Set(history.all().map((e) => e.url));
     const historyWas = prefs.get('saveHistory');
@@ -577,6 +579,7 @@ module.exports = async function safariImport(t) {
 
       Object.defineProperty(process, 'platform', { ...realPlatform, value: 'darwin' });
       process.env.HOME = tmp;
+      process.env.USERPROFILE = tmp;
       let listedBare = null;
       let first = null;
       let again = null;
@@ -597,6 +600,7 @@ module.exports = async function safariImport(t) {
       } finally {
         Object.defineProperty(process, 'platform', realPlatform);
         if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+        if (realProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = realProfile;
         if (historyWas === false) prefs.set('saveHistory', false);
       }
 
