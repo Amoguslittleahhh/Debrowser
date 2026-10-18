@@ -32,8 +32,15 @@ const { keystoreCapability } = require('../data/credentials');
 
 const FILE = 'incognito-tor.sealed';
 const MAGIC = Buffer.from('DBT1');
-/** The files worth keeping. Anything else in Tor's directory is left behind. */
-const KEEP = ['state', 'cached-certs', 'cached-microdesc-consensus', 'cached-microdescs', 'cached-microdescs.new'];
+/**
+ * The files worth keeping. Anything else in Tor's directory is left behind.
+ * Not cached-microdescs.new: it is a journal Tor appends to as descriptors
+ * arrive, and on Windows Tor is stopped with TerminateProcess, so the copy
+ * kept could end mid-descriptor. Restored, Tor read that half-written entry
+ * back and said "Bogus ed25519 key in microdesc" on the private window's
+ * page. Tor fetches whatever the journal held again in seconds.
+ */
+const KEEP = ['state', 'cached-certs', 'cached-microdesc-consensus', 'cached-microdescs'];
 /** A consensus and descriptors are a few MB; anything much bigger is not what we wrote. */
 const MAX_BYTES = 64 * 1024 * 1024;
 
