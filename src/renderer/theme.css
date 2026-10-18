@@ -461,7 +461,7 @@ body[data-design="grid"][data-theme="light"] {
  * Windows 11, which has a real semibold (Calibri does not), the desktop's face
  * on Linux, and San Francisco on the Mac from the rule above.
  */
-body[data-design="calm"] {
+body:is([data-design="calm"], [data-look="calm"]) {
   color-scheme: dark;
   --bg: #191918; --bg-raised: #212120; --bg-input: #292927;
   --border: #353532; --border-soft: #262624;
@@ -471,7 +471,7 @@ body[data-design="calm"] {
   --strip: color-mix(in srgb, var(--accent) 12%, #121211);
 }
 @media (prefers-color-scheme: light) {
-  body[data-design="calm"]:not([data-theme="dark"]) {
+  body:is([data-design="calm"], [data-look="calm"]):not([data-theme="dark"]) {
     color-scheme: light;
     --bg: #e8e6e2; --bg-raised: #f8f7f4; --bg-input: #ffffff;
     --border: #d3d0c9; --border-soft: #e1ded8;
@@ -479,14 +479,14 @@ body[data-design="calm"] {
     --strip: color-mix(in srgb, var(--accent) 16%, var(--bg));
   }
 }
-body[data-design="calm"][data-theme="light"] {
+body:is([data-design="calm"], [data-look="calm"])[data-theme="light"] {
   color-scheme: light;
   --bg: #e8e6e2; --bg-raised: #f8f7f4; --bg-input: #ffffff;
   --border: #d3d0c9; --border-soft: #e1ded8;
   --text: #1a1917; --text-dim: #45433f;
   --strip: color-mix(in srgb, var(--accent) 16%, var(--bg));
 }
-body[data-design="calm"]:not([data-platform="darwin"]) {
+body:is([data-design="calm"], [data-look="calm"]):not([data-platform="darwin"]) {
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, Inter, Cantarell, Ubuntu,
              "Noto Sans", Aptos, Calibri, Carlito, sans-serif;
 }
@@ -976,4 +976,14 @@ body:has(#wordmark)[data-design="ledger"]:not([data-platform="darwin"]),
 body:has(#wordmark)[data-design="paper"]:not([data-platform="darwin"]) {
   --font-ui: Aptos, Calibri, Carlito, "Segoe UI Variable Text", "Segoe UI",
              system-ui, -apple-system, Roboto, Ubuntu, sans-serif;
+}
+/* Calm's new tab page: Ledger's layout in Calm's warm greys and system face. */
+body:has(#wordmark)[data-look="calm"] { --text-dim: #9b978e; }
+@media (prefers-color-scheme: light) {
+  body:has(#wordmark)[data-look="calm"]:not([data-theme="dark"]) { --text-dim: #6b6559; }
+}
+body:has(#wordmark)[data-look="calm"][data-theme="light"] { --text-dim: #6b6559; }
+body:has(#wordmark)[data-look="calm"]:not([data-platform="darwin"]) {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, Inter, Cantarell, Ubuntu,
+             "Noto Sans", Aptos, Calibri, Carlito, sans-serif;
 }
