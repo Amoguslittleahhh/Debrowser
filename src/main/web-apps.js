@@ -258,7 +258,13 @@ class WebApps {
       ...(mac ? { trafficLightPosition: { x: 12, y: 11 } } : { titleBarOverlay: { color: colors.bg, symbolColor: colors.fg, height: BAR } }),
       ...(app.icon ? { icon: nativeImage.createFromPath(app.icon) } : {})
     });
-    if (process.platform === 'win32') win.setAppDetails({ appId: `Debrowser.App.${app.id}`, appIconPath: app.icon ? app.icon.replace(/\.png$/, '.ico') : '' });
+    // Its own taskbar button, with the site's icon, apart from Debrowser's;
+    // pinned, it starts the app rather than the browser.
+    if (process.platform === 'win32') {
+      const { exec, args } = this.launcher(app);
+      win.setAppDetails({ appId: `Debrowser.App.${app.id}`, appIconPath: app.icon ? app.icon.replace(/\.png$/, '.ico') : '',
+        relaunchCommand: [exec, ...args].map((a) => `"${a}"`).join(' '), relaunchDisplayName: app.name });
+    }
     let iconData = '';
     try { if (app.icon) iconData = `data:image/png;base64,${fs.readFileSync(app.icon).toString('base64')}`; } catch { /* none */ }
     const bar = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: true } });
