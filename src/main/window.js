@@ -2339,7 +2339,10 @@ class BrowserShell {
     // the window buttons in a dark box of their own. Tinted like the strip, it
     // is one surface with it.
     const opacity = this.prefs.get('windowOpacity');
-    const windowBg = !translucent || !this.vertical() ? sheer
+    // Calm tints the whole frame, so opaque down the side the gutters take the
+    // strip's tint rather than the page's neutral.
+    const calmFrame = !translucent && this.vertical() && this.prefs.get('design') === 'calm';
+    const windowBg = calmFrame ? this.stripColour() : !translucent || !this.vertical() ? sheer
       : this.seeThrough() ? withAlpha(this.stripColour(), opacity, 'argb') : this.stripColour();
     try {
       this.window.setBackgroundColor(windowBg);
@@ -2426,8 +2429,22 @@ class BrowserShell {
   stripColour() {
     const choice = this.prefs ? this.prefs.get('tabBarColor') : 'default';
     if (choice === 'mirror') return this.prefs.get('accent');
-    if (choice === 'default') return this.surface();
+    if (choice === 'default') return this.prefs.get('design') === 'calm' ? this.calmStrip() : this.surface();
     return choice;
+  }
+
+  /**
+   * Calm's strip: the accent mixed into the surface, 16% light and 12% dark,
+   * as `color-mix(in srgb, ...)` does it in theme.css. The two must agree, or
+   * the window buttons sit in a box of a different shade from the strip.
+   */
+  calmStrip() {
+    const accent = this.prefs.get('accent');
+    const bg = this.surface();
+    const share = this.lightTheme() ? 0.16 : 0.12;
+    const channel = (hex, i) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+    return '#' + [0, 1, 2].map((i) => Math.round(channel(accent, i) * share + channel(bg, i) * (1 - share))
+      .toString(16).padStart(2, '0')).join('');
   }
 
   /**
