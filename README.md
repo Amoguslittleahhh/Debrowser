@@ -17,9 +17,19 @@ Chromium (through Electron), so real websites work.
 - **A task manager and memory meter** that show what each tab really costs.
 - **Ads, trackers and dangerous sites blocked** by the browser itself.
 - **Private windows through Tor**, with nothing kept after they close.
+- **Chrome and Firefox extensions**, beside the address bar, each with its own
+  page of settings as in Chrome, and a developer mode.
+- **Install any site as an app**, in its own window with a Start menu or
+  applications-menu shortcut.
+- **Sync between your computers** through a folder you already sync, encrypted
+  with a passphrase you choose.
+- **Passwords, passkeys, addresses and cards**, filled only when you choose.
+- **Translate a page or a selection**, and **dark versions of light websites**.
+- **Import from other browsers**, Safari included on macOS.
 - **Spaces, split view, reader view and a command bar (Ctrl+K).**
 - **Battery mode** that puts background tabs in your system's efficiency mode.
-- **Four designs**, light and dark.
+- **Four designs** (Ledger, Paper, Grid and Legacy), light and dark, with
+  Release Notes laid out to match after every update.
 
 ## Download
 
