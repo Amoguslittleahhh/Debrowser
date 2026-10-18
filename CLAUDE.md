@@ -38,6 +38,9 @@ that specific change to the new tab page in so many words. A broader request
 the page loads (`theme.css`, `theme.js`) may change only in ways that leave
 this page looking the same.
 
+One exception, at the owner's request (2026-10-18): under Calm the page has
+no most-used sites row, and takes Calm's colours and face (`data-look`).
+
 ## Releases
 
 Release only when the owner says to. Fixes, however urgent, go under
