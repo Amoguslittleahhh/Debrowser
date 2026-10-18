@@ -2434,13 +2434,13 @@ class BrowserShell {
   }
 
   /**
-   * Calm's strip: the accent mixed into the surface, 16% light and 12% dark,
+   * Calm's strip: the accent mixed into the surface, 16% light and 12% dark (into a darker base, so the page reads as a card),
    * as `color-mix(in srgb, ...)` does it in theme.css. The two must agree, or
    * the window buttons sit in a box of a different shade from the strip.
    */
   calmStrip() {
     const accent = this.prefs.get('accent');
-    const bg = this.surface();
+    const bg = this.lightTheme() ? this.surface() : '#121211';
     const share = this.lightTheme() ? 0.16 : 0.12;
     const channel = (hex, i) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
     return '#' + [0, 1, 2].map((i) => Math.round(channel(accent, i) * share + channel(bg, i) * (1 - share))

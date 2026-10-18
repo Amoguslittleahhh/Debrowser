@@ -467,7 +467,8 @@ body[data-design="calm"] {
   --border: #353532; --border-soft: #262624;
   --text: #ebe9e4; --text-dim: #b6b3ac;
   --radius-sm: 8px; --radius: 10px; --radius-lg: 14px;
-  --strip: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  /* Into a shade darker than the page, so the page reads as a card on it. */
+  --strip: color-mix(in srgb, var(--accent) 12%, #121211);
 }
 @media (prefers-color-scheme: light) {
   body[data-design="calm"]:not([data-theme="dark"]) {
