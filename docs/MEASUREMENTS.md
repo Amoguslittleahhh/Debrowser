@@ -1148,3 +1148,94 @@ run, Debrowser's Tor bootstrapped through the kit's bridge and
 check.torproject.org reported `IsTor` - all three modes passing.
 
 Leak test 38/38 (40/40 with the Linux kill switch); smoke suite 148/148.
+
+---
+
+## Down to the allocator: what was left to take (2026-10-18)
+
+Asked to take memory "down to bare metal" across the whole browser. Everything
+below Electron's API this browser can reach from its command line was measured
+again, with 8b's method: six tabs, one site each, governor off, GPU off, PSS
+including the zygotes, three runs unless stated. Electron 44.5.1 (castLabs),
+Linux x64, 4 cores, 16 GB.
+
+```
+                                                       total MB    verdict
+baseline                                               359-363
+--disable-features=BackForwardCache                    362-363     nothing
+--js-flags=--minor-ms                                  372-373     +10, worse
+--enable-features=V8FlushCodeBasedOnTabVisibility      359-363     nothing
+--js-flags=--no-short-builtin-calls                    362-363     nothing
+--disable-features=PartitionAllocLargeThreadCacheSize  361         nothing
+--enable-features=PartitionAllocShortMemoryReclaim     359-363     nothing
+--disable-features=PartitionAllocLargeEmptySlotSpanRing 361-362    nothing
+--disable-features=PartitionAllocBackupRefPtr          361         nothing
+--disable-features=PartitionAllocSchedulerLoopQuarantine 357-358   -4, not taken
+```
+
+The one switch that moved, the scheduler-loop quarantine, is a use-after-free
+mitigation: it holds freed memory back so a dangling pointer finds poison
+rather than a new object. 1% of the total is not worth a weaker allocator in a
+browser. glibc's tunables (`MALLOC_ARENA_MAX`, `malloc_trim`) were not tried:
+the Electron binary exports its own `malloc`, `free` and `realloc`
+(PartitionAlloc, through Chromium's allocator shim), so they cannot reach it.
+
+**Simulated memory pressure on hidden tabs does nothing.** On Linux no
+renderer ever gets a pressure signal (Chromium has no Linux pressure monitor),
+so the hypothesis was that sending one over CDP would earn the purge Windows
+and macOS renderers get. `Memory.simulatePressureNotification` on the five
+hidden tabs: attached only 365-366, critical 365-367, moderate 366, critical
+and detached 366-367. Indistinguishable from attaching alone - Chromium already
+drops what a hidden renderer can drop.
+
+**Our main-process code is under 3MB of heap.** Every module of
+`src/main` required in turn in a bare Electron, collecting between each: 2.8MB
+in all (extensions.js 0.65, answers.js 0.34, tab-manager 0.32, window 0.30,
+nothing else over 0.2). Lazy-loading all of it would not move the total. The
+browser process's young generation was 0.5MB after 40 seconds, so there is no
+semi-space to tune either.
+
+**A view kept after use costs its renderer ~6MB, and closing it returns ~1.**
+The hover card is made on first use and kept. Kept: 368-369; closed after use:
+367-368, against 362 for never made. The memory stays with the renderer the
+view shared, so closing it on a timer, as the toast does, would buy ~1MB.
+Left as it is.
+
+### What did move: the governor's own debugger sessions
+
+**Attaching the debugger to a tab costs ~0.7MB in its renderer, and detaching
+does not give it back.** Five hidden tabs attached and left: 365-366; attached
+and detached: 365-366; never attached: 362. The comments in `tiers.js` said a
+detach returned the protocol agents' memory. It does not.
+
+**The governor attached to every hidden tab that shared a renderer, and the
+reading was worthless.** It read `Performance.getMetrics` from each, to split
+the renderer's memory by JS heap and its CPU by `TaskDuration`, on the belief
+that both were per-document. Two same-site pages in one renderer, one spinning
+its main thread 40ms in every 50 and one idle, read over the same 3 seconds:
+
+```
+            TaskDuration delta    JSHeapUsedSize
+busy page   2.355 s               9.6 MB
+idle page   2.355 s               9.6 MB
+```
+
+Both figures are the renderer's: one main thread, one V8 heap. So the memory
+weights were always equal, and every hidden tab of a busy renderer took the
+whole renderer's main-thread time as its own - which made it a freeze
+candidate whenever any page in that renderer was busy, the page in front
+included. That is the regression `ARCHITECTURE.md` says this reading was added
+to fix, and it was worse than the proportional split it replaced.
+
+Removed. Six same-site tabs (one renderer), kept warm so only the reading
+differs:
+
+```
+read every shared tab    330-331 MB
+read none                326-328 MB    (-3.5MB, ~0.7MB a hidden tab)
+```
+
+and the renderer is no longer woken every third tick for each of its hidden
+tabs. A shared renderer is split evenly, and its hidden tabs are not frozen for
+CPU while it also holds the page in front - the page in front may be the busy
+one, and freezing a quiet page costs it memory.

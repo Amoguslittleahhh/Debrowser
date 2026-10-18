@@ -95,25 +95,25 @@ one-to-one. Chromium coalesces same-site tabs into a shared renderer, and
 one-renderer-per-site is enabled by default, so this is the common case rather
 than the exception.
 
-`metrics.js` resolves this by measuring RSS per process and splitting it across
-that process's tabs in proportion to their JS heap sizes, which *are* per-tab
-and readable over CDP, over a flat per-tab base for DOM and compositor overhead
-a heap figure does not capture. Totals are always summed over unique PIDs, so a
+`metrics.js` resolves this by measuring each process and splitting it evenly
+across that process's tabs. Totals are always summed over unique PIDs, so a
 shared process is never double-counted against the budget.
 
-Heap sampling only runs for tabs that actually share a process. Elsewhere the
-process figure *is* the tab figure, and asking is not free — enabling the
-Performance domain instantiates instrumentation inside the renderer.
+It used to split by each tab's JS heap, and take each tab's CPU from the
+`TaskDuration` metric, both read over CDP on the belief that they were
+per-document. They are the renderer's: a page spinning its main thread and an
+idle page in one renderer read the same heap (9.6MB) and the same task time
+(2.355s over 3s). So the weights were equal anyway, and every hidden tab of a
+busy renderer read as busy - the regression the CPU reading had been added to
+fix, worse than the proportional split it replaced. The reading also cost each
+tab a debugger session that stays in the renderer after a detach (~0.7MB a tab:
+five hidden same-site tabs settled at 330MB read, 327MB unread). It is gone.
 
-CPU needs the same treatment, and getting it wrong was a real regression.
-Sharing a process's CPU out proportionally says every tab in a shared renderer
-is equally busy, so a single busy tab made the governor freeze its quiet
-neighbours — and freezing costs memory. Per-tab CPU now comes from the
-per-document `TaskDuration` metric, differenced over wall time. The honest
-limit: that covers a page's main thread, not its Web Workers, so worker-driven
-CPU in a *shared* renderer is not attributable to one tab and does not trigger
-a freeze. The conservative failure mode was chosen deliberately — leave it
-alone rather than freeze the wrong page.
+CPU is the even share, with one conservative exception: a renderer that holds
+the page in front is as likely busy with that page as with any other, so its
+hidden tabs are not frozen for CPU at all. Leaving a page alone is the chosen
+failure mode over freezing the wrong one, since freezing costs a quiet page
+memory.
 
 ### Victim selection
 
