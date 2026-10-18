@@ -1634,12 +1634,18 @@ class Extensions {
     const site = { ...(settings.site || {}) };
     const spec = SITE_SETTINGS.find(([k]) => k === kind);
     if (kind === null) for (const k of Object.keys(site)) delete site[k];
-    else if (!spec) return;
+    else if (!spec || !(Array.isArray(spec[3]) || ['page', 'blocker'].includes(spec[3]))) return;
     else if (!['ask', 'allow', 'block'].includes(value) || value === spec[2]) delete site[kind];
     else site[kind] = value;
     meta.settings = { ...settings, site };
     fs.writeFileSync(file, JSON.stringify(meta));
     this.settingCache?.delete(id);
+    // Its pages already open: the change ready for their next load, rather
+    // than one load late.
+    const { webContents } = require('electron');
+    for (const wc of webContents.getAllWebContents()) {
+      if (!wc.isDestroyed() && this.folderOf(wc.getURL()) === id) this.applyPageSettings(wc, wc.getURL()).catch(() => {});
+    }
   }
 
   /**
@@ -1653,7 +1659,7 @@ class Extensions {
     const media = [...(details.mediaTypes || []), ...(details.mediaType ? [details.mediaType] : [])];
     const asked = permission === 'media' ? (media.length ? media : ['video', 'audio']).map((t) => `media:${t}`) : [permission];
     const chosen = this.settingsOf(id).site || {};
-    const answers = SITE_SETTINGS.filter(([, , , perms]) => Array.isArray(perms) && perms.some((p) => asked.includes(p))).map(([kind]) => chosen[kind]);
+    const answers = SITE_SETTINGS.filter(([, , , perms]) => Array.isArray(perms) && perms.some((p) => asked.includes(p))).map(([kind, , def]) => chosen[kind] || def);
     if (!answers.length || answers.some((a) => !a || a === 'ask')) return answers.includes('block') ? false : null;
     if (answers.includes('block')) return false;
     return answers.every((a) => a === 'allow') ? true : null;
@@ -1682,7 +1688,14 @@ class Extensions {
    * loads refused, window.open answered with nothing. Untouched unless the
    * user changed one, and put back when they change it back.
    */
-  async applyPageSettings(wc, url) {
+  applyPageSettings(wc, url) {
+    // One at a time: two at once each added a pop-up rule, and only the
+    // second could be taken away.
+    wc.__debrowserApplying = (wc.__debrowserApplying || Promise.resolve()).then(() => this.applyPageNow(wc, url), () => {});
+    return wc.__debrowserApplying;
+  }
+
+  async applyPageNow(wc, url) {
     const choice = (kind) => this.siteChoice(url, kind);
     const sound = choice('sound');
     if (sound || wc.__debrowserMutedByExt) {
@@ -1691,7 +1704,9 @@ class Extensions {
     }
     const js = choice('javascript') === 'block';
     const images = choice('images') === 'block';
-    const popups = choice('popups') === 'block';
+    // Blocked unless allowed, as Chrome's default: a pop-up the user did not
+    // click for gets nothing.
+    const popups = (choice('popups') || 'block') === 'block';
     if (!js && !images && !popups && !wc.__debrowserPageRules) return;
     try { if (!wc.debugger.isAttached()) wc.debugger.attach('1.3'); } catch { return; }
     wc.__debrowserPageRules = true;
@@ -1699,13 +1714,16 @@ class Extensions {
     await send('Emulation.setScriptExecutionDisabled', { value: js });
     await send('Network.enable');
     await send('Network.setBlockedURLs', { urls: images ? IMAGE_PATTERNS : [] });
-    if (wc.__debrowserPopupScript) {
+    // Changed only when it changes: taken away and added again as a page
+    // starts loading, the new one came too late for that page, which then
+    // had neither.
+    if (!popups && wc.__debrowserPopupScript) {
       await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: wc.__debrowserPopupScript });
       wc.__debrowserPopupScript = null;
     }
-    if (popups) {
+    if (popups && !wc.__debrowserPopupScript) {
       await send('Page.enable');
-      const r = await send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.open = () => null;' });
+      const r = await send('Page.addScriptToEvaluateOnNewDocument', { source: '{ const open = window.open; window.open = function (...a) { return navigator.userActivation.isActive ? open.apply(this, a) : null; }; }' });
       wc.__debrowserPopupScript = r && r.identifier;
     }
   }
