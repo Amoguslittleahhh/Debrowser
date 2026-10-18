@@ -4,6 +4,8 @@
 
 ### Improved
 
+- **Extensions and downloads beside the memory meter.** With the tabs down the side and the sidebar tucked away, the extensions and downloads buttons sat at the far left, ahead of back and forward. They now sit on the right, beside the memory meter, and the address bar is a little shorter to make room.
+- **The tucked-away sidebar answers faster.** It notices the pointer at the window's edge sooner, slides in and out a little quicker, and goes away sooner once the pointer leaves it.
 - **A quieter new tab page.** The row of most-used sites under the search field is gone in every design, as it already was in Calm, and the logo and search field sit lower, in the middle of the page. Your recent pages are still in "Continue with these tabs" below.
 
 ## 2.5.0

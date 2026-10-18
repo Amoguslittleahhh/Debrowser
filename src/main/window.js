@@ -131,7 +131,7 @@ const CONTENT_RADIUS = 10;
  * out of the view for a moment. Short enough to feel like it is following the
  * pointer rather than lagging behind it.
  */
-const SIDEBAR_CLOSE_MS = 150;
+const SIDEBAR_CLOSE_MS = 90;
 const SIDEBAR_OPEN_MS = 40;    // enough to tell a brush past the edge from a visit, short enough not to feel
 
 /**
@@ -141,7 +141,7 @@ const SIDEBAR_OPEN_MS = 40;    // enough to tell a brush past the edge from a vi
  * reach the strip and be styled first - and hid the view a frame or two short
  * of the end. This is the fallback, with room for that message.
  */
-const DETACH_SLIDE_MS = 150;   // chrome.css, .sliding-out and the band's slide out
+const DETACH_SLIDE_MS = 120;   // chrome.css, .sliding-out and the band's slide out
 const DETACH_SLIDE_GRACE_MS = 100;
 
 /**
@@ -2839,7 +2839,7 @@ class BrowserShell {
     if (this.edgeTimer) return;
     // Paced by how far the pointer is from the edge: every 16ms - a frame,
     // as quick as the pointer's own hover would be - once it is within
-    // EDGE_NEAR of it, and every 150ms otherwise. A window left focused all
+    // EDGE_NEAR of it, and every 50ms otherwise. A window left focused all
     // day with the tabs tucked away read the cursor forty times a second for
     // a pointer that was nowhere near.
     const tick = () => {
@@ -2868,7 +2868,7 @@ class BrowserShell {
       if (this.window.isDestroyed() || this.sidebarOpen || this.edgeTimer) return;
       // Battery mode reads it less often far from the edge (400ms): the
       // pointer still has the 16ms pace once it is near.
-      this.edgeTimer = setTimeout(tick, near || this.edgeHeld ? 16 : this.saver ? 400 : 150);
+      this.edgeTimer = setTimeout(tick, near || this.edgeHeld ? 16 : this.saver ? 400 : 50);
       this.edgeTimer.unref?.();
     };
     this.edgeTimer = setTimeout(tick, 16);
@@ -2901,10 +2901,10 @@ class BrowserShell {
         this.setSidebarOpen(false);
         return;
       }
-      this.awayTimer = setTimeout(tick, this.saver ? 100 : 50);
+      this.awayTimer = setTimeout(tick, this.saver ? 100 : 32);
       this.awayTimer.unref?.();
     };
-    this.awayTimer = setTimeout(tick, 50);
+    this.awayTimer = setTimeout(tick, 32);
     this.awayTimer.unref?.();
   }
 
