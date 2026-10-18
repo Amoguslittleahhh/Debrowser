@@ -2535,3 +2535,27 @@ body[data-design="calm"][data-layout="left"]:not([data-strip-tone])[data-detache
   --side: light-dark(color-mix(in srgb, var(--accent) 10%, var(--bg-raised)),
                      color-mix(in srgb, var(--accent) 12%, var(--bg-raised)));
 }
+
+/*
+ * The bookmarks bar under the band across the top, while the strip is tucked
+ * away. Down the side the column used to be where bookmarks lived, but tucked
+ * away there is no column to see, so the bar comes back, a row under the
+ * address as it is with the tabs across the top. window.js gives the band its
+ * extra 34px (bandHeight) and starts the page below it.
+ */
+body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks {
+  grid-template-rows: 40px 34px 8px auto minmax(0, 1fr) 16px;
+}
+body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks .bookmarks {
+  display: flex;
+  grid-area: 2 / 1 / 3 / -1;
+  padding: 0 calc(env(titlebar-area-x, 0px) + 6px);
+  background: var(--strip);
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+body[data-role="main"][data-band="true"][data-layout="left"][data-translucent="on"].with-bookmarks .bookmarks { background: transparent; }
+body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks .toolbar { box-shadow: none; }
+body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks .findbar { grid-area: 4 / 2; }
+body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks .tabstrip { grid-area: 5 / 2; }
+body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks::before { top: 82px; }
