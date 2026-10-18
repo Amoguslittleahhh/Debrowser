@@ -230,14 +230,17 @@ class WebApps {
   }
 
   /**
-   * Its window: the site alone, at its start page, in the browsing session.
-   * A link out of its scope opens as a tab in Debrowser instead, as Chrome
-   * does. One window per app; opening it again brings that one forward.
+   * Its window, as Edge draws an installed site: no tabs and no address
+   * bar, only a slim title bar of the app's own colour - its icon, the page's
+   * title, a ⋯ menu and the system's window buttons - over the site. A link
+   * out of its scope opens as a tab in Debrowser instead, as Chrome does. One
+   * window per app; opening it again brings that one forward.
    * @param {object} hooks
    * @param {Electron.Session} hooks.session
    * @param {(url: string) => void} hooks.openInBrowser
+   * @param {(id: string) => void} [hooks.uninstall] asked from its menu
    */
-  open(id, { session: ses, openInBrowser }) {
+  open(id, { session: ses, openInBrowser, uninstall = null }) {
     const app = this.byId(id);
     if (!app) return null;
     const open = this.windows.get(id);
@@ -246,16 +249,78 @@ class WebApps {
       open.focus();
       return open;
     }
-    const { BrowserWindow, nativeImage } = require('electron');
-    const win = new BrowserWindow({
+    const { BaseWindow, WebContentsView, Menu, clipboard, nativeImage } = require('electron');
+    const mac = process.platform === 'darwin';
+    let colors = barColors(app.themeColor);
+    const win = new BaseWindow({
       width: 1100, height: 760, minWidth: 360, minHeight: 300, title: app.name, show: false,
-      autoHideMenuBar: true, backgroundColor: app.themeColor || '#ffffff',
-      ...(app.icon ? { icon: nativeImage.createFromPath(app.icon) } : {}),
-      webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true }
+      backgroundColor: colors.bg, titleBarStyle: 'hidden',
+      ...(mac ? { trafficLightPosition: { x: 12, y: 11 } } : { titleBarOverlay: { color: colors.bg, symbolColor: colors.fg, height: BAR } }),
+      ...(app.icon ? { icon: nativeImage.createFromPath(app.icon) } : {})
     });
-    win.setMenuBarVisibility(false);
     if (process.platform === 'win32') win.setAppDetails({ appId: `Debrowser.App.${app.id}`, appIconPath: app.icon ? app.icon.replace(/\.png$/, '.ico') : '' });
-    const wc = win.webContents;
+    let iconData = '';
+    try { if (app.icon) iconData = `data:image/png;base64,${fs.readFileSync(app.icon).toString('base64')}`; } catch { /* none */ }
+    const bar = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: true } });
+    const page = new WebContentsView({ webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    page.setBackgroundColor(colors.bg);
+    win.contentView.addChildView(page);
+    win.contentView.addChildView(bar);
+    win.page = page;
+    win.bar = bar;
+    const wc = page.webContents;
+    const place = () => {
+      if (win.isDestroyed()) return;
+      const { width, height } = win.getContentBounds();
+      bar.setBounds({ x: 0, y: 0, width, height: BAR });
+      page.setBounds({ x: 0, y: BAR, width, height: Math.max(0, height - BAR) });
+    };
+    win.on('resize', place);
+    place();
+
+    // The bar: a page of its own, nothing in it but the icon, the title and
+    // the ⋯ button, which asks for the menu by following a link this side
+    // catches - it has no other way to reach the browser.
+    const paint = () => {
+      if (bar.webContents.isDestroyed()) return;
+      bar.webContents.executeJavaScript(`document.documentElement.style.setProperty('--bg', ${JSON.stringify(colors.bg)});
+        document.documentElement.style.setProperty('--fg', ${JSON.stringify(colors.fg)});`).catch(() => {});
+      if (!mac) try { win.setTitleBarOverlay({ color: colors.bg, symbolColor: colors.fg, height: BAR }); } catch { /* not here */ }
+      win.setBackgroundColor(colors.bg);
+    };
+    const titled = () => {
+      const t = wc.getTitle();
+      const text = t && t !== app.name && !/^https?:/.test(t) ? t : app.name;
+      win.setTitle(text);
+      if (!bar.webContents.isDestroyed()) bar.webContents.executeJavaScript(`document.getElementById('t').textContent = ${JSON.stringify(text)};`).catch(() => {});
+    };
+    bar.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(barPage(app, iconData, colors, mac))}`).then(() => { paint(); titled(); }).catch(() => {});
+    bar.webContents.on('will-navigate', (event, url) => {
+      event.preventDefault();
+      if (url.startsWith('debrowser-app:menu')) menu();
+    });
+
+    const menu = () => {
+      const zoom = (d) => wc.setZoomFactor(d === 0 ? 1 : Math.min(3, Math.max(0.3, wc.getZoomFactor() + d)));
+      const history = wc.navigationHistory;
+      Menu.buildFromTemplate([
+        { label: 'Back', accelerator: 'Alt+Left', enabled: Boolean(history?.canGoBack()), click: () => history.goBack() },
+        { label: 'Forward', accelerator: 'Alt+Right', enabled: Boolean(history?.canGoForward()), click: () => history.goForward() },
+        { label: 'Reload', accelerator: 'F5', click: () => wc.reload() },
+        { type: 'separator' },
+        { label: `Zoom in (${Math.round(wc.getZoomFactor() * 100)}%)`, click: () => zoom(0.1) },
+        { label: 'Zoom out', click: () => zoom(-0.1) },
+        { label: 'Actual size', click: () => zoom(0) },
+        { type: 'separator' },
+        { label: 'Copy link', click: () => clipboard.writeText(wc.getURL()) },
+        { label: 'Open in Debrowser', click: () => openInBrowser(wc.getURL()) },
+        { label: 'Print…', click: () => wc.print() },
+        { type: 'separator' },
+        { label: `${app.name} · ${new URL(app.startUrl).host}`, enabled: false },
+        ...(uninstall ? [{ label: `Uninstall ${app.name}…`, click: () => uninstall(app.id) }] : [])
+      ]).popup({ window: win, x: Math.max(0, win.getContentBounds().width - (mac ? 44 : 180)), y: BAR });
+    };
+
     wc.setWindowOpenHandler(({ url }) => {
       if (/^https?:/i.test(url)) openInBrowser(url);
       return { action: 'deny' };
@@ -263,21 +328,57 @@ class WebApps {
     wc.on('will-navigate', (event, url) => {
       if (!this.inScope(app, url) && /^https?:/i.test(url)) { event.preventDefault(); openInBrowser(url); }
     });
-    // Back, forward and reload from the keyboard: there is no toolbar.
+    // The bar takes the colour the site asks for, as Edge's does.
+    wc.on('did-change-theme-color', (_e, color) => { if (color) { colors = barColors(color); paint(); } });
+    // Back, forward and reload from the keyboard, as in a tab.
     wc.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
-      const mod = process.platform === 'darwin' ? input.meta : input.control;
+      const mod = mac ? input.meta : input.control;
       if ((input.alt && input.key === 'ArrowLeft') || (mod && input.key === '[')) { wc.navigationHistory?.goBack(); event.preventDefault(); }
       else if ((input.alt && input.key === 'ArrowRight') || (mod && input.key === ']')) { wc.navigationHistory?.goForward(); event.preventDefault(); }
       else if (input.key === 'F5' || (mod && input.key.toLowerCase() === 'r')) { wc.reload(); event.preventDefault(); }
     });
-    wc.on('page-title-updated', (event, title) => { event.preventDefault(); win.setTitle(title && title !== app.name ? `${app.name} – ${title}` : app.name); });
-    win.once('ready-to-show', () => win.show());
-    win.on('closed', () => { if (this.windows.get(id) === win) this.windows.delete(id); });
+    wc.on('page-title-updated', titled);
+    wc.once('did-finish-load', () => { if (!win.isDestroyed()) win.show(); });
+    setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 3000);
+    win.on('closed', () => {
+      if (this.windows.get(id) === win) this.windows.delete(id);
+      for (const v of [page, bar]) try { v.webContents.close(); } catch { /* gone */ }
+    });
     this.windows.set(id, win);
     wc.loadURL(app.startUrl).catch(() => {});
     return win;
   }
+}
+
+/** How tall an app's title bar is, as Edge's. */
+const BAR = 34;
+
+/** The bar's background and text for a site's theme colour: dark text on a light one. */
+function barColors(color) {
+  const fallback = { bg: '#1f1f1f', fg: '#e8e8e8' };
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color || '').trim());
+  if (!m) return fallback;
+  const hex = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return { bg: `#${hex}`, fg: lum > 0.55 ? '#1d1d1d' : '#f2f2f2' };
+}
+
+/** The title bar's own page. */
+function barPage(app, icon, colors, mac) {
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  return `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+<style>
+:root{--bg:${colors.bg};--fg:${colors.fg}}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px system-ui,"Segoe UI",sans-serif;overflow:hidden;user-select:none}
+.bar{display:flex;align-items:center;gap:10px;height:100%;padding:0 ${mac ? '12px 0 80px' : '170px 0 10px'};-webkit-app-region:drag}
+img{width:16px;height:16px;border-radius:3px}
+#t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.85}
+a{-webkit-app-region:no-drag;color:inherit;text-decoration:none;width:36px;height:26px;display:grid;place-items:center;border-radius:6px;opacity:.8;font-size:16px;letter-spacing:1px}
+a:hover{background:color-mix(in srgb,var(--fg) 14%,transparent);opacity:1}
+</style></head><body><div class="bar">${icon ? `<img src="${icon}" alt="">` : ''}<span id="t">${esc(app.name)}</span><a href="debrowser-app:menu" title="Settings and more" aria-label="Settings and more">⋯</a></div></body></html>`;
 }
 
 /** The `--web-app=<id>` on a command line, or null. */

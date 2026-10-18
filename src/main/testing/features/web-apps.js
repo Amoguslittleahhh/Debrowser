@@ -45,10 +45,17 @@ module.exports = async function webAppsFeature(t) {
   const entry = (app.shortcuts || []).find((f) => f.endsWith('.desktop'));
   const text = entry ? fs.readFileSync(entry, 'utf8') : '';
   check('Apps: a shortcut that opens it', text.includes(`--web-app=${app.id}`) && text.includes('Name=Probe App'), entry || 'none');
-  await waitFor(() => apps.windows.get(app.id) && !apps.windows.get(app.id).webContents.isLoading(), 10000).catch(() => {});
+  await waitFor(() => apps.windows.get(app.id) && !apps.windows.get(app.id).page.webContents.isLoading(), 10000).catch(() => {});
   const win = apps.windows.get(app.id);
-  check('Apps: its own window at its start page', Boolean(win) && /web-app\.html\?start$/.test(win.webContents.getURL()),
-    win ? win.webContents.getURL() : 'no window');
+  check('Apps: its own window at its start page', Boolean(win) && /web-app\.html\?start$/.test(win.page.webContents.getURL()),
+    win ? win.page.webContents.getURL() : 'no window');
+  await sleep(500);
+  const barText = win ? await win.bar.webContents.executeJavaScript(`document.getElementById('t').textContent + '|' + getComputedStyle(document.body).backgroundColor`) : '';
+  check('Apps: a title bar of the app\'s own colour, with the page\'s title', /^Probe app page\|rgb\(42, 122, 108\)$/.test(barText), barText);
+  if (win && process.env.DEBROWSER_SHOT) {
+    fs.writeFileSync(`${process.env.DEBROWSER_SHOT}-bar.png`, (await win.bar.webContents.capturePage()).toPNG());
+    fs.writeFileSync(`${process.env.DEBROWSER_SHOT}-page.png`, (await win.page.webContents.capturePage()).toPNG());
+  }
   runCommand('open-web-app', { id: app.id });
   await sleep(300);
   check('Apps: opening it again brings the same window forward', apps.windows.size === 1);
