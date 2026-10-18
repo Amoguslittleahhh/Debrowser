@@ -545,7 +545,7 @@ body.with-continue:is([data-design="ledger"], [data-design="paper"], [data-desig
   font-size: 12px;
 }
 
-/* Calm (the owner's ask, 2026-10-18): no most-used row under the field. The
-   group is centred on its own measured height (--fit), so the mark and the
-   field come down into the room the row took. */
-body[data-look="calm"] .tiles:not([hidden]) { display: none; }
+/* No most-used row under the field, in any design (the owner's ask,
+   2026-10-18). The group is centred on its own measured height (--fit), so
+   the mark and the field come down into the room the row took. */
+body[data-look] .tiles:not([hidden]) { display: none; }
