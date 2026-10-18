@@ -27,7 +27,7 @@ and are worth knowing rather than rediscovering:
 
 The owner has said the new tab page must never change: the mark and
 "debrowser" wordmark above the search field, the field with its "Enter ↵"
-hint, the most-used sites row when there are any, and the "Continue with these
+hint, and the "Continue with these
 tabs" card - kept even when empty, saying "The pages you visit will be here to
 come back to." with See more under it.
 
@@ -38,8 +38,9 @@ that specific change to the new tab page in so many words. A broader request
 the page loads (`theme.css`, `theme.js`) may change only in ways that leave
 this page looking the same.
 
-One exception, at the owner's request (2026-10-18): under Calm the page has
-no most-used sites row, and takes Calm's colours and face (`data-look`).
+Changed at the owner's request (2026-10-18): the page has no most-used sites
+row in any design, and under Calm it takes Calm's colours and face
+(`data-look`).
 
 ## Releases
 
