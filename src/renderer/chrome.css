@@ -1801,9 +1801,9 @@ body[data-detached="true"][data-floating="false"][data-sidebar-open="false"] > *
  * do; the browser hides the view only when it has finished (sidebar-slid).
  */
 :root {
-  --strip-in: 160ms;
+  --strip-in: 150ms;
   --strip-in-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --strip-out: 150ms;
+  --strip-out: 120ms;
   --strip-out-ease: cubic-bezier(0.4, 0, 1, 1);
 }
 
@@ -2182,6 +2182,9 @@ body[data-band="true"][data-layout="left"] .toolbar .meter {
 }
 body[data-band="true"][data-layout="left"] .toolbar .meter-bar { flex: none; width: 46px; }
 body[data-band="true"][data-layout="left"] :is(.private-pill, #onion, #slow-js) { order: 4; }
+/* Extensions and downloads beside the meter, not ahead of back and forward:
+   the centred address bar is measured to clear them (fitOmnibox). */
+body[data-band="true"][data-layout="left"] .toolbar > :is(#extensions, #downloads) { order: 4; }
 
 /* Band buttons inside the address bar stay the address bar's size. */
 body[data-band="true"][data-layout="left"] .omnibox .icon-btn { width: 24px; height: 24px; }
