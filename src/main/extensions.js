@@ -44,6 +44,7 @@ const path = require('path');
 const zlib = require('zlib');
 const crypto = require('crypto');
 const { DeclarativeNetRequest } = require('./extension-dnr');
+const { NativeHosts } = require('./native-messaging');
 
 /**
  * The compatibility layer (extension-compat.js), put in front of the
@@ -616,6 +617,8 @@ class Extensions {
     // Each extension's right-click menu items, as it declared them.
     this.menus = new Map();
     this.dnr = new DeclarativeNetRequest({ log });
+    // Programs on the computer an extension talks to (connectNative).
+    this.native = new NativeHosts({ own: path.dirname(root) });
     // Each extension's webRequest listeners: id -> { event, filter, blocking }.
     this.listeners = new Map();
     // The browser events each extension listens to (tabs.*, webNavigation.*).
@@ -829,6 +832,31 @@ class Extensions {
         return this.hooks.webAuthFlow(ext, { url: String(a.url), interactive: a.interactive === true,
           timeout: Math.min(120000, Math.max(1000, Number(a.timeout) || 15000)) });
       }
+      case 'native.connect': case 'native.send': {
+        let perms = [];
+        try { perms = JSON.parse(fs.readFileSync(path.join(ext.dir, 'manifest.json'), 'utf8')).permissions || []; } catch { /* none */ }
+        if (!perms.includes('nativeMessaging')) throw new Error('Access to the specified native messaging host is forbidden.');
+        let chromeId = null;
+        for (const ses of this.sessions) chromeId ||= this.loadedId(ses, ext.id);
+        const origin = `chrome-extension://${chromeId}/`;
+        const name = String(a.name || '');
+        if (op === 'native.connect') {
+          const port = String(a.id || '');
+          this.native.connect(`${ext.id}:${port}`, ext.id, name, origin,
+            (msg) => this.dispatch(ext.id, 'native.onMessage', [port, msg]),
+            (error) => this.dispatch(ext.id, 'native.onDisconnect', [port, error]));
+          return undefined;
+        }
+        // One message, one answer, then the program is stopped.
+        const key = `${ext.id}:send:${crypto.randomUUID()}`;
+        return new Promise((resolve, reject) => {
+          const started = this.native.connect(key, ext.id, name, origin, (msg) => { this.native.disconnect(key); resolve(msg); },
+            (error) => reject(new Error(error || 'Native host has exited.')));
+          if (started) this.native.post(key, a.msg);
+        });
+      }
+      case 'native.post': this.native.post(`${ext.id}:${String(a.id || '')}`, a.msg); return undefined;
+      case 'native.disconnect': this.native.disconnect(`${ext.id}:${String(a.id || '')}`); return undefined;
       case 'debugger.attach': this.debuggerAttach(ext, a.target, a.version); return undefined;
       case 'debugger.detach': {
         const wc = this.debugTarget(ext, a.target);
@@ -1505,6 +1533,7 @@ class Extensions {
 
   unloadEverywhere(id) {
     this.debuggerDetachAll(id);
+    this.native.closeAll(id);
     if (this.hooks.closeSidePanel) this.hooks.closeSidePanel({ id }, null);
     this.panels.delete(id);
     this.dnr.drop(id);

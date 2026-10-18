@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "Debrowser test: native messaging",
+  "version": "1.0",
+  "description": "Talks to a small program on the computer, as Claude does to Claude Code and the Claude app, so the smoke test can see native messaging work.",
+  "permissions": ["nativeMessaging"]
+}
