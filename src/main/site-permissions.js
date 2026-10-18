@@ -212,9 +212,17 @@ class PermissionAsks {
    * @param {(tab: object) => void} hooks.show - put the question on screen
    * @param {(id: number) => object|null} [hooks.tabById]
    * @param {(tab: object) => void} [hooks.withdrawn] - the question on screen is void
+   * @param {(wc: object) => boolean} [hooks.isApp] - the page of a site installed as an app (web-apps.js)
+   * @param {(wc: object, origin: string, kinds: string[]) => Promise<boolean|null>} [hooks.askApp]
+   *   an app has no tab and no site panel, so it is asked in its own window:
+   *   true or false to remember, null for no answer
    */
-  constructor(store, { tabFor, tabById = () => null, isActive, show, withdrawn = () => {} }) {
+  constructor(store, { tabFor, tabById = () => null, isActive, show, withdrawn = () => {}, isApp = () => false, askApp = async () => null }) {
     this.store = store;
+    this.isApp = isApp;
+    this.askApp = askApp;
+    /** App questions waiting, by "<webContents id> <key>", so one is asked once. */
+    this.appPending = new Map();
     this.tabFor = tabFor;
     this.tabById = tabById;
     this.isActive = isActive;
@@ -231,6 +239,7 @@ class PermissionAsks {
   request(wc, kinds, details, callback) {
     const origin = originOf(details?.requestingUrl);
     const tab = this.tabFor(wc);
+    if (!tab && origin && wc && this.isApp(wc) && originOf(wc.getURL()) === origin) { this.requestInApp(wc, origin, kinds, callback); return; }
     // Only the site in the address bar may ask. A frame from somewhere else
     // would be borrowing the trust the user gives that site.
     if (!origin || !tab || originOf(tab.url) !== origin) { callback(false); return; }
@@ -256,6 +265,26 @@ class PermissionAsks {
     queue.push({ origin, kinds, key, callbacks: [callback] });
     this.pending.set(tab.id, queue);
     if (queue.length === 1 && this.isActive(tab)) this.show(tab);
+  }
+
+  /**
+   * The same question from a site installed as an app: decided by what the
+   * user already chose for that site, or asked in the app's own window. Only
+   * the app's page itself may ask, as only the address bar's site may in a tab.
+   */
+  requestInApp(wc, origin, kinds, callback) {
+    const decision = this.store.decide(origin, [...kinds]);
+    if (decision !== 'ask') { callback(decision === 'allow'); return; }
+    const key = `${wc.id} ${origin} ${[...kinds].sort().join(',')}`;
+    const waiting = this.appPending.get(key);
+    if (waiting) { waiting.push(callback); return; }
+    const callbacks = [callback];
+    this.appPending.set(key, callbacks);
+    Promise.resolve().then(() => this.askApp(wc, origin, [...kinds])).catch(() => null).then((allow) => {
+      this.appPending.delete(key);
+      if (allow === true || allow === false) for (const kind of kinds) this.store.set(origin, kind, allow ? 'allow' : 'block');
+      for (const cb of callbacks) cb(allow === true);
+    });
   }
 
   /** The question at the head of this tab's queue, as the panel draws it. */

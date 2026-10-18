@@ -56,6 +56,20 @@ module.exports = async function webAppsFeature(t) {
     fs.writeFileSync(`${process.env.DEBROWSER_SHOT}-bar.png`, (await win.bar.webContents.capturePage()).toPNG());
     fs.writeFileSync(`${process.env.DEBROWSER_SHOT}-page.png`, (await win.page.webContents.capturePage()).toPNG());
   }
+  // A site installed as an app has no tab to ask in: what the user chose for
+  // the site holds there too, and was refused outright before.
+  // Set as the site panel sets it, for the tab in front: the same site.
+  if (win && new URL(page.url).origin === new URL(win.page.webContents.getURL()).origin) {
+    const ask = () => win.page.webContents.executeJavaScript('Notification.requestPermission()').catch((e) => `error ${e.message}`);
+    await tabs.activate(page.id);
+    runCommand('site-permission', { kind: 'notifications', value: 'allow' });
+    const allowed = await ask();
+    runCommand('site-permission', { kind: 'notifications', value: 'block' });
+    const blocked = await ask();
+    runCommand('site-permission', { kind: 'notifications', value: null });
+    check('Apps: a site allowed notifications gets them in its app window, and a blocked one does not',
+      allowed === 'granted' && blocked === 'denied', `${allowed} / ${blocked}`);
+  } else check('Apps: its window is the same site as its tab', false, win ? win.page.webContents.getURL() : 'no window');
   runCommand('open-web-app', { id: app.id });
   await sleep(300);
   check('Apps: opening it again brings the same window forward', apps.windows.size === 1);

@@ -5854,6 +5854,23 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       `panel ${JSON.stringify(panelSaid)}; shown ${panelShown}, page narrowed by ${pageNarrowed}, layer current ${layerCurrent}, ` +
       `closed ${panelClosed}; page title ${JSON.stringify(pageTitle)}`);
 
+    // As Chrome: the debugger lets go when its tab goes to one of the
+    // browser's own pages, and never reaches another extension's.
+    let debuggerLeft = 'no extension';
+    if (panelExt) {
+      const back = page.wc.getURL();
+      try {
+        ext.debuggerAttach(panelExt, { tabId: page.wc.id }, '1.3');
+        const held = ext.debugging.has(`${panelExt.id}:${page.wc.id}`);
+        await page.wc.loadURL('debrowser://blank/').catch(() => {});
+        debuggerLeft = held && !ext.debugging.has(`${panelExt.id}:${page.wc.id}`) && !page.wc.debugger.isAttached() ? 'yes' : `held ${held}, still ${page.wc.debugger.isAttached()}`;
+      } catch (e) { debuggerLeft = `error ${e.message}`; }
+      await page.wc.loadURL(back).catch(() => {});
+    }
+    check('Extensions: the debugger lets go of a tab that opens a browser page, and not another extension\'s pages',
+      debuggerLeft === 'yes' && panelExt && !ext.debuggable(panelExt, 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x.html') &&
+        !ext.debuggable(panelExt, 'debrowser://settings/'), debuggerLeft);
+
     for (const e of installed) ext.remove(e.id);
     page.wc.reload();
     await waitFor(() => !page.loading, { timeoutMs: 10_000 });
