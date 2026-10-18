@@ -106,6 +106,12 @@ module.exports = async function realExtensions(t) {
     const file = path.join(dir, `${store}-${id.replace(/[^\w.-]/g, '_')}.${store === 'firefox' ? 'xpi' : 'crx'}`);
     const r = { label, install: '', background: false, scripts: null, popup: null, icon: false };
     let added = null;
+    // Brought back if the browser put it to sleep while the last one ran:
+    // with dozens installed it is short of memory, as it is meant to be.
+    if (!page.isLive) {
+      page.realise();
+      await waitFor(() => page.wc && !page.loading, { timeoutMs: 10_000 }).catch(() => {});
+    }
     try {
       if (!fs.existsSync(file)) await downloadFromStore({ store, id }, (u) => ses.fetch(u), dir, process.versions.chrome);
       added = ext.install(file);
