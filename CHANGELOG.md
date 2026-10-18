@@ -20,6 +20,7 @@
 
 ### Improved
 
+- **Bookmarks bar with the sidebar tucked away.** With the tabs down the side and the sidebar tucked away, the bookmarks bar now runs under the bar across the top, as it does with the tabs across the top. Before, there was no way to see your bookmarks at a glance in that layout.
 - **Settings use switches.** On-and-off settings are switches instead of checkboxes in every design but Legacy, and a list's Remove buttons appear on the row you point at, so a list of extensions or apps is no longer a column of Remove buttons.
 - **Ledger's Settings look more finished.** Settings in Ledger now groups each section into a card on a fine outline, with dividers that start under the text, softer fields and buttons, a rounded search field, and the current section filled with your accent colour.
 - **Background tabs use less memory when you have several of one site open.** Debrowser was watching every background tab that shares its process with tabs of the same site, to tell which of them was busy, at about 0.7 MB a tab kept until the tab closed - and what it read was the whole process, the same for every tab, so it could not tell. It no longer watches them. A background tab is also no longer stopped because the tab of the same site in front of you is the busy one.

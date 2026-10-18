@@ -116,8 +116,10 @@ const SECTIONS = {
       label: 'Show the bookmarks bar',
       hint: 'Ctrl+Shift+B',
       type: 'checkbox',
-      unavailable: (state) => (state.prefs.tabBarPosition === 'left'
-        ? 'Shown with tabs across the top. Down the side, bookmarks are under Ctrl+Shift+O.' : '')
+      // Down the side and pinned, the column has no room for it; tucked away,
+      // it runs under the band across the top (window.js, bookmarksBarVisible).
+      unavailable: (state) => (state.prefs.tabBarPosition === 'left' && state.prefs.sidebarPinned !== false
+        ? 'Shown with tabs across the top, or down the side when the sidebar is tucked away. Pinned, bookmarks are under Ctrl+Shift+O.' : '')
     },
     {
       key: 'tabBarPosition',

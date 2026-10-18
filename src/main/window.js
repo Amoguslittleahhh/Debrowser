@@ -2487,12 +2487,20 @@ class BrowserShell {
    * nothing - which is the whole reason a sidebar is worth having.
    */
   bookmarksBarVisible() {
-    if (this.vertical()) return false;
+    // Down the side the column holds the tabs, not the bookmarks - except with
+    // the strip tucked away under the band across the top, where nothing else
+    // shows them, so the bar runs under the band as it does under the toolbar.
+    if (this.vertical() && !this.band()) return false;
     if (this.prefs && this.prefs.get('showBookmarksBar') === false) return false;
     // An empty bar is 34px of nothing taken from the page. The preference says
     // whether the bar is wanted; this says whether there is anything to put in
     // it, and until the first bookmark is saved the answer is no.
     return Boolean(this.bookmarks && this.bookmarks.all().length > 0);
+  }
+
+  /** The band across the top while the strip is tucked away, its bookmarks bar included. */
+  bandHeight() {
+    return SIDEBAR_TOP_BAND + (this.band() && this.bookmarksBarVisible() ? BOOKMARKS_BAR_HEIGHT : 0);
   }
 
   /** How much vertical room the chrome needs, bars included. */
@@ -2597,7 +2605,7 @@ class BrowserShell {
     if (!this.stripView) this.createStrip();
     const shown = this.sidebarOpen || Boolean(this.sidebarSliding);
     this.stripView.setBounds({
-      x: 0, y: SIDEBAR_TOP_BAND, width: STRIP_VIEW_WIDTH, height: Math.max(0, height - SIDEBAR_TOP_BAND)
+      x: 0, y: this.bandHeight(), width: STRIP_VIEW_WIDTH, height: Math.max(0, height - this.bandHeight())
     });
     // Just above the chrome, so a menu or sheet opened later still lies over it.
     const root = this.window.contentView;
@@ -2635,7 +2643,7 @@ class BrowserShell {
   /** Where a view of the chrome's sits in the window, for coordinates it sends. */
   chromeOrigin(sender) {
     const wc = this.stripView && this.stripView.webContents;
-    if (sender && wc && !wc.isDestroyed() && wc.id === sender.id) return { x: 0, y: SIDEBAR_TOP_BAND };
+    if (sender && wc && !wc.isDestroyed() && wc.id === sender.id) return { x: 0, y: this.bandHeight() };
     return { x: 0, y: 0 };
   }
 
@@ -2841,7 +2849,7 @@ class BrowserShell {
       if (this.window.isFocused()) {
         const at = this.cursorPoint();
         const b = this.window.getContentBounds();
-        const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
+        const top = b.y + (this.band() ? this.bandHeight() : 0);
         const rows = at.y >= top && at.y < b.y + b.height;
         const inside = rows && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_SENSE;
         near = rows && at.x >= b.x - 8 && at.x < b.x + EDGE_NEAR;
@@ -2886,7 +2894,7 @@ class BrowserShell {
       const at = this.cursorPoint();
       const b = this.window.getContentBounds();
       const width = this.band() ? STRIP_VIEW_WIDTH : this.chromeView.getBounds().width;
-      const top = b.y + (this.band() ? SIDEBAR_TOP_BAND : 0);
+      const top = b.y + (this.band() ? this.bandHeight() : 0);
       const over = at.y >= top && at.y < b.y + b.height && at.x >= b.x - 8 && at.x < b.x + width + 8;
       if (!over) {
         this.edgeHeld = false;
@@ -3064,7 +3072,7 @@ class BrowserShell {
     // the margin on the left is where the pointer finds the strip.
     if (this.detached()) {
       const gap = CONTENT_GAP;
-      const top = this.band() ? SIDEBAR_TOP_BAND : gap;
+      const top = this.band() ? this.bandHeight() : gap;
       return {
         x: gap, y: top,
         width: Math.max(0, width - gap * 2 - panelWidth),
@@ -3173,7 +3181,7 @@ class BrowserShell {
         // it lying over the page, clear but in the way of every click, wheel
         // and drop - input could only be handed on piecemeal.
         this.chromeView.setBounds(this.band()
-          ? { x: 0, y: 0, width, height: SIDEBAR_TOP_BAND }
+          ? { x: 0, y: 0, width, height: this.bandHeight() }
           : this.vertical()
           ? { x: 0, y: 0, width: this.sidebarWidth(), height }
           : { x: 0, y: 0, width, height: this.chromeHeight() });
@@ -3239,7 +3247,7 @@ class BrowserShell {
       // In full screen there is no chrome, and no window buttons, above it:
       // it starts at the top, level with the page, not 84px down.
       const top = this.fullScreen() && (this.vertical() || this.chromeHidden()) ? 0
-        : (this.vertical() ? SIDEBAR_TOP_BAND : this.chromeHeight());
+        : (this.vertical() ? this.bandHeight() : this.chromeHeight());
       this.panelView.setBounds({
         x: width - PANEL_WIDTH,
         y: top,
@@ -3253,7 +3261,7 @@ class BrowserShell {
       this.extPanel.view.setVisible(shown);
       if (shown) {
         const top = this.fullScreen() && (this.vertical() || this.chromeHidden()) ? 0
-          : (this.vertical() ? SIDEBAR_TOP_BAND : this.chromeHeight());
+          : (this.vertical() ? this.bandHeight() : this.chromeHeight());
         this.extPanel.view.setBounds({
           x: width - EXT_PANEL_WIDTH - (this.panelOpen ? PANEL_WIDTH : 0),
           y: top,

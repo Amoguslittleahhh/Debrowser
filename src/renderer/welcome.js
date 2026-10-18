@@ -137,7 +137,7 @@ function render() {
   }
   // The bookmarks bar is across the top only; down the side it has nowhere to be.
   const bar = document.querySelector('input[data-pref="showBookmarksBar"]');
-  bar.disabled = prefs.tabBarPosition === 'left';
+  bar.disabled = prefs.tabBarPosition === 'left' && prefs.sidebarPinned !== false;
   bar.closest('label').title = bar.disabled ? 'With the tabs down the side, bookmarks are under Ctrl+Shift+O.' : '';
   const select = $('engines');
   if (select.options.length !== engines.length) {
