@@ -291,6 +291,54 @@ function crxKey(buf) {
   }
 }
 
+/*
+ * What a permission lets an extension do, in Chrome's words, for the question
+ * asked before adding one. The same list as Settings' (renderer/settings.js).
+ */
+const PERMISSION_WORDS = {
+  tabs: 'Read your browsing history',
+  webNavigation: 'Read your browsing history',
+  history: 'Read and change your browsing history on all your signed-in devices',
+  bookmarks: 'Read and change your bookmarks',
+  downloads: 'Manage your downloads',
+  'downloads.open': 'Open downloaded files',
+  clipboardRead: 'Read data you copy and paste',
+  clipboardWrite: 'Modify data you copy and paste',
+  notifications: 'Display notifications',
+  geolocation: 'Detect your physical location',
+  management: 'Manage your apps, extensions and themes',
+  nativeMessaging: 'Communicate with cooperating native applications',
+  privacy: 'Change your privacy-related settings',
+  proxy: 'Read and change all your data on all websites',
+  debugger: 'Access the page debugger backend',
+  declarativeNetRequest: 'Block content on any page',
+  declarativeNetRequestFeedback: 'Read your browsing history',
+  topSites: 'Read a list of your most frequently visited websites',
+  contentSettings: 'Change your settings that control websites’ access to features such as cookies, JavaScript, camera and microphone',
+  tabCapture: 'Capture the content of your screen',
+  desktopCapture: 'Capture the content of your screen',
+  pageCapture: 'Read and change all your data on all websites',
+  sessions: 'Read your browsing history on all your signed-in devices',
+  readingList: 'Read and change entries in the reading list',
+  tts: 'Read all text spoken using synthesised speech',
+  userScripts: 'Run scripts you add on the sites it can reach'
+};
+
+/** Chrome's install warnings for a manifest: the sites it reaches, then the rest. */
+function permissionWarnings(manifest) {
+  const perms = (manifest.permissions || []).map(String);
+  const hosts = [...(manifest.host_permissions || []), ...perms, ...(manifest.content_scripts || []).flatMap((c) => c.matches || [])]
+    .map(String).filter((p) => (p === '<all_urls>' || p.includes('://')) && p !== 'file:///*');
+  const out = [];
+  if (hosts.some((h) => h === '<all_urls>' || /^(\*|https?):\/\/\*\//.test(h))) out.push('Read and change all your data on all websites');
+  else if (hosts.length) {
+    const names = [...new Set(hosts.map((h) => h.replace(/^[^:]+:\/\/(\*\.)?/, '').replace(/\/.*$/, '')))];
+    out.push(`Read and change your data on ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} other sites` : ''}`);
+  }
+  for (const p of perms) if (PERMISSION_WORDS[p]) out.push(PERMISSION_WORDS[p]);
+  return [...new Set(out)];
+}
+
 /** The ID Chrome gives the extension with this manifest key: its store ID. */
 function idFromKey(key) {
   try {
@@ -657,10 +705,21 @@ class Extensions {
     const tabId = Number(target && target.tabId);
     const wc = Number.isInteger(tabId) && this.hooks.tabContents ? this.hooks.tabContents(tabId) : null;
     if (!wc || wc.isDestroyed()) throw new Error(`No tab with id: ${target && target.tabId}.`);
-    if (!/^(https?|file|chrome-extension):/i.test(wc.getURL()) && wc.getURL() !== 'about:blank') {
-      throw new Error('Cannot access contents of the page');
-    }
+    if (!this.debuggable(ext, wc.getURL())) throw new Error('Cannot access contents of the page');
     return wc;
+  }
+
+  /**
+   * A page an extension's debugger may be on: a website, a file, a blank page
+   * or its own pages - not the browser's, and not another extension's.
+   */
+  debuggable(ext, url) {
+    url = String(url || '');
+    if (/^(https?|file):/i.test(url) || url === 'about:blank') return true;
+    if (!/^chrome-extension:/i.test(url)) return false;
+    let own = null;
+    for (const ses of this.sessions) own ||= this.loadedId(ses, ext.id);
+    return Boolean(own) && url.startsWith(`chrome-extension://${own}/`);
   }
 
   debuggerAttach(ext, target, version) {
@@ -680,13 +739,22 @@ class Extensions {
       if (this.hooks.debugging) this.hooks.debugging(ext, wc, false);
       this.dispatch(ext.id, 'debugger.onDetach', [{ tabId }, reason === 'target closed' ? 'target_closed' : 'canceled_by_user']);
     };
+    // As Chrome: a tab that goes to a page it may not debug - one of the
+    // browser's own, say - leaves the debugger behind at once.
+    const onNavigate = (details) => {
+      if (!details.isMainFrame || this.debuggable(ext, details.url)) return;
+      stop();
+      this.dispatch(ext.id, 'debugger.onDetach', [{ tabId }, 'target_closed']);
+    };
     wc.debugger.on('message', onMessage);
     wc.debugger.once('detach', onDetach);
+    wc.on('did-start-navigation', onNavigate);
     const stop = () => {
       if (!this.debugging.has(key)) return;
       this.debugging.delete(key);
       wc.debugger.removeListener('message', onMessage);
       wc.debugger.removeListener('detach', onDetach);
+      if (!wc.isDestroyed()) wc.removeListener('did-start-navigation', onNavigate);
       try { if (!wc.isDestroyed() && wc.debugger.isAttached()) wc.debugger.detach(); } catch { /* gone */ }
       if (this.hooks.debugging) this.hooks.debugging(ext, wc, false);
     };
@@ -836,6 +904,15 @@ class Extensions {
         let perms = [];
         try { perms = JSON.parse(fs.readFileSync(path.join(ext.dir, 'manifest.json'), 'utf8')).permissions || []; } catch { /* none */ }
         if (!perms.includes('nativeMessaging')) throw new Error('Access to the specified native messaging host is forbidden.');
+        // Only one the store vouched for, or any with developer mode on, as
+        // Chrome: an extension added from a file could otherwise borrow the
+        // Claude extension's or a password manager's ID and reach its program.
+        let meta = {};
+        try { meta = JSON.parse(fs.readFileSync(path.join(ext.dir, META_FILE), 'utf8')); } catch { /* none */ }
+        if (!meta.store && !(this.hooks.developerMode && this.hooks.developerMode())) {
+          this.log(`extensions: ${ext.name} may not use native messaging: not from a store, and developer mode is off`);
+          throw new Error('Access to the specified native messaging host is forbidden.');
+        }
         let chromeId = null;
         for (const ses of this.sessions) chromeId ||= this.loadedId(ses, ext.id);
         const origin = `chrome-extension://${chromeId}/`;
@@ -1250,7 +1327,18 @@ class Extensions {
    *
    * @param {string} source
    */
-  install(source) {
+  /**
+   * Add an extension from a folder, .crx, .xpi or .zip.
+   *
+   * @param {string} source
+   * @param {{store?: {store: string, id: string}, confirm?: (info: {name: string, warnings: string[]}) => boolean}} [opts]
+   *   store: the store page it was downloaded from. Only a package the store
+   *   signed for that ID counts as from the store; a file the user picked,
+   *   whatever it calls itself, does not.
+   *   confirm: asked before anything is written, with what it may do; false
+   *   leaves the browser as it was.
+   */
+  install(source, opts = {}) {
     let files;
     let signedKey = null;
     const stat = fs.statSync(source);
@@ -1282,6 +1370,16 @@ class Extensions {
     // After the name above, so a copy added before this keeps its folder.
     if (signedKey && !manifest.key) manifest.key = signedKey;
     const original = manifest;
+    // From a store only when the store's own signature names the ID asked for.
+    // A file can carry any extension's key, and with it that extension's ID,
+    // which is what a program on the computer trusts (native-messaging.js).
+    const store = opts.store && (opts.store.store === 'firefox' ||
+      (signedKey && idFromKey(signedKey) === opts.store.id)) ? opts.store.store : null;
+    if (opts.confirm && !opts.confirm({ name: localName(own, manifest), warnings: permissionWarnings(manifest) })) {
+      const err = new Error('cancelled');
+      err.cancelled = true;
+      throw err;
+    }
     const adapted = adaptManifest(manifest);
     manifest = adapted.manifest;
     // A "__MSG_name__" the default locale does not define: Firefox shows
@@ -1324,7 +1422,7 @@ class Extensions {
     if (adapted.worker) fs.writeFileSync(path.join(temp, WORKER_FILE), adapted.worker);
     // Through adaptPage, so the layer and the context load first, as on every page.
     if (adapted.backgroundHtml) fs.writeFileSync(path.join(temp, BACKGROUND_FILE), adaptPage(adapted.backgroundHtml));
-    fs.writeFileSync(path.join(temp, META_FILE), JSON.stringify({ from, addedAt: Date.now(), source: path.basename(source),
+    fs.writeFileSync(path.join(temp, META_FILE), JSON.stringify({ from, addedAt: Date.now(), source: path.basename(source), store,
       background: adapted.background, token,
       // Its settings survive an update, as in Chrome; the site access they
       // set is applied to the new manifest when it loads.
@@ -1841,4 +1939,4 @@ class Extensions {
 
 module.exports = {
   restrictAccess, siteHost, SITE_SETTINGS,
-  allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, iconOf, matchesPattern, crxKey, idFromKey, storeTarget, downloadFromStore, COMPAT_FILE };
+  allowBridge, Extensions, readZip, crxZip, adaptManifest, adaptPage, isFirefox, iconOf, matchesPattern, crxKey, idFromKey, permissionWarnings, storeTarget, downloadFromStore, COMPAT_FILE };

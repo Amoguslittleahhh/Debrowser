@@ -134,7 +134,7 @@ const { resolveShortcut } = require('./site-shortcuts');
 const palette = require('./palette');
 const uninstall = require('./setup/uninstall');
 const installer = require('./setup/install');
-const { SitePermissions, PermissionAsks } = require('./site-permissions');
+const { SitePermissions, PermissionAsks, KINDS: SITE_KINDS } = require('./site-permissions');
 const { WebApps, describe: describeWebApp, appArg } = require('./web-apps');
 
 const SMOKE_TEST = process.argv.includes('--smoke-test');
@@ -1683,6 +1683,23 @@ function main() {
         tabFor: (wc) => allTabs.all().find((t) => t.isLive && t.wc.id === wc.id) || null,
         tabById: (id) => allTabs.byId(id),
         isActive: (tab) => tabsOf(tab)?.activeTab() === tab,
+        // A site installed as an app has no tab or site panel: it asks in its
+        // own window, and the answer is kept for the site as a tab's would be.
+        isApp: (wc) => Boolean(webApps) && [...webApps.windows.values()]
+          .some((w) => !w.isDestroyed() && w.page && w.page.webContents.id === wc.id),
+        askApp: async (wc, origin, kinds) => {
+          const win = [...webApps.windows.values()].find((w) => !w.isDestroyed() && w.page && w.page.webContents.id === wc.id);
+          if (!win) return null;
+          const { response } = await dialog.showMessageBox(win, {
+            type: 'question',
+            message: `${new URL(origin).host} wants to`,
+            detail: kinds.map((k) => `• ${SITE_KINDS[k] || k}`).join('\n'),
+            buttons: ['Allow', 'Block', 'Not now'],
+            defaultId: 2,
+            cancelId: 2
+          });
+          return response === 0 ? true : response === 1 ? false : null;
+        },
         // The chrome opens the panel, because only it knows where the padlock
         // is - the asking tab's window's chrome.
         show: (tab) => { const sh = (tab && shellOf(tab)) || shell; if (sh) sh.toChrome('site-ask'); },
@@ -1810,6 +1827,9 @@ function main() {
         : process.env.DEBROWSER_EXT_DIR || path.join(app.getPath('userData'), 'extensions'), log, {
         // One pinned or unpinned beside the puzzle button.
         pinsChanged: () => publish(),
+        // Developer mode lets an extension added from a file use native
+        // messaging; otherwise only one from a store may (extensions.js).
+        developerMode: () => prefs.get('extensionsDeveloperMode') === true,
         // What an extension may ask of the browser through the bridge.
         openTab: (url, active) => {
           if (!/^(https?|chrome-extension):/i.test(url)) throw new Error('only web pages and the extension’s own');
@@ -3011,6 +3031,26 @@ function ask(shell, spec) {
 }
 
 /**
+ * Asked before an extension is added, as Chrome does: its name and what it
+ * may do. Synchronous, since nothing is written until it answers. Tests never
+ * see a dialog; they read the last question asked instead.
+ */
+function confirmExtension({ name, warnings }) {
+  confirmExtension.last = { name, warnings };
+  if (OFFLINE_MODE) return true;
+  const win = browserShell && browserShell.window && !browserShell.window.isDestroyed() ? browserShell.window : null;
+  const spec = {
+    type: 'question',
+    message: `Add “${name}”?`,
+    detail: warnings.length ? `It can:\n• ${warnings.join('\n• ')}` : 'It asks for no special access.',
+    buttons: ['Cancel', 'Add extension'],
+    defaultId: 1,
+    cancelId: 0
+  };
+  return (win ? dialog.showMessageBoxSync(win, spec) : dialog.showMessageBoxSync(spec)) === 1;
+}
+
+/**
  * Start the private browser - or, with `warm`, one that connects Tor and keeps
  * its window back until Ctrl+Shift+N reaches it. A kept-ready one that ends,
  * because it was shown and then closed, is replaced by a new one while the
@@ -4098,14 +4138,14 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         runCommand.toast('Adding the extension…');
         downloadFromStore(target, (u) => ses.fetch(u), path.join(app.getPath('temp'), 'debrowser-store'), process.versions.chrome)
           .then((file) => {
-            const added = ext.install(file);
-            fs.rmSync(file, { force: true });
+            let added;
+            try { added = ext.install(file, { store: target, confirm: confirmExtension }); } finally { fs.rmSync(file, { force: true }); }
             return ext.loadEverywhere(added.id).then(([r]) => {
               publish();
               runCommand.toast(r && !r.ok ? `${added.name} was added but didn’t start: ${r.error}` : `${added.name} added`);
             });
           })
-          .catch((e) => runCommand.toast(`That couldn’t be added: ${e.message}`));
+          .catch((e) => { if (!e.cancelled) runCommand.toast(`That couldn’t be added: ${e.message}`); });
         break;
       }
 
@@ -6336,10 +6376,11 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
             filters: [{ name: 'Chrome or Firefox extension', extensions: ['crx', 'xpi', 'zip'] }] });
         if (canceled || !picked || !picked.length) return { ok: false, cancelled: true };
         try {
-          const added = ext.install(picked[0]);
+          const added = ext.install(picked[0], { confirm: confirmExtension });
           const [loaded] = await ext.loadEverywhere(added.id);
           return { ok: true, name: added.name, from: added.from, loadError: loaded && !loaded.ok ? loaded.error : null };
         } catch (err) {
+          if (err.cancelled) return { ok: false, cancelled: true };
           return { ok: false, reason: `That couldn’t be added: ${err.message}.` };
         }
       }
