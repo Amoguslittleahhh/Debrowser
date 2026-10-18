@@ -1,0 +1,6 @@
+{
+  "manifest_version": 3,
+  "name": "Debrowser test: site settings",
+  "version": "1.0",
+  "description": "A page of its own with a script, an image, a pop-up and a download, so the smoke test can see each of its site settings take effect."
+}
