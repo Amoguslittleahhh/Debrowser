@@ -13,6 +13,11 @@
 
 const api = window.debrowser;
 
+// The design, theme and accent, kept current as every page here keeps them;
+// without this the page stayed in the first-paint look - Legacy - whatever
+// design was chosen.
+api.onState((state) => applyThemePrefs(state.prefs));
+
 function inline(text) {
   const out = document.createDocumentFragment();
   String(text).split(/(`[^`]+`)/).forEach((bit) => {
