@@ -38,7 +38,7 @@ const { app, ipcMain, session, Menu, dialog, clipboard, screen, BaseWindow, Brow
 const { loadConfig, isStopped } = require('./config');
 const platform = require('./platform');
 const { TabManager, BROWSING_PARTITION } = require('./tabs/tab-manager');
-const { sweepThumbnails, sweepThumbnailsSync, setLightVideo } = require('./tabs/tab');
+const { sweepThumbnails, sweepThumbnailsSync, setLightVideo, setSiteSpare } = require('./tabs/tab');
 const { BrowserShell, WAYLAND } = require('./window');
 const { Prefs, applyPrefs, ZOOM_STEPS, BUDGET_MB, SCHEMA } = require('./prefs');
 const { Updater } = require('./updater');
@@ -140,6 +140,7 @@ const policy = require('./incognito/policy');
 const { SlowJsHint } = require('./incognito/slowjs');
 const { Camouflage } = require('./incognito/camouflage');
 const { suggest, TAB_SCOPE } = require('./suggest');
+const engineSuggest = require('./engine-suggest');
 const { classifyAddress } = require('./address');
 const { answer } = require('./answers');
 const { resolveShortcut } = require('./site-shortcuts');
@@ -2248,6 +2249,9 @@ function main() {
     });
     // A new tab page takes the spare, already loaded and drawn.
     forEachManager((m) => { m.takeSpare = () => prewarm.take(); });
+    // A tab leaving one of our pages for a site takes the renderer started
+    // while the address was typed.
+    setSiteSpare((ses) => prewarm.takeSite(ses));
 
     // Incognito reads the normal profile's bookmarks - they are how people get
     // to the sites they use - and cannot change them: a bookmark saved from a
@@ -2378,7 +2382,7 @@ function main() {
     wireRequests({ tabs: tabsInUse, shell: shellInUse, windowOps, credentials, vault, bookmarks, history, downloads, prefs, log, context,
       sitePermissions, permissionAsks, blocker, sitePrefs, getReceipts: () => receipts,
       getArchive: () => archive, getExtensions: () => extensions, getSync: () => sync, getWebApps: () => webApps,
-      wake: (tab) => (governor ? governor.wake(tab) : null) });
+      wake: (tab) => (governor ? governor.wake(tab) : null), getPrewarm: () => prewarm });
 
     /*
      * The tabs from last time, or one new one.
@@ -2692,7 +2696,7 @@ function main() {
         const soak = argv.includes('--soak');
         const heap = () => { if (global.gc) global.gc(); return process.memoryUsage().heapUsed; };
         const heapBefore = soak ? heap() : 0;
-        const report = await speed.runSpeed({ tabs, runCommand, log, runs });
+        const report = await speed.runSpeed({ tabs, runCommand, log, runs, warmSite: () => prewarm && prewarm.warmSite() });
         if (soak) {
           await new Promise((r) => setTimeout(r, 2000));
           const heapAfter = heap();
@@ -3439,14 +3443,14 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         const index = Number(payload?.index);
         if (!Number.isInteger(index) || index < 0) break;
         shell.suggestSelected = index;
-        shell.toChrome('suggest-hover', { index });
+        shell.toSuggestOwner('suggest-hover', { index });
         break;
       }
 
       case 'suggest-pick': {
         const item = (shell.suggestItems || [])[Number(payload?.index)];
         shell.hideSuggestions();
-        shell.toChrome('suggest-done');
+        shell.toSuggestOwner('suggest-done');
         if (!item) break;
         if (item.kind === 'tab') {
           if (tabs.byId(item.tabId)) goTo(item.tabId);
@@ -5752,7 +5756,8 @@ const CHROME_REQUESTS = new Set([
  * have fifteen of, and it is one navigation away from being a website, so its
  * surface is the smallest of any page here.
  */
-const NEWTAB_REQUESTS = new Set(['top-sites', 'forget-site', 'recent-pages', 'hide-continue-card']);
+// `suggest`: the search field's list, the address bar's own (see CHROME_REQUESTS).
+const NEWTAB_REQUESTS = new Set(['top-sites', 'forget-site', 'recent-pages', 'hide-continue-card', 'suggest']);
 
 /**
  * What the history page may ask for - its own list, and nothing else.
@@ -5808,7 +5813,8 @@ const PAGE_POLICY = new Map([
     requests: new Set(['bookmark-profiles', 'import-from-profile', 'import-bookmark-file', 'default-browser-status'])
   }],
   ['newtab', {
-    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'activate-tab', 'open-history', 'open-receipt']),
+    commands: new Set([...PAGE_COMMON_COMMANDS, 'navigate', 'new-tab', 'activate-tab', 'open-history', 'open-receipt',
+      'suggest-select', 'suggest-hide', 'suggest-pick']),
     requests: NEWTAB_REQUESTS
   }],
   ['history', {
@@ -5876,8 +5882,21 @@ function pageMay(page, channel, name) {
 function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null, bookmarks, history, downloads, prefs, log,
                        sitePermissions = null, permissionAsks = null, blocker = null, sitePrefs = null,
                        getReceipts = () => null, getArchive = () => null, getExtensions = () => null,
-                       getSync = () => null, getWebApps = () => null, context = { model: null }, wake = async () => {} }) {
+                       getSync = () => null, getWebApps = () => null, context = { model: null }, wake = async () => {},
+                       getPrewarm = () => null }) {
   const everyTab = () => (windowOps ? windowOps.all.all() : tabs.all());
+  // The engine's completions of what is typed (engine-suggest.js): asked
+  // without cookies, on the browsing session so its proxy and DNS apply.
+  const engineAsker = new engineSuggest.EngineSuggest({
+    log,
+    fetchText: async (url, signal) => {
+      const res = await session.fromPartition(BROWSING_PARTITION).fetch(url, {
+        signal, credentials: 'omit', referrerPolicy: 'no-referrer', headers: { Accept: 'application/json' }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.text();
+    }
+  });
   ipcMain.handle('debrowser:request', async (event, command, payload) => {
     if (windowOps) windowOps.useSender(event.sender, { views: true });
     // Stricter than the command channel: only the passwords page may touch credentials.
@@ -6115,12 +6134,41 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
           shortcut: scoped ? null : resolveShortcut(text, prefs.get('siteShortcuts')),
           answer: scoped || text.trim().startsWith('>') ? null : answer(text)
         });
+        // The new tab page's search field asks too; its list hangs under that
+        // field, and what the list does comes back to the page.
+        const page = sender === 'newtab' ? everyTab().find((t) => t.wc === event.sender && t.view) : null;
+        const engineTemplate = !INCOGNITO && !OFFLINE_MODE && !scoped && engineSuggest.worthAsking(text)
+          ? prefs.suggestTemplate() : null;
+        const engineUrl = engineTemplate ? engineTemplate.replace('%s', encodeURIComponent(text.trim())) : null;
+        // A recent answer goes straight in; otherwise the list shows now and
+        // the engine's rows follow when it answers.
+        const known = engineUrl ? engineAsker.cached(engineUrl) : null;
+        if (known) result.items = engineSuggest.merge(result.items, known, text, prefs.engineName());
         shell.suggestItems = result.items;
         shell.suggestSelected = -1;
+        shell.suggestText = text;
         preconnectLead(prefs, result.items[0]);
+        // Typing an address on one of our pages: Enter will need a website
+        // renderer, so it starts now rather than after the key (prewarm.js).
+        if (active && active.isLive && active.realisedInternal && !scoped && !text.trim().startsWith('>') &&
+            prefs.get('preloadPages') !== false && getPrewarm()) getPrewarm().warmSite();
         const a = payload?.anchor || {};
-        if (Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.width)) {
-          shell.showSuggestions(result.items, a);
+        const shown = Number.isFinite(a.x) && Number.isFinite(a.y) && Number.isFinite(a.width);
+        const place = page ? { origin: page.view.getBounds(), owner: page.view } : {};
+        if (shown) shell.showSuggestions(result.items, a, place);
+        if (engineUrl && !known) {
+          engineAsker.ask(engineUrl).then((phrases) => {
+            // Only into the list it was asked for, while it is still up and
+            // nothing in it has been highlighted: the rows must not move
+            // under a pointer or an arrow key.
+            if (!phrases || !phrases.length || shell.suggestText !== text || shell.suggestItems !== result.items ||
+                (shell.suggestSelected ?? -1) >= 0) return;
+            const items = engineSuggest.merge(result.items, phrases, text, prefs.engineName());
+            if (items === result.items) return;
+            shell.suggestItems = items;
+            if (shown && shell.suggestOpen) shell.showSuggestions(items, a, place);
+            shell.toSuggestOwner('suggest-more', { text, items });
+          });
         }
         return result;
       }

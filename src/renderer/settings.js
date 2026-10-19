@@ -222,6 +222,12 @@ const SECTIONS = {
     },
     { key: 'searchEngine', label: 'Search engine', type: 'select', options: 'engines' },
     {
+      key: 'searchSuggestions',
+      label: 'Show search suggestions',
+      hint: 'Your search engine suggests searches as you type in the address bar and on the new tab page. What you type is sent to it without your cookies. Never in a private window. Mojeek has no suggestions.',
+      type: 'checkbox'
+    },
+    {
       key: 'translateTo',
       label: 'Translate pages into',
       hint: 'Right-click a page or a selection to translate it. Google Translate fetches the page to do it, without your cookies, so a page you are signed in to comes back as a visitor sees it.',

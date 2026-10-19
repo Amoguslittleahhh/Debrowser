@@ -76,7 +76,7 @@ function summarise(samples) {
   };
 }
 
-async function runSpeed({ tabs, runCommand, log = () => {}, runs = 15 }) {
+async function runSpeed({ tabs, runCommand, log = () => {}, runs = 15, warmSite = () => {} }) {
   const fixtures = await fixtureServer.start();
   let site = 1000;
   const fresh = (page) => fixtures.url(page, site++);
@@ -110,6 +110,11 @@ async function runSpeed({ tabs, runCommand, log = () => {}, runs = 15 }) {
       // 2. An address typed on that new tab page: Enter, to the site's first
       //    contentful paint. A new site, so a new renderer - which is also what
       //    leaving the new tab page costs here.
+      //    Typing it came first, and the first letter started a website
+      //    renderer (prewarm.js, `warmSite`); a person takes far longer to
+      //    type an address than the 100 ms allowed here.
+      warmSite();
+      await sleep(100);
       const t1 = Date.now();
       runCommand('navigate', { url: fresh('article.html') });
       await waitFor(() => tab.wc && !tab.wc.isDestroyed() && /article\.html/.test(tab.wc.getURL()), 8000);

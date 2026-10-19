@@ -2262,6 +2262,12 @@ api.onMessage((message) => {
       closeList();
       el.url.blur();
       break;
+    // The search engine's phrases, added to the list once it answered - only
+    // to the list for what the field still says.
+    case 'suggest-more':
+      if (!listOpen || message.text !== typed || selected !== -1 || !Array.isArray(message.items)) break;
+      suggestions = message.items;
+      break;
     case 'focus-address':
       el.url.focus();
       if (typeof message.text === 'string') {

@@ -447,7 +447,10 @@ class Tab {
     this.suspendedState = null;
     this.url = url;
     this.internal = pages.isInternal(url);
-    this.realise();
+    // A website renderer started while the address was being typed
+    // (prewarm.js, `warmSite`), so leaving the new tab page does not wait for
+    // a process to start after Enter.
+    this.realise({ view: !this.internal && takeSiteSpare ? takeSiteSpare(this.session) : null });
   }
 
   /**
@@ -489,11 +492,12 @@ class Tab {
    * after this returns - which loaded the site before its overrides existed,
    * and then had this load the old address over it.
    */
-  realise({ navigateTo = null } = {}) {
+  realise({ navigateTo = null, view = null } = {}) {
     if (this.isLive) return;
     if (navigateTo) this.url = navigateTo;
     this.realisedInternal = this.internal;
-    this.view = createTabView({ session: this.session, url: this.url });
+    this.view = view || createTabView({ session: this.session, url: this.url });
+    if (view) view.setBackgroundColor(palette.surfaceFor(this.url));
 
     this.wc = this.view.webContents;
     // WebRTC gathers ICE candidates over UDP, which does not go through a SOCKS
@@ -523,7 +527,8 @@ class Tab {
           .then(() => {
             // The blank page the overrides went on is not somewhere Back
             // should go. Cleared once the real page has committed.
-            if (INCOGNITO && this.wc && !this.wc.isDestroyed()) this.wc.navigationHistory.clear();
+            // Nor is the spare's blank page.
+            if ((INCOGNITO || view) && this.wc && !this.wc.isDestroyed()) this.wc.navigationHistory.clear();
           })
           .catch((err) => this.log(`load failed: ${brief(err.message)}`));
       }
@@ -1288,5 +1293,9 @@ function safePid(wc) {
   }
 }
 
+/** Where a tab leaving one of our pages for a website gets a warm renderer. */
+let takeSiteSpare = null;
+function setSiteSpare(take) { takeSiteSpare = take; }
+
 module.exports = {
-  createTabView, Tab, sweepThumbnails, sweepThumbnailsSync, thumbnailDir, setLightVideo };
+  createTabView, setSiteSpare, Tab, sweepThumbnails, sweepThumbnailsSync, thumbnailDir, setLightVideo };

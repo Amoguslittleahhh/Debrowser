@@ -80,6 +80,9 @@ const { createTabView } = require('./tabs/tab');
  */
 const TTL_MS = 30_000;
 
+/** How long a website renderer started for a typed address waits for Enter. */
+const SITE_TTL_MS = 15_000;
+
 class Prewarm {
   /**
    * @param {object} deps
@@ -102,6 +105,9 @@ class Prewarm {
     this.loaded = false;
     this.timer = null;
     this.held = false;
+    /** @type {Electron.WebContentsView|null} see warmSite */
+    this.site = null;
+    this.siteTimer = null;
   }
 
   /**
@@ -183,7 +189,58 @@ class Prewarm {
     if (typeof this.timer.unref === 'function') this.timer.unref();
   }
 
+  /*
+   * A website renderer, for the address being typed on one of our pages.
+   *
+   * Leaving the new tab page for a site builds the tab a renderer of its own
+   * (Tab#rebuildFor), and starting that process was most of what Enter waited
+   * on. So the first letter typed starts one, on a blank page with the
+   * website preload, and the tab takes it over: the site then loads in a
+   * process that is already running. Chromium's own spare renderer is off
+   * (config.js, `spareRenderer`) because it is kept for the life of the
+   * browser; this one lives only while someone is typing an address, and
+   * SITE_TTL_MS after.
+   */
+  warmSite() {
+    if (!this.enabled || this.held || this.busy()) return false;
+    if (!this.site) {
+      try {
+        const view = createTabView({ session: this.session(), url: 'about:blank' });
+        this.site = view;
+        view.webContents.loadURL('about:blank')
+          .catch((err) => this.log(`spare site renderer load ended: ${err.message}`));
+      } catch (err) {
+        this.log(`spare site renderer failed: ${err.message}`);
+        this.site = null;
+        return false;
+      }
+    }
+    clearTimeout(this.siteTimer);
+    this.siteTimer = setTimeout(() => this.dropSite(), SITE_TTL_MS);
+    if (typeof this.siteTimer.unref === 'function') this.siteTimer.unref();
+    return true;
+  }
+
+  /** The warm website renderer, for a tab on `session` to take, if there is one. */
+  takeSite(session) {
+    const view = this.site;
+    if (!view || view.webContents.isDestroyed() || view.webContents.isCrashed() ||
+        view.webContents.session !== session) return null;
+    clearTimeout(this.siteTimer);
+    this.site = null;
+    return view;
+  }
+
+  dropSite() {
+    clearTimeout(this.siteTimer);
+    const view = this.site;
+    this.site = null;
+    if (!view) return;
+    try { view.webContents.close(); } catch { /* already gone */ }
+  }
+
   drop() {
+    this.dropSite();
     clearTimeout(this.timer);
     this.timer = null;
     const view = this.view;
@@ -196,4 +253,4 @@ class Prewarm {
   }
 }
 
-module.exports = { Prewarm, TTL_MS };
+module.exports = { Prewarm, TTL_MS, SITE_TTL_MS };

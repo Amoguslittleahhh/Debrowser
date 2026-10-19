@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### New
+
+- **Search suggestions as you type.** The address bar and the new tab page's search field now show what your search engine suggests for the words you are typing, under the search for exactly what you typed. They come from Google, DuckDuckGo, Bing or Startpage, whichever you search with; Mojeek has none. What you type is sent without your cookies, nothing is sent for something that looks like a web address, and private windows never send it. Turn it off in Settings with Show search suggestions.
+- **The new tab page's search field suggests too.** It offers the same open tabs, bookmarks and history the address bar does, with the arrow keys and Enter working the same way.
+
+### Improved
+
+- **Sites typed on the new tab page open sooner.** Debrowser now starts the process a website needs while you are still typing, instead of after Enter, which took about a fifth off the time to the page's first picture in our tests (around 80ms instead of 99ms). It is dropped after 15 seconds if you do not press Enter, and never started in a private window or with Preload pages you point at off.
+
 ### Fixed
 
 - **YouTube videos play again.** On watch pages and Shorts the player area stayed empty. The ad blocker ran the scripts meant for each of YouTube's hidden frames in the page itself, so the same scripts ran several times over and crashed the player before it drew. Each frame's scripts now run once, in that frame.
