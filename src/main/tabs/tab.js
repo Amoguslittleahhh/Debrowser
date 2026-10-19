@@ -828,16 +828,24 @@ class Tab {
     // or a console's SSH window is the exception: a real window of its own
     // (popup-window.js), since the page waits on window.opener to hear back
     // and a Peek, being a new page, cuts that tie.
+    // A sign-in window's rules, at every depth: what it opens in turn is a
+    // tab, unless it is another sign-in step - a window under the same rules,
+    // never Electron's default one, which shows no address at all. Nor may it
+    // go to one of our pages, any more than a tab may (below).
+    const popupRules = (_win, popup) => {
+      popup.setWindowOpenHandler(({ url: to, disposition: d }) => {
+        if (d === 'new-window' && isPriorityPopup(to)) {
+          return { action: 'allow', createWindow: (o) => createPopupWindow(o, { onOpen: popupRules }) };
+        }
+        if (/^https?:/i.test(to)) this.emit('open-tab', { url: to });
+        return { action: 'deny' };
+      });
+      popup.on('will-navigate', (event, to) => { if (pages.isInternal(to)) event.preventDefault(); });
+      popup.on('will-redirect', (event, to) => { if (pages.isInternal(to)) event.preventDefault(); });
+    };
     wc.setWindowOpenHandler(({ url, disposition }) => {
       if (disposition === 'new-window' && isPriorityPopup(url)) {
-        return { action: 'allow', createWindow: (options) => createPopupWindow(options, {
-          onOpen: (_win, popup) => popup.setWindowOpenHandler(({ url: to, disposition: d }) => {
-            // Anything it opens in turn is a tab, unless it is another sign-in step.
-            if (d === 'new-window' && isPriorityPopup(to)) return { action: 'allow', createWindow: (o) => createPopupWindow(o) };
-            if (/^https?:/i.test(to)) this.emit('open-tab', { url: to });
-            return { action: 'deny' };
-          })
-        }) };
+        return { action: 'allow', createWindow: (options) => createPopupWindow(options, { onOpen: popupRules }) };
       }
       this.emit(disposition === 'new-window' && /^https?:/i.test(url) ? 'peek' : 'open-tab', { url });
       return { action: 'deny' };

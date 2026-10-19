@@ -264,7 +264,8 @@ class ContentBlocker {
       callerContext: { frameId: frame.routingId, processId: frame.processId, lifecycle: msg?.lifecycle }
     });
     if (active === false) return undefined;
-    const run = (code) => frame.executeJavaScript(code, true).catch(() => {});
+    // No user gesture: the page's own scripts could spend it on pop-ups, sound or fullscreen.
+    const run = (code) => frame.executeJavaScript(code, false).catch(() => {});
     if (styles.length > 0 && !frame.parent) {
       // The top page as before: a user stylesheet, which outranks the page's own.
       wc.insertCSS(styles, { cssOrigin: 'user' }).catch(() => {});

@@ -32,6 +32,8 @@
 
 ### Security
 
+- **Sign-in windows keep to the browser's rules.** A sign-in pop-up could open further windows that showed no address at all, and could be sent to one of Debrowser's own pages. Every window a sign-in opens now shows where it is, and none can reach the browser's pages.
+- **The ad blocker no longer hands pages a click.** Its scripts ran as if the user had just clicked, which a page could spend on a pop-up, fullscreen or sound playing on its own.
 - **A private window no longer tells sites the real size and position of its window.** Pages saw the letterboxed screen size, but could still read the window's true outer size, which gives away the toolbar's height, and where the window sits on the desktop, which can name the monitor. Sites now see the page's own size, the window at the corner of the screen, and a single monitor.
 - **The canvas fingerprint can no longer be read around the private window's blur.** Copying a drawing into an image bitmap and reading it back through a video frame returned the untouched pixels, the same in every tab, which identifies the graphics hardware. That copy is now blurred like every other way of reading a canvas.
 - **A page saved to your computer can no longer read your other files.** A downloaded .html file opened in Debrowser could read any file it named, such as SSH keys or another program's saved sign-ins, and send it anywhere. Pages opened from the disk now follow Chrome's rules.
