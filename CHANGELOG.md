@@ -16,6 +16,11 @@
 
 - **The bookmarks bar shows with the sidebar tucked away.** With the tabs down the side and tucked away, the bookmarks bar left an empty strip under the address bar and only filled in when the sidebar came out.
 
+### Security
+
+- **A private window no longer tells sites the real size and position of its window.** Pages saw the letterboxed screen size, but could still read the window's true outer size, which gives away the toolbar's height, and where the window sits on the desktop, which can name the monitor. Sites now see the page's own size, the window at the corner of the screen, and a single monitor.
+- **The canvas fingerprint can no longer be read around the private window's blur.** Copying a drawing into an image bitmap and reading it back through a video frame returned the untouched pixels, the same in every tab, which identifies the graphics hardware. That copy is now blurred like every other way of reading a canvas.
+
 ## 2.5.0
 
 Debrowser 2.5.0 adds Calm, a quieter new design, and brings Chrome and Firefox extensions out of Labs. You can install any site as an app, sync bookmarks and settings between your computers, fill addresses and cards, and translate pages. Sites now ask before using your certificates or Bluetooth devices, and private windows are harder to fingerprint.
