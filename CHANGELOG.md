@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Sign-in pop-ups open in a window of their own.** Signing in with Google, Microsoft, Apple and other providers, and consoles such as Google Cloud's SSH, now open in a separate window with a strip naming the site, as Chrome shows them, instead of a card over the page. The site that asked hears back, so the sign-in completes.
 - **Windows: no more "Bogus ed25519 key in microdesc" in a private window.** With "Remember Tor between sessions" on (the default), Debrowser kept a copy of a file Tor was still writing when it was closed, and the next private window read the half-written entry back and showed Tor's complaint about it as if Tor could not connect. That file is no longer kept, and a complaint about one bad relay description is no longer shown as a problem.
 
 ### Improved
