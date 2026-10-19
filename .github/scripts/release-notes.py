@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print one version's release notes, exactly as they should appear on its
+"""Print one version's release notes - its short summary - exactly as they should appear on its
 GitHub release page.
 
 A release page describes the release it is on and nothing else. Publishing the
@@ -42,6 +42,8 @@ DOWNLOADS = os.path.join('src', 'main', 'setup', 'downloads.json')
 # which is always github-actions[bot] because the workflow publishes with the
 # built-in GITHUB_TOKEN; that field cannot be set to a person, so the credit
 # goes in the body, which is the part anyone actually reads.
+MORE = 'Every change is listed in Release Notes, which Debrowser opens by itself after it updates.'
+
 FOOTER = ('\n\n---\n\nReleased by **Amoguslittleahhh** (<amogus36311@gmail.com>) '
           'and **`github-actions[bot]`**.\n')
 
@@ -64,6 +66,21 @@ def section(text, version=None):
     rest = text[head.end():]
     nxt = re.search(r'^## ', rest, re.M)
     return (rest[:nxt.start()] if nxt else rest).strip('\n')
+
+
+def summary(body):
+    """The short plain-language part of a version's notes.
+
+    The GitHub release says in a few sentences what changed; the in-browser
+    Release Notes page carries every item. That is the paragraph a section
+    opens with, before its first `### ` heading. A section without one gets
+    its items' bold headlines instead, which are already one line each.
+    """
+    lead = re.split(r'^### ', body, maxsplit=1, flags=re.M)[0].strip()
+    if not lead:
+        heads = re.findall(r'^- \*\*(.+?)\*\*', body, re.M)
+        lead = '\n'.join(f'- {h.rstrip(".")}' for h in heads)
+    return lead + '\n\n' + MORE
 
 
 def header(version):
@@ -139,7 +156,7 @@ def main():
     top = header(version) if os.environ.get('COMMIT') or os.environ.get('CHROMIUM') else ''
     if top and version:
         top += downloads(version)
-    sys.stdout.write(top + body + provenance() + FOOTER)
+    sys.stdout.write(top + summary(body) + provenance() + FOOTER)
 
 
 if __name__ == '__main__':

@@ -18,7 +18,7 @@
 
 ## 2.5.0
 
-Debrowser 2.5.0 adds Calm, a quieter design with switches in Settings, takes Chrome and Firefox extensions out of Labs with a page of their own for each, side panels and developer mode, and lets you install any site as an app with its own window and shortcut. It also brings sync between your computers through a folder you already sync, filling addresses and cards, translation, dark websites and, on macOS, importing from Safari; several windows each get a colour, and Release Notes open in your design after every update. Sites can no longer take your certificates or connect to Bluetooth devices without asking, saved passwords fill only while unlocked, and private windows are harder to fingerprint.
+Debrowser 2.5.0 adds Calm, a quieter new design, and brings Chrome and Firefox extensions out of Labs. You can install any site as an app, sync bookmarks and settings between your computers, fill addresses and cards, and translate pages. Sites now ask before using your certificates or Bluetooth devices, and private windows are harder to fingerprint.
 
 ### New
 
