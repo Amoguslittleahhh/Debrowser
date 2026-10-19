@@ -10,6 +10,18 @@ const bootMark = (name) => { if (!(name in boot)) boot[name] = Math.round(proces
 // `debrowser --terminal`: the browser in a terminal, and none of what follows.
 if (require('../terminal/launch').launch()) return;
 
+// V8's compiled code for the browser's own modules, kept between launches:
+// compiling them was ~35ms of every start, all of it before the first window
+// (the first launch after an update compiles once more). Not in a private
+// window, which writes nothing.
+if (!process.argv.includes('--incognito')) {
+  try {
+    const { app: electronApp } = require('electron');
+    require('module').enableCompileCache(require('path').join(
+      process.env.DEBROWSER_TEST_PROFILE || electronApp.getPath('userData'), 'Compile Cache'));
+  } catch { /* a start without it is only slower */ }
+}
+
 /**
  * Debrowser entry point.
  *
@@ -107,7 +119,7 @@ const { DownloadManager, sanitiseName, runsAsProgram } = require('./downloads');
 const { Governor } = require('./governor');
 const { Prewarm } = require('./prewarm');
 const { IpcHub } = require('./ipc');
-const { pageMergingStatus } = require('./memory');
+const { pageMergingStatus, processMergeable } = require('./memory');
 const pages = require('./pages');
 const shortcuts = require('./shortcuts');
 const contextMenu = require('./context-menu');
@@ -336,9 +348,15 @@ if (cfg.siteIsolation === false) {
       '           page test whether specific content exists elsewhere in memory.\n' +
       '           A browser runs untrusted code by design. Use this only on a\n' +
       '           machine and workload where you accept that.');
-  } else if (merging.processMergeable && !merging.ksmRunning) {
-    console.warn('[debrowser] page merging requested, but KSM is not running system-wide ' +
-                 '(root: echo 1 > /sys/kernel/mm/ksm/run). Running unmerged.');
+  } else if (!merging.ksmRunning && process.platform === 'linux') {
+    // Whether merging was asked for at all takes reading every mapping this
+    // process has: after the first window, not before it.
+    setTimeout(() => {
+      if (processMergeable()) {
+        console.warn('[debrowser] page merging requested, but KSM is not running system-wide ' +
+                     '(root: echo 1 > /sys/kernel/mm/ksm/run). Running unmerged.');
+      }
+    }, 10000).unref();
   }
 }
 

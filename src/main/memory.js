@@ -153,13 +153,11 @@ function processMergeable() {
 }
 
 function pageMergingStatus() {
-  // Asked on every governor tick, so the expensive half is memoised above and
-  // the cheap sysfs reads are skipped entirely when merging cannot happen -
-  // which is the default configuration, where this result is discarded.
-  if (!processMergeable()) {
-    return { processMergeable: false, ksmRunning: false, profitMB: null, active: false };
-  }
-
+  // Asked on every governor tick, and once before the first window. KSM's own
+  // switch is read first: it is one small sysfs file, and while it is off -
+  // the default on essentially every distro - nothing can be merged, so the
+  // expensive half (the whole of /proc/self/smaps, ~6ms before the first
+  // window) is left for whoever asks `processMergeable()` itself.
   const sysfs = (name) => {
     try {
       return Number(fs.readFileSync(`/sys/kernel/mm/ksm/${name}`, 'utf8').trim());
@@ -168,15 +166,18 @@ function pageMergingStatus() {
     }
   };
 
-  const run = sysfs('run');
+  const run = isLinux ? sysfs('run') : null;
+  if (run !== 1 || !processMergeable()) {
+    return { processMergeable: processMergeableCache === true, ksmRunning: run === 1, profitMB: null, active: false };
+  }
   const profit = sysfs('general_profit');
 
   return {
     processMergeable: true,
-    ksmRunning: run === 1,
+    ksmRunning: true,
     profitMB: profit == null ? null : Math.round(profit / MB),
     // Merging only actually happens when both halves are true.
-    active: run === 1
+    active: true
   };
 }
 
@@ -390,6 +391,6 @@ function accountingMode() {
 }
 
 module.exports = {
-  footprintMB, readProcessMemory, accountingMode, detectPss, pageMergingStatus,
+  footprintMB, readProcessMemory, accountingMode, detectPss, pageMergingStatus, processMergeable,
   unreportedProcessesMB, compressionStatus
 };

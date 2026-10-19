@@ -42,13 +42,19 @@ function appIconPath() {
  * window manager as one property, and from 256px up it was silently not set
  * at all - measured: every Linux window, private ones included, had none.
  */
+const scaled = new Map();
+
 function windowIcon(file) {
   if (!file) return null;
   if (process.platform === 'win32') return file;
+  // Made once per file: every later window takes the same image.
+  if (scaled.has(file)) return scaled.get(file);
   const { nativeImage } = require('electron');
   const image = nativeImage.createFromPath(file);
-  if (image.isEmpty()) return null;
-  return image.getSize().width > 128 ? image.resize({ width: 128, height: 128, quality: 'best' }) : image;
+  const icon = image.isEmpty() ? null
+    : image.getSize().width > 128 ? image.resize({ width: 128, height: 128, quality: 'best' }) : image;
+  scaled.set(file, icon);
+  return icon;
 }
 
 module.exports = { privateIconPath, appIconPath, windowIcon };

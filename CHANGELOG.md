@@ -9,6 +9,7 @@
 
 ### Improved
 
+- **Debrowser starts faster.** The first page now appears about a fifth sooner after launch (around 365ms instead of 450ms in our tests). The browser keeps its own compiled code between launches instead of compiling it again every time, and on Linux two pieces of setup that do not affect the first page now wait until it is up. The first launch after an update is as fast as before.
 - **Extensions and downloads beside the memory meter.** With the tabs down the side and the sidebar tucked away, the extensions and downloads buttons sat at the far left, ahead of back and forward. They now sit on the right, beside the memory meter, and the address bar is a little shorter to make room.
 - **The tucked-away sidebar answers faster.** It notices the pointer at the window's edge sooner, slides in and out a little quicker, and goes away sooner once the pointer leaves it.
 - **A quieter new tab page.** The row of most-used sites under the search field is gone in every design, as it already was in Calm, and the logo and search field sit lower, in the middle of the page. Your recent pages are still in "Continue with these tabs" below.
