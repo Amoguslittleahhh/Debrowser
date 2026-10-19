@@ -7,7 +7,9 @@
  * leave the tab on the site, with nothing of the browser's in reach.
  */
 
+const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const crypto = require('crypto');
 const { crxKey } = require('../../extensions');
@@ -184,4 +186,71 @@ module.exports = async function securityFeature(t) {
   check('Security: documents are not called programs', !runsAsProgram('report.pdf') && !runsAsProgram('photo.jpg'));
 
   await new Promise((r) => server.close(r));
+
+  await signInPopups(t);
 };
+
+/**
+ * A sign-in pop-up (popup-window.js) and the pop-ups it opens in turn: each a
+ * window under the same rules, never Electron's default window, which shows
+ * no address; and none of them taken to one of our pages. Over HTTPS, as only
+ * HTTPS pop-ups get a window, with a certificate of the test's own.
+ */
+async function signInPopups({ check, waitFor, sleep, tabs }) {
+  const { BaseWindow, BrowserWindow, webContents } = require('electron');
+  const certs = path.join(__dirname, '..', '..', '..', '..', 'test', 'certs');
+  const cert = fs.readFileSync(path.join(certs, 'localhost-cert.pem'));
+  const server = https.createServer({ key: fs.readFileSync(path.join(certs, 'localhost-key.pem')), cert }, (req, res) => {
+    const u = new URL(req.url, 'https://x');
+    const mode = u.searchParams.get('mode') || '';
+    if (u.pathname === '/r') { res.writeHead(302, { Location: 'debrowser://settings' }); res.end(); return; }
+    const script = {
+      start: `window.open('/login?mode=${u.searchParams.get('next')}', 'a', 'popup,width=400,height=400')`,
+      nav: "setTimeout(() => { location.href = 'debrowser://settings'; }, 200)",
+      redir: "setTimeout(() => { location.href = '/r'; }, 200)",
+      nest: "setTimeout(() => window.open('/login?mode=leaf', 'b', 'popup,width=300,height=300'), 200)",
+      leaf: "setTimeout(() => window.open('/plain?leafchild', 'c', 'popup,width=300,height=300'), 200)"
+    }[u.pathname === '/start' ? 'start' : mode] || '';
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<!doctype html><title>sign in</title><body>${u.pathname}<script>${script}</script>`);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const base = `https://127.0.0.1:${server.address().port}`;
+  const tab = tabs.create({ url: 'about:blank', activate: true, realise: true });
+  await waitFor(() => tab.isLive, { timeoutMs: 8000 });
+  const ses = tab.wc.session;
+  const ours = new crypto.X509Certificate(cert).fingerprint256;
+  ses.setCertificateVerifyProc((req, done) => {
+    let mine = false;
+    try { mine = req.hostname === '127.0.0.1' && new crypto.X509Certificate(req.certificate.data).fingerprint256 === ours; } catch { /* not ours */ }
+    done(mine ? 0 : -3);
+  });
+  const urls = () => webContents.getAllWebContents().filter((w) => !w.isDestroyed()).map((w) => w.getURL()).filter((u) => !u.startsWith('data:'));
+  try {
+    for (const next of ['nav', 'redir', 'nest']) {
+      const windows = new Set(BaseWindow.getAllWindows());
+      const plain = BrowserWindow.getAllWindows().length;
+      const settingsBefore = urls().filter((u) => u.startsWith('debrowser://settings')).length;
+      tab.wc.loadURL(`${base}/start?next=${next}`).catch(() => {});
+      await waitFor(() => urls().some((u) => u.includes(`/login?mode=${next}`)), { timeoutMs: 8000 });
+      await sleep(next === 'nest' ? 1500 : 1000);
+      const opened = BaseWindow.getAllWindows().filter((w) => !windows.has(w));
+      if (next === 'nest') {
+        check('Security: a sign-in pop-up\'s own pop-up is a sign-in window too, never a bare one',
+          opened.length === 2 && BrowserWindow.getAllWindows().length === plain, `${opened.length} new, ${BrowserWindow.getAllWindows().length - plain} bare`);
+        const child = tabs.all().find((x) => /leafchild/.test(x.url));
+        check('Security: what a nested sign-in window opens is a tab', !!child, urls().join(' | '));
+        if (child) tabs.close(child.id);
+      } else {
+        const settingsAfter = urls().filter((u) => u.startsWith('debrowser://settings')).length;
+        check(`Security: a sign-in pop-up cannot go to one of our pages (${next === 'nav' ? 'script' : 'redirect'})`,
+          opened.length === 1 && settingsAfter === settingsBefore, `${opened.length} new: ${urls().join(' | ')}`);
+      }
+      for (const w of opened) if (!w.isDestroyed()) w.destroy();
+    }
+  } finally {
+    ses.setCertificateVerifyProc(null);
+    tabs.close(tab.id);
+    await new Promise((r) => server.close(r));
+  }
+}
