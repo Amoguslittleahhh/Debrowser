@@ -64,11 +64,12 @@ Appended by `.github/scripts/release-notes.py`, which the "Build the release
 body" step in `.github/workflows/release.yml` runs (as does
 `release-notes.yml`), so it cannot be forgotten on a release.
 
-The release body is that version's notes and nothing else — the script takes the
-`## ` section of `CHANGELOG.md` for the version in `package.json` and drops its
-heading, so rename `## Unreleased` to the version before releasing. Publishing the
-whole changelog means every download page repeats the notes for versions the
-reader already has, burying the one thing they came to read.
+The release body is a short plain-language summary of that version and nothing
+else; the in-browser Release Notes page carries every item. The script takes the
+`## ` section of `CHANGELOG.md` for the version in `package.json` and prints the
+paragraph it opens with, before its first `### ` heading (or, with none, the
+items' bold headlines), so every version's section starts with a few sentences
+saying what changed. Rename `## Unreleased` to the version before releasing.
 
 ### Sections, header and footer
 
