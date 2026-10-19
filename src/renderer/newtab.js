@@ -20,7 +20,85 @@ watchTransientInput(api);
 document.getElementById('search').addEventListener('submit', (event) => {
   event.preventDefault();
   const text = q.value.trim();
-  if (text) api.send('navigate', { url: text });
+  // A highlighted row is what Enter takes, and so is a first row that is a
+  // page rather than the typed text - an open tab is switched to, as the
+  // address bar does.
+  const lead = suggestions[0];
+  const leadIsPage = listOpen && lead && lead.isDefault && !['go', 'search'].includes(lead.kind) && q.value === typed;
+  if (listOpen && selected >= 0) api.send('suggest-pick', { index: selected });
+  else if (leadIsPage) api.send('suggest-pick', { index: 0 });
+  else if (text) api.send('navigate', { url: text });
+  closeList();
+});
+
+/*
+ * What the field offers as you type: the address bar's own list (suggest.js
+ * in the browser), drawn by the browser under this field, with the search
+ * engine's suggestions in it. The keyboard stays here and moves the
+ * highlight; a press in the list comes back as `suggest-hover`/`suggest-done`.
+ */
+let typed = '';
+let suggestions = [];
+let selected = -1;
+let listOpen = false;
+let asked = 0;
+
+function closeList() {
+  asked += 1;
+  if (!listOpen && !suggestions.length) return;
+  listOpen = false;
+  suggestions = [];
+  selected = -1;
+  api.send('suggest-hide');
+}
+
+const shownText = (item) => (item.kind === 'search' || item.kind === 'go' ? item.title : item.url);
+
+q.addEventListener('input', async () => {
+  typed = q.value;
+  selected = -1;
+  if (!typed.trim()) { closeList(); return; }
+  const ask = ++asked;
+  const r = document.getElementById('search').getBoundingClientRect();
+  const res = await api.request('suggest', { text: typed, anchor: { x: r.left, y: r.bottom, width: r.width }, complete: false });
+  if (ask !== asked || q.value !== typed || !res) return;
+  suggestions = res.items || [];
+  listOpen = suggestions.length > 0;
+});
+
+q.addEventListener('keydown', (event) => {
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && listOpen) {
+    event.preventDefault();
+    const n = suggestions.length;
+    selected = event.key === 'ArrowDown'
+      ? (selected + 1 >= n ? -1 : selected + 1)
+      : (selected - 1 < -1 ? n - 1 : selected - 1);
+    q.value = selected === -1 ? typed : shownText(suggestions[selected]);
+    q.setSelectionRange(q.value.length, q.value.length);
+    api.send('suggest-select', { index: selected });
+  } else if (event.key === 'Escape' && listOpen) {
+    event.preventDefault();
+    q.value = typed;
+    closeList();
+  }
+});
+
+// Hidden on the way out, a moment late: a press on a row blurs the field first.
+q.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== q) closeList(); }, 120));
+window.addEventListener('resize', closeList);
+
+api.onMessage((message) => {
+  if (message.kind === 'suggest-hover') {
+    if (!listOpen || !suggestions[message.index]) return;
+    selected = message.index;
+    q.value = shownText(suggestions[selected]);
+  } else if (message.kind === 'suggest-done') {
+    listOpen = false;
+    suggestions = [];
+    selected = -1;
+  } else if (message.kind === 'suggest-more') {
+    if (listOpen && message.text === typed && selected === -1 && Array.isArray(message.items)) suggestions = message.items;
+  }
 });
 
 

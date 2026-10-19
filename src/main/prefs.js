@@ -289,6 +289,9 @@ const SCHEMA = {
   // Fetching the page behind a link the pointer rests on; see speculation.js.
   // Never in a private window, whatever this says.
   preloadPages: { def: true, ok: (v) => typeof v === 'boolean' },
+  // The search engine's completions of what is typed in the address bar and
+  // the new tab page (engine-suggest.js). Never in a private window.
+  searchSuggestions: { def: true, ok: (v) => typeof v === 'boolean' },
 
   // The built-in blocker (blocker.js): ads and trackers, and cookie notices.
   // Per-site exceptions live in site-prefs.json, not here.
@@ -495,15 +498,23 @@ const SCHEMA = {
  */
 const LIGHT_GRAPHICS = { reduceMotion: true, preloadPages: false, hoverPrefetch: false };
 
-/** Search engines, as query templates. `%s` is the URL-encoded term. */
+/**
+ * Search engines, as query templates. `%s` is the URL-encoded term. `suggest`
+ * is where the engine completes what is being typed, as OpenSearch JSON
+ * (engine-suggest.js); an engine without one offers no suggestions.
+ */
 const SEARCH_ENGINES = {
-  google:     { name: 'Google',     url: 'https://www.google.com/search?q=%s' },
-  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s' },
-  bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=%s' },
+  google:     { name: 'Google',     url: 'https://www.google.com/search?q=%s',
+    suggest: 'https://suggestqueries.google.com/complete/search?client=firefox&q=%s' },
+  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/?q=%s',
+    suggest: 'https://duckduckgo.com/ac/?q=%s&type=list' },
+  bing:       { name: 'Bing',       url: 'https://www.bing.com/search?q=%s',
+    suggest: 'https://www.bing.com/osjson.aspx?query=%s' },
   // One of the few engines with an index of its own rather than a reseller of
   // Google's or Bing's. Thinner on obscure queries, and that is the trade.
   mojeek:     { name: 'Mojeek',     url: 'https://www.mojeek.com/search?q=%s' },
-  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/sp/search?query=%s' }
+  startpage:  { name: 'Startpage',  url: 'https://www.startpage.com/sp/search?query=%s',
+    suggest: 'https://www.startpage.com/osuggestions?q=%s' }
 };
 
 class Prefs {
@@ -687,6 +698,11 @@ class Prefs {
 
   searchTemplate() {
     return this.engine().url;
+  }
+
+  /** Where the engine completes typed words, or null: see engine-suggest.js. */
+  suggestTemplate() {
+    return this.get('searchSuggestions') === false ? null : this.engine().suggest || null;
   }
 
   /**

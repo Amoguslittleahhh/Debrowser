@@ -1278,8 +1278,11 @@ class BrowserShell {
    * @param {{x:number, y:number, width:number}} anchor - the address bar's
    *   bottom-left and width, in the chrome's own coordinates
    */
-  showSuggestions(items, anchor) {
+  showSuggestions(items, anchor, { origin = null, owner = null } = {}) {
     if (this.window.isDestroyed()) return;
+    // Whose field the list is under: the address bar's, or a page's (the new
+    // tab page's search) - told when a row is pointed at or taken.
+    this.suggestOwner = owner;
     if (!items || !items.length) { this.hideSuggestions(); return; }
     clearTimeout(this.suggestCloseTimer);
     if (!this.suggestView) {
@@ -1306,7 +1309,7 @@ class BrowserShell {
       view.webContents.loadFile(path.join(RENDERER_DIR, 'suggest.html')).catch(() => {});
       this.window.contentView.addChildView(view);
     }
-    const origin = this.chromeView.getBounds();
+    if (!origin) origin = this.chromeView.getBounds();
     const { width: winW } = this.window.getContentBounds();
     const EDGE = 28;       // suggest.css's side padding, room for the list's shadow
     const x = Math.max(0, Math.round(origin.x + anchor.x) - EDGE);
@@ -1339,6 +1342,13 @@ class BrowserShell {
     if (!Number.isFinite(height) || height <= 0) return;
     this.suggestHeight = Math.min(Math.round(height), 600);
     this.placeSuggestions();
+  }
+
+  /** Tells the field the list is under: the address bar, or the page that asked. */
+  toSuggestOwner(kind, payload = null) {
+    const owner = this.suggestOwner;
+    if (owner && owner.webContents && !owner.webContents.isDestroyed()) send(owner, 'debrowser:ui', { kind, ...(payload || {}) });
+    else this.toChrome(kind, payload);
   }
 
   selectSuggestion(index) {

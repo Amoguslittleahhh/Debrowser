@@ -4498,6 +4498,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
         typing.items[0].kind === 'history' && deleting.items[0].kind === 'search',
         `${typing.items[0].kind} / ${deleting.items[0].kind}`);
 
+      // The search engine's suggestions (engine-suggest.js).
+      const es = require('../engine-suggest');
+      const { SEARCH_ENGINES } = require('../prefs');
+      const howTo = suggest({ text: 'how to b', history: [{ title: 'How to bake', url: 'https://bake.test/', visits: 2 }] });
+      const merged = es.merge(howTo.items, es.parse('["how to b",["how to b","How to boil an egg","how to bake bread"]]'), 'how to b', 'Google');
+      const phrases = merged.filter((r) => r.suggested).map((r) => r.title);
+      check('the engine\'s suggestions follow the search for what was typed, without repeating it',
+        merged[0].kind === 'search' && merged[0].isDefault && merged[0].title === 'how to b' &&
+        merged[1].suggested && phrases.join('|') === 'How to boil an egg|how to bake bread' &&
+        merged.some((r) => r.kind === 'history') && merged.length <= es.MAX_ROWS,
+        merged.map((r) => `${r.kind}:${r.title}`).join(', '));
+      check('the engine is not asked about an address, a command or tab search, and a bad answer is nothing',
+        !es.worthAsking('github.com') && !es.worthAsking('https://x.test/a') && !es.worthAsking('> settings') &&
+        !es.worthAsking('@tabs mail') && es.worthAsking('weather tomorrow') &&
+        es.parse('<html>').length === 0 && es.parse('{"a":1}').length === 0);
+      const shortcutRows = [{ kind: 'shortcut', title: 'cats', isDefault: true }, { kind: 'search', title: 'yt cats' }];
+      check('a site shortcut keeps its list to itself',
+        es.merge(shortcutRows, ['yt cats videos'], 'yt cats', 'Google') === shortcutRows);
+      check('every engine but Mojeek has somewhere to ask for suggestions',
+        Object.entries(SEARCH_ENGINES).every(([id, e]) => (id === 'mojeek') === !e.suggest &&
+          (!e.suggest || (e.suggest.startsWith('https://') && e.suggest.includes('%s')))));
+
       const words = ['how to reach printer.local', 'note:3', 'what is example.com'].map(classifyAddress);
       check('a question ending in a host name is searched, not opened',
         words.every((k) => k === null) && classifyAddress('github.com/a b') === 'host', words.join(','));
