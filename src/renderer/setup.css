@@ -24,7 +24,7 @@ html, body { height: auto; }
      card and the desktop behind it can be the same dark. The window is sized
      to this box (setup-size), border included. */
   box-sizing: border-box;
-  animation: setup-in 200ms var(--ease);
+  animation: setup-in 240ms var(--ease-out);
 }
 
 @keyframes setup-in {

@@ -681,6 +681,22 @@ body .chip.has-icon {
      quick off the mark, then a long, soft landing with no overshoot. */
   --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-in: cubic-bezier(0.3, 0, 0.8, 0.15);
+  /* The rest follow Hudson and Stasko's toolkit (after Lasseter's cartoon
+     principles), kept to the ones that tell you something:
+       --ease-move    slow-in / slow-out, for a thing travelling from one
+                      place to another - it leaves gently and arrives gently
+       --ease-settle  follow-through: lands a hair past its mark and comes
+                      back, so a menu or a tab reads as having arrived.
+                      Small things only - a whole page or a dialog that
+                      bounces feels loose, so those arrive on --ease-out
+       --ease-leave   anticipation: a small step back before it goes, so the
+                      eye sees the exit coming rather than a sudden gap */
+  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-settle: cubic-bezier(0.34, 1.2, 0.64, 1);
+  --ease-leave: cubic-bezier(0.5, -0.35, 0.75, 0.2);
+  /* One beat between things that start together, so a list arrives as a
+     sequence instead of a slab (the paper's "after-start-of"). */
+  --stagger: 12ms;
   --instant: 70ms;
   --fast: 120ms;
   --slow: 200ms;

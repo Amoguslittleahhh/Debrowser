@@ -14,7 +14,7 @@ body { padding: 16px; font: var(--fs-body, 13px) / 1.35 var(--font-ui, system-ui
   color: var(--text);
   box-shadow: var(--shadow-menu);
   outline: none;
-  animation: card-in 160ms var(--ease-out);
+  animation: card-in 220ms var(--ease-settle);
 }
 @keyframes card-in {
   from { opacity: 0; transform: translateY(-4px) scale(0.98); }

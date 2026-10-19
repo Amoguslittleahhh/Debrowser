@@ -178,7 +178,7 @@ body[data-platform="linux"] { --caption-right: 146px; }
      is the width the basis above asks for. */
   contain-intrinsic-inline-size: 256px;
   transition: background-color var(--slow) var(--ease), color var(--slow) var(--ease);
-  animation: tab-in var(--slow) var(--ease-out);
+  animation: tab-in 220ms var(--ease-settle);
 }
 /* The fade at an edge with more tabs past it; see updateStripFades. */
 .tabs {
@@ -202,7 +202,7 @@ body[data-layout="left"] .tabs {
 .tab.entered { animation: none; }
 
 @keyframes tab-in {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(3px) scale(0.96); }
   to   { opacity: 1; transform: none; }
 }
 
@@ -415,10 +415,10 @@ body.calm .tab[data-loading="on"] .tab-icon::after { animation: none; }
  */
 .tab.dragging { z-index: 2; }
 body.tab-dragging .tab:not(.dragging) {
-  transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+  transition: transform var(--slow) var(--ease-move), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
 }
 .tab.settling {
-  transition: transform var(--slow) var(--ease-out), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
+  transition: transform 240ms var(--ease-settle), background-color var(--slow) var(--ease), color var(--slow) var(--ease);
 }
 /* Pulled out of the strip: it stays in its place, faded, while its picture
    follows the pointer outside - letting go there takes it to a window. */
@@ -873,7 +873,7 @@ body[data-dots="off"] .tier { display: none; }
   background: var(--ok);
   /* Transform-only so the meter never causes layout on the governor tick. */
   transform-origin: left center;
-  transition: transform 400ms ease, background-color 400ms ease;
+  transition: transform 400ms var(--ease-move), background-color 400ms var(--ease);
 }
 
 .meter[data-pressure="moderate"] .meter-fill { background: var(--ok); }
@@ -1194,10 +1194,14 @@ body[data-layout="left"]:not([data-strip-tone])[data-detached="true"]:not([data-
 .reader-btn.on { color: var(--accent-text); }
 
 /* A saved bookmark is worth one beat of acknowledgement and no more. */
-.star.on svg { animation: star-pop var(--slow) var(--ease); }
+.star.on svg { animation: star-pop 380ms linear; }
+/* Anticipation, then the pop, then follow-through: it crouches, springs past
+   its size and settles back, so the save reads as a deliberate act. */
 @keyframes star-pop {
-  0%   { transform: scale(1); }
-  45%  { transform: scale(1.22); }
+  0%   { transform: scale(1);    animation-timing-function: var(--ease-in); }
+  18%  { transform: scale(0.88); animation-timing-function: var(--ease-out); }
+  55%  { transform: scale(1.2);  animation-timing-function: var(--ease-move); }
+  80%  { transform: scale(0.97); animation-timing-function: var(--ease-move); }
   100% { transform: scale(1); }
 }
 body.calm .star.on svg { animation: none; }
@@ -1372,14 +1376,17 @@ body .bookmark-chip.has-icon {
    tray. Once, and not again until the next download finishes. */
 .icon-btn.downloads.landed .downloads-ring { animation: download-ring-done 700ms var(--ease) forwards; }
 .icon-btn.downloads.landed .ring-fill { stroke-dasharray: 100 100; transition: none; }
-.icon-btn.downloads.landed > svg:first-child { animation: download-drop 360ms var(--ease-out); }
+.icon-btn.downloads.landed > svg:first-child { animation: download-drop 440ms linear; transform-origin: 50% 100%; }
 @keyframes download-ring-done {
   0%, 45% { opacity: 1; }
   100% { opacity: 0; }
 }
+/* Squash and stretch: long while it falls, flattened as it lands in the tray,
+   then a small rebound before it comes to rest. */
 @keyframes download-drop {
-  0% { transform: translateY(-3px); }
-  60% { transform: translateY(1.5px); }
+  0%   { transform: translateY(-4px) scale(0.94, 1.08); animation-timing-function: var(--ease-in); }
+  45%  { transform: translateY(1px) scale(1.1, 0.88);  animation-timing-function: var(--ease-out); }
+  70%  { transform: translateY(-1px) scale(0.97, 1.04); animation-timing-function: var(--ease-move); }
   100% { transform: none; }
 }
 body.calm .icon-btn.downloads.landed :is(.downloads-ring, svg) { animation: none; }

@@ -31,7 +31,7 @@ function leave(command) {
     if (current) return;          // a new one arrived while this one left
     el.toast.hidden = true;
     api.send(command, { id });
-  }, 130);
+  }, 170);
 }
 
 function show(toast) {

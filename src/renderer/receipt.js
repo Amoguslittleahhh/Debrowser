@@ -39,6 +39,7 @@ async function load() {
   const days = week.map((d, i) => {
     const el = document.createElement('div');
     el.className = i === week.length - 1 ? 'day today' : 'day';
+    el.style.setProperty('--i', i); // the bars rise in turn, left to right
     const v = document.createElement('span');
     v.className = 'v';
     // A day with nothing freed still gets its figure, or the row of labels has a

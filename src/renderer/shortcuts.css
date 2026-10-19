@@ -16,7 +16,7 @@
   padding: var(--s4) var(--s5) var(--s5);
   transform: translate(-50%, -50%);
   transform-origin: center;
-  animation: keys-in 160ms var(--ease-out);
+  animation: keys-in 220ms var(--ease-out);
 }
 
 @keyframes keys-in {
