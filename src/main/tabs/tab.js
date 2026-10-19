@@ -21,8 +21,24 @@ const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload
 // The browser's own pages need the command bridge the chrome uses; a web page
 // must never get it. Which one a tab loads is decided by `internal` below.
 const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
+
+/**
+ * Pop-ups that must be real windows: sign-in providers, and browser consoles
+ * such as Google Cloud's SSH, whose pages talk back to their opener.
+ */
+const PRIORITY_HOSTS = /(^|\.)(accounts\.google\.com|ssh\.cloud\.google\.com|shell\.cloud\.google\.com|login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|appleid\.apple\.com|accounts\.firefox\.com|id\.atlassian\.com|auth0\.com|okta\.com|oktapreview\.com|onelogin\.com|duosecurity\.com|accounts\.spotify\.com|id\.twitch\.tv|discord\.com\/oauth2|steamcommunity\.com\/openid|amazon\.com\/ap\/oa)$/i;
+const PRIORITY_PATH = /\/(oauth2?|authorize|openid|sso|saml|signin|sign-in|login)(\/|$|\?)/i;
+function isPriorityPopup(url) {
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  if (!/^https:$/i.test(u.protocol)) return false;
+  if (PRIORITY_HOSTS.test(u.hostname)) return true;
+  // Facebook, GitHub, X and the rest sign in under a path on their main host.
+  return PRIORITY_PATH.test(u.pathname);
+}
 const pages = require('../pages');
 const errorPage = require('../error-page');
+const { createPopupWindow } = require('../popup-window');
 const palette = require('../palette');
 const { INCOGNITO } = require('../incognito/mode');
 const fingerprint = require('../incognito/fingerprint');
@@ -803,8 +819,21 @@ class Tab {
     // New windows open as tabs rather than popups.
     // A shift-click, or a page's own pop-up, asks for a new window: that is a
     // Peek (window.js) - a card over the page - rather than a tab. Everything
-    // else is a tab, as before.
+    // else is a tab, as before. A sign-in pop-up (Google, Microsoft, Apple...)
+    // or a console's SSH window is the exception: a real window of its own
+    // (popup-window.js), since the page waits on window.opener to hear back
+    // and a Peek, being a new page, cuts that tie.
     wc.setWindowOpenHandler(({ url, disposition }) => {
+      if (disposition === 'new-window' && isPriorityPopup(url)) {
+        return { action: 'allow', createWindow: (options) => createPopupWindow(options, {
+          onOpen: (_win, popup) => popup.setWindowOpenHandler(({ url: to, disposition: d }) => {
+            // Anything it opens in turn is a tab, unless it is another sign-in step.
+            if (d === 'new-window' && isPriorityPopup(to)) return { action: 'allow', createWindow: (o) => createPopupWindow(o) };
+            if (/^https?:/i.test(to)) this.emit('open-tab', { url: to });
+            return { action: 'deny' };
+          })
+        }) };
+      }
       this.emit(disposition === 'new-window' && /^https?:/i.test(url) ? 'peek' : 'open-tab', { url });
       return { action: 'deny' };
     });
