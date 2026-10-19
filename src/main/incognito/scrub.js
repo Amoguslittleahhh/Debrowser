@@ -37,6 +37,9 @@ function scrubber(seed, cores, languages) {
   const define = (obj, prop, value) => {
     try { Object.defineProperty(obj, prop, { get: () => value, configurable: true, enumerable: true }); } catch { /* frozen */ }
   };
+  const defineGetter = (obj, prop, getter) => {
+    try { Object.defineProperty(obj, prop, { get: getter, configurable: true, enumerable: true }); } catch { /* frozen */ }
+  };
   const remove = (obj, prop) => {
     try { delete obj[prop]; } catch { /* not configurable */ }
     if (obj && prop in obj) define(obj, prop, undefined);
@@ -68,6 +71,23 @@ function scrubber(seed, cores, languages) {
   if (typeof nav.getGamepads === 'function') replace(nav, 'getGamepads', () => function getGamepads() { return []; });
   if (g.MediaDevices) replace(g.MediaDevices.prototype, 'enumerateDevices', () => function enumerateDevices() { return Promise.resolve([]); });
   if (g.SpeechSynthesis) replace(g.SpeechSynthesis.prototype, 'getVoices', () => function getVoices() { return []; });
+
+  // The window's own size and where it sits on the desktop. The DevTools
+  // screen override (fingerprint.js) letterboxes `screen.*`, but it does not
+  // reach `window.outerWidth/outerHeight` - which keep the real frame, so the
+  // toolbar's height (outer minus inner) is a per-install constant a page can
+  // read - nor `screenX/screenY`, which give the window's pixel position, and
+  // on a multi-monitor desktop that names which monitor. Tor Browser reports
+  // the outer size as the inner size and the position as the origin; the same
+  // here, as getters because the viewport changes as the window is resized.
+  if (g.document && typeof g.innerWidth === 'number') {
+    defineGetter(g, 'outerWidth', () => g.innerWidth);
+    defineGetter(g, 'outerHeight', () => g.innerHeight);
+    for (const p of ['screenX', 'screenY', 'screenLeft', 'screenTop']) defineGetter(g, p, () => 0);
+    // `screen.isExtended` is true whenever a second monitor is attached - a
+    // bit that splits the anonymity set in two before anything else is read.
+    if (g.Screen) define(g.Screen.prototype, 'isExtended', false);
+  }
 
   // A small deterministic generator from the tab's seed.
   let state = seed >>> 0 || 1;
@@ -138,16 +158,36 @@ function scrubber(seed, cores, languages) {
     });
   }
 
+  const isCanvas = (src) => (g.HTMLCanvasElement && src instanceof g.HTMLCanvasElement) ||
+    (g.OffscreenCanvas && src instanceof g.OffscreenCanvas);
+  const CanvasKind = (src) => (g.HTMLCanvasElement && src instanceof g.HTMLCanvasElement ? MakeCanvas : g.OffscreenCanvas);
+
+  // `createImageBitmap(canvas)` copies the canvas into an ImageBitmap, and the
+  // bitmap carries the raw pixels past every hook above: handed to
+  // `new VideoFrame(bitmap)` and `copyTo`, or drawn into a WebGL texture, it
+  // reads back the true drawing - the hardware's canvas fingerprint, the same
+  // in every tab, which is exactly what the per-tab blur is for. So a canvas
+  // source is blurred before the bitmap is made of it. Every other source
+  // (ImageData, which getImageData already blurred; an <img>, video or blob,
+  // which carry no canvas fingerprint) is left alone.
+  if (typeof g.createImageBitmap === 'function' && originalGetImageData) {
+    const original = g.createImageBitmap;
+    const fn = function createImageBitmap(image, ...rest) {
+      const src = isCanvas(image) && image.width && image.height
+        ? blurredCopy(image, image.width, image.height, CanvasKind(image)) : image;
+      return original.call(this, src, ...rest);
+    };
+    try { Object.defineProperty(g, 'createImageBitmap', { value: fn, configurable: true, writable: true }); } catch { /* frozen */ }
+  }
+
   // A drawing handed to video: `new VideoFrame(canvas)` and `copyTo` read the
   // pixels without passing through anything above.
   if (g.VideoFrame && originalGetImageData) {
     const Original = g.VideoFrame;
-    const isCanvas = (src) => (g.HTMLCanvasElement && src instanceof g.HTMLCanvasElement) ||
-      (g.OffscreenCanvas && src instanceof g.OffscreenCanvas);
     const VideoFrame = class VideoFrame extends Original {
       constructor(src, ...rest) {
         super(isCanvas(src) && src.width && src.height
-          ? blurredCopy(src, src.width, src.height, g.HTMLCanvasElement && src instanceof g.HTMLCanvasElement ? MakeCanvas : g.OffscreenCanvas)
+          ? blurredCopy(src, src.width, src.height, CanvasKind(src))
           : src, ...rest);
       }
     };

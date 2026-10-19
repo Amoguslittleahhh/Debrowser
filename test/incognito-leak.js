@@ -512,6 +512,21 @@ async function main() {
     Boolean(p1 && p2 && other) && p1.canvas === p2.canvas && p1.audio === p2.audio &&
       p1.canvas !== other.canvas && p1.audio !== other.audio,
     JSON.stringify({ tab: p1, again: p2, otherTab: other }));
+  // The canvas read back through createImageBitmap + VideoFrame.copyTo: a path
+  // that returned the raw drawing (the same in every tab) until the bitmap was
+  // blurred. It must now behave like the canvas print - stable in a tab, and
+  // different between tabs, so it links no two visits and names no hardware.
+  check('a canvas read through an ImageBitmap and a VideoFrame is blurred, not raw',
+    Boolean(p1 && p2 && other) && typeof p1.bitmapCanvas === 'number' &&
+      p1.bitmapCanvas === p2.bitmapCanvas && p1.bitmapCanvas !== other.bitmapCanvas,
+    JSON.stringify({ tab: p1.bitmapCanvas, again: p2.bitmapCanvas, otherTab: other.bitmapCanvas }));
+  // The window's own size and position do not escape the screen override: the
+  // frame reports the viewport's size (so the toolbar height cannot be read)
+  // and the window sits at the origin (so no monitor is named).
+  const geom = fs3.geom || {};
+  check('the window reports no true size, position or second monitor',
+    geom.outer === geom.inner && geom.pos === '0,0,0,0' && geom.isExtended === false,
+    JSON.stringify(geom));
   check('the startup self-check ran and found nothing',
     Boolean(f.audit) && !f.audit.error && f.audit.checked > 0 && f.audit.problems.length === 0,
     JSON.stringify(f.audit));

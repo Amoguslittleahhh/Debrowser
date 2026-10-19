@@ -203,7 +203,16 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     const ac = new OfflineAudioContext(1, 5000, 44100); const o = ac.createOscillator(); o.type = 'triangle';
     o.frequency.value = 1000; const k = ac.createDynamicsCompressor(); o.connect(k); k.connect(ac.destination); o.start();
     const buf = await ac.startRendering(); let sum = 0; for (const v of buf.getChannelData(0)) sum += Math.abs(v);
-    return { canvas: hash(c.toDataURL()), audio: sum.toFixed(12) };
+    // The same canvas read back through an ImageBitmap and a VideoFrame -
+    // a path that read the raw drawing until createImageBitmap was covered.
+    let bitmapCanvas = 'unavailable';
+    try {
+      const bm = await createImageBitmap(c);
+      const vf = new VideoFrame(bm, { timestamp: 0 });
+      const out = new Uint8Array(vf.allocationSize()); await vf.copyTo(out); vf.close(); if (bm.close) bm.close();
+      let s = ''; for (let i = 0; i < out.length; i += 7) s += out[i]; bitmapCanvas = hash(s);
+    } catch (e) { bitmapCanvas = 'error:' + e.message; }
+    return { canvas: hash(c.toDataURL()), audio: sum.toFixed(12), bitmapCanvas };
   })()`;
   const surfaces = fpTab.isLive ? await within(fpTab.wc.executeJavaScript(`(async () => {
     const blob = (src) => URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
@@ -220,6 +229,9 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     const headers = await fetch('/headers').then((res) => res.json());
     return { page, dedicated, frame, headers, prints: [await ${PRINTS}, await ${PRINTS}],
       screen: screen.width + 'x' + screen.height, viewport: innerWidth + 'x' + innerHeight,
+      // The window's frame and where it sits: these escape the screen override.
+      geom: { outer: outerWidth + 'x' + outerHeight, inner: innerWidth + 'x' + innerHeight,
+        pos: [screenX, screenY, screenLeft, screenTop].join(','), isExtended: screen.isExtended === true },
       webgl: Boolean(document.createElement('canvas').getContext('webgl')) };
   })()`), 10_000, null) : null;
   // The same fingerprint from another tab must differ: it cannot link the two.
