@@ -2156,7 +2156,11 @@ body[data-band="true"][data-layout="left"] .toolbar .icon-btn {
   border: none;
   border-radius: 50%;
 }
+/* Not centred like the bar across the top: the band has back, forward and
+   reload on its left and more on its right, and centring left a gap beside
+   the reload button. It runs from there to the buttons on the right. */
 body[data-band="true"][data-layout="left"] .omnibox {
+  margin: 0 8px 0 12px;
   --omni-side: 320px;       /* the window buttons, the meter and a pill beside them */
   order: 2;
   /* What is left of the row, and no more. The rule for the pinned side panel
@@ -2276,8 +2280,7 @@ body.calm[data-band="true"][data-layout="left"]::before { transition: none !impo
 body:not([data-layout="left"]) .omnibox { --omni-side: 230px; }
 body.incognito .omnibox { --omni-side-extra: 110px; }
 @media (min-width: 900px) {
-  body:not([data-layout="left"]) .omnibox,
-  body[data-band="true"][data-layout="left"] .omnibox {
+  body:not([data-layout="left"]) .omnibox {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -2294,8 +2297,7 @@ body.incognito .omnibox { --omni-side-extra: 110px; }
 @media (min-width: 900px) {
   /* Everything after the back, forward and reload goes to the right end, now
      the address bar no longer fills the row between them. */
-  body:not([data-layout="left"]) .toolbar .nav,
-  body[data-band="true"][data-layout="left"] .toolbar .nav { margin-right: auto; }
+  body:not([data-layout="left"]) .toolbar .nav { margin-right: auto; }
 }
 
 /* The Protected video button, in the address bar with the page's other actions. */
