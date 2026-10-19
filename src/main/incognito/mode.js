@@ -385,7 +385,10 @@ function prepare(app) {
   // before the app is ready, which is before anything could ask the OS for a
   // free one. A collision is rare and handled - Tor reports it and main picks
   // again. The test suite supplies its own stand-in instead, on its own port.
-  const requested = Number(argValue('incognito-proxy-port'));
+  // Never in an installed copy: a shortcut edited to carry it would send
+  // every private page to whatever listens there, with the window still
+  // saying Tor.
+  const requested = app.isPackaged ? NaN : Number(argValue('incognito-proxy-port'));
   const external = Number.isInteger(requested) && requested > 0 && requested < 65536;
   const port = external ? requested : pickPort();
   const poolPorts = poolFrom(port);

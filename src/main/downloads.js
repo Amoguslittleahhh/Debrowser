@@ -906,7 +906,9 @@ function filenameFor(url, disposition) {
  * as a path by Windows.
  */
 function sanitiseName(raw) {
-  let name = String(raw || '').replace(/[\x00-\x1f\x7f]/g, '');
+  // Control characters, and the invisible ones that change how a name reads:
+  // `invoice\u202Efdp.cpl` shows as "invoicelpc.pdf" and runs as a program.
+  let name = String(raw || '').replace(/[\x00-\x1f\x7f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '');
   name = name.split('/').pop();
   name = name.split('\\').pop();
   name = name.replace(/^\.+/, '');                       // no dotfiles, no ".."
@@ -919,6 +921,24 @@ function sanitiseName(raw) {
   // device, and the download is written to nowhere.
   if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i.test(name)) name = `_${name}`;
   return name || 'download';
+}
+
+/**
+ * Files that run, or open something that runs, when opened: asked about
+ * before opening (main.js). Beyond the plain programs, Control Panel items,
+ * consoles, help files and shortcuts run code; disk images open as a drive
+ * of whatever they hold, past the mark that says a file came from the web.
+ */
+const RUNS_AS_PROGRAM = new RegExp('\\.(' + [
+  'exe', 'msi', 'msix', 'msixbundle', 'appx', 'appxbundle', 'appref-ms', 'bat', 'cmd', 'com', 'scr', 'pif', 'cpl', 'msc',
+  'chm', 'hta', 'url', 'website', 'library-ms', 'settingcontent-ms', 'search-ms', 'lnk', 'inf', 'reg', 'gadget', 'msp',
+  'ps1', 'psm1', 'psd1', 'ps1xml', 'psc1', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'xll', 'xlam', 'ppam', 'jar', 'jnlp',
+  'iso', 'img', 'vhd', 'vhdx', 'dmg', 'pkg', 'mpkg', 'app', 'command', 'tool', 'terminal', 'workflow', 'scpt',
+  'sh', 'bash', 'zsh', 'csh', 'run', 'appimage', 'desktop', 'deb', 'rpm', 'snap', 'flatpakref', 'apk', 'py', 'pyw'
+].join('|') + ')$', 'i');
+
+function runsAsProgram(file) {
+  return RUNS_AS_PROGRAM.test(String(file || ''));
 }
 
 /**
@@ -955,5 +975,6 @@ module.exports = {
   strongValidator,
   clampConnections,
   MIN_SEGMENTED_BYTES,
-  MAX_CONNECTIONS
+  MAX_CONNECTIONS,
+  runsAsProgram
 };

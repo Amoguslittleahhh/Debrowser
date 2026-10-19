@@ -197,6 +197,10 @@ function serve(log = () => {}, partitions = []) {
       : url.pathname.slice(1);
 
     if (!file) return new Response('Not found', { status: 404 });
+    // A page only under its own name. Privilege is judged by the name in the
+    // address (main.js senderPage), so debrowser://settings/passwords.html -
+    // or the chrome's menu.html - would run with Settings' rights.
+    if (/\.html?$/i.test(file) && file !== PAGES[url.hostname]) return new Response('Not found', { status: 404 });
 
     // Resolve first, then check containment. Checking the unresolved string
     // would pass `..` straight through.

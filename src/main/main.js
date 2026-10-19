@@ -103,7 +103,7 @@ const icons = require('./icons');
 const presence = require('./presence');
 const { Vault } = require('./data/vault');
 const { Speculation } = require('./speculation');
-const { DownloadManager, sanitiseName } = require('./downloads');
+const { DownloadManager, sanitiseName, runsAsProgram } = require('./downloads');
 const { Governor } = require('./governor');
 const { Prewarm } = require('./prewarm');
 const { IpcHub } = require('./ipc');
@@ -844,13 +844,15 @@ function main() {
       // ask for ranges and nothing for our manager to fetch, so Chromium keeps
       // those - taking them over would break them to no purpose.
       if (!/^https?:/i.test(url) || !downloads) return;
-      const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : [url];
-      if (chain.some((u) => Date.now() - (posted.get(u) || 0) < 60_000)) return;
-      event.preventDefault();
       let page = '';
       try { page = source && !source.isDestroyed() ? source.getURL() : ''; } catch { page = ''; }
-      const risk = INCOGNITO ? null : downloadRisk(url, page);
-      if (risk) { downloads.refuse(url, risk, item.getFilename()); return; }
+      // Judged before the posted ones are left to Chromium: a hidden form
+      // posted at a listed host went past the lists otherwise.
+      const chain = typeof item.getURLChain === 'function' ? item.getURLChain() : [url];
+      const risk = INCOGNITO ? null : downloadRisk(url, page) || chain.map((u) => downloadRisk(u, '')).find(Boolean) || null;
+      if (risk) { event.preventDefault(); downloads.refuse(url, risk, item.getFilename()); return; }
+      if (chain.some((u) => Date.now() - (posted.get(u) || 0) < 60_000)) return;
+      event.preventDefault();
       downloads.start(url, { session: ses });
     });
   };
@@ -1852,9 +1854,10 @@ function main() {
           const here = tabs.activeTab();
           return here && here.wc && !here.wc.isDestroyed() ? here.wc.id : null;
         },
-        captureActive: async ({ format, quality }) => {
+        captureActive: async ({ format, quality }, may = () => false) => {
           const here = tabs.activeTab();
           if (!here || !here.wc || here.wc.isDestroyed()) throw new Error('No active tab');
+          if (!may(here.wc.getURL())) throw new Error('Cannot access contents of the page. Extension manifest must request permission to access the respective host.');
           const image = await here.wc.capturePage();
           return format === 'png' ? image.toDataURL()
             : `data:image/jpeg;base64,${image.toJPEG(Math.max(0, Math.min(100, Number(quality) || 92))).toString('base64')}`;
@@ -6037,7 +6040,7 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
         }
         // A program is asked about first, as every browser asks: it can do
         // anything the user can.
-        if (!INCOGNITO && RUNS_AS_PROGRAM.test(file)) {
+        if (!INCOGNITO && runsAsProgram(file)) {
           const { response } = await ask(shell, {
             buttons: ['Cancel', 'Open'],
             defaultId: 1,
@@ -7464,9 +7467,6 @@ function downloadRisk(url, pageUrl) {
   if (/^http:/i.test(url) && /^https:/i.test(pageUrl || '')) return 'Blocked – it came over an insecure connection';
   return null;
 }
-
-/** Files that run as programs when opened. */
-const RUNS_AS_PROGRAM = /\.(exe|msi|msix|appx|bat|cmd|com|scr|pif|ps1|vbs|vbe|js|jse|wsf|hta|jar|reg|lnk|dmg|pkg|app|command|sh|run|appimage|deb|rpm|apk)$/i;
 
 /*
  * DNS over HTTPS: which sites you look up, hidden from the network the way

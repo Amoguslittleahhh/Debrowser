@@ -808,6 +808,18 @@ class Tab {
       this.emit(disposition === 'new-window' && /^https?:/i.test(url) ? 'peek' : 'open-tab', { url });
       return { action: 'deny' };
     });
+    // A website may not take its own tab to one of our pages - by a link, a
+    // form, script, a refresh or its server's redirect. It got there, with the
+    // site's words in the address (debrowser://danger/?like=...), and a
+    // restore then rebuilt it with the command bridge. Our pages are opened
+    // by the browser (`loadURL`), which fires neither event; a server never
+    // has a reason to send anyone into them.
+    wc.on('will-navigate', (event, url) => {
+      if (!this.internal && pages.isInternal(url)) event.preventDefault();
+    });
+    wc.on('will-redirect', (event, url) => {
+      if (pages.isInternal(url)) event.preventDefault();
+    });
   }
 
   /**

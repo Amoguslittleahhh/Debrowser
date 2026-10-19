@@ -20,6 +20,12 @@
 
 - **A private window no longer tells sites the real size and position of its window.** Pages saw the letterboxed screen size, but could still read the window's true outer size, which gives away the toolbar's height, and where the window sits on the desktop, which can name the monitor. Sites now see the page's own size, the window at the corner of the screen, and a single monitor.
 - **The canvas fingerprint can no longer be read around the private window's blur.** Copying a drawing into an image bitmap and reading it back through a video frame returned the untouched pixels, the same in every tab, which identifies the graphics hardware. That copy is now blurred like every other way of reading a canvas.
+- **A page saved to your computer can no longer read your other files.** A downloaded .html file opened in Debrowser could read any file it named, such as SSH keys or another program's saved sign-ins, and send it anywhere. Pages opened from the disk now follow Chrome's rules.
+- **Websites can no longer open Debrowser's own pages.** A site could send its tab to one of the browser's pages, such as the warning page with its own words in it, by a link, a form, a refresh or a redirect. That now does nothing, in tabs and in sites installed as apps.
+- **Extensions can no longer take pictures of Debrowser's own pages.** An extension could capture whatever tab was in front, including Passwords with a password showing. It now needs access to the site in front, as in Chrome, and never gets the browser's pages.
+- **An extension from a store can no longer pass as a different extension.** A store package carrying another extension's key, or a Firefox add-on carrying a Chrome key, could take that extension's ID and talk to its desktop program. Extensions from the Chrome and Edge stores now have their signatures checked too.
+- **More kinds of programs are asked about before they open.** Control Panel items, consoles, help files, internet shortcuts, disk images, PowerShell modules, Excel add-ins and Linux launchers now get the same "is a program" question as an .exe. A download's name can no longer use invisible characters that make it read backwards, so that a program ending ".cpl" looks like a ".pdf", and a file sent back by a form on a dangerous site is stopped like any other download from it.
+- **Installed copies ignore a test-only switch.** A shortcut edited to carry it could send private windows' traffic somewhere other than Tor while the window still said Tor was ready.
 
 ## 2.5.0
 

@@ -62,7 +62,7 @@ jobs:
         run: node -e "require('electron')" > /dev/null || npm rebuild electron
 
       - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5   # v1.9.0
 
       - name: Build the measurement helper
         run: npm run build:memprobe
@@ -178,7 +178,7 @@ jobs:
 
       - name: Release
         if: github.event.inputs.tag != ''
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64   # v3.0.3
         with:
           tag_name: ${{ github.event.inputs.tag }}
           # The commit that was built, not the default branch's head.
