@@ -243,7 +243,7 @@ function readZip(buf) {
 
 /** The zip inside a `.crx`: version 2 and 3 headers both name their own length. */
 /**
- * The public key a .crx (version 3) was signed with, as a manifest's "key":
+ * The public key a .crx (version 3) was signed with, checked, as a manifest's "key":
  * with it Chromium gives the extension the same ID it has in Chrome and on
  * the store, rather than one made up from where its folder is. Null for
  * anything else.
@@ -282,10 +282,17 @@ function crxKey(buf) {
     const top = fields(header);
     const signed = top.find((f) => f.field === 10000);
     const crxId = signed && fields(signed.data).find((f) => f.field === 1);
-    const keys = top.filter((f) => f.field === 2).map((f) => fields(f.data).find((g) => g.field === 1)).filter(Boolean)
-      .map((f) => f.data);
-    const own = keys.find((k) => crxId && crypto.createHash('sha256').update(k).digest().subarray(0, 16).equals(crxId.data));
-    return own ? own.toString('base64') : null;
+    // The key that names the ID, and only if its signature over the header's
+    // signed part and the archive holds: a header can carry any extension's
+    // public key, and the store's signature is what makes it that extension.
+    const signedData = Buffer.concat([Buffer.from('CRX3 SignedData\0', 'latin1'),
+      Buffer.from(Uint32Array.of(signed ? signed.data.length : 0).buffer), signed ? signed.data : Buffer.alloc(0), crxZip(buf)]);
+    const proofs = top.filter((f) => f.field === 2).map((f) => fields(f.data))
+      .map((g) => ({ key: g.find((x) => x.field === 1)?.data, sig: g.find((x) => x.field === 2)?.data }));
+    const own = proofs.find(({ key, sig }) => key && sig && crxId &&
+      crypto.createHash('sha256').update(key).digest().subarray(0, 16).equals(crxId.data) &&
+      crypto.verify('sha256', signedData, { key, format: 'der', type: 'spki' }, sig));
+    return own ? own.key.toString('base64') : null;
   } catch {
     return null;
   }
@@ -809,8 +816,10 @@ class Extensions {
       case 'notifications.create': {
         const id = String(a.id || `${ext.id}-n${Date.now()}`);
         if (this.hooks.notify) {
-          const icon = a.options && a.options.iconUrl && !/^[a-z]+:/i.test(a.options.iconUrl)
-            ? path.join(ext.dir, String(a.options.iconUrl).replace(/^\/+/, '')) : null;
+          let icon = a.options && a.options.iconUrl && !/^[a-z]+:/i.test(a.options.iconUrl)
+            ? path.resolve(ext.dir, String(a.options.iconUrl).replace(/^\/+/, '')) : null;
+          // Its own files only: `../../` would name any picture on the disk.
+          if (icon && !icon.startsWith(ext.dir + path.sep)) icon = null;
           this.hooks.notify({ title: a.options?.title || ext.name, message: a.options?.message || '', iconPath: icon },
             () => this.dispatch(ext.id, 'notifications.onClicked', [id]));
         }
@@ -915,6 +924,10 @@ class Extensions {
         }
         let chromeId = null;
         for (const ses of this.sessions) chromeId ||= this.loadedId(ses, ext.id);
+        // Running under the ID the store signed, not one its manifest claims.
+        if (meta.storeId && chromeId !== meta.storeId && !(this.hooks.developerMode && this.hooks.developerMode())) {
+          throw new Error('Access to the specified native messaging host is forbidden.');
+        }
         const origin = `chrome-extension://${chromeId}/`;
         const name = String(a.name || '');
         if (op === 'native.connect') {
@@ -958,7 +971,11 @@ class Extensions {
       case 'cookies.remove': return this.cookies(ext, op.slice(8), a);
       case 'tabs.captureVisibleTab': {
         if (!this.hooks.captureActive) throw new Error('pictures of the page aren’t available here');
-        return this.hooks.captureActive(a);
+        // As Chrome: only a website the extension may reach, or any with
+        // activeTab - never the browser's own pages (Passwords with a
+        // password showing) or another extension's.
+        return this.hooks.captureActive(a, (url) => /^https?:/i.test(url) &&
+          (ext.permissions.includes('activeTab') || (ext.hosts || []).some((p) => matchesPattern(p, url))));
       }
       default: throw new Error(`${op} isn’t available in Debrowser yet`);
     }
@@ -1373,8 +1390,12 @@ class Extensions {
     // From a store only when the store's own signature names the ID asked for.
     // A file can carry any extension's key, and with it that extension's ID,
     // which is what a program on the computer trusts (native-messaging.js).
-    const store = opts.store && (opts.store.store === 'firefox' ||
-      (signedKey && idFromKey(signedKey) === opts.store.id)) ? opts.store.store : null;
+    // And only when it will run under that ID: the manifest's own `key` wins
+    // over the signed one, so a store package carrying another extension's
+    // key - or an add-on from Firefox's store, which has no Chrome ID to
+    // vouch for - would otherwise pass as that extension.
+    const store = opts.store && (opts.store.store === 'firefox' ? !manifest.key
+      : signedKey && idFromKey(signedKey) === opts.store.id && idFromKey(manifest.key) === opts.store.id) ? opts.store.store : null;
     if (opts.confirm && !opts.confirm({ name: localName(own, manifest), warnings: permissionWarnings(manifest) })) {
       const err = new Error('cancelled');
       err.cancelled = true;
@@ -1423,6 +1444,7 @@ class Extensions {
     // Through adaptPage, so the layer and the context load first, as on every page.
     if (adapted.backgroundHtml) fs.writeFileSync(path.join(temp, BACKGROUND_FILE), adaptPage(adapted.backgroundHtml));
     fs.writeFileSync(path.join(temp, META_FILE), JSON.stringify({ from, addedAt: Date.now(), source: path.basename(source), store,
+      storeId: store && store !== 'firefox' ? opts.store.id : null,
       background: adapted.background, token,
       // Its settings survive an update, as in Chrome; the site access they
       // set is applied to the new manifest when it loads.

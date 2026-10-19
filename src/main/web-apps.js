@@ -332,8 +332,15 @@ class WebApps {
       return { action: 'deny' };
     });
     wc.on('will-navigate', (event, url) => {
-      if (!this.inScope(app, url) && /^https?:/i.test(url)) { event.preventDefault(); openInBrowser(url); }
+      if (/^https?:/i.test(url)) {
+        if (!this.inScope(app, url)) { event.preventDefault(); openInBrowser(url); }
+        return;
+      }
+      // Nowhere else: the browser's own pages took the site's words as a
+      // tab did (tab.js), and an app is a website and nothing more.
+      if (!/^(about|blob):/i.test(url)) event.preventDefault();
     });
+    wc.on('will-redirect', (event, url) => { if (!/^https?:/i.test(url)) event.preventDefault(); });
     // The bar takes the colour the site asks for, as Edge's does.
     wc.on('did-change-theme-color', (_e, color) => { if (color) { colors = barColors(color); paint(); } });
     // Back, forward and reload from the keyboard, as in a tab.

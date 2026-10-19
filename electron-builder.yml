@@ -41,6 +41,13 @@ directories:
 ##   embeddedAsarIntegrity...   The app archive is checked against a hash in the
 ##   onlyLoadAppFromAsar        binary, and nothing outside it is loaded, so the
 ##                              code cannot be swapped on disk (Windows, macOS).
+##   grantFileProtocolExtra...  Off, so a page opened from the disk is held to
+##                              Chrome's rules: a downloaded .html could
+##                              otherwise fetch any file it names - ~/.ssh,
+##                              saved sessions - and post it anywhere. The
+##                              browser's own views are file:// too and need
+##                              none of it (the smoke suite, run on a binary
+##                              with this fuse off, passes).
 ##
 ## Nothing here needs any of them: the helpers are separate binaries, and no
 ## code starts this one as Node (tools/ scripts run the system's Node). Dev and
@@ -53,6 +60,7 @@ electronFuses:
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
 
 ## What goes in the archive.
 ##

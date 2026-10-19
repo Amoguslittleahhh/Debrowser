@@ -391,7 +391,7 @@ jobs:
           npx electron-fuses read --app dist/linux-unpacked/debrowser | tee fuses.txt
           for want in "RunAsNode is Disabled" "EnableNodeOptionsEnvironmentVariable is Disabled" \
                       "EnableNodeCliInspectArguments is Disabled" "EnableEmbeddedAsarIntegrityValidation is Enabled" \
-                      "OnlyLoadAppFromAsar is Enabled"; do
+                      "OnlyLoadAppFromAsar is Enabled" "GrantFileProtocolExtraPrivileges is Disabled"; do
             grep -q "$want" fuses.txt || { echo "fuse not set: $want"; exit 1; }
           done
           (ELECTRON_RUN_AS_NODE=1 timeout 15 xvfb-run -a dist/linux-unpacked/debrowser --no-sandbox \
@@ -660,4 +660,8 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yml --repo "${{ github.repository }}" --ref "${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch }}"
+          # Through the environment, not pasted into the script: a branch name
+          # is text anyone who can push chooses, and `$(...)` is a legal one.
+          REPO: ${{ github.repository }}
+          REF: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.repository.default_branch }}
+        run: gh workflow run pages.yml --repo "$REPO" --ref "$REF"

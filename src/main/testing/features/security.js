@@ -1,0 +1,187 @@
+'use strict';
+
+/**
+ * A website attacking the browser it runs in: every way a page could reach
+ * the browser's own pages and their command bridge, or files on the computer,
+ * tried from a real tab against a hostile server of its own. Each one must
+ * leave the tab on the site, with nothing of the browser's in reach.
+ */
+
+const http = require('http');
+const path = require('path');
+const crypto = require('crypto');
+const { crxKey } = require('../../extensions');
+const pages = require('../../pages');
+const { sanitiseName, runsAsProgram } = require('../../downloads');
+
+/** A site of the attacker's: each path a different way out. */
+function hostileServer() {
+  const page = (body) => `<!doctype html><meta charset="utf-8"><title>hostile</title><body>${body}</body>`;
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const to = u.searchParams.get('to') || '';
+    const html = (body) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(page(body)); };
+    switch (u.pathname) {
+      case '/redirect': res.writeHead(302, { Location: to }); res.end(); return;
+      case '/self': return html(`<script>setTimeout(() => { location.href = ${JSON.stringify(to)}; }, 50)</script>`);
+      case '/meta': return html(`<meta http-equiv="refresh" content="0;url=${to.replace(/"/g, '&quot;')}">`);
+      case '/link': return html(`<a id="a" href="${to.replace(/"/g, '&quot;')}">go</a><script>setTimeout(() => document.getElementById('a').click(), 50)</script>`);
+      case '/form': return html(`<form id="f" method="get" action="${to.replace(/"/g, '&quot;')}"></form><script>setTimeout(() => document.getElementById('f').submit(), 50)</script>`);
+      case '/open': return html(`<script>setTimeout(() => window.open(${JSON.stringify(to)}), 50)</script>`);
+      default: return html('<p>hostile</p>');
+    }
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
+module.exports = async function securityFeature(t) {
+  const { check, waitFor, sleep, tabs, inTime } = t;
+  const server = await hostileServer();
+  const site = `http://hostile.test:${server.address().port}`;
+
+  // Each way a page can send its own tab somewhere, to each place a site must
+  // not be able to send it.
+  const targets = {
+    settings: 'debrowser://settings',
+    warning: 'debrowser://danger/?kind=lookalike&like=bank.example&url=https%3A%2F%2Fbank.example%2F',
+    file: 'file:///etc/passwd',
+    chrome: 'chrome://gpu',
+    'view-source': 'view-source:http://hostile.test/'
+  };
+  for (const way of ['self', 'redirect', 'meta', 'link', 'form']) {
+    for (const [name, to] of Object.entries(targets)) {
+      const tab = tabs.create({ url: `${site}/${way}?to=${encodeURIComponent(to)}`, activate: false, realise: true });
+      await waitFor(() => tab.isLive && !tab.loading, { timeoutMs: 8000 });
+      await sleep(400);
+      await waitFor(() => !tab.loading, { timeoutMs: 4000 });
+      const live = tab.isLive ? tab.wc.getURL() : '';
+      const bridge = tab.isLive ? await inTime(tab.wc.executeJavaScript('typeof window.debrowser').catch(() => 'gone'), 2000, 'undefined') : 'gone';
+      check(`Security: a website cannot send its tab to ${name} (${way})`,
+        !pages.isInternal(live) && !pages.isInternal(tab.url) && !/^(file|chrome|view-source):/i.test(live) && bridge === 'undefined',
+        `${live} | tab ${tab.url} | bridge ${bridge}`);
+      tabs.close(tab.id);
+    }
+  }
+
+  // A pop-up to one of ours or to a file: no tab for it.
+  for (const to of ['debrowser://passwords', 'file:///etc/passwd']) {
+    const before = new Set(tabs.all().map((x) => x.id));
+    const tab = tabs.create({ url: `${site}/open?to=${encodeURIComponent(to)}`, activate: true, realise: true });
+    await waitFor(() => tab.isLive && !tab.loading, { timeoutMs: 8000 });
+    await sleep(600);
+    const opened = tabs.all().filter((x) => x !== tab && !before.has(x.id));
+    check(`Security: a website's pop-up to ${to} opens nothing`, opened.length === 0, opened.map((x) => x.url).join(', '));
+    for (const x of [...opened, tab]) tabs.close(x.id);
+  }
+
+  // From inside a site: nothing of the browser to call, read, frame or load.
+  const tab = tabs.create({ url: `${site}/plain`, activate: false, realise: true });
+  await waitFor(() => tab.isLive && !tab.loading, { timeoutMs: 8000 });
+  const seen = await tab.wc.executeJavaScript(`(async () => {
+    const out = {};
+    out.globals = [typeof window.debrowser, typeof require, typeof process, typeof module, typeof chrome?.runtime?.sendMessage].join(',');
+    const tryFetch = async (u) => { try { const r = await fetch(u); return 'read ' + r.status; } catch { return 'refused'; } };
+    out.fetchPage = await tryFetch('debrowser://settings/settings.js');
+    out.fetchBridge = await tryFetch('debrowser://ext-bridge/?t=x&op=tabs.query&a=%7B%7D');
+    out.fetchIcon = await tryFetch('debrowser://icon/?u=' + encodeURIComponent('https://example.com/favicon.ico'));
+    out.fetchFile = await tryFetch('file:///etc/passwd');
+    out.img = await new Promise((r) => { const i = new Image(); i.onload = () => r('loaded'); i.onerror = () => r('refused'); i.src = 'debrowser://newtab/icon.svg'; setTimeout(() => r('timeout'), 3000); });
+    out.frame = await new Promise((r) => {
+      const f = document.createElement('iframe');
+      f.src = 'debrowser://settings';
+      f.onload = () => { let u = 'opaque'; try { u = f.contentWindow.location.href; } catch {} r('loaded ' + u + ' ' + typeof f.contentWindow.debrowser); };
+      document.body.append(f);
+      setTimeout(() => r('timeout'), 3000);
+    });
+    return out;
+  })()`).catch((e) => ({ error: e.message }));
+  check('Security: a website sees no bridge, Node or extension messaging', seen.globals === 'undefined,undefined,undefined,undefined,undefined', seen.globals);
+  check('Security: a website cannot read the browser\'s pages, the extension bridge or files',
+    seen.fetchPage === 'refused' && seen.fetchBridge === 'refused' && seen.fetchFile === 'refused', JSON.stringify(seen));
+  check('Security: a website cannot load the browser\'s images to tell it is Debrowser', seen.img === 'refused', seen.img);
+  check('Security: a website cannot frame one of the browser\'s pages', !/debrowser:\/\/settings|function|object/.test(String(seen.frame)), String(seen.frame));
+  tabs.close(tab.id);
+
+  // A page saved to the computer and opened: it may not read the computer's
+  // other files, as in Chrome - a downloaded .html reading ~/.ssh.
+  if (process.env.DEBROWSER_FILE_PROBE) {
+    const local = tabs.create({ url: `file://${process.env.DEBROWSER_FILE_PROBE}`, activate: false, realise: true });
+    await waitFor(() => local.isLive && !local.loading, { timeoutMs: 8000 });
+    const read = await inTime(local.wc.executeJavaScript('window.result').catch((e) => ({ error: e.message })), 6000, { error: 'timeout' });
+    check('Security: a local page cannot read other files', !JSON.stringify(read).includes('SECRET-123'), JSON.stringify(read));
+    tabs.close(local.id);
+  }
+
+  // Our pages only under their own names: a page's file under another page's
+  // name would run with that page's rights.
+  const wrongName = tabs.create({ url: 'debrowser://settings/passwords.html', activate: false, realise: true });
+  await waitFor(() => wrongName.isLive && !wrongName.loading, { timeoutMs: 8000 });
+  const body = await wrongName.wc.executeJavaScript('document.title + "|" + document.body.innerText.slice(0, 40)').catch(() => '');
+  check('Security: another page\'s file is not served under Settings\' name', !/Passwords/i.test(body), body);
+  tabs.close(wrongName.id);
+  const ownName = tabs.create({ url: 'debrowser://settings/settings.html', activate: false, realise: true });
+  await waitFor(() => ownName.isLive && !ownName.loading, { timeoutMs: 8000 });
+  const own = await ownName.wc.executeJavaScript('document.title').catch(() => '');
+  check('Security: a page\'s own file is still served at its own name', /Settings/i.test(own), own);
+  tabs.close(ownName.id);
+
+  // An extension's picture of the tab in front: never one of the browser's
+  // pages (Passwords with a password showing), and a website only with
+  // access to it.
+  const ext = t.getExtensions && t.getExtensions();
+  if (ext) {
+    const fixtures = path.join(__dirname, '..', '..', '..', '..', 'test', 'extensions');
+    const everywhere = ext.install(path.join(fixtures, 'chrome-tools'));
+    const nowhere = ext.install(path.join(fixtures, 'chrome-hello'));
+    const shot = (who) => inTime(ext.bridge(who.token || ext.list().find((e) => e.id === who.id).token, 'tabs.captureVisibleTab', {})
+      .then((v) => (String(v).startsWith('data:image/') ? 'captured' : String(v)), (e) => `refused: ${e.message}`), 5000, 'timeout');
+    const own = tabs.create({ url: pages.PASSWORDS_URL, activate: true, realise: true });
+    await waitFor(() => own.isLive && !own.loading, { timeoutMs: 8000 });
+    const ofPasswords = await shot(everywhere);
+    const web = tabs.create({ url: `${site}/plain`, activate: true, realise: true });
+    await waitFor(() => web.isLive && !web.loading, { timeoutMs: 8000 });
+    const ofSite = await shot(everywhere);
+    const ofSiteNoAccess = await shot(nowhere);
+    check('Security: an extension cannot take a picture of the browser\'s own pages', /^refused/.test(ofPasswords), ofPasswords);
+    check('Security: an extension takes a picture of a website it may reach, and not of one it may not',
+      ofSite === 'captured' && /^refused/.test(ofSiteNoAccess), `${ofSite} / ${ofSiteNoAccess}`);
+    tabs.close(web.id);
+    tabs.close(own.id);
+    ext.remove(everywhere.id);
+    ext.remove(nowhere.id);
+  }
+
+  // A .crx's key counts - and with it the store's ID - only when its own
+  // signature holds: a header can name any extension's key.
+  const varint = (n) => { const o = []; while (n > 127) { o.push((n & 127) | 128); n = Math.floor(n / 128); } o.push(n); return Buffer.from(o); };
+  const field = (num, data) => Buffer.concat([varint(num * 8 + 2), varint(data.length), data]);
+  const crx = (signer, claimed, zip) => {
+    const pub = claimed.publicKey.export({ type: 'spki', format: 'der' });
+    const signedHeader = field(1, crypto.createHash('sha256').update(pub).digest().subarray(0, 16));
+    const sig = crypto.sign('sha256', Buffer.concat([Buffer.from('CRX3 SignedData\0', 'latin1'),
+      Buffer.from(Uint32Array.of(signedHeader.length).buffer), signedHeader, zip]), signer.privateKey);
+    const header = Buffer.concat([field(2, Buffer.concat([field(1, pub), field(2, sig)])), field(10000, signedHeader)]);
+    const head = Buffer.alloc(12);
+    head.write('Cr24', 0, 'latin1');
+    head.writeUInt32LE(3, 4);
+    head.writeUInt32LE(header.length, 8);
+    return { file: Buffer.concat([head, header, zip]), key: pub.toString('base64') };
+  };
+  const real = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const other = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const zip = Buffer.from('PK\x03\x04 an archive');
+  const signedRight = crx(real, real, zip);
+  check('Security: a .crx signed by its own key gives that key', crxKey(signedRight.file) === signedRight.key);
+  check('Security: a .crx claiming a key it was not signed with gives none', crxKey(crx(other, real, zip).file) === null);
+  check('Security: a .crx changed after signing gives none', crxKey(Buffer.concat([signedRight.file, Buffer.from('x')])) === null);
+
+  // Downloads: names that pretend to be something else, and programs by any name.
+  const bidi = sanitiseName('invoice‮fdp.cpl');
+  check('Security: a download\'s name loses the characters that reverse how it reads', !/[‎‏‪-‮⁦-⁩]/.test(bidi) && bidi.endsWith('.cpl'), JSON.stringify(bidi));
+  const programs = ['a.cpl', 'a.msc', 'a.chm', 'a.url', 'a.iso', 'a.img', 'a.vhd', 'a.vhdx', 'a.xll', 'a.psm1', 'a.desktop', 'a.exe', 'a.EXE'];
+  const missed = programs.filter((f) => !runsAsProgram(f));
+  check('Security: every kind of file that runs when opened is asked about first', missed.length === 0, missed.join(', '));
+  check('Security: documents are not called programs', !runsAsProgram('report.pdf') && !runsAsProgram('photo.jpg'));
+
+  await new Promise((r) => server.close(r));
+};
