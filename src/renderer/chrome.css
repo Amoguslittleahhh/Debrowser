@@ -2551,6 +2551,12 @@ body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks {
 }
 body[data-role="main"][data-band="true"][data-layout="left"].with-bookmarks .bookmarks {
   display: flex;
+  /* Drawn while the tabs are away too, as the band is: the rule that hides
+     the tucked-away chrome's children left this a blank 34px until the
+     sidebar came out. */
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
   grid-area: 2 / 1 / 3 / -1;
   padding: 0 calc(env(titlebar-area-x, 0px) + 6px);
   background: var(--strip);
