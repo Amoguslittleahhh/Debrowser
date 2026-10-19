@@ -55,7 +55,9 @@ function row(item, index) {
   if (item.kind === 'search') {
     el.append(glyph(SEARCH));
     title.textContent = item.title;
-    detail.textContent = `${item.engine} search`;
+    // The engine's own suggestions say nothing beside them: the row that
+    // searches for what was typed already names the engine.
+    detail.textContent = item.suggested ? '' : `${item.engine} search`;
   } else if (item.kind === 'shortcut') {
     el.append(glyph(SEARCH));
     title.textContent = item.title;
