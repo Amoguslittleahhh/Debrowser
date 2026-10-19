@@ -45,7 +45,8 @@ h2 {
      the one bar that is still growing. */
   background: color-mix(in srgb, var(--text) 18%, transparent);
   transform-origin: bottom;
-  animation: grow var(--slow) var(--ease-out) both;
+  animation: grow 320ms var(--ease-settle) both;
+  animation-delay: calc(var(--i, 0) * 2 * var(--stagger));
 }
 .day.today .bar { background: var(--accent); }
 .day .d { color: var(--text-dim); font-size: var(--fs-small); }

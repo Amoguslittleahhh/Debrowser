@@ -718,7 +718,9 @@ function slideToPlaces(before) {
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
     root.animate(
       [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
-      { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
+      // Slow-in / slow-out: a tab travelling between places eases off the
+      // old one and into the new, rather than leaving at full speed.
+      { duration: 220, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' }
     );
   }
 }
@@ -753,7 +755,13 @@ function closeTabElement(root) {
   const [full, none] = tabFold(root);
   // Eased at both ends: a front-loaded curve took a third of the width in
   // its first frame, and the tabs beside it lurched rather than slid.
-  const fold = root.animate([full, none], { duration: 180, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
+  // Anticipation: it shrinks back a little first, so the eye sees which tab
+  // is going before the gap closes.
+  const fold = root.animate([
+    { ...full, transform: 'none' },
+    { ...full, opacity: 0.9, transform: 'scale(0.96)', offset: 0.18 },
+    { ...none, transform: 'scale(0.9)' },
+  ], { duration: 220, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' });
   fold.onfinish = () => root.remove();
   fold.oncancel = () => root.remove();
 }

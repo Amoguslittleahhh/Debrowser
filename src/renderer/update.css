@@ -32,7 +32,7 @@
   padding: 22px 24px 18px;
   transform: translate(-50%, -50%);
   transform-origin: center;
-  animation: update-in 160ms var(--ease);
+  animation: update-in 240ms var(--ease-out);
 }
 
 @keyframes update-in {

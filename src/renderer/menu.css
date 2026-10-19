@@ -46,15 +46,24 @@ html, body {
    * session and where a shadow would be permanent.
    */
   box-shadow: var(--shadow-menu);
-  animation: menu-in 160ms var(--ease-out);
+  animation: menu-in 220ms var(--ease-settle);
   transform-origin: top right;
   outline: none;                 /* it holds focus so the keyboard reaches it */
 }
 
 @keyframes menu-in {
-  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  from { opacity: 0; transform: translateY(-4px) scale(0.95); }
   to   { opacity: 1; transform: none; }
 }
+
+/* Its rows follow it in one beat apart, top to bottom, so the eye is led down
+   the list. Capped, so a long menu is never still arriving when you reach it. */
+.sheet > * {
+  animation: row-in 140ms var(--ease-out) both;
+  animation-delay: calc(min(sibling-index(), 8) * var(--stagger));
+}
+@keyframes row-in { from { opacity: 0; transform: translateY(-2px); } }
+body.calm .sheet > * { animation: none; }
 
 body.calm .sheet { animation: none; }
 

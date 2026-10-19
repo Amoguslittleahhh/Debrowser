@@ -19,7 +19,7 @@ body {
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
   box-shadow: var(--shadow-menu);
-  animation: card-in var(--fast) var(--ease-out);
+  animation: card-in 180ms var(--ease-settle);
 }
 @keyframes card-in { from { opacity: 0; transform: translateY(-3px); } }
 body.calm .card { animation: none; }

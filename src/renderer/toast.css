@@ -28,12 +28,13 @@ body {
   background: var(--bg-raised);
   box-shadow: var(--shadow-menu);
   box-sizing: border-box;
-  animation: rise var(--slow) var(--ease-out);
+  animation: rise 260ms var(--ease-settle);
 }
 .toast.leaving {
   opacity: 0;
   transform: translateY(8px);
-  transition: opacity var(--fast) var(--ease-in), transform var(--fast) var(--ease-in);
+  /* Anticipation: it lifts a touch before it drops away. */
+  transition: opacity var(--fast) var(--ease-in) 40ms, transform 160ms var(--ease-leave);
 }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 

@@ -76,7 +76,7 @@ function show(index) {
   // hello step's height, which is not where the page ever was.
   if (shown && from && Math.abs(from - to) > 1 && !calm.matches) {
     card.animate([{ height: `${from}px` }, { height: `${to}px` }],
-      { duration: 240, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+      { duration: 260, easing: 'cubic-bezier(0.65, 0, 0.35, 1)' });
   }
   shown = true;
   $('next').focus({ preventScroll: true });
