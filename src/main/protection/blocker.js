@@ -226,12 +226,55 @@ class ContentBlocker {
     const fromWeb = (event) => /^https?:/i.test(event.senderFrame?.url || '');
     ipcMain.handle('@ghostery/adblocker/inject-cosmetic-filters', (event, url, msg) => {
       if (!fromWeb(event) || !this.activeFor(event.sender, { frame: event.senderFrame })) return undefined;
-      return this.engine.onInjectCosmeticFilters(event, event.senderFrame.url, msg);
+      return this.injectCosmetics(event.sender, event.senderFrame, msg);
     });
     ipcMain.handle('@ghostery/adblocker/is-mutation-observer-enabled', (event) => {
       if (!fromWeb(event) || !this.activeFor(event.sender, { frame: event.senderFrame })) return false;
       return this.engine.onIsMutationObserverEnabled(event);
     });
+  }
+
+  /**
+   * The cosmetic rules for one frame, put into that frame. Not the engine's
+   * own onInjectCosmeticFilters, which put every frame's styles and scripts
+   * into the tab's top page: on YouTube each of its frames ran the page's
+   * scriptlets there again, each run wrapping what the last one had wrapped,
+   * until the player's script overflowed the stack and no player was drawn.
+   * And each scriptlet runs in a scope of its own - two of the json-edit ones
+   * both declare `class JSONPath`, which as bare scripts in one page is a
+   * SyntaxError for every one after the first.
+   */
+  injectCosmetics(wc, frame, msg) {
+    if (!frame || frame.isDestroyed?.()) return undefined;
+    const url = frame.url;
+    const { hostname = '', domain = '' } = require('tldts-experimental').parse(url);
+    const first = msg === undefined;
+    const { active, styles, scripts } = this.engine.getCosmeticsFilters({
+      domain: domain || '',
+      hostname: hostname || '',
+      url,
+      classes: msg?.classes,
+      hrefs: msg?.hrefs,
+      ids: msg?.ids,
+      getBaseRules: first,
+      getInjectionRules: first,
+      getExtendedRules: false,
+      getRulesFromHostname: first,
+      getRulesFromDOM: !first,
+      callerContext: { frameId: frame.routingId, processId: frame.processId, lifecycle: msg?.lifecycle }
+    });
+    if (active === false) return undefined;
+    const run = (code) => frame.executeJavaScript(code, true).catch(() => {});
+    if (styles.length > 0 && !frame.parent) {
+      // The top page as before: a user stylesheet, which outranks the page's own.
+      wc.insertCSS(styles, { cssOrigin: 'user' }).catch(() => {});
+    } else if (styles.length > 0) {
+      // A frame has no insertCSS. A stylesheet the page adopts is not subject to its policy on inline styles.
+      run(`(()=>{try{const s=new CSSStyleSheet();s.replaceSync(${JSON.stringify(styles)});` +
+        'document.adoptedStyleSheets=[...document.adoptedStyleSheets,s];}catch{}})();');
+    }
+    for (const script of scripts) run(`(function(){try{${script}\n}catch(e){}})();`);
+    return undefined;
   }
 
   /** A setting changed: build an engine if there is none, or if the cookie lists came or went. */
