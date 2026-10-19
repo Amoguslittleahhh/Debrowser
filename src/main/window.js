@@ -352,8 +352,10 @@ class BrowserShell {
       title: 'Debrowser',
       // A private window wears its own icon on Windows and Linux, where the
       // window's icon is the taskbar's (private-icon.js). macOS takes the
-      // Dock's, set in main.js.
-      ...windowIconOption(),
+      // Dock's, set in main.js. On Linux it is a 1024px PNG to decode and
+      // scale, ~14ms, so it is put on once the window is up (below) rather
+      // than in front of the first tab.
+      ...(process.platform === 'win32' ? windowIconOption() : {}),
       // The theme's own surface from the first frame. A fixed dark one flashed
       // on every launch in the light theme.
       backgroundColor: this.surface(),
@@ -537,7 +539,12 @@ class BrowserShell {
 
     this.window.on('maximize', () => { this.layout(); this.reapplyMaterial(); });
     this.window.on('unmaximize', () => { this.layout(); this.reapplyMaterial(); });
-    this.window.once('ready-to-show', () => this.reveal());
+    this.window.once('ready-to-show', () => {
+      this.reveal();
+      if (process.platform === 'win32') return;
+      const { icon } = windowIconOption();
+      if (icon && !this.window.isDestroyed()) this.window.setIcon(icon);
+    });
   }
 
   /** Show the window, maximised the first time if that is how it was left. */

@@ -1239,3 +1239,44 @@ and the renderer is no longer woken every third tick for each of its hidden
 tabs. A shared renderer is split evenly, and its hidden tabs are not frozen for
 CPU while it also holds the page in front - the page in front may be the busy
 one, and freezing a quiet page costs it memory.
+
+## Startup time, and RAM once more (2026-10-19)
+
+`--speed-test`, first tab drawn, six runs each side alternating, GPU off,
+Linux x64, 4 cores:
+
+```
+                       ready (ms)    first tab drawn (ms)
+before                 148-188       382-512   median ~450
+after                  119-156       340-377   median ~365
+```
+
+A bare Electron app is `ready` at ~82ms. Ours was at ~175 because everything
+`main.js` does before `whenReady` runs on the same thread first, and a CPU
+profile of that stretch put three things on top:
+
+**Compiling our modules: ~35ms.** `module.enableCompileCache()` in `main.js`
+keeps V8's code for them in `<userData>/Compile Cache` (~1MB), keyed by each
+file's contents, so an update recompiles only what changed. It works from inside
+an asar (checked with a packed app). Not in a private window, which writes
+nothing. Cost: the bench below reads 1-2MB higher with it on, inside the noise,
+because cached functions arrive compiled rather than when first called.
+
+**The Linux window icon: ~14ms.** A 1024px PNG decoded and scaled before the
+window existed. It is now set when the window is first shown, and the scaled
+image is kept for later windows.
+
+**`/proc/self/smaps`: ~6ms.** Read in full for the page-merging warning before
+the first window, although merging cannot happen while KSM's own switch is off,
+which it is by default. KSM's switch is read first now, and the full read only
+happens, ten seconds in, when it is off.
+
+`codeCache: true` on the `debrowser://` scheme was also tried, for the pages'
+own scripts: new tab and page-switch timings did not move, so it was not taken.
+
+**RAM.** Six-tab bench, three runs each side: before 363-366MB, after
+366-370MB, the difference being the compile cache above (365-368 with it off).
+No new lever found: this round looked for one in the per-process breakdown
+(browser 118, tabs 177 over 7 renderers, utility 27, zygote 25, GPU 21; our
+browser heap 13MB + 3MB external) and every remaining candidate is one already
+measured null in "Down to the allocator".
