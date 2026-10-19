@@ -992,7 +992,20 @@ class BrowserShell {
       // Only ever itself. A panel replaced by another is removed at once, and
       // on Windows its blur can arrive after that - when the panel on screen
       // is already the new one, which this used to close in its place.
-      wc.on('blur', () => { if (this.sheetView === sheetView) this.closeSheet({ blurred: true }); });
+      //
+      // Not a question. It is answered, not clicked away from, and the page
+      // behind it takes the keyboard on its own - a sign-in that has just
+      // submitted loads the next page, which focused itself and closed "Save
+      // password?" as "Not now" before the user had read it. The keyboard goes
+      // back to the question, so Escape and Enter still reach it; only while
+      // this window is the one in front, so switching apps is left alone.
+      wc.on('blur', () => {
+        if (this.sheetView !== sheetView) return;
+        if (page !== 'ask') { this.closeSheet({ blurred: true }); return; }
+        setImmediate(() => {
+          if (this.sheetView === sheetView && !wc.isDestroyed() && !this.window.isDestroyed() && this.window.isFocused()) wc.focus();
+        });
+      });
     });
   }
 
