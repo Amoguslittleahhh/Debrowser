@@ -423,6 +423,7 @@ async function main() {
     fs.writeFileSync(template, require('../src/main/incognito/tor').launcherTemplate(), { mode: 0o600 });
     env.FAKE_TOR_FIXTURE_PORT = String(fixtures.port);
     if (tls.port) env.FAKE_TOR_TLS_PORT = String(tls.port);
+    env.FAKE_TOR_SIGNIN_PORT = String(signIn.port);
     env.FAKE_TOR_NAMES = namesFile;
     const args = browserArgs.filter((a) => !a.startsWith('--incognito-proxy-port='));
     launch = [helper, [privateRoot, path.join(__dirname, 'fake-tor.js'), template, '--', electron, ...args]];
