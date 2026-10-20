@@ -232,8 +232,12 @@ jobs:
       # Runs the real suite against real renderers before anything is packaged,
       # on the platform being packaged. This is the step that would have caught
       # every packaging bug found while writing this config.
+      # A bound on every smoke run, as the leak tests have: a test that waits
+      # on something that never comes fails here, instead of holding the
+      # runner for hours (a Windows run of 2.6.0 sat four hours on one).
       - name: Smoke test (headless)
         if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 45
         run: npm run smoke:headless
 
       # Every page measured against the rules that hold on every platform:
@@ -253,6 +257,7 @@ jobs:
 
       - name: Smoke test
         if: matrix.os == 'windows-latest'
+        timeout-minutes: 45
         run: npm run smoke
 
       # Incognito's leak test: every request through a stand-in for Tor that
@@ -314,6 +319,7 @@ jobs:
         id: mac_smoke
         if: matrix.os == 'macos-latest'
         continue-on-error: true
+        timeout-minutes: 45
         run: npm run smoke
 
       - name: Report the macOS smoke result
