@@ -53,6 +53,24 @@ function isThirdParty(requestUrl, pageUrl) {
   return Boolean(page && target && page !== target);
 }
 
+/**
+ * Sign-in providers whose own frames, drawn inside a site, sign the user in:
+ * Google's "Sign in with Google" and "Continue as ...", Apple's and
+ * Microsoft's buttons, Facebook's. Their frame and what it loads keep the
+ * provider's cookies - nothing else from them does, and no one else's.
+ */
+const SIGN_IN_FRAMES = /(^|\.)(accounts\.google\.com|appleid\.apple\.com|login\.microsoftonline\.com|login\.live\.com|www\.facebook\.com)$/i;
+function hostOf(url) {
+  try { return new URL(url).hostname; } catch { return ''; }
+}
+function isSignInFrame(details) {
+  if (!SIGN_IN_FRAMES.test(hostOf(details.url))) return false;
+  if (details.resourceType === 'subFrame') return true;
+  let frameUrl = '';
+  try { frameUrl = details.frame?.url || ''; } catch { /* frame gone */ }
+  return SIGN_IN_FRAMES.test(hostOf(frameUrl)) && siteOf(frameUrl) === siteOf(details.url);
+}
+
 const dropHeader = (headers, name) => {
   let dropped = false;
   const out = {};
@@ -77,7 +95,7 @@ class ThirdPartyCookies {
   refuses(details) {
     if (details.resourceType === 'mainFrame' || this.enabled() === false) return false;
     const page = pageOf(details);
-    return Boolean(page && isThirdParty(details.url, page) && !this.allowedOn(page));
+    return Boolean(page && isThirdParty(details.url, page) && !this.allowedOn(page) && !isSignInFrame(details));
   }
 
   attach(session) {
@@ -95,4 +113,4 @@ class ThirdPartyCookies {
   }
 }
 
-module.exports = { ThirdPartyCookies, isThirdParty, siteOf };
+module.exports = { ThirdPartyCookies, isThirdParty, isSignInFrame, siteOf };

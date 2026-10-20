@@ -118,7 +118,7 @@ async function signInRoundTrip({ check, waitFor, sleep, tabs }) {
   } finally {
     ses.setCertificateVerifyProc(null);
     tabs.close(tab.id);
-    await new Promise((r) => server.close(r));
+    server.closeAllConnections(); await new Promise((r) => server.close(r));
   }
 }
 module.exports = async function securityFeature(t) {
@@ -270,10 +270,21 @@ module.exports = async function securityFeature(t) {
   check('Security: every kind of file that runs when opened is asked about first', missed.length === 0, missed.join(', '));
   check('Security: documents are not called programs', !runsAsProgram('report.pdf') && !runsAsProgram('photo.jpg'));
 
-  await new Promise((r) => server.close(r));
+  server.closeAllConnections(); await new Promise((r) => server.close(r));
 
   await signInPopups(t);
   await signInRoundTrip(t);
+  {
+    const { isSignInFrame } = require('../../protection/third-party');
+    const { check } = t;
+    check('Sign-in buttons: Google\'s frame on a site keeps its cookies',
+      isSignInFrame({ url: 'https://accounts.google.com/gsi/button', resourceType: 'subFrame' }) &&
+      isSignInFrame({ url: 'https://accounts.google.com/gsi/status', resourceType: 'xhr', frame: { url: 'https://accounts.google.com/gsi/iframe/select' } }));
+    check('Sign-in buttons: nothing else gets the exception - a site\'s own call to Google, or a tracker in Google\'s frame',
+      !isSignInFrame({ url: 'https://accounts.google.com/gsi/status', resourceType: 'xhr', frame: { url: 'https://site.example/' } }) &&
+      !isSignInFrame({ url: 'https://tracker.example/p', resourceType: 'image', frame: { url: 'https://accounts.google.com/gsi/iframe/select' } }) &&
+      !isSignInFrame({ url: 'https://ads.google.com/x', resourceType: 'subFrame' }));
+  }
 };
 
 /**
@@ -339,6 +350,6 @@ async function signInPopups({ check, waitFor, sleep, tabs }) {
   } finally {
     ses.setCertificateVerifyProc(null);
     tabs.close(tab.id);
-    await new Promise((r) => server.close(r));
+    server.closeAllConnections(); await new Promise((r) => server.close(r));
   }
 }

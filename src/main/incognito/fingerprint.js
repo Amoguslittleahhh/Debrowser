@@ -151,6 +151,13 @@ async function apply(tab) {
     cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: scrub.sourceFor(seedOf(tab.wc), PROFILE.cores, PROFILE.languages) }),
     ...coverHooks.map((fn) => Promise.resolve(fn(tab)).then((ok) => (ok === false ? null : true), () => null))
   ]);
+  // A pop-up shares its opener's renderer, whose locale override is already
+  // on, and Chromium refuses a second one there. Refused but in effect is
+  // covered: the page reads the uniform locale either way.
+  if (results[1] === null) {
+    const r = await cdp.send('Runtime.evaluate', { expression: 'Intl.DateTimeFormat().resolvedOptions().locale', returnByValue: true });
+    if (r && r.result && r.result.value === PROFILE.locale) results[1] = true;
+  }
   // Last: from here every new frame and worker is held until it is covered.
   results.push(await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }));
   return results.every((r) => r !== null);

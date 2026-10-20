@@ -379,6 +379,46 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
   }
   step('badCertificate', badCertificate);
 
+  // A sign-in in a private window: a pop-up to another site is a window of
+  // its own there (no Peek), shielded like a tab, and still its opener's.
+  const signInPort = Number(argValue('leak-signin-port'));
+  let signIn = { error: 'no sign-in fixture' };
+  if (signInPort) {
+    const { BaseWindow } = require('electron');
+    const crypto = require('crypto');
+    const fs = require('fs');
+    const ours = new crypto.X509Certificate(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'test', 'certs', 'localhost-cert.pem'))).fingerprint256;
+    const trust = (req, done) => {
+      let mine = false;
+      try { mine = (req.hostname === 'siteapp.test' || req.hostname === 'idpsso.test') && new crypto.X509Certificate(req.certificate.data).fingerprint256 === ours; } catch { /* not ours */ }
+      done(mine ? 0 : -2);
+    };
+    const before = new Set(BaseWindow.getAllWindows());
+    const tabCount = tabs.all().length;
+    const siTab = tabs.create({ url: 'about:blank' });
+    await waitFor(() => siTab.isLive && !siTab.loading, 10_000);
+    siTab.wc.session.setCertificateVerifyProc(trust);
+    let sawWindow = false;
+    siTab.wc.loadURL(`https://siteapp.test:${signInPort}/app`).catch(() => {});
+    await waitFor(() => {
+      if (BaseWindow.getAllWindows().some((w) => !before.has(w))) sawWindow = true;
+      return siTab.wc.getTitle() === 'signed in private-ok';
+    }, 30_000);
+    await waitFor(() => BaseWindow.getAllWindows().every((w) => before.has(w) || w.isDestroyed()), 5_000);
+    signIn = {
+      title: siTab.wc.getTitle(),
+      window: sawWindow,
+      windowsLeft: BaseWindow.getAllWindows().filter((w) => !before.has(w) && !w.isDestroyed()).length,
+      tabsAdded: tabs.all().length - tabCount - 1,
+      guard: siTab.signInGuard,
+      at: BaseWindow.getAllWindows().filter((w) => !before.has(w) && !w.isDestroyed())
+        .map((w) => w.contentView.children.map((v) => v.webContents && !v.webContents.isDestroyed() ? v.webContents.getURL().slice(0, 80) : '').join(' + '))
+    };
+    siTab.wc.session.setCertificateVerifyProc(null);
+    tabs.close(siTab.id);
+  }
+  step('signIn', signIn);
+
   // Camouflage: with it on, each real page load brings one decoy load, on a
   // circuit that page is not using; with it off, none. The harness reads
   // which ports the pages and the decoys arrived on.

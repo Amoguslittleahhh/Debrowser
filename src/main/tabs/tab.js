@@ -25,6 +25,8 @@ const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload
 const pages = require('../pages');
 const errorPage = require('../error-page');
 const { createPopupWindow, isPriorityPopup } = require('../popup-window');
+// Google's "Couldn't sign you in - This browser or app may not be secure".
+const isGoogleRefusal = (url) => /^https:\/\/accounts\.google\.com\/(v\d+\/)?signin\/rejected/i.test(String(url || ''));
 const palette = require('../palette');
 const { INCOGNITO } = require('../incognito/mode');
 const fingerprint = require('../incognito/fingerprint');
@@ -806,6 +808,7 @@ class Tab {
     wc.on('did-finish-load', () => this.emit('loaded'));
     // Each document, as soon as it is parsed: when a site's own style goes in (site-styles.js).
     wc.on('dom-ready', () => this.emit('dom-ready'));
+    wc.on('did-navigate', (_e, url) => { if (isGoogleRefusal(url)) this.emit('sign-in-refused', { url }); });
 
     // New windows open as tabs rather than popups.
     // A shift-click, or a page's own pop-up, asks for a new window: that is a
@@ -827,6 +830,7 @@ class Tab {
         return { action: 'deny' };
       });
       popup.on('will-navigate', (event, to) => { if (pages.isInternal(to)) event.preventDefault(); });
+      popup.on('did-navigate', (_e, to) => { if (isGoogleRefusal(to)) this.emit('sign-in-refused', { url: to }); });
       popup.on('will-redirect', (event, to) => { if (pages.isInternal(to)) event.preventDefault(); });
     };
     // At most a few at once, so a page cannot bury the screen in them; the
@@ -834,10 +838,11 @@ class Tab {
     // window first and saying where afterwards - waits unseen for its first
     // address, and is a Peek after all if that is not a sign-in.
     const signIns = new Set();
-    const asSignIn = (pending) => ({ action: 'allow', createWindow: (options) => createPopupWindow(options, {
+    const asSignIn = (pending, url = '') => ({ action: 'allow', createWindow: (options) => createPopupWindow(options, {
       pending,
       opener: wc.isDestroyed() ? null : wc.getURL(),
       onOpen: (win, popup) => {
+        if (INCOGNITO) this.guardPrivatePopup(win, popup, url);
         signIns.add(win);
         this.signingIn = true;
         win.on('closed', () => { signIns.delete(win); this.signingIn = signIns.size > 0; });
@@ -847,8 +852,12 @@ class Tab {
     }) });
     wc.setWindowOpenHandler(({ url, disposition }) => {
       if (disposition === 'new-window' && signIns.size < 3) {
-        if (isPriorityPopup(url, wc.getURL())) return asSignIn(false);
+        if (isPriorityPopup(url, wc.getURL())) return asSignIn(false, url);
         if (!url || url === 'about:blank') return asSignIn(true);
+        // A private window has no Peek to keep an opener in, and a tab would
+        // cut it: a pop-up to another site there is a window of its own, so
+        // a sign-in on an address no list knows still hears back.
+        if (INCOGNITO && /^https:/i.test(url) && isPriorityPopup(url, wc.getURL(), { anyPath: true })) return asSignIn(false, url);
       }
       // Any other pop-up is a Peek that keeps its opener, so a sign-in on an
       // address no list knows still hears back. Where there is no Peek to
@@ -1244,6 +1253,39 @@ class Tab {
     if (this.view) this.view.setBounds(bounds);
     // The screen a private page reports is its own letterboxed size.
     if (INCOGNITO && this.wc) fingerprint.setScreen(this, bounds);
+  }
+
+  /**
+   * A private window's pop-up gets what its tabs get: WebRTC kept to the
+   * proxy, and the fingerprint overrides on before the page loads. Not by
+   * the tab's way (a blank page, then the browser loading the address): a
+   * load the browser starts, to another site, cuts the pop-up from its
+   * opener, and the sign-in never hears back. So the first load is stopped,
+   * the overrides go on the pop-up's empty first document, and that document
+   * - still its opener's - goes on to the address itself.
+   */
+  guardPrivatePopup(win, popup, url) {
+    popup.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+    popup.stop();
+    const shim = { id: `${this.id}-signin`, wc: popup, cdp: new CdpSession(popup, this.log), log: this.log };
+    shim.cdp.keepAttached = true;
+    const size = win.getContentBounds();
+    fingerprint.setScreen(shim, fingerprint.letterbox({ x: 0, y: 0, width: size.width, height: size.height }));
+    fingerprint.apply(shim).then((ok) => {
+      this.signInGuard = ok ? 'covered' : 'refused';
+      if (popup.isDestroyed()) return;
+      if (!ok) { fingerprint.block(shim, 'Its protection against being recognised could not be switched on, so it did not load the page.'); return; }
+      // The overrides go with the debugger: if it is ever taken off, so is the window.
+      popup.debugger.on('detach', () => { if (!win.isDestroyed()) win.destroy(); });
+      // Through the debugger: Electron's own script call waits for a load
+      // the stopped pop-up never has.
+      if (url) shim.cdp.send('Runtime.evaluate', { expression: `location.replace(${JSON.stringify(url)})` });
+    }, (err) => {
+      this.signInGuard = `error ${err.message}`;
+      this.log(`sign-in window shield failed: ${err.message}`);
+      if (!win.isDestroyed()) win.destroy();
+    });
+    win.on('closed', () => fingerprint.release(popup));
   }
 
   emit(event, payload) {

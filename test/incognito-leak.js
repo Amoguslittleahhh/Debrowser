@@ -104,6 +104,36 @@ function selfSignedServer() {
 }
 
 /**
+ * A sign-in from start to finish, over HTTPS with the repository's test
+ * certificate (the browser is told to trust it for these two hosts only):
+ * siteapp.test opens idpsso.test in a pop-up, which sends it back to the
+ * site's /callback with a code; the callback hands the code to its opener
+ * and closes.
+ */
+function signInServer() {
+  const certs = path.join(__dirname, 'certs');
+  const server = require('https').createServer({
+    key: fs.readFileSync(path.join(certs, 'localhost-key.pem')),
+    cert: fs.readFileSync(path.join(certs, 'localhost-cert.pem'))
+  }, (req, res) => {
+    const u = new URL(req.url, 'https://x');
+    if (u.pathname === '/oauth/authorize') {
+      res.writeHead(302, { Location: `https://siteapp.test:${u.searchParams.get('port')}/callback?code=private-ok` });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(u.pathname === '/callback'
+      ? `<!doctype html><script>window.opener && window.opener.postMessage({ code: new URLSearchParams(location.search).get('code') }, location.origin); setTimeout(() => window.close(), 300);</script>`
+      : `<!doctype html><title>app</title><script>
+          addEventListener('message', (e) => { if (e.origin === location.origin && e.data && e.data.code) document.title = 'signed in ' + e.data.code; });
+          window.open('https://idpsso.test:' + location.port + '/oauth/authorize?port=' + location.port, 'signin', 'popup,width=420,height=520');
+        </script>`);
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, server })));
+}
+
+/**
  * A font installed on this machine that a private window must not show pages:
  * any family not on the allowed list. Linux only - elsewhere fonts are not
  * restricted, and the connection page says so.
@@ -268,7 +298,9 @@ async function main() {
   // An HTTPS site with a certificate nobody vouches for - what an exit relay
   // intercepting the connection would present. Its page must never show.
   const tls = await selfSignedServer();
-  const route = (host) => (host.startsWith('tls.') && tls.port ? tls.port : fixtures.port);
+  const signIn = await signInServer();
+  const route = (host) => (host.startsWith('tls.') && tls.port ? tls.port
+    : host === 'siteapp.test' || host === 'idpsso.test' ? signIn.port : fixtures.port);
   const stub = await socksPoolOnPorts(POOL_SIZE, route);
   const ip = canaryAddress();
   if (!ip) {
@@ -335,6 +367,7 @@ async function main() {
     // Decoys for the camouflage check: the fixture, never a real site.
     `--leak-decoys=http://decoy.test:${fixtures.port}/idle.html`,
     `--leak-tls-port=${tls.port || 0}`,
+    `--leak-signin-port=${signIn.port}`,
     `--leak-hidden-font=${hiddenFont() || ''}`,
     // Started the way "Keep a private window ready" starts it.
     '--warm', `--warm-parent=${process.pid}`];
@@ -577,6 +610,10 @@ async function main() {
   const cleanArrival = (r) => r && r.gps === false && r.samePixels === true && r.freshTimestamp === true;
   check('a photo dropped or pasted onto a page arrives without its GPS data or its timestamp',
     cleanArrival(dr.drop) && cleanArrival(dr.paste), JSON.stringify(dr));
+
+  const si = s.signIn || {};
+  check('a sign-in pop-up in a private window answers its site and closes itself',
+    si.title === 'signed in private-ok' && si.windowsLeft === 0 && si.tabsAdded === 0 && si.window === true, JSON.stringify(si));
 
   const cert = s.badCertificate || {};
   check('a site with a certificate nobody vouches for is refused, with no way past it',
