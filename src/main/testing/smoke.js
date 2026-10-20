@@ -5104,11 +5104,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       const field = await run('document.getElementById("user").getBoundingClientRect().bottom');
       const box = shell.passkeyView ? shell.passkeyView.getBounds() : null;
       const under = box && Math.abs(box.y + 16 - 4 - (page.view.getBounds().y + field)) <= 2;
+      // The field keeps the keyboard: the dropdown is only shown, and typing
+      // an email by hand still goes into the field.
+      const keptKeys = page.wc.isFocused() && !shell.passkeysFocused();
       runCommand('passkey-pick', { id: alice });
       const fromField = await run('window.waiting');
       check('a page waiting on its sign-in field gets the passkey dropdown under that field',
-        conditional === true && !before && under && fromField === alice,
-        `available ${conditional}, shown before focus ${before}, under the field ${Boolean(under)}, ` +
+        conditional === true && !before && under && keptKeys && fromField === alice,
+        `available ${conditional}, shown before focus ${before}, under the field ${Boolean(under)}, field kept the keyboard ${keptKeys}, ` +
         `signed in as ${fromField === alice ? 'Alice, as picked' : fromField}`);
 
       // The page gives up waiting: the list goes, and nothing is left behind.
