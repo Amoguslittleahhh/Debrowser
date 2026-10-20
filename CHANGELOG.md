@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.6.0
 
-Search suggestions now come from your search engine as you type, in the address bar and on the new tab page, and Debrowser starts and opens typed sites faster. YouTube videos play again, sign-in pop-ups open in a window of their own, and "Save password?" waits for your answer. Animations are smoother throughout. Several security fixes close ways for websites, local files and extensions to reach what they shouldn't.
+In Debrowser 2.6.0, search suggestions come from your search engine as you type, in the address bar and on the new tab page, and Debrowser starts and opens typed sites faster. YouTube videos play again, sign-in pop-ups open in a window of their own, and "Save password?" waits for your answer. Animations are smoother throughout. Several security fixes close ways for websites, local files and extensions to reach what they shouldn't.
 
 ### New
 
