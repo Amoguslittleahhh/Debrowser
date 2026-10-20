@@ -13,12 +13,17 @@ if (require('../terminal/launch').launch()) return;
 // V8's compiled code for the browser's own modules, kept between launches:
 // compiling them was ~35ms of every start, all of it before the first window
 // (the first launch after an update compiles once more). Not in a private
-// window, which writes nothing.
+// window, which writes nothing. Nor in an installed Windows or macOS build:
+// there the app's own files are integrity-checked (the ASAR fuse), and code
+// cached in the profile, which anything running as the user can write, would
+// be a way round that check. Linux checks neither, so it loses nothing.
 if (!process.argv.includes('--incognito')) {
   try {
     const { app: electronApp } = require('electron');
-    require('module').enableCompileCache(require('path').join(
-      process.env.DEBROWSER_TEST_PROFILE || electronApp.getPath('userData'), 'Compile Cache'));
+    if (!electronApp.isPackaged || process.platform === 'linux') {
+      require('module').enableCompileCache(require('path').join(
+        process.env.DEBROWSER_TEST_PROFILE || electronApp.getPath('userData'), 'Compile Cache'));
+    }
   } catch { /* a start without it is only slower */ }
 }
 
