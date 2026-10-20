@@ -41,14 +41,24 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { getDomain } = require('tldts-experimental');
 
-/** Longest a listing may take before the system's own dialog is used instead. */
-const LIST_TIMEOUT_MS = 4000;
+/**
+ * Longest a listing may take before the system's own dialog is used instead.
+ * Every millisecond of it is a wait before Windows Hello can appear.
+ */
+const LIST_TIMEOUT_MS = 2000;
 
 /** How long the dropdown outlives the field's blur, for a click on itself. */
 const BLUR_GRACE_MS = 150;
 
 /** How long one listing of a site's passkeys answers every request for it. */
 const LISTING_FRESH_MS = 2000;
+
+/**
+ * How long a listing that found passkeys still answers at once while a new
+ * one is made behind it: a site asks again when its sign-in button is
+ * pressed, and waiting on a fresh helper then held Windows Hello back.
+ */
+const LISTING_REUSE_MS = 5 * 60_000;
 
 /** No second "Save a passkey?" from a tab for this long after the last. */
 const SAVE_QUIET_MS = 10_000;
@@ -198,10 +208,20 @@ class PasskeyBroker {
     if (this.store) return Promise.resolve().then(() => this.list(site)).catch(() => null);
     const held = this.listing.get(site);
     if (held && Date.now() - held.at < LISTING_FRESH_MS) return held.promise;
-    const promise = Promise.resolve().then(() => this.list(site)).catch(() => null);
-    this.listing.set(site, { promise, at: Date.now() });
+    const entry = { at: Date.now(), found: null };
+    entry.promise = Promise.resolve().then(() => this.list(site)).catch(() => null).then((accounts) => {
+      // Kept for the next request only if it found something: a site with
+      // none is asked afresh, so a passkey just made shows up at once.
+      if (accounts && accounts.length) entry.found = accounts;
+      else if (accounts === null && this.listing.get(site) === entry && held && held.found) this.listing.set(site, held);
+      return accounts;
+    });
+    this.listing.delete(site);
+    this.listing.set(site, entry);
     if (this.listing.size > 32) this.listing.delete(this.listing.keys().next().value);
-    return promise;
+    // An earlier listing answers now; the new one, under way, replaces it.
+    if (held && held.found && Date.now() - held.at < LISTING_REUSE_MS) return Promise.resolve(held.found);
+    return entry.promise;
   }
 
   /** Answer a tab's request, if it has one, and take its list away. */
@@ -255,7 +275,7 @@ class PasskeyBroker {
     let zoom = 1;
     try { zoom = req.tab.wc.getZoomFactor() || 1; } catch { /* default */ }
     const anchor = rect
-      ? { x: b.x + rect.left * zoom, y: b.y + rect.bottom * zoom, width: rect.width * zoom }
+      ? { x: b.x + rect.left * zoom, y: b.y + rect.bottom * zoom, top: b.y + rect.top * zoom, pageTop: b.y, width: rect.width * zoom }
       : { x: b.x + b.width / 2, y: b.y, width: 0 };
     shell.showPasskeys({
       mode: rect ? 'dropdown' : 'chooser',

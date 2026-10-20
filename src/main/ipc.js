@@ -205,7 +205,9 @@ class IpcHub {
       if (!tab) return;
       const ok = rect && typeof rect === 'object' &&
         ['left', 'bottom', 'width'].every((k) => Number.isFinite(rect[k]) && Math.abs(rect[k]) < 1e5);
-      broker.field(tab, ok ? { left: rect.left, bottom: rect.bottom, width: rect.width } : null);
+      // Its top, where sent, lets a dropdown with no room below open above it.
+      const top = Number.isFinite(rect && rect.top) && Math.abs(rect.top) < 1e5 ? rect.top : rect && rect.bottom;
+      broker.field(tab, ok ? { left: rect.left, top, bottom: rect.bottom, width: rect.width } : null);
     });
     ipcMain.on('debrowser:passkey-abort', (event) => {
       const tab = pageTab(event);
