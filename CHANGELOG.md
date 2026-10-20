@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+Search suggestions now come from your search engine as you type, in the address bar and on the new tab page, and Debrowser starts and opens typed sites faster. YouTube videos play again, sign-in pop-ups open in a window of their own, and "Save password?" waits for your answer. Animations are smoother throughout. Several security fixes close ways for websites, local files and extensions to reach what they shouldn't.
+
 ### New
 
 - **Search suggestions as you type.** The address bar and the new tab page's search field now show what your search engine suggests for the words you are typing, under the search for exactly what you typed. They come from Google, DuckDuckGo, Bing or Startpage, whichever you search with; Mojeek has none. What you type is sent without your cookies, nothing is sent for something that looks like a web address, and private windows never send it. Turn it off in Settings with Show search suggestions.
@@ -11,6 +13,10 @@
 
 - **Smoother, livelier animations.** Menus, tabs, hover cards, toasts and pop-ups now ease in and out and settle into place instead of stopping dead. A closing tab dips before it folds away, menu rows arrive one after another, the bookmark star pops when you save a page, and the download arrow lands in its tray. Large dialogs and pages glide in without bouncing. Calm and "reduce motion" still turn all of this off.
 - **Sites typed on the new tab page open sooner.** Debrowser now starts the process a website needs while you are still typing, instead of after Enter, which took about a fifth off the time to the page's first picture in our tests (around 80ms instead of 99ms). It is dropped after 15 seconds if you do not press Enter, and never started in a private window or with Preload pages you point at off.
+- **Debrowser starts faster.** The first page now appears about a fifth sooner after launch (around 365ms instead of 450ms in our tests). The browser keeps its own compiled code between launches instead of compiling it again every time, and on Linux two pieces of setup that do not affect the first page now wait until it is up. The first launch after an update is as fast as before.
+- **Extensions and downloads beside the memory meter.** With the tabs down the side and the sidebar tucked away, the extensions and downloads buttons sat at the far left, ahead of back and forward. They now sit on the right, beside the memory meter, and the address bar is a little shorter to make room.
+- **The tucked-away sidebar answers faster.** It notices the pointer at the window's edge sooner, slides in and out a little quicker, and goes away sooner once the pointer leaves it.
+- **A quieter new tab page.** The row of most-used sites under the search field is gone in every design, as it already was in Calm, and the logo and search field sit lower, in the middle of the page. Your recent pages are still in "Continue with these tabs" below.
 
 ### Fixed
 
@@ -19,16 +25,6 @@
 - **"Save password?" waits for your answer.** After signing in, the next page loading could take the keyboard and close the question as "Not now" before you got to it. It now stays until you choose Save or Not now.
 - **z.ai and other well-known sites are no longer called phishing.** One of the phishing lists Debrowser checks had picked up chat.z.ai by mistake, so the whole site was stopped with a phishing warning. A phishing list entry no longer stops a well-known site as a whole (z.ai, ChatGPT, Claude, Google, GitHub and about forty others). Look-alikes of those sites, and malware entries, are still stopped.
 - **Windows: no more "Bogus ed25519 key in microdesc" in a private window.** With "Remember Tor between sessions" on (the default), Debrowser kept a copy of a file Tor was still writing when it was closed, and the next private window read the half-written entry back and showed Tor's complaint about it as if Tor could not connect. That file is no longer kept, and a complaint about one bad relay description is no longer shown as a problem.
-
-### Improved
-
-- **Debrowser starts faster.** The first page now appears about a fifth sooner after launch (around 365ms instead of 450ms in our tests). The browser keeps its own compiled code between launches instead of compiling it again every time, and on Linux two pieces of setup that do not affect the first page now wait until it is up. The first launch after an update is as fast as before.
-- **Extensions and downloads beside the memory meter.** With the tabs down the side and the sidebar tucked away, the extensions and downloads buttons sat at the far left, ahead of back and forward. They now sit on the right, beside the memory meter, and the address bar is a little shorter to make room.
-- **The tucked-away sidebar answers faster.** It notices the pointer at the window's edge sooner, slides in and out a little quicker, and goes away sooner once the pointer leaves it.
-- **A quieter new tab page.** The row of most-used sites under the search field is gone in every design, as it already was in Calm, and the logo and search field sit lower, in the middle of the page. Your recent pages are still in "Continue with these tabs" below.
-
-### Fixed
-
 - **The bookmarks bar shows with the sidebar tucked away.** With the tabs down the side and tucked away, the bookmarks bar left an empty strip under the address bar and only filled in when the sidebar came out.
 
 ### Security
