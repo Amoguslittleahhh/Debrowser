@@ -9,6 +9,21 @@ const palette = require('./palette');
 
 const STRIP = 34;
 
+/**
+ * Pop-ups that must be real windows: sign-in providers, and browser consoles
+ * such as Google Cloud's SSH, whose pages talk back to their opener.
+ */
+const PRIORITY_HOSTS = /(^|\.)(accounts\.google\.com|ssh\.cloud\.google\.com|shell\.cloud\.google\.com|login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|appleid\.apple\.com|accounts\.firefox\.com|id\.atlassian\.com|auth0\.com|okta\.com|oktapreview\.com|onelogin\.com|duosecurity\.com|accounts\.spotify\.com|id\.twitch\.tv|firebaseapp\.com)$/i;
+// Facebook, GitHub, X, Discord, Steam and the rest sign in under a path on
+// their main host; Firebase's handler is /__/auth/handler, Supabase's /auth/v1.
+const PRIORITY_PATH = /\/(oauth2?|auth|authorize|openid|sso|saml|signin|sign-in|login|ap\/signin|ap\/oa)(\/|$|\?)/i;
+function isPriorityPopup(url) {
+  let u;
+  try { u = new URL(url); } catch { return false; }
+  if (!/^https:$/i.test(u.protocol)) return false;
+  return PRIORITY_HOSTS.test(u.hostname) || PRIORITY_PATH.test(u.pathname);
+}
+
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /**
@@ -51,7 +66,7 @@ function show(strip, url) {
  * Build the window around the page Electron made for the pop-up; returns its
  * webContents, as setWindowOpenHandler's createWindow wants.
  */
-function createPopupWindow(options, { onOpen } = {}) {
+function createPopupWindow(options, { onOpen, pending = false, onReject } = {}) {
   const parent = BaseWindow.getFocusedWindow();
   const width = Math.min(Math.max(Number(options.width) || 500, 360), 1000);
   const height = Math.min(Math.max(Number(options.height) || 640, 300), 900);
@@ -105,8 +120,28 @@ function createPopupWindow(options, { onOpen } = {}) {
     if (!wc.isDestroyed()) wc.close();
     if (!strip.webContents.isDestroyed()) strip.webContents.close();
   });
-  wc.once('ready-to-show', () => { if (!win.isDestroyed()) { win.show(); page.webContents.focus(); } });
-  setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 1500);
+  const reveal = () => { if (!win.isDestroyed() && !pending && !win.isVisible()) { win.show(); wc.focus(); } };
+  wc.once('ready-to-show', reveal);
+  setTimeout(reveal, 1500);
+  if (pending) {
+    // A blank pop-up shows only once it is sent to a sign-in; sent anywhere
+    // else, or nowhere, it was not one.
+    wc.on('did-start-navigation', (d) => {
+      if (!pending || !d.isMainFrame || d.url === 'about:blank') return;
+      if (isPriorityPopup(d.url)) { pending = false; reveal(); return; }
+      pending = false;
+      win.destroy();
+      if (onReject) onReject(d.url);
+    });
+    setTimeout(() => { if (pending && !win.isDestroyed()) win.destroy(); }, 5000);
+  }
+  // Ctrl+W (Cmd+W) closes it, as any window.
+  wc.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && (input.control || input.meta) && !input.alt && String(input.key).toLowerCase() === 'w') {
+      e.preventDefault();
+      win.close();
+    }
+  });
   if (onOpen) onOpen(win, wc);
   return wc;
 }
@@ -116,4 +151,4 @@ function centre(parent, size, axis) {
   return Math.round(axis === 'x' ? b.x + (b.width - size) / 2 : b.y + Math.max(0, (b.height - size) / 3));
 }
 
-module.exports = { createPopupWindow, stripHtml };
+module.exports = { createPopupWindow, isPriorityPopup, stripHtml };

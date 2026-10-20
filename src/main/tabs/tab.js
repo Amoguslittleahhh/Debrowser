@@ -22,23 +22,9 @@ const PROBE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'probe-preload
 // must never get it. Which one a tab loads is decided by `internal` below.
 const PAGE_PRELOAD = path.join(__dirname, '..', '..', 'preload', 'chrome-preload.js');
 
-/**
- * Pop-ups that must be real windows: sign-in providers, and browser consoles
- * such as Google Cloud's SSH, whose pages talk back to their opener.
- */
-const PRIORITY_HOSTS = /(^|\.)(accounts\.google\.com|ssh\.cloud\.google\.com|shell\.cloud\.google\.com|login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|appleid\.apple\.com|accounts\.firefox\.com|id\.atlassian\.com|auth0\.com|okta\.com|oktapreview\.com|onelogin\.com|duosecurity\.com|accounts\.spotify\.com|id\.twitch\.tv|discord\.com\/oauth2|steamcommunity\.com\/openid|amazon\.com\/ap\/oa)$/i;
-const PRIORITY_PATH = /\/(oauth2?|authorize|openid|sso|saml|signin|sign-in|login)(\/|$|\?)/i;
-function isPriorityPopup(url) {
-  let u;
-  try { u = new URL(url); } catch { return false; }
-  if (!/^https:$/i.test(u.protocol)) return false;
-  if (PRIORITY_HOSTS.test(u.hostname)) return true;
-  // Facebook, GitHub, X and the rest sign in under a path on their main host.
-  return PRIORITY_PATH.test(u.pathname);
-}
 const pages = require('../pages');
 const errorPage = require('../error-page');
-const { createPopupWindow } = require('../popup-window');
+const { createPopupWindow, isPriorityPopup } = require('../popup-window');
 const palette = require('../palette');
 const { INCOGNITO } = require('../incognito/mode');
 const fingerprint = require('../incognito/fingerprint');
@@ -843,9 +829,24 @@ class Tab {
       popup.on('will-navigate', (event, to) => { if (pages.isInternal(to)) event.preventDefault(); });
       popup.on('will-redirect', (event, to) => { if (pages.isInternal(to)) event.preventDefault(); });
     };
+    // At most a few at once, so a page cannot bury the screen in them; the
+    // rest are Peeks. A blank pop-up - a sign-in script's way of opening the
+    // window first and saying where afterwards - waits unseen for its first
+    // address, and is a Peek after all if that is not a sign-in.
+    const signIns = new Set();
+    const asSignIn = (pending) => ({ action: 'allow', createWindow: (options) => createPopupWindow(options, {
+      pending,
+      onOpen: (win, popup) => {
+        signIns.add(win);
+        win.on('closed', () => signIns.delete(win));
+        popupRules(win, popup);
+      },
+      onReject: (to) => { if (/^https?:/i.test(to)) this.emit('peek', { url: to }); }
+    }) });
     wc.setWindowOpenHandler(({ url, disposition }) => {
-      if (disposition === 'new-window' && isPriorityPopup(url)) {
-        return { action: 'allow', createWindow: (options) => createPopupWindow(options, { onOpen: popupRules }) };
+      if (disposition === 'new-window' && signIns.size < 3) {
+        if (isPriorityPopup(url)) return asSignIn(false);
+        if (!url || url === 'about:blank') return asSignIn(true);
       }
       this.emit(disposition === 'new-window' && /^https?:/i.test(url) ? 'peek' : 'open-tab', { url });
       return { action: 'deny' };
