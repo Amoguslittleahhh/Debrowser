@@ -1420,10 +1420,15 @@ class BrowserShell {
       });
       this.passkeyView = view;
       this.passkeyHeight = 0;
-      this.passkeyReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
+      // Into the window only once loaded: Chromium gives a view in a window
+      // the keyboard on its first load, which took it from the sign-in field
+      // the dropdown hangs from, so typing an email there typed nothing.
+      this.passkeyReady = new Promise((resolve) => view.webContents.once('did-finish-load', () => {
+        if (this.passkeyView === view && !this.window.isDestroyed()) this.window.contentView.addChildView(view);   // topmost
+        resolve();
+      }));
       view.webContents.loadFile(path.join(RENDERER_DIR, 'passkeys.html')).catch(() => {});
       view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
-      this.window.contentView.addChildView(view);   // topmost
     }
     const view = this.passkeyView;
     const EDGE = 16;   // passkeys.css's margin round the card, for its shadow
