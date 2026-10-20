@@ -262,9 +262,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const pulledWindows = pulled.map((t) => windowOps.of(t));
     const colours = new Set([first, ...pulledWindows].map((w) => w && w.color));
     const offered = windowOps.others(first.tabs.activeTab());
-    await sleep(300);
-    const band = await pulledWindows[0]?.shell.chromeView.webContents.executeJavaScript(
-      `[document.body.dataset.windows, getComputedStyle(document.body).getPropertyValue('--window').trim()]`).catch(() => null);
+    // Waited for, not slept on: a new window's strip is still starting on one
+    // slow core 300 ms after it opened, and drew the band a moment later.
+    let band = null;
+    await waitFor(async () => {
+      band = await pulledWindows[0]?.shell.chromeView.webContents.executeJavaScript(
+        `[document.body.dataset.windows, getComputedStyle(document.body).getPropertyValue('--window').trim()]`).catch(() => null);
+      return Array.isArray(band) && band[0] === 'several';
+    }, { timeoutMs: 5000 });
     for (const w of pulledWindows) if (w && w !== first) w.shell.close();
     await waitFor(() => windowOps.count() === startWindows, { timeoutMs: 5000 });
     check('tabs pulled out over a page make a window each, as many as wanted, each its own colour, offered by name in the tab menu',
@@ -348,6 +353,15 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   await home.wc.loadURL(pageUrl('idle.html')).catch(() => {});
 
   const heavy = tabs.create({ url: pageUrl('heavy.html'), activate: false, realise: true });
+  // The idle ladder's peak CPU (section 2), watched from the start and at
+  // every change of tier: on one slow core the tab is still loading - busy -
+  // when the governor first samples it, and is frozen for that before
+  // section 2 begins, so a watch started there saw only the frozen zero.
+  let heavyPeakCpu = 0;
+  const notePeak = () => { heavyPeakCpu = Math.max(heavyPeakCpu, heavy.cpu || 0); };
+  const heavyEmit = heavy.emit;
+  heavy.emit = function (event, payload) { if (event === 'updated') notePeak(); return heavyEmit.call(this, event, payload); };
+  const peakWatch = setInterval(notePeak, 50);
   const animated = tabs.create({ url: pageUrl('animated.html'), activate: false, realise: true });
   const form = tabs.create({ url: pageUrl('form.html'), activate: false, realise: true });
   const busy = tabs.create({ url: pageUrl('busy.html'), activate: false, realise: true });
@@ -463,8 +477,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // is what it is for - so a reading taken after the fact says "quiet" about
   // every frozen tab, including the ones that were frozen precisely because
   // they were busy. Only a sample from before the decision can tell them apart.
-  let heavyPeakCpu = 0;
-  const notePeak = () => { heavyPeakCpu = Math.max(heavyPeakCpu, heavy.cpu); };
+  // (heavyPeakCpu and notePeak are set up where the tab is created.)
 
   // "At least COLD", not "exactly COLD". The tab passes *through* COLD on its
   // way down, so an equality test polled every 200ms can miss it entirely - and
@@ -496,6 +509,8 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // *correct*, and an unconditional assertion fails on the governor doing the
   // right thing. The condition uses the peak seen before the decision, not the
   // current reading, for the reason given where `notePeak` is defined.
+  clearInterval(peakWatch);
+  heavy.emit = heavyEmit;
   const heavyWasQuiet = heavyPeakCpu < cfg.freezeCpuThreshold;
   check('a quiet tab is not frozen, because freezing it would only cost memory',
     !heavyWasQuiet || heavy.tier !== Tier.FROZEN,
@@ -1950,7 +1965,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       quick.page.webContents.getURL() === url, { timeoutMs: 8000 });
     const titled = loaded && await waitFor(async () => (await quick.bar.webContents.executeJavaScript(
       'document.getElementById("title").textContent').catch(() => '')) !== 'Loading…', { timeoutMs: 5000 });
-    await quick.bar.webContents.executeJavaScript('document.getElementById("promote").click()').catch(() => {});
+    // Bounded: on one slow core this once never settled, and the run hung
+    // here for a quarter of an hour with no check failing to say where.
+    await inTime(quick.bar.webContents.executeJavaScript('document.getElementById("promote").click()').catch(() => {}), 5000, null);
     const promoted = await waitFor(() => !shell.quick && tabs.all().length === before + 1, { timeoutMs: 5000 });
     const tab = tabs.all().find((t) => t.url === url);
     check('the quick window shows a link, and "Open in Debrowser" keeps it as a tab',
@@ -3604,8 +3621,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       await sleep(250);
       const byGutter = shell.sidebarOpen;
       await leave();
-      await sleep(200);   // the close delay (150ms), then partway into the 120ms slide
-      const slid = await inChrome(`document.body.classList.contains('sliding-out')`);
+      // The close delay (150ms), then the 120ms slide: watched for, since one
+      // fixed look at 200ms missed the slide on one slow core.
+      let slid = false;
+      await waitFor(async () => (slid = await inChrome(`document.body.classList.contains('sliding-out')`)) === true,
+        { timeoutMs: 600, pollMs: 15 });
       await settle();
       check('the left edge opens the side strip, and it slides away',
         byGutter && slid === !shell.reducedMotion() && !shell.sidebarOpen,
@@ -6083,6 +6103,11 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     cpuOf();
     await sleep(3000);
     const idleCpu = cpuOf();
+    // What the chrome was busy with, when it was: running animations by name.
+    const idleBusy = idleCpu >= 1 ? await inTime(chrome.executeJavaScript(`document.getAnimations()
+      .filter((a) => a.playState === 'running')
+      .map((a) => (a.animationName || a.transitionProperty || 'script') + '@' + ((a.effect && a.effect.target && (a.effect.target.id || a.effect.target.className)) || '?'))
+      .slice(0, 12)`).catch(() => null), 2000, null) : null;
 
     const newTabMs = median(newTab);
     const barMs = median(bar);
@@ -6096,7 +6121,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     check('performance budgets: cold start, new tab, command bar, tab switching, idle chrome',
       Number.isFinite(ownStartMs) && ownStartMs < 600 * SLACK && newTabMs < 100 * SLACK && barMs < 100 * SLACK && longest < 50 * SLACK && Number.isFinite(idleCpu) && idleCpu < 1 * SLACK,
       `cold start ${coldStartMs} ms, ${Math.round(ownStartMs)} ms of it after Electron was ready (budget ${600 * SLACK}), new tab ${Math.round(newTabMs)} ms (budget ${100 * SLACK}), command bar ${Math.round(barMs)} ms (${100 * SLACK}), ` +
-      `longest chrome task switching tabs ${Math.round(longest)} ms (${50 * SLACK}), idle chrome CPU ${idleCpu?.toFixed(2)}% (${SLACK}); ` +
+      `longest chrome task switching tabs ${Math.round(longest)} ms (${50 * SLACK}), idle chrome CPU ${idleCpu?.toFixed(2)}% (${SLACK})${idleBusy ? ` running ${JSON.stringify(idleBusy)}` : ''}; ` +
       `start-up steps (ms since the process started): ${JSON.stringify(global.debrowserBoot || {})}`);
   }
 
