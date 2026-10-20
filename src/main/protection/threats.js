@@ -112,6 +112,24 @@ function indexOf(entries) {
   return { hashes: BigUint64Array.from(pairs.map((p) => p[0])), kinds: Uint8Array.from(pairs.map((p) => p[1])) };
 }
 
+/**
+ * Well-known sites a phishing feed entry never stops as a whole. The feeds are
+ * gathered from many automated sources and now and then name a big site's own
+ * host (chat.z.ai was one), and since a hostname is all we match, that would
+ * stop the whole site for everyone. Their sites hosting user pages (Google
+ * Sites, GitHub Pages) are separate domains or public suffixes, so phishing
+ * there is still caught; malware entries are always kept.
+ */
+const WELL_KNOWN = new Set([
+  'z.ai', 'bigmodel.cn', 'zhipuai.cn', 'openai.com', 'chatgpt.com', 'anthropic.com', 'claude.ai', 'claude.com',
+  'deepseek.com', 'moonshot.cn', 'kimi.com', 'qwen.ai', 'mistral.ai', 'perplexity.ai', 'gemini.google.com',
+  'google.com', 'youtube.com', 'gmail.com', 'microsoft.com', 'live.com', 'office.com', 'bing.com',
+  'apple.com', 'icloud.com', 'amazon.com', 'facebook.com', 'instagram.com', 'whatsapp.com', 'x.com',
+  'twitter.com', 'reddit.com', 'wikipedia.org', 'github.com', 'gitlab.com', 'stackoverflow.com',
+  'linkedin.com', 'netflix.com', 'spotify.com', 'discord.com', 'twitch.tv', 'paypal.com', 'yahoo.com',
+  'baidu.com', 'yandex.ru', 'cloudflare.com', 'mozilla.org', 'duckduckgo.com', 'huggingface.co'
+]);
+
 /** Letters people and attackers swap for one another. */
 const LOOKALIKE = { 0: 'o', 1: 'l', 3: 'e', 5: 's', 7: 't', rn: 'm', vv: 'w' };
 const unconfuse = (s) => s.replace(/rn/g, 'm').replace(/vv/g, 'w').replace(/[01357]/g, (c) => LOOKALIKE[c]);
@@ -188,7 +206,9 @@ class Threats {
 
   /** 'malware', 'phishing' or null for one hostname and every domain above it. */
   listed(hostname) {
-    const labels = String(hostname || '').toLowerCase().replace(/\.$/, '').split('.');
+    const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+    const labels = host.split('.');
+    const known = WELL_KNOWN.has(getDomain(host) || '');
     for (let i = 0; i < labels.length - 1; i++) {
       const h = hash64(labels.slice(i).join('.'));
       let lo = 0;
@@ -196,7 +216,11 @@ class Threats {
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
         const v = this.hashes[mid];
-        if (v === h) return this.kinds[mid] === 0 ? 'malware' : 'phishing';
+        if (v === h) {
+          if (this.kinds[mid] === 0) return 'malware';
+          if (!known) return 'phishing';
+          break;
+        }
         if (v < h) lo = mid + 1; else hi = mid - 1;
       }
     }
