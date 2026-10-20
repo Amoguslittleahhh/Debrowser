@@ -1459,10 +1459,12 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   {
     const { Threats, domainsIn, distance } = require('../protection/threats');
     const parsed = domainsIn('# comment\n127.0.0.1\tbad.example\nphish.example.net\n0.0.0.0 localhost\n');
-    const fake = new Threats({ dir: null, enabled: () => true, domains: ['evil.example'],
+    const fake = new Threats({ dir: null, enabled: () => true, domains: ['evil.example', 'chat.z.ai', 'z.ai', 'evil-z.ai'],
       history: () => [{ url: 'https://github.com/x', visits: 30 }, { url: 'https://paypal.com/', visits: 9 }] });
     const unit = parsed.join() === 'bad.example,phish.example.net' &&
       fake.listed('login.evil.example') === 'phishing' && fake.listed('example') === null &&
+      fake.verdict('https://chat.z.ai/') === null && fake.verdict('https://z.ai/') === null &&
+      fake.listed('evil-z.ai') === 'phishing' && fake.verdict('https://z.al/') === null &&
       distance('githbu', 'github') === 1 && fake.verdict('https://githbu.com/')?.like === 'github.com' &&
       fake.verdict('https://paypa1.com/')?.like === 'paypal.com' && fake.verdict('https://github.com/') === null &&
       fake.verdict('https://gitlab.com/') === null;
