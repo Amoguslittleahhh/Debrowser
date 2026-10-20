@@ -363,11 +363,21 @@ async function run({ app, tabs, shell, downloads, tripwire, circuits, camouflage
     const onCertificate = (_event, _wc, url, error) => {
       if (String(url).includes(`tls.test:${tlsPort}`)) failure = failure || `${error} (refused by the browser)`;
     };
-    require('electron').app.on('certificate-error', onCertificate);
-    tlsTab.wc.once('did-fail-load', (_e, code, description) => { failure = failure || `${description} (${code})`; });
+    // And from any renderer the load lands in, not only the first: the
+    // rebuild's renderer is a new one, and on a slow runner neither the app's
+    // event nor the first renderer's was heard inside the wait (2 of 5 CI runs).
+    const onFail = (_e, code, description, failedUrl) => {
+      if (String(failedUrl).includes(`tls.test:${tlsPort}`)) failure = failure || `${description} (${code})`;
+    };
+    const onCreated = (_e, wc) => wc.on('did-fail-load', onFail);
+    const { app: electronApp } = require('electron');
+    electronApp.on('certificate-error', onCertificate);
+    electronApp.on('web-contents-created', onCreated);
+    tlsTab.wc.on('did-fail-load', onFail);
     tlsTab.wc.loadURL(`https://tls.test:${tlsPort}/`).catch(() => {});
-    await waitFor(() => failure !== null, 15_000);
-    require('electron').app.removeListener('certificate-error', onCertificate);
+    await waitFor(() => failure !== null, 30_000);
+    electronApp.removeListener('certificate-error', onCertificate);
+    electronApp.removeListener('web-contents-created', onCreated);
     await sleep(500);
     const seen = await within(tlsTab.wc.executeJavaScript(
       '({ title: document.title, text: document.body ? document.body.innerText : "" })'), 4000, { title: '', text: '' });
