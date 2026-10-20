@@ -387,8 +387,11 @@ function prepare(app) {
   // again. The test suite supplies its own stand-in instead, on its own port.
   // Never in an installed copy: a shortcut edited to carry it would send
   // every private page to whatever listens there, with the window still
-  // saying Tor.
-  const requested = app.isPackaged ? NaN : Number(argValue('incognito-proxy-port'));
+  // saying Tor. Installed means an app bundled with the binary: Electron
+  // reads any binary not named electron as packaged, and the leak test runs
+  // a copy named Debrowser-Incognito.exe, as the installer's, from source.
+  const installed = app.isPackaged && !process.defaultApp;
+  const requested = installed ? NaN : Number(argValue('incognito-proxy-port'));
   const external = Number.isInteger(requested) && requested > 0 && requested < 65536;
   const port = external ? requested : pickPort();
   const poolPorts = poolFrom(port);
