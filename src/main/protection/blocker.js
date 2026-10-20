@@ -248,6 +248,9 @@ class ContentBlocker {
     if (!frame || frame.isDestroyed?.()) return undefined;
     const url = frame.url;
     const { hostname = '', domain = '' } = require('tldts-experimental').parse(url);
+    // Google's sign-in gets no scriptlets, for the reason probe-preload.js
+    // leaves its functions alone: it reads changed ones as an embedded browser.
+    if (hostname === 'accounts.google.com') return undefined;
     const first = msg === undefined;
     const { active, styles, scripts } = this.engine.getCosmeticsFilters({
       domain: domain || '',

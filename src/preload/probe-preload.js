@@ -28,6 +28,16 @@
 const { ipcRenderer } = require('electron');
 
 /*
+ * Google's sign-in pages run exactly as Chromium serves them: none of the
+ * changes below to the page's own functions (the DRM notice, the passkey
+ * list). Google decides whether a browser is safe to sign in from partly by
+ * looking at those functions, and an altered one reads as an app's embedded
+ * browser. Nothing is pretended here - the page simply sees the engine as it
+ * is - and passkeys there go to Windows' own dialog, as in Chrome.
+ */
+const untouchedPage = location.hostname === 'accounts.google.com';
+
+/*
  * In an iframe. A private window loads this preload into its subframes too
  * (tab.js, nodeIntegrationInSubFrames) for one reason: a file dropped or
  * pasted into an embedded upload widget is that frame's event, out of reach of
@@ -901,7 +911,7 @@ if (!process.argv.includes('--debrowser-private') && window === window.top &&
  * Not in private windows, where there is nowhere to send the page that would
  * not leave Tor.
  */
-if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol)) {
+if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol) && !untouchedPage) {
   const { contextBridge } = require('electron');
   // Only when the page got no DRM at all. Players and test pages ask about
   // every key system in turn - PlayReady, FairPlay - and go on to use the one
@@ -999,7 +1009,7 @@ if (process.argv.includes('--debrowser-light-video') && /(^|\.)(youtube\.com|you
  *
  * Not in private windows, which keep nothing and ask Windows for nothing new.
  */
-if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol)) {
+if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.protocol) && !untouchedPage) {
   const { contextBridge } = require('electron');
   const ask = (request) => ipcRenderer.invoke('debrowser:passkey-request', request);
   const canAsk = () => ipcRenderer.invoke('debrowser:passkey-available');
