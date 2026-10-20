@@ -36,6 +36,91 @@ function hostileServer() {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
+
+/**
+ * A sign-in from start to finish, as a site does it: the page opens the
+ * provider in a pop-up, the provider sends it back to the site with a code,
+ * and the site's page there hands the code to the page that opened it and
+ * closes the window. Each way sites hand it over - postMessage to the
+ * opener, the opener watching for the window to close, and storage when the
+ * provider's isolation has cut the opener - and a site's own sign-in path,
+ * which is a Peek that must keep the opener just the same.
+ */
+async function signInRoundTrip({ check, waitFor, sleep, tabs }) {
+  const { BaseWindow } = require('electron');
+  const certs = path.join(__dirname, '..', '..', '..', '..', 'test', 'certs');
+  const cert = fs.readFileSync(path.join(certs, 'localhost-cert.pem'));
+  const server = https.createServer({ key: fs.readFileSync(path.join(certs, 'localhost-key.pem')), cert }, (req, res) => {
+    const u = new URL(req.url, 'https://x');
+    const how = u.searchParams.get('how') || '';
+    const page = (body) => { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(`<!doctype html><body>${body}`); };
+    // The provider: sends the window back to the site with a code.
+    if (u.pathname === '/oauth/authorize') {
+      res.writeHead(302, { Location: `${u.searchParams.get('back')}/callback?how=${how}&code=c-${how}`, ...(how === 'storage' ? { 'Cross-Origin-Opener-Policy': 'same-origin' } : {}) });
+      res.end();
+      return;
+    }
+    if (u.pathname === '/callback' || u.pathname === '/connect') {
+      const code = u.searchParams.get('code') || 'c-peek';
+      page(`<script>
+        ${how === 'storage' ? `localStorage.setItem('signin', '${code}');` : how === 'closed' ? `localStorage.setItem('signin', '${code}');` : `window.opener && window.opener.postMessage({ code: '${code}' }, location.origin);`}
+        setTimeout(() => window.close(), 700);
+      </script>`);
+      return;
+    }
+    // The site.
+    page(`<script>
+      localStorage.removeItem('signin');
+      const done = (code) => { document.title = 'signed in ' + code; };
+      addEventListener('message', (e) => { if (e.origin === location.origin && e.data && e.data.code) done(e.data.code); });
+      addEventListener('storage', (e) => { if (e.key === 'signin' && '${how}' === 'storage') done(e.newValue); });
+      const w = window.open(${how === 'peek' ? "'/connect'" : "'https://127.0.0.1:' + location.port + '/oauth/authorize?how=" + how + "&back=' + encodeURIComponent(location.origin)"}, 'signin', 'popup,width=420,height=520');
+      if ('${how}' === 'closed') { const t = setInterval(() => { if (w.closed) { clearInterval(t); done(localStorage.getItem('signin')); } }, 100); }
+    </script>`);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const site = `https://localhost:${server.address().port}`;
+  const tab = tabs.create({ url: 'about:blank', activate: true, realise: true });
+  await waitFor(() => tab.isLive, { timeoutMs: 8000 });
+  const ses = tab.wc.session;
+  const ours = new crypto.X509Certificate(cert).fingerprint256;
+  ses.setCertificateVerifyProc((req, done) => {
+    let mine = false;
+    try { mine = (req.hostname === '127.0.0.1' || req.hostname === 'localhost') && new crypto.X509Certificate(req.certificate.data).fingerprint256 === ours; } catch { /* not ours */ }
+    done(mine ? 0 : -3);
+  });
+  try {
+    for (const how of ['message', 'closed', 'storage', 'peek']) {
+      const windows = new Set(BaseWindow.getAllWindows());
+      const tabCount = tabs.all().length;
+      let opened = [];
+      let awake = false;
+      tab.wc.loadURL(`${site}/app?how=${how}`).catch(() => {});
+      const ok = await waitFor(() => {
+        opened = opened.concat(BaseWindow.getAllWindows().filter((w) => !windows.has(w) && !opened.includes(w)));
+        if (tab.signingIn) awake = true;
+        return tab.wc.getTitle() === `signed in c-${how}`;
+      }, { timeoutMs: 10000 });
+      const fresh = () => BaseWindow.getAllWindows().filter((w) => !windows.has(w) && !w.isDestroyed());
+      await waitFor(() => fresh().length === 0 && !tab.signingIn, { timeoutMs: 4000 });
+      const left = fresh();
+      check(`Sign-in round trip (${how}): the site gets the answer, the window closes itself, no tab is left`,
+        ok && left.length === 0 && tabs.all().length === tabCount,
+        `title "${tab.wc.getTitle()}", ${left.length} window(s) left, ${tabs.all().length - tabCount} new tab(s)`);
+      if (how === 'peek') {
+        check('Sign-in round trip: a site\'s own sign-in path is a Peek, not a window', opened.length === 0, `${opened.length} window(s)`);
+      } else {
+        check(`Sign-in round trip (${how}): it was a sign-in window, and the tab was kept awake meanwhile`, opened.length === 1 && awake, `${opened.length} window(s), awake ${awake}`);
+        check(`Sign-in round trip (${how}): the tab is no longer held awake once it ends`, !tab.signingIn);
+      }
+      for (const w of left) w.destroy();
+    }
+  } finally {
+    ses.setCertificateVerifyProc(null);
+    tabs.close(tab.id);
+    await new Promise((r) => server.close(r));
+  }
+}
 module.exports = async function securityFeature(t) {
   const { check, waitFor, sleep, tabs, inTime } = t;
   const server = await hostileServer();
@@ -188,6 +273,7 @@ module.exports = async function securityFeature(t) {
   await new Promise((r) => server.close(r));
 
   await signInPopups(t);
+  await signInRoundTrip(t);
 };
 
 /**
@@ -205,7 +291,7 @@ async function signInPopups({ check, waitFor, sleep, tabs }) {
     const mode = u.searchParams.get('mode') || '';
     if (u.pathname === '/r') { res.writeHead(302, { Location: 'debrowser://settings' }); res.end(); return; }
     const script = {
-      start: `window.open('/login?mode=${u.searchParams.get('next')}', 'a', 'popup,width=400,height=400')`,
+      start: `window.open('https://127.0.0.1:' + location.port + '/login?mode=${u.searchParams.get('next')}', 'a', 'popup,width=400,height=400')`,
       nav: "setTimeout(() => { location.href = 'debrowser://settings'; }, 200)",
       redir: "setTimeout(() => { location.href = '/r'; }, 200)",
       nest: "setTimeout(() => window.open('/login?mode=leaf', 'b', 'popup,width=300,height=300'), 200)",
@@ -222,7 +308,7 @@ async function signInPopups({ check, waitFor, sleep, tabs }) {
   const ours = new crypto.X509Certificate(cert).fingerprint256;
   ses.setCertificateVerifyProc((req, done) => {
     let mine = false;
-    try { mine = req.hostname === '127.0.0.1' && new crypto.X509Certificate(req.certificate.data).fingerprint256 === ours; } catch { /* not ours */ }
+    try { mine = (req.hostname === '127.0.0.1' || req.hostname === 'localhost') && new crypto.X509Certificate(req.certificate.data).fingerprint256 === ours; } catch { /* not ours */ }
     done(mine ? 0 : -3);
   });
   const urls = () => webContents.getAllWebContents().filter((w) => !w.isDestroyed()).map((w) => w.getURL()).filter((u) => !u.startsWith('data:'));
@@ -231,7 +317,9 @@ async function signInPopups({ check, waitFor, sleep, tabs }) {
       const windows = new Set(BaseWindow.getAllWindows());
       const plain = BrowserWindow.getAllWindows().length;
       const settingsBefore = urls().filter((u) => u.startsWith('debrowser://settings')).length;
-      tab.wc.loadURL(`${base}/start?next=${next}`).catch(() => {});
+      // From another site than the sign-in's, as a real sign-in is (localhost
+      // and 127.0.0.1 are two): a site's own /login pop-up is a Peek.
+      tab.wc.loadURL(`${base.replace('127.0.0.1', 'localhost')}/start?next=${next}`).catch(() => {});
       await waitFor(() => urls().some((u) => u.includes(`/login?mode=${next}`)), { timeoutMs: 8000 });
       await sleep(next === 'nest' ? 1500 : 1000);
       const opened = BaseWindow.getAllWindows().filter((w) => !windows.has(w));

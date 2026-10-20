@@ -836,17 +836,30 @@ class Tab {
     const signIns = new Set();
     const asSignIn = (pending) => ({ action: 'allow', createWindow: (options) => createPopupWindow(options, {
       pending,
+      opener: wc.isDestroyed() ? null : wc.getURL(),
       onOpen: (win, popup) => {
         signIns.add(win);
-        win.on('closed', () => signIns.delete(win));
+        this.signingIn = true;
+        win.on('closed', () => { signIns.delete(win); this.signingIn = signIns.size > 0; });
         popupRules(win, popup);
       },
-      onReject: (to) => { if (/^https?:/i.test(to)) this.emit('peek', { url: to }); }
+      onReject: (to) => this.emit('peek', { url: to })
     }) });
     wc.setWindowOpenHandler(({ url, disposition }) => {
       if (disposition === 'new-window' && signIns.size < 3) {
-        if (isPriorityPopup(url)) return asSignIn(false);
+        if (isPriorityPopup(url, wc.getURL())) return asSignIn(false);
         if (!url || url === 'about:blank') return asSignIn(true);
+      }
+      // Any other pop-up is a Peek that keeps its opener, so a sign-in on an
+      // address no list knows still hears back. Where there is no Peek to
+      // take it (a private window), a tab, as before.
+      if (disposition === 'new-window' && /^https?:/i.test(url) && !INCOGNITO) {
+        return { action: 'allow', createWindow: (options) => {
+          const payload = { url, webContents: options.webContents, adopted: false };
+          this.emit('peek', payload);
+          if (!payload.adopted) setImmediate(() => { if (!options.webContents.isDestroyed()) options.webContents.close(); });
+          return options.webContents;
+        } };
       }
       this.emit(disposition === 'new-window' && /^https?:/i.test(url) ? 'peek' : 'open-tab', { url });
       return { action: 'deny' };

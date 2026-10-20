@@ -4,7 +4,8 @@
  * is asking for the password. The page stays the opener's pop-up, so
  * window.opener and postMessage reach the page that is waiting on it.
  */
-const { BaseWindow, WebContentsView } = require('electron');
+const { BaseWindow, WebContentsView, nativeTheme } = require('electron');
+const { getDomain } = require('tldts-experimental');
 const palette = require('./palette');
 
 const STRIP = 34;
@@ -17,12 +18,28 @@ const PRIORITY_HOSTS = /(^|\.)(accounts\.google\.com|ssh\.cloud\.google\.com|she
 // Facebook, GitHub, X, Discord, Steam and the rest sign in under a path on
 // their main host; Firebase's handler is /__/auth/handler, Supabase's /auth/v1.
 const PRIORITY_PATH = /\/(oauth2?|auth|authorize|openid|sso|saml|signin|sign-in|login|ap\/signin|ap\/oa)(\/|$|\?)/i;
-function isPriorityPopup(url) {
+/**
+ * Whether `url`, opened as a pop-up by a page at `opener`, is a sign-in.
+ * A known provider always is. A sign-in path counts only on another site
+ * than the page's own, as every third-party sign-in is: a site's own /login
+ * pop-up is a Peek (which keeps its opener too), so no page gets a bare
+ * window just by naming a path.
+ */
+function isPriorityPopup(url, opener) {
   let u;
   try { u = new URL(url); } catch { return false; }
   if (!/^https:$/i.test(u.protocol)) return false;
-  return PRIORITY_HOSTS.test(u.hostname) || PRIORITY_PATH.test(u.pathname);
+  if (PRIORITY_HOSTS.test(u.hostname)) return true;
+  if (!PRIORITY_PATH.test(u.pathname)) return false;
+  let from = null;
+  try { from = getDomain(new URL(opener).hostname) || new URL(opener).hostname; } catch { /* none */ }
+  return !from || from !== (getDomain(u.hostname) || u.hostname);
 }
+
+/** Live strips, redrawn when the design or light and dark change. */
+const live = new Set();
+function restyleAll() { for (const redraw of live) redraw(); }
+nativeTheme.on('updated', () => setTimeout(restyleAll, 50));
 
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -66,7 +83,7 @@ function show(strip, url) {
  * Build the window around the page Electron made for the pop-up; returns its
  * webContents, as setWindowOpenHandler's createWindow wants.
  */
-function createPopupWindow(options, { onOpen, pending = false, onReject } = {}) {
+function createPopupWindow(options, { onOpen, pending = false, onReject, opener = null } = {}) {
   const parent = BaseWindow.getFocusedWindow();
   const width = Math.min(Math.max(Number(options.width) || 500, 360), 1000);
   const height = Math.min(Math.max(Number(options.height) || 640, 300), 900);
@@ -103,6 +120,8 @@ function createPopupWindow(options, { onOpen, pending = false, onReject } = {}) 
     if (url !== shown) { shown = url; show(strip, url); }
   };
   show(strip, '');
+  const redraw = () => { if (shown !== null) show(strip, shown); };
+  live.add(redraw);
   wc.on('did-navigate', update);
   wc.on('did-navigate-in-page', update);
   wc.on('did-finish-load', update);
@@ -117,6 +136,9 @@ function createPopupWindow(options, { onOpen, pending = false, onReject } = {}) 
   // window.close() from the page - the end of every sign-in - closes the window.
   wc.on('destroyed', () => { if (!win.isDestroyed()) win.destroy(); });
   win.on('closed', () => {
+    live.delete(redraw);
+    // Back to the window the sign-in started from, where its answer lands.
+    if (parent && !parent.isDestroyed()) parent.focus();
     if (!wc.isDestroyed()) wc.close();
     if (!strip.webContents.isDestroyed()) strip.webContents.close();
   });
@@ -128,7 +150,7 @@ function createPopupWindow(options, { onOpen, pending = false, onReject } = {}) 
     // else, or nowhere, it was not one.
     wc.on('did-start-navigation', (d) => {
       if (!pending || !d.isMainFrame || d.url === 'about:blank') return;
-      if (isPriorityPopup(d.url)) { pending = false; reveal(); return; }
+      if (isPriorityPopup(d.url, opener)) { pending = false; reveal(); return; }
       pending = false;
       win.destroy();
       if (onReject) onReject(d.url);
@@ -151,4 +173,4 @@ function centre(parent, size, axis) {
   return Math.round(axis === 'x' ? b.x + (b.width - size) / 2 : b.y + Math.max(0, (b.height - size) / 3));
 }
 
-module.exports = { createPopupWindow, isPriorityPopup, stripHtml };
+module.exports = { createPopupWindow, isPriorityPopup, restyleAll, stripHtml };

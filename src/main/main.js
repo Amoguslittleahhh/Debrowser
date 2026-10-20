@@ -1474,6 +1474,7 @@ function main() {
         // Not in a private window: its tabs carry protections a bare view
         // would not, so a pop-up there is a tab as it always was.
         if (INCOGNITO || !shell) openLinkTab(tabs, prefs, tab, payload?.url);
+        else if (payload?.webContents) payload.adopted = shell.openPeek(payload.url, tab.session, payload.webContents);
         else shell.openPeek(payload?.url, tab.session);
         break;
       case 'closed':
@@ -5063,6 +5064,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
             if (tab.failed) tab.redrawError();
             try { tab.view.setBackgroundColor(palette.surfaceFor(tab.url)); } catch { /* view going away */ }
           }
+          require('./popup-window').restyleAll();
         }
         publish();
         // The governor reads cfg on its next tick, so a budget or cap change

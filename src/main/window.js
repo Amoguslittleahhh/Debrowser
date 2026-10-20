@@ -1590,9 +1590,14 @@ class BrowserShell {
    * as tab" keeps it. It is not a tab: no history, no place in the strip, no
    * renderer after it closes. In the opener's session, so it is signed in
    * wherever the page was.
+   *
+   * `adopt` is the page a site's own pop-up already made (tab.js): the card
+   * shows it rather than a fresh one, so the site keeps window.opener - a
+   * sign-in on an address no list knows still hears back - and the page's
+   * window.close() puts the card away. Answers whether it was shown.
    */
-  openPeek(url, ses) {
-    if (this.window.isDestroyed() || !/^https?:/i.test(String(url || ''))) return;
+  openPeek(url, ses, adopt = null) {
+    if (this.window.isDestroyed() || !/^https?:/i.test(String(url || ''))) return false;
     this.closePeek();
     const backdrop = new WebContentsView({
       webPreferences: {
@@ -1606,9 +1611,9 @@ class BrowserShell {
     });
     try { backdrop.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
     backdrop.webContents.loadFile(path.join(RENDERER_DIR, 'peek.html')).catch(() => {});
-    const page = new WebContentsView({
-      webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true }
-    });
+    const page = adopt
+      ? new WebContentsView({ webContents: adopt })
+      : new WebContentsView({ webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true } });
     page.setBackgroundColor(this.surface());
     setRadius(page, PEEK_RADIUS);
     const wc = page.webContents;
@@ -1617,6 +1622,10 @@ class BrowserShell {
       if (/^https?:/i.test(next)) this.onCommand('new-tab', { url: next });
       return { action: 'deny' };
     });
+    // Nor may it go to one of our pages, any more than a tab may (tab.js).
+    const ours = (event, to) => { if (require('./pages').isInternal(to)) event.preventDefault(); };
+    wc.on('will-navigate', ours);
+    wc.on('will-redirect', ours);
     const escape = (event, input) => {
       if (input.type === 'keyDown' && input.key === 'Escape') { event.preventDefault(); this.closePeek(); }
     };
@@ -1635,8 +1644,10 @@ class BrowserShell {
     root.addChildView(page, root.children.indexOf(backdrop) + 1);
     this.peek = { backdrop, page };
     this.placePeek();
-    wc.loadURL(url).catch(() => {});
+    if (adopt) wc.once('destroyed', () => { if (this.peek && this.peek.page === page) this.closePeek(); });
+    else wc.loadURL(url).catch(() => {});
     wc.focus();
+    return true;
   }
 
   /** The card: inset from the content area, with room above it for its buttons. */
