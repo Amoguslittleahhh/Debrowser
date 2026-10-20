@@ -11,6 +11,7 @@ Search suggestions now come from your search engine as you type, in the address 
 
 ### Improved
 
+- **Clearer tab indicators.** The tab you are on now has a lit dot, other awake tabs a faint one and sleeping tabs their usual dot, so the dots no longer vanish when tabs wake. Down the side, the open tab's bar now sits inside its row instead of hanging off its rounded edge.
 - **Smoother, livelier animations.** Menus, tabs, hover cards, toasts and pop-ups now ease in and out and settle into place instead of stopping dead. A closing tab dips before it folds away, menu rows arrive one after another, the bookmark star pops when you save a page, and the download arrow lands in its tray. Large dialogs and pages glide in without bouncing. Calm and "reduce motion" still turn all of this off.
 - **Sites typed on the new tab page open sooner.** Debrowser now starts the process a website needs while you are still typing, instead of after Enter, which took about a fifth off the time to the page's first picture in our tests (around 80ms instead of 99ms). It is dropped after 15 seconds if you do not press Enter, and never started in a private window or with Preload pages you point at off.
 - **Debrowser starts faster.** The first page now appears about a fifth sooner after launch (around 365ms instead of 450ms in our tests). The browser keeps its own compiled code between launches instead of compiling it again every time, and on Linux two pieces of setup that do not affect the first page now wait until it is up. The first launch after an update is as fast as before.
