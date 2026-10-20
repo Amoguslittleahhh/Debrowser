@@ -30,7 +30,10 @@ fs.writeFileSync(cookie, Buffer.alloc(32, 7), { mode: 0o600 });
 
 const fixturePort = Number(process.env.FAKE_TOR_FIXTURE_PORT);
 const tlsPort = Number(process.env.FAKE_TOR_TLS_PORT) || fixturePort;
-const route = (host) => (host.startsWith('tls.') ? tlsPort : fixturePort);
+// The sign-in check's two sites (incognito-leak.js, signInServer).
+const signInPort = Number(process.env.FAKE_TOR_SIGNIN_PORT) || fixturePort;
+const route = (host) => (host.startsWith('tls.') ? tlsPort
+  : host === 'siteapp.test' || host === 'idpsso.test' ? signInPort : fixturePort);
 socksPool(sockets.length, route, (slot) => ({ path: sockets[slot] })).then((pool) => {
   // Appended as they arrive, so the harness can read them after the browser has gone.
   const flush = () => {
