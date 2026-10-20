@@ -162,9 +162,12 @@ module.exports = async function securityFeature(t) {
   }
 
   // From inside a site: nothing of the browser to call, read, frame or load.
-  const tab = tabs.create({ url: `${site}/plain`, activate: false, realise: true });
+  // In front, so the tab is not put to sleep while its script waits on its
+  // timers: in the background on a slow runner it went cold and then
+  // hibernated mid-script, and the promise never settled.
+  const tab = tabs.create({ url: `${site}/plain`, activate: true, realise: true });
   await waitFor(() => tab.isLive && !tab.loading, { timeoutMs: 8000 });
-  const seen = await tab.wc.executeJavaScript(`(async () => {
+  const seen = await inTime(tab.wc.executeJavaScript(`(async () => {
     const out = {};
     out.globals = [typeof window.debrowser, typeof require, typeof process, typeof module, typeof chrome?.runtime?.sendMessage].join(',');
     const tryFetch = async (u) => { try { const r = await fetch(u); return 'read ' + r.status; } catch { return 'refused'; } };
@@ -181,7 +184,7 @@ module.exports = async function securityFeature(t) {
       setTimeout(() => r('timeout'), 3000);
     });
     return out;
-  })()`).catch((e) => ({ error: e.message }));
+  })()`).catch((e) => ({ error: e.message })), 20_000, { error: 'timeout' });
   check('Security: a website sees no bridge, Node or extension messaging', seen.globals === 'undefined,undefined,undefined,undefined,undefined', seen.globals);
   check('Security: a website cannot read the browser\'s pages, the extension bridge or files',
     seen.fetchPage === 'refused' && seen.fetchBridge === 'refused' && seen.fetchFile === 'refused', JSON.stringify(seen));
