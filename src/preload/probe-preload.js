@@ -495,6 +495,18 @@ window.addEventListener('submit', (event) => {
  * state outside the DOM - React, Vue, Angular - so the form would submit blank
  * while appearing filled, which is worse than not filling it at all.
  */
+/**
+ * Fields the person has typed into. A fill never overwrites one: the fill
+ * comes when the page finishes loading, which can be after they started typing
+ * - or the page reloads with the form after a failed attempt - and putting the
+ * saved account back over the one they typed signs them into the wrong
+ * account, which reads as "I can't switch accounts".
+ */
+const typedFields = new WeakSet();
+window.addEventListener('input', (event) => {
+  if (event.isTrusted && event.target instanceof HTMLInputElement) typedFields.add(event.target);
+}, true);
+
 ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
   try {
     if (!record || location.origin !== record.origin) return;   // never cross-origin
@@ -510,6 +522,9 @@ ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
     };
     const password = [...document.querySelectorAll('input[type="password"]')].find(seen);
     if (!password) return;
+    // Already in use: typed into, or holding a password the fill did not put
+    // there. Left exactly as it is.
+    if (typedFields.has(password) || password.value) return;
 
     const setValue = (el, value) => {
       const proto = Object.getPrototypeOf(el);
@@ -527,7 +542,11 @@ ipcRenderer.on('debrowser:credential-fill', (_event, record) => {
         const type = (el.getAttribute('type') || 'text').toLowerCase();
         if (['text', 'email', 'tel'].includes(type) && seen(el)) user = el;
       }
-      if (user) setValue(user, record.username);
+      // Someone else's account in the box - typed, or put there by the site
+      // (an account chooser, a "not you?" page) - is a different sign-in in
+      // progress. Neither field is touched.
+      if (user && (typedFields.has(user) || (user.value && user.value !== record.username))) return;
+      if (user && user.value !== record.username) setValue(user, record.username);
     }
     setValue(password, record.password);
   } catch { /* nothing fillable here */ }
