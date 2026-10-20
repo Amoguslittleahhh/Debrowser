@@ -288,8 +288,8 @@ async function discard(tab, ctx) {
 
   // Started playing sound, or was given the camera or microphone, while the
   // snapshot was taken: no longer a tab to discard.
-  if (tab.audible || tab.capturing) {
-    log(`tab ${tab.id}: discard cancelled, now audible or capturing`);
+  if (tab.audible || tab.capturing || tab.signingIn) {
+    log(`tab ${tab.id}: discard cancelled, now audible, capturing or signing in`);
     return tab.tier;
   }
 

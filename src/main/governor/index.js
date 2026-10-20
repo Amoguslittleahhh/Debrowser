@@ -190,7 +190,7 @@ class Governor {
       const pid = tab.pid;
       if (!pid) continue;
       pids.set(tab, pid);
-      if (tab.visible || tab.tier === Tier.ACTIVE || tab.audible || tab.capturing || tab.boosted) awake.add(pid);
+      if (tab.visible || tab.tier === Tier.ACTIVE || tab.audible || tab.capturing || tab.signingIn || tab.boosted) awake.add(pid);
     }
     for (const pid of new Set(pids.values())) {
       platform.setEfficiency(pid, this.saver === true && !awake.has(pid), this.log);
@@ -741,6 +741,9 @@ class Governor {
     if (tab.audible) cap(Tier.WARM);
     // So is a call or a recording: a tab with the camera or microphone.
     if (tab.capturing) cap(Tier.WARM);
+    // And a page waiting on its sign-in window: frozen or discarded, it never
+    // hears the answer, and the sign-in is lost.
+    if (tab.signingIn) cap(Tier.WARM);
 
     // Unsubmitted input survives a freeze perfectly; it does not survive a
     // discard. The memory cost of holding it is not a close call.
