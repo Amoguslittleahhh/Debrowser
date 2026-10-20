@@ -25,12 +25,12 @@ const PRIORITY_PATH = /\/(oauth2?|auth|authorize|openid|sso|saml|signin|sign-in|
  * pop-up is a Peek (which keeps its opener too), so no page gets a bare
  * window just by naming a path.
  */
-function isPriorityPopup(url, opener) {
+function isPriorityPopup(url, opener, { anyPath = false } = {}) {
   let u;
   try { u = new URL(url); } catch { return false; }
   if (!/^https:$/i.test(u.protocol)) return false;
   if (PRIORITY_HOSTS.test(u.hostname)) return true;
-  if (!PRIORITY_PATH.test(u.pathname)) return false;
+  if (!anyPath && !PRIORITY_PATH.test(u.pathname)) return false;
   let from = null;
   try { from = getDomain(new URL(opener).hostname) || new URL(opener).hostname; } catch { /* none */ }
   return !from || from !== (getDomain(u.hostname) || u.hostname);
@@ -149,7 +149,7 @@ function createPopupWindow(options, { onOpen, pending = false, onReject, opener 
     // A blank pop-up shows only once it is sent to a sign-in; sent anywhere
     // else, or nowhere, it was not one.
     wc.on('did-start-navigation', (d) => {
-      if (!pending || !d.isMainFrame || d.url === 'about:blank') return;
+      if (!pending || !d.isMainFrame || !/^https?:/i.test(d.url)) return;
       if (isPriorityPopup(d.url, opener)) { pending = false; reveal(); return; }
       pending = false;
       win.destroy();

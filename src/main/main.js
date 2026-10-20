@@ -1470,6 +1470,20 @@ function main() {
         if (siteStyles) siteStyles.apply(tab);
         if (!INCOGNITO) darkPages.apply(tab, prefs, sitePrefs, { newPage: true });
         break;
+      // Google turned the sign-in away. Debrowser does not pretend to be
+      // another browser to get past that check; it says what happened and
+      // offers the site in the user's usual browser, where Google allows it.
+      case 'sign-in-refused': {
+        const site = tab.wc && !tab.wc.isDestroyed() ? tab.wc.getURL() : tab.url;
+        const elsewhere = /^https?:/i.test(String(site || '')) && !/^https:\/\/accounts\.google\.com\//i.test(site);
+        if (elsewhere) {
+          runCommand.toast('Google doesn’t allow sign-in from Debrowser yet. Use another way to sign in, or open this site in your usual browser',
+            'Open in usual browser', () => electronShell.openExternal(site).catch(() => {}));
+        } else {
+          runCommand.toast('Google doesn’t allow sign-in from Debrowser yet. Your usual browser can sign in to Google');
+        }
+        break;
+      }
       case 'peek':
         // Not in a private window: its tabs carry protections a bare view
         // would not, so a pop-up there is a tab as it always was.
