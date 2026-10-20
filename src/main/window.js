@@ -1432,28 +1432,40 @@ class BrowserShell {
     const cardW = dropdown ? Math.min(Math.max(Math.round(model.anchor.width), 300), 420) : 380;
     const width = Math.min(cardW + EDGE * 2, winW);
     const left = dropdown ? model.anchor.x - EDGE : model.anchor.x - width / 2;
+    // The card's top 4px under the field, or 8px into the page, and no
+    // taller than the window has room for under it: past that the list
+    // scrolls. A dropdown with little room below opens above the field
+    // instead, where there is more, as Chrome's does.
+    const GAP = 8;     // kept clear of the window's bottom (or top) edge
+    const top = Math.min(model.anchor.y + (dropdown ? 4 : 8), winH - 40);
+    const below = winH - top - GAP;
+    const above = dropdown && Number.isFinite(model.anchor.top)
+      ? model.anchor.top - 4 - Math.max(GAP, model.anchor.pageTop || 0) : 0;
+    const up = dropdown && below < 240 && above > below;
     this.passkeyBox = {
       x: Math.round(Math.max(0, Math.min(left, winW - width))),
-      // The card's top 4px under the field, or 8px into the page.
-      y: Math.round(Math.min(model.anchor.y + (dropdown ? 4 : 8) - EDGE, winH - 40)),
+      y: Math.round(up ? model.anchor.top - 4 + EDGE : top - EDGE),
+      up,
       width
     };
     this.placePasskeys();
     const chooser = !dropdown;
+    // sizePasskeys' cap on the view, less the margin round the card.
+    const maxHeight = Math.max(96, Math.min(640 - EDGE * 2, Math.floor(up ? above : below)));
     this.passkeyReady.then(() => {
       if (this.passkeyView !== view || view.webContents.isDestroyed()) return;
-      send(view, 'debrowser:ui', { kind: 'passkeys', ...model, prefs: this.prefs ? this.prefs.all() : null });
+      send(view, 'debrowser:ui', { kind: 'passkeys', ...model, maxHeight, prefs: this.prefs ? this.prefs.all() : null });
       if (chooser) view.webContents.focus();
     });
   }
 
   placePasskeys() {
     if (!this.passkeyView || !this.passkeyBox) return;
-    const { x, y, width } = this.passkeyBox;
+    const { x, y, up, width } = this.passkeyBox;
     // One pixel tall until the card has measured itself, so nothing
-    // half-drawn shows.
+    // half-drawn shows. Opened upward, `y` is the view's bottom.
     const height = Math.max(1, this.passkeyHeight || 1);
-    this.passkeyView.setBounds({ x, y, width, height });
+    this.passkeyView.setBounds({ x, y: up ? Math.max(0, y - height) : y, width, height });
   }
 
   /** The card measured itself: the view is exactly that tall. */

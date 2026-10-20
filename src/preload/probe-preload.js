@@ -1130,7 +1130,7 @@ if (!process.argv.includes('--debrowser-private') && /^https?:$/.test(location.p
     frame = 0;
     if (!passkeyField) return;
     const r = passkeyField.getBoundingClientRect();
-    ipcRenderer.send('debrowser:passkey-field', { left: r.left, bottom: r.bottom, width: r.width });
+    ipcRenderer.send('debrowser:passkey-field', { left: r.left, top: r.top, bottom: r.bottom, width: r.width });
   };
   const follow = () => { if (passkeyField && !frame) frame = requestAnimationFrame(reportField); };
   document.addEventListener('focusin', (e) => {

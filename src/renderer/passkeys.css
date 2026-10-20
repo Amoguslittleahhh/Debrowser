@@ -15,7 +15,14 @@ body { padding: 16px; font: var(--fs-body, 13px) / 1.35 var(--font-ui, system-ui
   box-shadow: var(--shadow-menu);
   outline: none;
   animation: card-in 220ms var(--ease-settle);
+  /* No taller than the window has room for (max-height, set by passkeys.js);
+     the accounts scroll, the heading and "different passkey" stay. */
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
+.card > * { flex: none; }
+.card > .rows { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 @keyframes card-in {
   from { opacity: 0; transform: translateY(-4px) scale(0.98); }
   to   { opacity: 1; transform: none; }

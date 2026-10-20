@@ -62,6 +62,8 @@ function render(model) {
   if (model.prefs) applyThemePrefs(model.prefs);
   const chooser = model.mode !== 'dropdown';
   document.body.dataset.mode = chooser ? 'chooser' : 'dropdown';
+  // The room the window has for the card; past it the rows scroll.
+  el.card.style.maxHeight = model.maxHeight ? `${model.maxHeight}px` : '';
   el.head.hidden = !chooser;
   el.title.textContent = `Sign in to ${model.site}`;
   el.sub.textContent = 'Choose a passkey saved on this device';
