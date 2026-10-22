@@ -28,9 +28,7 @@ The interesting part is `src/main/governor/`.
 
 Ledger, Paper, Grid, Calm and Legacy share one foundation and differ in shape, type and colour. Pick one in Settings → Appearance.
 
-![Debrowser's four designs side by side](screenshots/designs.png)
-
-Calm, the newest, is not in the picture above: a quiet look after Arc and Zen, with soft colours and no animation.
+![Debrowser's five designs side by side](screenshots/designs.png)
 
 ## Installing it
 
