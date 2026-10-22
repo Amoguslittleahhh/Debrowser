@@ -60,6 +60,6 @@
     "@ghostery/adblocker-electron-preload": "^2.18.2",
     "@mozilla/readability": "^0.6.0",
     "electron-updater": "^6.8.9",
-    "tldts-experimental": "^7.4.16"
+    "tldts-experimental": "^7.4.19"
   }
 }

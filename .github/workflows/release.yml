@@ -143,7 +143,7 @@ jobs:
       # have looked for a compiler that was not on PATH yet.
       - name: Set up MSVC
         if: matrix.os == 'windows-latest'
-        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5   # v1.9.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756   # v1.13.0
 
       # The trim helper has a backend on Linux and on Windows; macOS has no
       # public API to force its compressor, so there it is neither built nor
