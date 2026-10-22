@@ -6,12 +6,14 @@ import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
+// Each: preferences over the base, and optionally switches and a saved window.
 const variants = {
-  plain: {},
-  mica: { backgroundMaterial: 'mica' },
-  acrylic: { backgroundMaterial: 'acrylic', windowOpacity: 0.85 },
-  pinned: { sidebarPinned: true },
-  top: { tabBarPosition: 'top' }
+  scaled: { prefs: {}, args: ['--force-device-scale-factor=1.5'] },
+  maximized: { prefs: {}, window: { x: 0, y: 0, width: 1000, height: 700, maximized: true } },
+  scaledMax: { prefs: {}, args: ['--force-device-scale-factor=1.5'], window: { x: 0, y: 0, width: 900, height: 600, maximized: true } },
+  systemAccent: { prefs: { accentFromSystem: true } },
+  blue: { prefs: { accent: '#3b6fd8', backgroundMaterial: 'mica' } },
+  updated: { prefs: { seenVersion: '2.6.0' } }
 };
 const base = { design: 'calm', theme: 'dark', tabBarPosition: 'left', sidebarPinned: false, welcomeDone: true };
 const electron = path.resolve('node_modules/electron/dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
@@ -39,12 +41,14 @@ const EXPR = `JSON.stringify({ ds: { ...document.body.dataset },
   size: [innerWidth, innerHeight], dpr: devicePixelRatio,
   errors: window.__probeErrors || [] })`;
 
-for (const [name, extra] of Object.entries(variants)) {
+for (const [name, v] of Object.entries(variants)) {
+  const extra = v.prefs;
   const profile = path.join(os.tmpdir(), `band-probe-${name}`);
   rmSync(profile, { recursive: true, force: true });
   mkdirSync(profile, { recursive: true });
   writeFileSync(path.join(profile, 'preferences.json'), JSON.stringify({ ...base, ...extra }));
-  const child = spawn(electron, ['.', '--remote-debugging-port=9333', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], {
+  if (v.window) writeFileSync(path.join(profile, 'window.json'), JSON.stringify(v.window));
+  const child = spawn(electron, ['.', '--remote-debugging-port=9333', ...(v.args || []), ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], {
     env: { ...process.env, DEBROWSER_TEST_PROFILE: profile }, stdio: ['ignore', 'pipe', 'pipe']
   });
   let log = '';
