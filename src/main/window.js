@@ -632,6 +632,31 @@ class BrowserShell {
       this.reveal();
       this.onCommand('chrome-ready');
     });
+    this.reviveOnCrash(this.chromeView.webContents, 'chrome');
+  }
+
+  /**
+   * The chrome's renderer gone - crashed, killed by the system short of
+   * memory - is the whole toolbar and tab strip gone with it: the view stays,
+   * clear, and the window is a page under an empty band with no way to reach
+   * another tab, type an address or open the menu. Nothing brought it back.
+   * It is loaded again, and told the state once it is, as at startup. A
+   * renderer that dies again straight away is not reloaded forever: three
+   * times in a minute and it is left, logged.
+   */
+  reviveOnCrash(wc, name) {
+    const deaths = [];
+    wc.on('render-process-gone', (_event, details) => {
+      const reason = details && details.reason;
+      this.log(`${name} renderer gone (${reason})`);
+      if (reason === 'clean-exit' || this.window.isDestroyed() || wc.isDestroyed()) return;
+      const now = Date.now();
+      while (deaths.length && now - deaths[0] > 60000) deaths.shift();
+      deaths.push(now);
+      if (deaths.length > 3) return;
+      wc.once('did-finish-load', () => this.onCommand('chrome-ready'));
+      wc.reload();
+    });
   }
 
   /* ---------------------------------------------------------------- */
@@ -2692,6 +2717,7 @@ class BrowserShell {
     this.bindShortcuts(view.webContents);
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     view.webContents.once('did-finish-load', () => this.onCommand('chrome-ready'));
+    this.reviveOnCrash(view.webContents, 'tab list');
     view.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'), { query: { role: 'strip' } }).catch(() => {});
     this.window.contentView.addChildView(view);
     this.stripView = view;

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+The toolbar and tabs come back by themselves if the part of Debrowser that draws them stops.
+
+### Fixed
+
+- **The toolbar and tabs no longer disappear for good.** If the process drawing the address bar, toolbar and tabs stopped, for example when Windows ran short of memory, the window was left with the page under an empty bar and no way to change tabs, type an address or open the menu until Debrowser was restarted. They are now drawn again within a moment.
+
 ## 2.6.0
 
 In Debrowser 2.6.0, search suggestions come from your search engine as you type, in the address bar and on the new tab page, and Debrowser starts and opens typed sites faster. YouTube videos play again, sign-in pop-ups open in a window of their own, and "Save password?" waits for your answer. Animations are smoother throughout. Several security fixes close ways for websites, local files and extensions to reach what they shouldn't.
