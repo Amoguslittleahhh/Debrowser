@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.6.1
 
 The toolbar and tabs come back by themselves if the part of Debrowser that draws them stops.
 
