@@ -1,0 +1,33 @@
+# Diagnostic: what the chrome draws on Windows with the tabs tucked away
+# (tools/band-probe.mjs). Runs only when the probe itself changes.
+name: Band probe
+
+on:
+  push:
+    branches: [claude/research-build]
+    paths: [tools/band-probe.mjs, .github/workflows/band-probe.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Ensure the Electron binary is present
+        run: node -e "require('electron')" || npm rebuild electron || node node_modules/electron/install.js
+      - name: Probe
+        run: node tools/band-probe.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: band-probe
+          path: band-probe/
