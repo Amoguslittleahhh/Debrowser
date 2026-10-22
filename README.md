@@ -10,7 +10,8 @@
 
 A web browser built around one idea: **a tab should hold the least memory and
 CPU it can get away with, and you should never be able to tell.** Built on
-Chromium (through Electron), so real websites work.
+Chromium (through Electron 44), so real websites work. The current release is
+**2.6.0**; see [what's new](CHANGELOG.md).
 
 - **Tabs that cost almost nothing in the background:** they sleep when you
   leave them, on a schedule you choose, and wake as you come back.
@@ -24,12 +25,15 @@ Chromium (through Electron), so real websites work.
 - **Sync between your computers** through a folder you already sync, encrypted
   with a passphrase you choose.
 - **Passwords, passkeys, addresses and cards**, filled only when you choose.
+- **Search suggestions as you type** from your search engine, never sent from
+  private windows, and sign-in pop-ups (Google, Microsoft, Apple) in a window of
+  their own, as in Chrome.
 - **Translate a page or a selection**, and **dark versions of light websites**.
 - **Import from other browsers**, Safari included on macOS.
 - **Spaces, split view, reader view and a command bar (Ctrl+K).**
 - **Battery mode** that puts background tabs in your system's efficiency mode.
-- **Four designs** (Ledger, Paper, Grid and Legacy), light and dark, with
-  Release Notes laid out to match after every update.
+- **Five designs** (Ledger, Paper, Grid, Legacy and the quieter Calm), light
+  and dark, with Release Notes laid out to match after every update.
 
 ## Download
 
