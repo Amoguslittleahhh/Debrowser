@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.6.2
 
 The toolbar and tabs show again in installed copies of Debrowser.
 
