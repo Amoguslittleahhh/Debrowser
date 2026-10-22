@@ -22,6 +22,7 @@ Search suggestions now come from your search engine as you type, in the address 
 
 ### Fixed
 
+- **The toolbar and tabs no longer disappear for good.** If the process drawing the address bar, toolbar and tabs stopped, for example when Windows ran short of memory, the window was left with the page under an empty bar and no way to change tabs, type an address or open the menu until Debrowser was restarted. They are now drawn again within a moment.
 - **You can type your email by hand while the passkey list is showing.** On sites that offer passkeys, such as Google, the list of saved passkeys that opens under the email field took the keyboard from the field the moment it appeared, so typing your email or password yourself typed nothing. The list now opens without taking the keyboard, and the field keeps it until you press the down arrow or click the list.
 - **The passkey list under a sign-in field fits the window.** With many saved accounts it used to run off the bottom of the window and hide "Use a different passkey". It now stops at the window's edge and scrolls, keeps "Use a different passkey" in view, and opens above the field when there is more room there.
 - **YouTube videos play again.** On watch pages and Shorts the player area stayed empty. The ad blocker ran the scripts meant for each of YouTube's hidden frames in the page itself, so the same scripts ran several times over and crashed the player before it drew. Each frame's scripts now run once, in that frame.
