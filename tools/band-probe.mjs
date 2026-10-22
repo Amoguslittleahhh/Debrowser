@@ -8,12 +8,12 @@ import os from 'node:os';
 
 // Each: preferences over the base, and optionally switches and a saved window.
 const variants = {
-  scaled: { prefs: {}, args: ['--force-device-scale-factor=1.5'] },
-  maximized: { prefs: {}, window: { x: 0, y: 0, width: 1000, height: 700, maximized: true } },
-  scaledMax: { prefs: {}, args: ['--force-device-scale-factor=1.5'], window: { x: 0, y: 0, width: 900, height: 600, maximized: true } },
-  systemAccent: { prefs: { accentFromSystem: true } },
-  blue: { prefs: { accent: '#3b6fd8', backgroundMaterial: 'mica' } },
-  updated: { prefs: { seenVersion: '2.6.0' } }
+  acrylicFull: { prefs: { backgroundMaterial: 'acrylic', windowOpacity: 0.85, graphicsMode: 'full' } },
+  micaFull: { prefs: { backgroundMaterial: 'mica', windowOpacity: 0.85, graphicsMode: 'full', accent: '#3b6fd8' } },
+  acrylicFullScaled: { prefs: { backgroundMaterial: 'acrylic', windowOpacity: 0.85, graphicsMode: 'full' }, args: ['--force-device-scale-factor=2'],
+    window: { x: 0, y: 0, width: 700, height: 500, maximized: true } },
+  defaultMaterialFull: { prefs: { windowOpacity: 0.7, graphicsMode: 'full' } },
+  pinnedTranslucentFull: { prefs: { sidebarPinned: true, windowOpacity: 0.85, graphicsMode: 'full' } }
 };
 const base = { design: 'calm', theme: 'dark', tabBarPosition: 'left', sidebarPinned: false, welcomeDone: true };
 const electron = path.resolve('node_modules/electron/dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
