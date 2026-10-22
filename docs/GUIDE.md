@@ -24,11 +24,13 @@ The interesting part is `src/main/governor/`.
 
 ---
 
-## Four designs
+## Five designs
 
-Ledger, Paper, Grid and Legacy share one foundation and differ in shape, type and colour. Pick one in Settings → Appearance.
+Ledger, Paper, Grid, Calm and Legacy share one foundation and differ in shape, type and colour. Pick one in Settings → Appearance.
 
 ![Debrowser's four designs side by side](screenshots/designs.png)
+
+Calm, the newest, is not in the picture above: a quiet look after Arc and Zen, with soft colours and no animation.
 
 ## Installing it
 
@@ -129,12 +131,15 @@ Everything a browser is expected to do, without the parts you have to learn.
 The details below are the ones people tend to ask about.
 
 **Address bar.** Type and it suggests open tabs (picking one switches to it
-instead of opening it twice), bookmarks, history and a search. The top row is
+instead of opening it twice), bookmarks, history and a search, with your search engine's own suggestions
+for what you are typing (Google, DuckDuckGo, Bing or Startpage; never in a
+private window, and off with Settings → Show search suggestions). The new tab
+page's search field suggests the same way. The top row is
 always what Enter will do. Esc puts back what you typed, and pressing it again
 puts back the page's address. Local addresses (`localhost:3000`, `192.168.1.1`,
 `printer.local`) open over `http://` without a detour.
 
-**Designs.** Settings → Appearance → Design picks the look: **Ledger** (the default: sage by day, near-black green by night), **Paper** (warm paper, tabs as underlined words, a serif search), **Grid** (black and white, square, numbered tabs, the one in front inverted) or **Legacy design**, the look Debrowser had up to 1.7. Each works in light and dark, tabs across the top or down the side, and keeps your accent colour, tab bar colour and translucency. In every design but Legacy the new tab page shows the mark above a search field boxed like an address bar, and "Continue with these tabs" (your last few pages) right under it; its ⋮ menu hides it, and Settings brings it back. Private windows never show it.
+**Designs.** Settings → Appearance → Design picks the look: **Ledger** (the default: sage by day, near-black green by night), **Paper** (warm paper, tabs as underlined words, a serif search), **Grid** (black and white, square, numbered tabs, the one in front inverted) **Calm** (quiet colours and no animation, after Arc and Zen) or **Legacy design**, the look Debrowser had up to 1.7. Each works in light and dark, tabs across the top or down the side, and keeps your accent colour, tab bar colour and translucency. In every design but Legacy the new tab page shows the mark above a search field boxed like an address bar, and "Continue with these tabs" (your last few pages) right under it; its ⋮ menu hides it, and Settings brings it back. Private windows never show it.
 
 **Tabs.** Drag to reorder, across the top or down the side (Settings →
 Appearance). Down the side they can be detached (the button at the foot of the strip): the page gets the whole window, and pointing at the left edge brings the tabs out as a floating panel. Right-click a tab to pin, mute, duplicate or close several at
@@ -150,6 +155,13 @@ it. With more than one window open, each has a colour - Teal, Green, Copper,
 Gold, Violet, Blue, Rose - shown as a band along its top edge, and a tab's menu
 offers "Move to the Copper window" and so on for every other one, with the
 same colour beside it. A window keeps its colour when Debrowser reopens it.
+
+**Sign-in pop-ups.** Signing in with Google, Microsoft, Apple and other
+providers opens a window of its own, with a strip naming the site it is really
+on, as Chrome does, and the site that asked hears back when you finish. Other
+pop-ups open as a Peek over the page. If Google refuses to sign in from
+Debrowser ("This browser or app may not be secure"), Debrowser says so and
+offers to open the site in your usual browser.
 
 **Passwords.** Off until you set a passcode (Settings → Passwords and
 payment). Then the browser offers to remember sign-ins, fills a site's own
