@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+The toolbar and tabs show again in installed copies of Debrowser.
+
+### Fixed
+
+- **The toolbar and tabs show again in installed copies.** Since 2.6.0, an installed Debrowser on Windows, macOS or Linux opened with no address bar, toolbar or tabs, only the page under an empty bar, and menus, notices and the setup window were blank too. A security setting added in 2.6.0, which keeps a web page saved to your computer from reading your other files, also stopped Debrowser reading its own toolbar from inside the app. Debrowser now loads its own parts a different way, and that setting stays on.
+
 ## 2.6.1
 
 The toolbar and tabs come back by themselves if the part of Debrowser that draws them stops.

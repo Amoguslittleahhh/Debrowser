@@ -126,7 +126,8 @@ function showSetupWindow({ spec, prefs, onConfirm, onClosed = () => {}, owner = 
   // Shown once the page has measured itself (`setup-size`), so the window
   // opens at its final height; this is the fallback if that never comes.
   setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) { win.center(); win.show(); } }, 1500).unref?.();
-  win.loadFile(PAGE);
+  // Not loadFile: an installed copy's file:// cannot read app.asar (pages.js, loadUi).
+  require('../pages').loadUi(win.webContents, path.basename(PAGE)).catch(() => {});
   return win;
 }
 

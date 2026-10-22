@@ -104,7 +104,56 @@ function registerScheme() {
   protocol.registerSchemesAsPrivileged([{
     scheme: SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+  }, {
+    scheme: UI_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true }
   }]);
+}
+
+/*
+ * The browser's own views - the toolbar and tabs, menus, panels, toasts, the
+ * setup window - and the address each is loaded from.
+ *
+ * They were `file://` pages inside app.asar. An installed copy runs with the
+ * GrantFileProtocolExtraPrivileges fuse off (electron-builder.yml), which
+ * holds file:// to Chrome's rules and also takes away its reading of the
+ * archive: every one of them failed with ERR_FILE_NOT_FOUND, and the window
+ * was a page under an empty bar. Nothing caught it, because the smoke suite
+ * runs the unpackaged app, where the fuse is on. A scheme of our own reads the
+ * archive here instead, and only on the default session, where these views
+ * live: a tab, in its own partition, cannot load one.
+ */
+const UI_SCHEME = 'debrowser-ui';
+const UI_HOST = 'app';
+
+/** A view's address: `file` from the renderer directory, with its query. */
+function uiUrl(file, query = null) {
+  const url = new URL(`${UI_SCHEME}://${UI_HOST}/${file}`);
+  for (const [key, value] of Object.entries(query || {})) url.searchParams.set(key, String(value));
+  return url.href;
+}
+
+/** Load one of the browser's own views, as `loadFile` did with `{ query }`. */
+function loadUi(wc, file, { query } = {}) {
+  serveUi();
+  return wc.loadURL(uiUrl(file, query));
+}
+
+let uiServed = false;
+function serveUi(log = () => {}) {
+  if (uiServed) return;
+  uiServed = true;
+  try {
+    protocol.handle(UI_SCHEME, (request) => {
+      const url = new URL(request.url);
+      if (url.hostname !== UI_HOST) return new Response('Not found', { status: 404 });
+      const full = path.resolve(PAGES_DIR, decodeURIComponent(url.pathname).replace(/^\/+/, ''));
+      if (!full.startsWith(PAGES_DIR + path.sep)) return new Response('Forbidden', { status: 403 });
+      return respond(full, log);
+    });
+  } catch (err) {
+    log('pages', `could not register ${UI_SCHEME}: ${err.message}`);
+  }
 }
 
 /**
@@ -174,6 +223,7 @@ function contentType(file) {
 let handler = null;
 
 function serve(log = () => {}, partitions = []) {
+  serveUi(log);
   const registries = [protocol, ...partitions.map((p) => session.fromPartition(p).protocol)];
   handler = async (request) => {
     const url = new URL(request.url);
@@ -268,7 +318,7 @@ function serveSession(ses, log = () => {}) {
  * Referer, Origin or Sec-Fetch header at all, from our pages and a website
  * alike. The network hooks can, from the frame that made the request, which a
  * page has no way to set. Our own pages are `debrowser:` and the browser's
- * chrome is `file:`; nothing else asks for these files.
+ * chrome is `debrowser-ui:`; nothing else asks for these files.
  *
  * A navigation of the whole tab is not judged here: typing an address is the
  * user's to do, and links from websites are refused before they get this far.
@@ -285,7 +335,7 @@ function fromWebPage(details) {
   }
   // An extension's own pages may reach the bridge, and nothing else of ours.
   if (/^chrome-extension:/.test(from) && pageName(details.url) === 'ext-bridge') return false;
-  return Boolean(from) && !/^(debrowser|file|devtools):/.test(from);
+  return Boolean(from) && !/^(debrowser|debrowser-ui|file|devtools):/.test(from);
 }
 
 /** Is this one of ours? */
@@ -326,5 +376,5 @@ function titleFor(url) {
 
 module.exports = {
   SCHEME, PAGES, PAGES_DIR, NEW_TAB_URL, SETTINGS_URL, HISTORY_URL, DOWNLOADS_URL, PASSWORDS_URL, TOR_URL, WELCOME_URL,
-  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, isInternal, pageName, titleFor, fromWebPage, setBridge
+  INSECURE_URL, DANGER_URL, SAFETY_URL, RECEIPT_URL, WHATS_NEW_URL, READER_URL, STYLE_URL, FINGERPRINT_URL, BLANK_URL, registerScheme, serveSession, serve, UI_SCHEME, uiUrl, loadUi, isInternal, pageName, titleFor, fromWebPage, setBridge
 };

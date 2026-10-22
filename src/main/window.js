@@ -247,7 +247,6 @@ const SHEET_PAGES = {
   shortcuts: 'shortcuts.html'
 };
 
-const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
 const CHROME_PRELOAD = path.join(__dirname, '..', 'preload', 'chrome-preload.js');
 
 /**
@@ -283,6 +282,11 @@ function preloadArgs(prefs) {
   const look = {};
   for (const key of FIRST_PAINT_PREFS) if (key in all) look[key] = all[key];
   return [`--prefs=${JSON.stringify(look)}`];
+}
+
+/** One of the browser's own views into `wc` (pages.js, loadUi). */
+function loadUi(wc, file, options) {
+  return require('./pages').loadUi(wc, file, options);
 }
 
 function setRadius(view, radius) {
@@ -617,7 +621,7 @@ class BrowserShell {
     // again. Harmless in every other layout, where nothing reads the flag.
     this.chromeView.webContents.on('focus', () => this.setChromeFocused(true));
     this.chromeView.webContents.on('blur', () => this.setChromeFocused(false));
-    this.chromeView.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'));
+    loadUi(this.chromeView.webContents, 'chrome.html');
 
     // Links in our own UI (there should be none) open externally rather than
     // replacing the browser chrome. Web addresses only: `openExternal` hands
@@ -956,7 +960,7 @@ class BrowserShell {
 
     const wc = sheetView.webContents;
     this.bindShortcuts(wc);
-    wc.loadFile(path.join(RENDERER_DIR, file), {
+    loadUi(wc, file, {
       query: {
         x: String(Number.isFinite(x) ? Math.round(x) : 0),
         y: String(Number.isFinite(y) ? Math.round(y) : 0),
@@ -1331,7 +1335,7 @@ class BrowserShell {
       view.webContents.on('focus', () => this.focusChrome());
       this.suggestView = view;
       this.suggestReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
-      view.webContents.loadFile(path.join(RENDERER_DIR, 'suggest.html')).catch(() => {});
+      loadUi(view.webContents, 'suggest.html').catch(() => {});
       this.window.contentView.addChildView(view);
     }
     if (!origin) origin = this.chromeView.getBounds();
@@ -1452,7 +1456,7 @@ class BrowserShell {
         if (this.passkeyView === view && !this.window.isDestroyed()) this.window.contentView.addChildView(view);   // topmost
         resolve();
       }));
-      view.webContents.loadFile(path.join(RENDERER_DIR, 'passkeys.html')).catch(() => {});
+      loadUi(view.webContents, 'passkeys.html').catch(() => {});
       view.setBounds({ x: 0, y: 0, width: 1, height: 1 });
     }
     const view = this.passkeyView;
@@ -1597,7 +1601,7 @@ class BrowserShell {
         }
       });
       try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
-      view.webContents.loadFile(path.join(RENDERER_DIR, 'divider.html')).catch(() => {});
+      loadUi(view.webContents, 'divider.html').catch(() => {});
       this.dividerView = view;
       this.trackPointer(view);
     }
@@ -1652,7 +1656,7 @@ class BrowserShell {
       }
     });
     try { backdrop.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
-    backdrop.webContents.loadFile(path.join(RENDERER_DIR, 'peek.html')).catch(() => {});
+    loadUi(backdrop.webContents, 'peek.html').catch(() => {});
     const page = adopt
       ? new WebContentsView({ webContents: adopt })
       : new WebContentsView({ webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -1757,7 +1761,7 @@ class BrowserShell {
         additionalArguments: preloadArgs(this.prefs)
       }
     });
-    bar.webContents.loadFile(path.join(RENDERER_DIR, 'quick.html')).catch(() => {});
+    loadUi(bar.webContents, 'quick.html').catch(() => {});
     const page = new WebContentsView({
       webPreferences: { session: ses, contextIsolation: true, nodeIntegration: false, sandbox: true }
     });
@@ -1849,7 +1853,7 @@ class BrowserShell {
       view.setVisible(false);
       this.toastView = view;
       this.toastReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
-      view.webContents.loadFile(path.join(RENDERER_DIR, 'toast.html')).catch(() => {});
+      loadUi(view.webContents, 'toast.html').catch(() => {});
     }
     this.toastReady.then(() => {
       if (!this.toastView || this.window.isDestroyed()) return;
@@ -1900,7 +1904,7 @@ class BrowserShell {
       view.webContents.on('before-input-event', (event) => event.preventDefault());
       this.hoverCardView = view;
       this.hoverCardReady = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
-      view.webContents.loadFile(path.join(RENDERER_DIR, 'hovercard.html')).catch(() => {});
+      loadUi(view.webContents, 'hovercard.html').catch(() => {});
     }
     const token = (this.hoverCardToken || 0) + 1;
     this.hoverCardToken = token;
@@ -1990,7 +1994,7 @@ class BrowserShell {
         }
       });
       view.setBackgroundColor(this.surface());
-      view.webContents.loadFile(path.join(RENDERER_DIR, 'crashed.html')).catch(() => {});
+      loadUi(view.webContents, 'crashed.html').catch(() => {});
       // Ctrl+R and F5 reload from here, as they would from the page it covers.
       this.bindShortcuts(view.webContents);
       setRadius(view, this.vertical() && !this.fullScreen() ? CONTENT_RADIUS : 0);
@@ -2200,7 +2204,7 @@ class BrowserShell {
       });
       try { view.setBackgroundColor('#00000000'); } catch { /* opaque then */ }
       view.axis = row ? 'row' : 'col';
-      view.webContents.loadFile(path.join(RENDERER_DIR, 'divider.html'),
+      loadUi(view.webContents, 'divider.html',
         { query: row ? { for: 'devtools', axis: 'row' } : { for: 'devtools' } }).catch(() => {});
       this.devToolsDivider = view;
       this.trackPointer(view);
@@ -2253,7 +2257,7 @@ class BrowserShell {
       const sheet = this.sheetView ? root.children.indexOf(this.sheetView) : -1;
       root.addChildView(this.panelView, sheet === -1 ? undefined : sheet);
       this.bindShortcuts(this.panelView.webContents);
-      this.panelView.webContents.loadFile(path.join(RENDERER_DIR, 'panel.html'));
+      loadUi(this.panelView.webContents, 'panel.html');
     } else if (this.panelView) {
       // Destroy rather than hide. A task manager that costs a live renderer
       // while closed would be an embarrassing thing for this browser to ship.
@@ -2718,7 +2722,7 @@ class BrowserShell {
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     view.webContents.once('did-finish-load', () => this.onCommand('chrome-ready'));
     this.reviveOnCrash(view.webContents, 'tab list');
-    view.webContents.loadFile(path.join(RENDERER_DIR, 'chrome.html'), { query: { role: 'strip' } }).catch(() => {});
+    loadUi(view.webContents, 'chrome.html', { query: { role: 'strip' } }).catch(() => {});
     this.window.contentView.addChildView(view);
     this.stripView = view;
     this.trackPointer(view);
