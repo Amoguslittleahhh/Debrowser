@@ -368,6 +368,18 @@ body:is([data-design="ledger"], [data-design="paper"], [data-design="grid"]) .co
 }
 .continue-row .chip.has-icon { background: var(--bg); }
 .continue-row .site-icon { inset: 8px; width: 18px; height: 18px; border-radius: 4px; }
+.continue-item { position: relative; }
+/* The cross takes the count's place on hover, so the row keeps its width. */
+.continue-forget {
+  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: var(--radius); background: var(--bg); color: var(--text-dim);
+  opacity: 0; transition: opacity var(--fast) var(--ease);
+}
+.continue-forget svg { width: 12px; height: 12px; }
+.continue-item:hover .continue-forget, .continue-forget:focus-visible { opacity: 1; }
+.continue-forget:hover { background: var(--wash); color: var(--text); }
+.continue-item:hover .continue-when { visibility: hidden; }
 .continue-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .continue-when {
   flex: none;

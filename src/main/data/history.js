@@ -62,6 +62,11 @@ const SAVE_DELAY_MS = 4000;
  */
 const SAFE_SCHEMES = new Set(['http:', 'https:', 'file:']);
 
+/** An entry's arrivals, or its visits when it was recorded before they were counted. */
+function arrivalsOf(entry) {
+  return Number.isFinite(entry.arrivals) ? entry.arrivals : entry.visits || 1;
+}
+
 function safeUrl(raw) {
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > 4096) return null;
   let parsed;
@@ -161,6 +166,12 @@ class History {
       title: cleanTitle(entry.title, url),
       visitedAt: Number.isFinite(entry.visitedAt) ? entry.visitedAt : Date.now(),
       visits: Number.isFinite(entry.visits) && entry.visits > 0 ? Math.min(entry.visits, 1e6) : 1,
+      // Times you came to this page from another site, a new tab or nowhere:
+      // the new tab page's count of the sites you use. Unlike `visits`, a
+      // reload or a step inside the same site does not add to it. Absent on
+      // entries older than the count (and on imports), which fall back to
+      // `visits` (see `arrivalsOf`).
+      ...(Number.isFinite(entry.arrivals) && entry.arrivals >= 0 ? { arrivals: Math.min(entry.arrivals, 1e6) } : {}),
       // Present only for a site whose icon is somewhere other than the default
       // address; see `describe`. Absent rather than null, so it does not appear
       // in the file at all for the common case - which is most of them.
@@ -200,7 +211,7 @@ class History {
    * Note a visit. Returns the stored entry, or null if this URL is not one we
    * keep - which is the normal answer for the browser's own pages.
    */
-  record({ url, title } = {}) {
+  record({ url, title, arrived = true } = {}) {
     if (!this.enabled()) return null;
     const clean = safeUrl(url);
     if (!clean) return null;
@@ -210,6 +221,7 @@ class History {
       const [existing] = this.items.splice(index, 1);
       existing.visitedAt = Date.now();
       existing.visits += 1;
+      existing.arrivals = arrivalsOf(existing) + (arrived ? 1 : 0);
       // A later visit usually has the better title: the first one is often the
       // URL, recorded before the document announced its own name.
       existing.title = cleanTitle(title, existing.title);
@@ -218,7 +230,7 @@ class History {
       return existing;
     }
 
-    const entry = this.normalise({ url: clean, title, visitedAt: Date.now(), visits: 1 });
+    const entry = this.normalise({ url: clean, title, visitedAt: Date.now(), visits: 1, arrivals: arrived ? 1 : 0 });
     if (!entry) return null;
     this.items.unshift(entry);
     if (this.items.length > MAX_ENTRIES) this.items.length = MAX_ENTRIES;
@@ -404,4 +416,4 @@ function newId() {
   return `h-${Date.now().toString(36)}-${idCounter.toString(36)}`;
 }
 
-module.exports = { History, MAX_ENTRIES, safeUrl, customIcon };
+module.exports = { History, MAX_ENTRIES, safeUrl, customIcon, arrivalsOf };

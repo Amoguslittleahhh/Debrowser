@@ -215,24 +215,15 @@ loadTiles();
 /* ------------------------------------------------------------------ */
 
 /**
- * The pages you were last on, a scroll below the search - every design but
- * Legacy. Straight from the browser's history, newest first, so a private
- * window, which keeps none, gets nothing and the card stays hidden.
+ * The sites you use most, a scroll below the search - every design but
+ * Legacy. Counted from the browser's own history on this device (main.js
+ * `recent-pages`), so a private window, which keeps none, gets nothing and
+ * the card stays hidden, and forgetting a site here forgets its visits.
  */
 const card = document.getElementById('continue');
 const cardList = document.getElementById('continue-list');
 const cardPop = document.getElementById('continue-pop');
 const cardMore = document.getElementById('continue-more');
-
-function ago(at) {
-  const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
-  if (hours < 48) return 'Yesterday';
-  return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-}
 
 /**
  * The query and the engine, when a recent page is a search results page.
@@ -255,6 +246,9 @@ function searchOf(item) {
 }
 
 function continueRow(item) {
+  const host = siteOf(item.url);
+  const root = document.createElement('div');
+  root.className = 'continue-item';
   const row = document.createElement('button');
   row.type = 'button';
   row.className = 'continue-row';
@@ -265,19 +259,18 @@ function continueRow(item) {
   title.className = 'continue-title';
   const meta = document.createElement('span');
   meta.className = 'continue-meta';
-  // A search reads as what was searched for, not as "query - Google Search":
-  // the engine's name repeated down the card said nothing the second line
-  // could not, and pushed the query itself toward the ellipsis.
+  // A search engine reads as its name: its busiest page is a results page,
+  // and the last query on it says nothing about why you go there.
   const searched = searchOf(item);
-  title.textContent = searched ? searched.query : (item.title || siteOf(item.url));
-  meta.textContent = searched ? `${searched.engine} search` : siteOf(item.url);
+  title.textContent = searched ? searched.engine : (item.title || host);
+  meta.textContent = host;
   text.append(title, meta);
-  // When, on its own at the end of the row, where a list's times line up.
+  // How often, on its own at the end of the row, where a list's counts line up.
   const when = document.createElement('span');
   when.className = 'continue-when';
   // Already open: says so, and the row goes to that tab rather than opening
-  // the page a second time.
-  when.textContent = item.tabId != null ? 'Open now' : ago(item.visitedAt);
+  // the site a second time.
+  when.textContent = item.tabId != null ? 'Open now' : (item.visits === 1 ? '1 visit' : `${item.visits} visits`);
   row.append(siteChip(item.url, { icon: item.icon }), text, when);
   row.addEventListener('click', (event) => {
     if (item.tabId != null && !event.ctrlKey && !event.metaKey) api.send('activate-tab', { id: item.tabId });
@@ -287,7 +280,20 @@ function continueRow(item) {
   row.addEventListener('auxclick', (event) => {
     if (event.button === 1) api.send('new-tab', { url: item.url });
   });
-  return row;
+  // Removing a site forgets its visits, as a favourite's cross does: the
+  // count is history, and a site merely hidden would be counted back.
+  const forget = document.createElement('button');
+  forget.type = 'button';
+  forget.className = 'continue-forget';
+  forget.append(crossIcon());
+  forget.title = `Forget ${host}`;
+  forget.setAttribute('aria-label', `Forget ${host}`);
+  forget.addEventListener('click', async () => {
+    const res = await api.request('forget-site', { url: item.url });
+    if (res) loadContinue();
+  });
+  root.append(row, forget);
+  return root;
 }
 
 async function loadContinue() {

@@ -2441,6 +2441,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     }
     history.items = keptHistory;
 
+    // The card counts arrivals at a site, not page loads: a reload or a step
+    // inside the site leaves the count where it was.
+    {
+      // A History of its own: the test profile may not be saving history.
+      const { History } = require('../data/history');
+      const scratch = new History(() => {}, { dir: fs.mkdtempSync(path.join(app.getPath('temp'), 'arrivals-')) });
+      const url = 'https://arrivals.test/';
+      scratch.record({ url, arrived: true });
+      scratch.record({ url, arrived: false });
+      scratch.record({ url, arrived: true });
+      const entry = scratch.items.find((e) => e.url === url);
+      check('most used sites count arrivals, not reloads', Boolean(entry && entry.visits === 3 && entry.arrivals === 2),
+        JSON.stringify(entry && { visits: entry.visits, arrivals: entry.arrivals }));
+      scratch.clear();
+    }
+
     const planted = history.normalise({ url: 'https://continue.test/page', title: 'A page to come back to',
       visitedAt: Date.now() - 5 * 60_000, visits: 1 });
     history.items.unshift(planted);
@@ -2462,6 +2478,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
           label: [...document.querySelectorAll('.tile-label')].map((l) => l.textContent.replace(/\u200b/g, '')).join(','),
           card: shown(document.getElementById('continue')),
           rows: document.querySelectorAll('#continue-list .continue-row').length,
+          count: (document.querySelector('#continue-list .continue-when') || {}).textContent || '',
           dot: getComputedStyle(document.querySelector('.brand-dot')).fill
         };
       })()`).catch(() => null);
@@ -2485,9 +2502,9 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       !seen.legacy.brand && seen.legacy.label.split(',').includes('continue.test'),
       fresh.map((d) => `${d}: mark=${seen[d].brand} dot=${seen[d].dot} favourites=${seen[d].label}`).join(', ') +
       `, legacy mark=${seen.legacy.brand} list=${seen.legacy.label}`);
-    check('"Continue with these tabs" lists recent pages in the new designs and not in Legacy',
-      fresh.every((d) => seen[d].card && seen[d].rows === 1) && !seen.legacy.card,
-      fresh.map((d) => `${d}: ${seen[d].rows} row(s)`).join(', ') + `, legacy card=${seen.legacy.card}`);
+    check('"Continue with these tabs" lists most used sites, with their visit counts, in the new designs and not in Legacy',
+      fresh.every((d) => seen[d].card && seen[d].rows === 1 && seen[d].count === '1 visit') && !seen.legacy.card,
+      fresh.map((d) => `${d}: ${seen[d].rows} row(s) "${seen[d].count}"`).join(', ') + `, legacy card=${seen.legacy.card}`);
 
     // Its menu's "Hide this card" turns it off for good, until Settings.
     runCommand('set-pref', { key: 'design', value: 'ledger' });
