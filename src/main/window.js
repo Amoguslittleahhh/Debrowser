@@ -2922,6 +2922,7 @@ class BrowserShell {
       clearTimeout(this.edgeTimer);
       this.edgeTimer = null;
       this.edgeHeld = false;
+      this.edgeLastX = null;
       return;
     }
     if (this.edgeTimer) return;
@@ -2941,9 +2942,19 @@ class BrowserShell {
         const rows = at.y >= top && at.y < b.y + b.height;
         const inside = rows && at.x >= b.x - 8 && at.x < b.x + SIDEBAR_SENSE;
         near = rows && at.x >= b.x - 8 && at.x < b.x + EDGE_NEAR;
+        // Moving left fast enough to be at the edge by the next reading: read
+        // at a frame's pace from now on, not the far-away one. A pointer
+        // thrown at the edge crossed EDGE_NEAR between two 50ms readings, and
+        // the strip came out a reading late.
+        const last = this.edgeLastX;
+        this.edgeLastX = at.x;
+        if (last != null && at.x < last && at.x - (last - at.x) * 2 < b.x + EDGE_NEAR) near = rows;
         if (inside && !this.edgeHeld) {
           this.edgeHeld = true;
-          this.setSidebarOpen(true);
+          // Pushed against the wall itself rather than brushing past the
+          // band beside it: that is a visit, so the strip comes out now,
+          // without the pause that tells a brush from one.
+          this.setSidebarOpen(true, { now: at.x <= b.x });
         } else if (!inside && this.edgeHeld) {
           this.edgeHeld = false;
           // Left before the pause ran out: a brush past the edge, not a visit.

@@ -27,6 +27,7 @@ In Debrowser 2.6.0, search suggestions come from your search engine as you type,
 
 ### Improved
 
+- **Tucked tabs come out as soon as the pointer hits the left edge.** Pushing the pointer against the window's left edge now opens the tab panel straight away instead of after a short pause, and a pointer thrown at the edge from across the window is noticed a reading sooner.
 - **Windows: Windows Hello appears sooner when you sign in with a passkey.** Debrowser reuses the list of your passkeys it read when the page opened, instead of asking Windows again before Hello can show, and falls back to Windows' own dialog after 2 seconds rather than 4 if Windows is slow to answer.
 - **Clearer tab indicators.** The tab you are on now has a lit dot, other awake tabs a faint one and sleeping tabs their usual dot, so the dots no longer vanish when tabs wake. Down the side, the open tab's bar now sits inside its row instead of hanging off its rounded edge.
 - **Smoother, livelier animations.** Menus, tabs, hover cards, toasts and pop-ups now ease in and out and settle into place instead of stopping dead. A closing tab dips before it folds away, menu rows arrive one after another, the bookmark star pops when you save a page, and the download arrow lands in its tray. Large dialogs and pages glide in without bouncing. Calm and "reduce motion" still turn all of this off.
