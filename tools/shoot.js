@@ -39,10 +39,10 @@ const TABS = [
 ];
 
 const RECENT = { items: [
-  { url: 'https://www.google.com/search?q=lisbon+in+october', title: 'lisbon in october - Google Search', visitedAt: Date.now() - 4 * 60_000 },
-  { url: 'https://github.com/Amoguslittleahhh/Debrowser/pulls', title: 'Pull requests · Amoguslittleahhh/Debrowser', visitedAt: Date.now() - 38 * 60_000 },
-  { url: 'https://www.nature.com/articles/perspective', title: 'Perspective-Taking: Emerging research on how we see others', visitedAt: Date.now() - 3 * 3600_000 },
-  { url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/color-mix', title: 'color-mix() - CSS | MDN', visitedAt: Date.now() - 26 * 3600_000 }
+  { url: 'https://github.com/Amoguslittleahhh/Debrowser/pulls', title: 'GitHub', visits: 214 },
+  { url: 'https://www.youtube.com/', title: 'YouTube', visits: 131, tabId: 4 },
+  { url: 'https://www.google.com/search?q=lisbon+in+october', title: 'lisbon in october - Google Search', visits: 87 },
+  { url: 'https://developer.mozilla.org/en-US/docs/Web/CSS/color-mix', title: 'color-mix() - CSS | MDN', visits: 1 }
 ] };
 
 const STATE = {

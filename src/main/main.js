@@ -114,7 +114,7 @@ function endTabCycle() {
     });
   });
 }
-const { History } = require('./data/history');
+const { History, arrivalsOf } = require('./data/history');
 const { ReadingList } = require('./data/reading-list');
 const icons = require('./icons');
 const presence = require('./presence');
@@ -1453,7 +1453,15 @@ function main() {
         }
         break;
       case 'visited':
-        if (history && payload?.url && history.record({ url: payload.url, title: tab.title })) {
+        if (!history || !payload?.url) break;
+        {
+          // An arrival when the tab was last on another site, or on none: a
+          // reload or a step inside one site is a visit, not a return to it.
+          let site = null;
+          try { site = new URL(payload.url).origin; } catch { /* recorded or refused below */ }
+          const arrived = tab.lastSite !== site;
+          tab.lastSite = site;
+          if (!history.record({ url: payload.url, title: tab.title, arrived })) break;
           // Going back to a forgotten site brings its tile back through
           // history; the hidden entry would only be a record of the visit.
           unhideTile(prefs, payload.url);
@@ -5951,23 +5959,27 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
       case 'top-sites':
         return { items: topSites(history, bookmarks, Number(payload?.limit) || 8, prefs.get('hiddenTiles')) };
 
-      // "Continue with these tabs": the last pages visited, newest first. `shown` false when the card is off, or in a
-      // private window, which has no history to give; otherwise the card
-      // stays, empty or not, so the new tab page keeps one layout.
+      // "Continue with these tabs": the sites you use most, by how often you
+      // have visited them. Counted from history alone, on this device - the
+      // same visits History keeps, so clearing it or forgetting a site clears
+      // the count, and nothing is ever sent anywhere. Bookmarks do not pad the
+      // list: a site you saved but never open is not one you use. `shown`
+      // false when the card is off, or in a private window, which counts
+      // nothing; otherwise the card stays, empty or not, so the new tab page
+      // keeps one layout.
       case 'recent-pages': {
         if (!history || INCOGNITO || !prefs.get('continueCard')) return { items: [], shown: false };
-        // Pages open now are listed too, as the tab to switch to: left out,
-        // a restart that reopened your last pages emptied the card, and the
-        // new tab page changed its whole layout to favourites.
-        const open = new Map(everyTab().map((t) => [t.url, t.id]));
-        const limit = Math.min(Math.max(Number(payload?.limit) || 4, 1), 12);
-        const items = [];
-        for (const e of history.entries()) {
-          if (!/^https?:/i.test(e.url)) continue;
-          items.push({ url: e.url, title: e.title || '', visitedAt: e.visitedAt, icon: e.icon || null,
-            tabId: open.get(e.url) ?? null });
-          if (items.length >= limit) break;
+        // A site open now is listed as the tab to switch to.
+        const open = new Map();
+        for (const t of everyTab()) {
+          try { const o = new URL(t.url).origin; if (!open.has(o)) open.set(o, t.id); } catch { /* no page */ }
         }
+        const limit = Math.min(Math.max(Number(payload?.limit) || 4, 1), 12);
+        // Counted by arrivals, not page loads: a site you reload or click
+        // around in is not one you went to twenty times.
+        const items = topSites(history, null, limit, [], arrivalsOf).map((s) => ({
+          url: s.url, title: s.title || '', visits: s.visits, icon: s.icon, tabId: open.get(s.origin) ?? null
+        }));
         return { items, shown: true };
       }
 
@@ -7412,7 +7424,7 @@ function unhideTile(prefs, url) {
   if (hidden.includes(origin)) prefs.set('hiddenTiles', hidden.filter((o) => o !== origin));
 }
 
-function topSites(history, bookmarks, limit = 8, hidden = []) {
+function topSites(history, bookmarks, limit = 8, hidden = [], countOf = (entry) => entry.visits || 1) {
   const byOrigin = new Map();
 
   for (const entry of history ? history.all() : []) {
@@ -7429,21 +7441,21 @@ function topSites(history, bookmarks, limit = 8, hidden = []) {
     if (!seen) {
       byOrigin.set(origin, {
         url: entry.url, title: entry.title, icon: entry.icon || null,
-        visits: entry.visits || 1, origin,
+        visits: countOf(entry), origin,
         // The page this tile opens, and how often it was visited.
         //
         // Seeded here rather than left undefined: `1 > (undefined || 0)` is
         // true, so every later page on the same origin won the comparison below
         // and the tile ended up pointing at whichever page history happened to
         // list last rather than at the one you actually go to.
-        best: entry.visits || 1
+        best: countOf(entry)
       });
       continue;
     }
-    seen.visits += entry.visits || 1;
+    seen.visits += countOf(entry);
     // The busiest page on the site is the one the tile opens.
-    if ((entry.visits || 1) > seen.best) {
-      seen.best = entry.visits || 1;
+    if (countOf(entry) > seen.best) {
+      seen.best = countOf(entry);
       seen.url = entry.url;
       seen.title = entry.title;
       seen.icon = entry.icon || null;
@@ -7451,6 +7463,7 @@ function topSites(history, bookmarks, limit = 8, hidden = []) {
   }
 
   const items = [...byOrigin.values()]
+    .filter((site) => site.visits > 0)
     .sort((a, b) => b.visits - a.visits)
     .slice(0, limit);
 
