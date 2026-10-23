@@ -51,8 +51,67 @@ function invoke(id) {
   close();
 }
 
+/**
+ * The submenu showing, if one is: its row from the model, or null at the top.
+ *
+ * A submenu opens in place of the menu rather than flying out beside it. The
+ * view is anchored under a button at the window's right edge, so a flyout would
+ * have nowhere to go but over the menu it came from - and in place, the keyboard
+ * needs nothing new beyond a way back.
+ */
+let open = null;
+let topItems = [];
+
 function render(items) {
+  topItems = items;
+  // The model is fetched again after a zoom step; a submenu showing stays.
+  const sub = open && items.find((item) => item.kind === 'submenu' && item.label === open.label);
+  open = sub || null;
+  draw(sub ? sub.items : items, sub);
+}
+
+function enter(item, keyboard) {
+  open = item;
+  draw(item.items, item);
+  // From the keyboard, onto the first row; from the mouse, nothing lit until
+  // the pointer moves, as when the menu first opens.
+  if (keyboard) focusFirst();
+}
+
+function leave() {
+  const was = open;
+  open = null;
+  draw(topItems, null);
+  const row = [...el.sheet.querySelectorAll('.item.submenu')].find((b) => b.dataset.label === was?.label);
+  if (row) row.focus();
+}
+
+function focusFirst() {
+  const first = el.sheet.querySelector('.item:not(.back):not(:disabled)');
+  if (first) first.focus();
+}
+
+function draw(items, sub) {
   el.sheet.textContent = '';
+
+  if (sub) {
+    const back = document.createElement('button');
+    back.className = 'item back';
+    back.type = 'button';
+    back.setAttribute('role', 'menuitem');
+    back.setAttribute('aria-label', `Back from ${sub.label}`);
+    back.append(menuIcon('back'));
+    const label = document.createElement('span');
+    label.className = 'item-label';
+    label.textContent = sub.label;
+    back.append(label);
+    back.addEventListener('click', leave);
+    el.sheet.append(back);
+    const sep = document.createElement('div');
+    sep.className = 'sep';
+    sep.setAttribute('role', 'separator');
+    el.sheet.append(sep);
+  }
 
   for (const item of items) {
     if (item.kind === 'separator') {
@@ -76,6 +135,25 @@ function render(items) {
 
     if (item.kind === 'zoom') {
       el.sheet.append(zoomRow(item));
+      continue;
+    }
+
+    if (item.kind === 'submenu') {
+      const button = document.createElement('button');
+      button.className = 'item submenu';
+      button.type = 'button';
+      button.dataset.label = item.label;
+      button.setAttribute('role', 'menuitem');
+      button.setAttribute('aria-haspopup', 'menu');
+      button.append(menuIcon(item.icon));
+      const label = document.createElement('span');
+      label.className = 'item-label';
+      label.textContent = item.label;
+      const more = menuIcon('forward');
+      more.classList.add('chevron');
+      button.append(label, more);
+      button.addEventListener('click', (event) => enter(item, event.detail === 0));
+      el.sheet.append(button);
       continue;
     }
 
@@ -222,6 +300,19 @@ function place() {
 
 // The keyboard and the click-away are the same in both menus; see sheet-menu.js.
 wireMenuKeyboard(el.sheet, el.backdrop, close);
+
+// Right opens a submenu row, Left (or Backspace) goes back out of one - as a
+// flyout's arrows would. Escape inside a submenu closes the menu, as anywhere.
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowRight' && document.activeElement?.classList.contains('submenu')) {
+    enter(topItems.find((item) => item.label === document.activeElement.dataset.label), true);
+  } else if ((event.key === 'ArrowLeft' || event.key === 'Backspace') && open) {
+    leave();
+  } else {
+    return;
+  }
+  event.preventDefault();
+});
 
 /* ------------------------------------------------------------------ */
 

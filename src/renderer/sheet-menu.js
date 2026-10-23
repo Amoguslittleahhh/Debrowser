@@ -64,6 +64,9 @@ const MENU_ICONS = {
   forward: ['M6 3l5 5-5 5'],
   reload: ['M13.5 8a5.5 5.5 0 1 1-1.6-3.9', 'M13.5 2v3.2h-3.2'],
   inspect: ['M2.5 2.5h5v5h-5z', 'M7.5 7.5l6 6', 'M9.5 13.5h4v-4'],
+  // A spanner, for the drawer of less-used tools.
+  tools: ['M10.5 2.5a3 3 0 0 0-2.8 4.1L2.8 11.5a1.2 1.2 0 0 0 1.7 1.7l4.9-4.9a3 3 0 0 0 4.1-2.8l-1.8 1.8-1.8-.4-.4-1.8z'],
+  help: ['M8 2.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z', 'M6.3 6.4a1.8 1.8 0 1 1 2.5 1.6c-.5.3-.8.6-.8 1.2v.3', 'M8 11.2v.1'],
   flag: ['M4 13.5V2.5', 'M4 3h7.5l-1.5 2.5 1.5 2.5H4'],
   // Drawn to the same 11px extent as the rest of the set, so a cross in a menu
   // is the weight of the glyph above it rather than whatever an X happens to be.

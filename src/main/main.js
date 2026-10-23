@@ -7303,38 +7303,46 @@ function menuModel({ tabs, shell }) {
       checked: full
     },
     { id: 'find-open', label: 'Find in page\u2026', accel: accel('find-open'), icon: 'search', enabled: live },
-    { id: 'save-page', label: 'Save page as\u2026', accel: accel('save-page'), icon: 'download',
-      enabled: live && !tabs.activeTab()?.internal },
-    ...(INCOGNITO ? [] : [{ id: 'install-web-app', label: 'Install this site as an app\u2026', icon: 'plus',
-      enabled: live && !tabs.activeTab()?.internal && /^https?:/i.test(String(tabs.activeTab()?.url)) }]),
-    { id: 'screenshot-page', label: 'Screenshot page', icon: 'image',
-      enabled: live && !tabs.activeTab()?.internal },
-    { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print',
-      enabled: live && !tabs.activeTab()?.internal },
+    // The rest of what this page and the browser can do, one row each,
+    // behind a row that opens them. Every one of these was in the top level,
+    // which made the menu taller than a laptop screen; what stays up there is
+    // what people reach for daily.
+    { kind: 'submenu', label: 'More tools', icon: 'tools', items: [
+      { id: 'save-page', label: 'Save page as\u2026', accel: accel('save-page'), icon: 'download',
+        enabled: live && !tabs.activeTab()?.internal },
+      ...(INCOGNITO ? [] : [{ id: 'install-web-app', label: 'Install this site as an app\u2026', icon: 'plus',
+        enabled: live && !tabs.activeTab()?.internal && /^https?:/i.test(String(tabs.activeTab()?.url)) }]),
+      { id: 'screenshot-page', label: 'Screenshot page', icon: 'image',
+        enabled: live && !tabs.activeTab()?.internal },
+      { id: 'print', label: 'Print\u2026', accel: accel('print'), icon: 'print',
+        enabled: live && !tabs.activeTab()?.internal },
+      { kind: 'separator' },
+      {
+        id: 'toggle-panel',
+        label: 'Task manager',
+        accel: accel('toggle-panel'),
+        icon: 'gauge',
+        kind: 'checkbox',
+        checked: shell.panelOpen
+      },
+      {
+        id: 'toggle-devtools',
+        label: 'Developer tools',
+        accel: accel('toggle-devtools'),
+        icon: 'code',
+        kind: 'checkbox',
+        checked: Boolean(live && active.devToolsOpen),
+        enabled: live
+      }
+    ] },
     { kind: 'separator' },
-    {
-      id: 'toggle-panel',
-      label: 'Task manager',
-      accel: accel('toggle-panel'),
-      icon: 'gauge',
-      kind: 'checkbox',
-      checked: shell.panelOpen
-    },
-    {
-      id: 'toggle-devtools',
-      label: 'Developer tools',
-      accel: accel('toggle-devtools'),
-      icon: 'code',
-      kind: 'checkbox',
-      checked: Boolean(live && active.devToolsOpen),
-      enabled: live
-    },
-    { id: 'show-shortcuts', label: 'Keyboard shortcuts', accel: accel('show-shortcuts'), icon: 'keyboard' },
     { id: 'open-settings', label: 'Settings', accel: accel('open-settings'), icon: 'gear' },
-    { kind: 'separator' },
     { id: 'open-whats-new', label: 'Release Notes', icon: 'notes' },
-    { id: 'report-problem', label: 'Report a problem…', icon: 'flag' },
-    { id: 'copy-version-info', label: 'Copy version info', icon: 'copy' },
+    { kind: 'submenu', label: 'Help', icon: 'help', items: [
+      { id: 'show-shortcuts', label: 'Keyboard shortcuts', accel: accel('show-shortcuts'), icon: 'keyboard' },
+      { id: 'report-problem', label: 'Report a problem\u2026', icon: 'flag' },
+      { id: 'copy-version-info', label: 'Copy version info', icon: 'copy' }
+    ] },
     // macOS has Quit in its own app menu, as every browser there does.
     ...(process.platform === 'darwin' ? [] : [{ id: 'quit-browser', label: 'Exit', icon: 'close' }]),
     { kind: 'note', label: `Debrowser ${app.getVersion()} · Chromium ${process.versions.chrome}` }

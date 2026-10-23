@@ -263,3 +263,8 @@ body.closing .backdrop { transition: opacity 90ms var(--ease-in); opacity: 0; }
 }
 .item.checked { font-weight: var(--fw-bold); }
 .item.checked .swatch { box-shadow: 0 0 0 2px var(--bg-raised), 0 0 0 3.5px currentColor; }
+
+/* A row that opens a submenu: a chevron where a shortcut would sit. */
+.item .chevron { margin-left: auto; width: 12px; height: 12px; opacity: 0.6; }
+/* The way back out of a submenu, which also names it. */
+.item.back { font-weight: var(--fw-bold); }
