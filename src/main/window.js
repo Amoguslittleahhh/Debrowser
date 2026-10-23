@@ -131,7 +131,7 @@ const CONTENT_RADIUS = 10;
  * out of the view for a moment. Short enough to feel like it is following the
  * pointer rather than lagging behind it.
  */
-const SIDEBAR_CLOSE_MS = 90;
+const SIDEBAR_CLOSE_MS = 100;
 const SIDEBAR_OPEN_MS = 40;    // enough to tell a brush past the edge from a visit, short enough not to feel
 
 /**
