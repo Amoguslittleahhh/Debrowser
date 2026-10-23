@@ -91,6 +91,11 @@ function inTime(promise, ms, fallback = null) {
   ]).finally(() => clearTimeout(timer));
 }
 
+/** A menu model with its submenus' rows lifted up beside the rest. */
+function flatMenu(items) {
+  return items.flatMap((item) => (item.kind === 'submenu' ? [item, ...flatMenu(item.items)] : [item]));
+}
+
 async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDevTools,
                           openInternalPage, senderPage, bookmarks,
                           runCommand = () => {}, history = null, context = { model: null },
@@ -1453,7 +1458,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // The menu has what every other browser's has: a new window, find, the
   // extensions when there are any to manage, and a way out.
   {
-    const ids = () => menuModel({ tabs, shell }).filter((item) => item.id).map((item) => item.id);
+    const ids = () => flatMenu(menuModel({ tabs, shell })).filter((item) => item.id).map((item) => item.id);
     const wasLab = prefs.get('extensions');
     prefs.set('extensions', false);
     const without = ids();
@@ -2613,7 +2618,7 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
   // act on carries an `id`, and anything that cannot survive IPC - a function,
   // as the old Electron template's `click` handlers were - would be silently
   // dropped on the way across and leave a row that does nothing.
-  const model = menuModel({ tabs, shell });
+  const model = flatMenu(menuModel({ tabs, shell }));
   const labels = model.map((item) => item.label).filter(Boolean);
   const ids = model.filter((item) => item.id).map((item) => item.id);
   const survivesIpc = JSON.stringify(model) === JSON.stringify(JSON.parse(JSON.stringify(model)));
