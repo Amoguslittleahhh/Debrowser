@@ -156,11 +156,15 @@ function setStar(on) {
  */
 let pointerOver = null;
 
-function reportHover(over) {
+function reportHover(over, wall = false) {
   if (over === pointerOver) return;
   pointerOver = over;
-  api.send('sidebar-hover', { over });
+  api.send('sidebar-hover', { over, wall });
 }
+
+// Against the window's very edge: pushed there on purpose, so the strip comes
+// out without the pause that tells a brush past the edge from a visit.
+const atWall = (event) => ROLE !== 'strip' && event.clientX <= 1;
 
 // In the bar across the top only the edge it starts at brings the strip out:
 // the rest of the bar is a toolbar, used all day. The tab list's own view is
@@ -180,12 +184,12 @@ document.addEventListener('transitionend', (event) => {
   api.send('sidebar-slid');
 });
 
-document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event)));
+document.addEventListener('mouseenter', (event) => reportHover(pointerWantsStrip(event), atWall(event)));
 document.addEventListener('mouseleave', () => reportHover(false));
 // `mousemove` as well, because entering a view the pointer is *already* inside
 // - which is what happens when the strip slides out from under it - does not
 // fire `mouseenter`.
-document.addEventListener('mousemove', (event) => reportHover(pointerWantsStrip(event)));
+document.addEventListener('mousemove', (event) => reportHover(pointerWantsStrip(event), atWall(event)));
 
 /*
  * The wheel over the tab strip moves the strip.

@@ -5299,7 +5299,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
       // The pointer reached the window's left edge, or left the strip. Only
       // the chrome can tell us: it is the view the pointer enters and leaves.
       case 'sidebar-hover':
-        shell.setSidebarOpen(Boolean(payload?.over));
+        shell.setSidebarOpen(Boolean(payload?.over), { now: payload?.wall === true });
         break;
       case 'sidebar-slid':
         shell.sidebarSlid();
