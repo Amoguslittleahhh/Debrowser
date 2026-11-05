@@ -41,8 +41,8 @@
   "devDependencies": {
     "axe-core": "^4.13.0",
     "electron": "github:castlabs/electron-releases#v44.5.1+wvcus",
-    "electron-builder": "^26.15.3",
-    "eslint": "^10.12.0",
+    "electron-builder": "^26.18.0",
+    "eslint": "^10.14.0",
     "js-yaml": "^5.4.2"
   },
   "author": {
@@ -56,10 +56,10 @@
   },
   "desktopName": "debrowser.desktop",
   "dependencies": {
-    "@ghostery/adblocker-electron": "^2.18.2",
+    "@ghostery/adblocker-electron": "^2.20.3",
     "@ghostery/adblocker-electron-preload": "^2.18.2",
     "@mozilla/readability": "^0.6.0",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "^6.8.11",
     "tldts-experimental": "^7.4.19"
   }
 }
