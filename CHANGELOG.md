@@ -40,6 +40,7 @@ Search suggestions now come from your search engine as you type, in the address 
 
 ### Security
 
+- **Security fixes from Chromium.** Debrowser now runs on Electron 44.10.1 (was 44.5.1), which brings five releases of Chromium security fixes and stops trusting the compromised eMudhra certificates, so a site using one is no longer shown as secure. The ad blocker, the updater and the tools that build Debrowser are updated too.
 - **Sign-in windows keep to the browser's rules.** A sign-in pop-up could open further windows that showed no address at all, and could be sent to one of Debrowser's own pages. Every window a sign-in opens now shows where it is, and none can reach the browser's pages.
 - **The ad blocker no longer hands pages a click.** Its scripts ran as if the user had just clicked, which a page could spend on a pop-up, fullscreen or sound playing on its own.
 - **A private window no longer tells sites the real size and position of its window.** Pages saw the letterboxed screen size, but could still read the window's true outer size, which gives away the toolbar's height, and where the window sits on the desktop, which can name the monitor. Sites now see the page's own size, the window at the corner of the screen, and a single monitor.
