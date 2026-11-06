@@ -1,5 +1,6 @@
 {
   "version": "15.0.25",
   "fingerprint": "EF6E286DDA85EA2A4BA7DE684E2C6E8793298290",
-  "base": "https://dist.torproject.org/torbrowser"
+  "base": "https://dist.torproject.org/torbrowser",
+  "archive": "https://archive.torproject.org/tor-package-archive/torbrowser"
 }
