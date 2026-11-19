@@ -2726,11 +2726,12 @@ function renderProfiles(profiles, state, host) {
     'Import',
     async (button) => {
       button.disabled = true;
-      const res = await api.request('import-from-profile', { path: profile.path });
+      const res = await api.request('import-from-profile', { path: profile.path, withTabs: true });
       button.disabled = false;
       if (res && res.ok) {
         state.textContent = `Imported ${res.added} from ${res.browser}` +
-          `${res.skipped ? `, skipped ${res.skipped} already saved or unsupported` : ''}.`;
+          `${res.skipped ? `, skipped ${res.skipped} already saved or unsupported` : ''}` +
+          `${res.opened ? `, and opened ${res.opened} of its tabs` : ''}.`;
         renderBookmarks();
       } else {
         state.textContent = (res && res.reason) || 'That import didn’t work.';

@@ -24,6 +24,7 @@ In Debrowser 2.6.0, search suggestions come from your search engine as you type,
 
 - **Search suggestions as you type.** The address bar and the new tab page's search field now show what your search engine suggests for the words you are typing, under the search for exactly what you typed. They come from Google, DuckDuckGo, Bing or Startpage, whichever you search with; Mojeek has none. What you type is sent without your cookies, nothing is sent for something that looks like a web address, and private windows never send it. Turn it off in Settings with Show search suggestions.
 - **The new tab page's search field suggests too.** It offers the same open tabs, bookmarks and history the address bar does, with the arrow keys and Enter working the same way.
+- **Bring your open tabs over from Zen, Firefox or Floorp.** Importing from one of these profiles now opens the tabs you had open there too, pinned ones pinned, each asleep until you click it, so even hundreds of them cost almost no memory. Pages already open in Debrowser are not opened twice.
 
 ### Improved
 
