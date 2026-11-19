@@ -51,6 +51,7 @@ In Debrowser 2.6.0, search suggestions come from your search engine as you type,
 - **z.ai and other well-known sites are no longer called phishing.** One of the phishing lists Debrowser checks had picked up chat.z.ai by mistake, so the whole site was stopped with a phishing warning. A phishing list entry no longer stops a well-known site as a whole (z.ai, ChatGPT, Claude, Google, GitHub and about forty others). Look-alikes of those sites, and malware entries, are still stopped.
 - **Windows: no more "Bogus ed25519 key in microdesc" in a private window.** With "Remember Tor between sessions" on (the default), Debrowser kept a copy of a file Tor was still writing when it was closed, and the next private window read the half-written entry back and showed Tor's complaint about it as if Tor could not connect. That file is no longer kept, and a complaint about one bad relay description is no longer shown as a problem.
 - **The bookmarks bar shows with the sidebar tucked away.** With the tabs down the side and tucked away, the bookmarks bar left an empty strip under the address bar and only filled in when the sidebar came out.
+- **Chromium's spare background process stays off when Debrowser says so.** The setting that turns it off used a misspelled feature name, so Chromium ignored it. No difference was measured, because Electron did not start a spare in tests, but the setting now does what it says.
 
 ### Security
 

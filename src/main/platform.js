@@ -875,8 +875,9 @@ function chromiumSwitches(cfg, incognito = null) {
   if (!cfg.spareRenderer) {
     // Chromium keeps a warm spare renderer to make the next navigation feel
     // instant. It costs a real process (~30-40MB) to save ~100ms, which is
-    // the wrong trade when memory is the constraint.
-    disabledFeatures.push('SpareRendererForProcessPerSite');
+    // the wrong trade when memory is the constraint. Chromium's name for it
+    // (content_features.cc); an earlier misspelling here disabled nothing.
+    disabledFeatures.push('SpareRendererForSitePerProcess');
   }
 
   // Bias V8 towards smaller heaps and smaller generated code rather than peak
