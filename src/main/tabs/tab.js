@@ -1102,7 +1102,10 @@ class Tab {
 
       // Downscaled hard. This is shown for a few hundred milliseconds behind a
       // loading page, so it needs to read as the right page, not to be legible.
-      const buffer = image.resize({ width: THUMB_WIDTH }).toJPEG(THUMB_QUALITY);
+      // 'better', not the default 'best': measured 3.9ms against 8.5ms for a
+      // 1080p page (four times that on a 2x screen), on the main thread right
+      // after a switch, for a picture nobody reads closely.
+      const buffer = image.resize({ width: THUMB_WIDTH, quality: 'better' }).toJPEG(THUMB_QUALITY);
       if (!buffer || !buffer.length) return null;
 
       const dir = await privateThumbDir();
