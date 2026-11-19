@@ -463,7 +463,11 @@ const PROFILES = {
     maxConcurrentLoads: 6,
     // Crash isolation per tab, at the cost of a process per tab.
     processPerSite: false,
-    spareRenderer: true
+    spareRenderer: true,
+    // Full-speed JIT: optimize-for-size measured ~10% more script time per
+    // frame on an animation-heavy page, for the ~13% per-tab memory this
+    // profile has chosen to spend.
+    optimizeForSize: false
   }
 };
 
