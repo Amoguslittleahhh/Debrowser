@@ -918,6 +918,7 @@ function main() {
     ...(spaces && !INCOGNITO ? { spaces: spaces.describe() } : {}),
     ...(prefs && prefs.get('labTabGroups') === true ? { groups: tabGroups.describe() } : {}),
     ...(!INCOGNITO && systemAccentNow ? { systemAccent: systemAccentNow } : {}),
+    ...(!INCOGNITO ? { rustBlocker: require('./protection/rust-engine').present() } : {}),
     ...(shell && shell.split ? { split: { left: shell.split.left, right: shell.split.right } } : {}),
     // The toolbar's puzzle button, while extensions are on and something is installed.
     ...(extensions && prefs && prefs.get('extensions') === true ? { extensionCount: extensions.list().length,
@@ -1839,6 +1840,7 @@ function main() {
         cookieBanners: () => prefs.get('hideCookieBanners') !== false,
         sitePrefs,
         rules: OFFLINE_MODE ? '/debrowser-test-ad.\n##.debrowser-test-ad' : null,
+        rust: () => prefs.get('labRustBlocker') === true,
         log
       });
       browsingSetup.push((ses) => blocker.attach(ses));
@@ -5050,7 +5052,7 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         if (payload.key === 'defaultZoom') {
           for (const tab of everyTab()) if (tab.isLive) siteZoom.apply(tab.wc);
         }
-        if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners')) blocker.refresh();
+        if (blocker && (payload.key === 'blockAds' || payload.key === 'hideCookieBanners' || payload.key === 'labRustBlocker')) blocker.refresh();
         if (payload.key === 'secureDns') applySecureDns(prefs, log);
         // Dark websites: open pages change now rather than on their next load.
         if (payload.key === 'theme') recheckDark();

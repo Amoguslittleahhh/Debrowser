@@ -34,6 +34,7 @@ const { WebHooks } = require('../web-hooks');
 
 const MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 const FILE = 'engine.bin';
+const RUST_FILE = 'engine-rust.bin';   // Labs (rust-engine.js): both engines in one file
 
 let ghostery = null;
 const lib = () => (ghostery ||= require('@ghostery/adblocker-electron'));
@@ -56,15 +57,20 @@ class ContentBlocker {
    * @param {import('./site-prefs').SitePrefs} opts.sitePrefs - where the user turned it off
    * @param {(...a) => void} [opts.log]
    * @param {string|null} [opts.rules] - a list to use instead of the real ones (tests)
+   * @param {() => boolean} [opts.rust] - Labs: network matching in Rust, read live
    */
-  constructor({ dir, enabled, cookieBanners, sitePrefs, log = () => {}, rules = null }) {
+  constructor({ dir, enabled, cookieBanners, sitePrefs, log = () => {}, rules = null, rust = () => false }) {
     this.dir = dir ? path.join(dir, 'blocker') : null;
     this.enabled = enabled;
     this.cookieBanners = cookieBanners;
     this.sitePrefs = sitePrefs;
     this.log = log;
     this.rules = rules;
+    this.rust = rust;
     this.engine = null;
+    /** Labs: the Rust engine that answers per request instead of Ghostery; null when off. */
+    this.native = null;
+    this.engineRust = false;
     this.engineCookies = null;
     this.loading = null;
     /** Requests blocked since start, and per page (webContents id) since it last navigated. */
@@ -75,14 +81,21 @@ class ContentBlocker {
 
   get file() { return this.dir ? path.join(this.dir, FILE) : null; }
 
+  /** The Labs setting, where this build has the module. */
+  wantsRust() { return this.rust() === true && require('./rust-engine').present(); }
+
   /** Load the engine: the one on disk if it is fresh and built for these lists, else build one. */
   load() {
     if (this.loading) return this.loading;
     const cookies = this.cookieBanners() !== false;
-    this.loading = this.build(cookies).then((engine) => {
+    const rust = this.wantsRust();
+    this.loading = (rust ? this.buildRust(cookies) : this.build(cookies).then((engine) => ({ engine, native: null })))
+      .then(({ engine, native }) => {
       // Turned off while it was loading: not kept (refresh).
       if (this.enabled() === false) return null;
       this.engine = engine;
+      this.native = native;
+      this.engineRust = rust;
       this.engineCookies = cookies;
       this.loadedAt = Date.now();
       return engine;
@@ -108,7 +121,8 @@ class ContentBlocker {
     } catch (err) {
       this.log(`blocker: compiling here (${err.message})`);
       this.compiledIn = 'browser';
-      return Buffer.from((await here()).serialize());
+      const made = await here();
+      return Buffer.isBuffer(made) ? made : Buffer.from(made.serialize());
     }
   }
 
@@ -160,6 +174,56 @@ class ContentBlocker {
   }
 
   /**
+   * Labs: Ghostery's engine for cosmetic filters and Rust's for requests, from
+   * one file like build()'s. Any failure here falls back to Ghostery alone.
+   */
+  async buildRust(cookies) {
+    const { ElectronBlocker } = lib();
+    const rustEngine = require('./rust-engine');
+    const open = (bytes) => {
+      const { ghostery, rust } = rustEngine.unpack(bytes);
+      return {
+        engine: ElectronBlocker.deserialize(new Uint8Array(ghostery.buffer, ghostery.byteOffset, ghostery.byteLength)),
+        native: rustEngine.load().Engine.deserialize(rust)
+      };
+    };
+    try {
+      if (this.rules !== null) return open(await this.compile({ rules: this.rules, rust: true }, () => rustEngine.compile({ rules: this.rules }, null)));
+      const file = this.dir ? path.join(this.dir, RUST_FILE) : null;
+      let stale = null;
+      if (file) {
+        try {
+          const info = JSON.parse(fs.readFileSync(`${file}.json`, 'utf8'));
+          const engines = open(fs.readFileSync(file));
+          this.builtAt = info.built;
+          if (info.cookies === cookies && Date.now() - info.built < MAX_AGE_MS) return engines;
+          stale = engines;
+        } catch { /* none yet, or unreadable: build one */ }
+      }
+      try {
+        const urls = listsFor(cookies);
+        const bytes = await this.compile({ urls, rust: true }, () => rustEngine.compile({ urls }, (url, init) => net.fetch(url, init)));
+        const engines = open(bytes);
+        if (file) {
+          fs.mkdirSync(this.dir, { recursive: true });
+          fs.writeFileSync(`${file}.tmp`, bytes);
+          fs.renameSync(`${file}.tmp`, file);
+          fs.writeFileSync(`${file}.json`, JSON.stringify({ built: Date.now(), cookies }));
+        }
+        this.builtAt = Date.now();
+        this.log(`blocker: lists compiled for the Rust engine${cookies ? ', with cookie notices' : ''}`);
+        return engines;
+      } catch (err) {
+        if (stale) { this.log(`blocker: refresh failed, keeping the old lists (${err.message})`); return stale; }
+        throw err;
+      }
+    } catch (err) {
+      this.log(`blocker: Rust engine unavailable, using Ghostery (${err.message})`);
+      return { engine: await this.build(cookies), native: null };
+    }
+  }
+
+  /**
    * Is blocking on for the page a request belongs to? The page is the top
    * document of the frame that asked - read from the frame first, because a
    * tab's own address can still be the one it is leaving while the new page's
@@ -199,7 +263,13 @@ class ContentBlocker {
       }
       if (!this.activeFor(details.webContents, details)) return undefined;
       let out;
-      this.engine.onBeforeRequest(details, (result) => { out = result; });
+      if (this.native) {
+        // Labs: Rust answers. No redirect resources, so a $redirect rule blocks.
+        const source = safely(() => details.frame?.top?.url) || details.referrer || '';
+        if (this.native.check(details.url, source, details.resourceType, details.method || 'GET')) out = { cancel: true };
+      } else {
+        this.engine.onBeforeRequest(details, (result) => { out = result; });
+      }
       if (out && (out.cancel || out.redirectURL)) {
         this.total += 1;
         const id = details.webContentsId;
@@ -212,7 +282,8 @@ class ContentBlocker {
       if (details.resourceType !== 'mainFrame' && details.resourceType !== 'subFrame') return undefined;
       if (!this.activeFor(details.webContents, details)) return undefined;
       let out;
-      this.engine.onHeadersReceived(details, (result) => { out = result; });
+      if (this.native) out = cspFrom(this.native, details);
+      else this.engine.onHeadersReceived(details, (result) => { out = result; });
       return out;
     });
 
@@ -285,9 +356,24 @@ class ContentBlocker {
   refresh() {
     // Off: the engine goes (8MB and more), rather than staying for the rest
     // of the session for nothing. On again, it is read back from disk.
-    if (this.enabled() === false) { this.engine = null; return; }
-    if (!this.engine || this.engineCookies !== (this.cookieBanners() !== false)) this.load();
+    if (this.enabled() === false) { this.engine = null; this.native = null; return; }
+    if (!this.engine || this.engineCookies !== (this.cookieBanners() !== false) ||
+      this.engineRust !== this.wantsRust()) this.load();
   }
+}
+
+/** The page's $csp policies added to its own, as Ghostery's onHeadersReceived does. */
+function cspFrom(native, details) {
+  const source = safely(() => details.frame?.top?.url) || details.referrer || '';
+  const raw = native.csp(details.url, source, details.resourceType);
+  if (!raw) return undefined;
+  const policies = raw.split(';').map((p) => p.trim());
+  const responseHeaders = { ...(details.responseHeaders || {}) };
+  for (const [name, values] of Object.entries(responseHeaders)) {
+    if (name.toLowerCase() === 'content-security-policy') { policies.push(...values); delete responseHeaders[name]; }
+  }
+  responseHeaders['content-security-policy'] = [policies.join(';')];
+  return { responseHeaders };
 }
 
 function safely(read) {

@@ -259,6 +259,7 @@ const SCHEMA = {
   // to an ordinary setting, or goes, in a later release.
   labTabGroups: { def: false, ok: (v) => typeof v === 'boolean' },
   labQuickWindow: { def: false, ok: (v) => typeof v === 'boolean' },
+  labRustBlocker: { def: false, ok: (v) => typeof v === 'boolean' },
 
 
   // Chrome and Firefox extensions (extensions.js), out of Labs since the

@@ -10,7 +10,7 @@
  * held. Here it is a process that exits when it is done, and the browser gets
  * back only the compiled bytes: the 8MB it keeps either way.
  *
- * One job per process: { kind: 'blocker', urls } - or `rules`, a list given
+ * One job per process: { kind: 'blocker', urls, rust } - or `rules`, a list given
  * as text, which is how the tests run it - or { kind: 'threats' }.
  * Replies { ok: true, bytes } or { ok: false, error }, then the parent kills it.
  */
@@ -18,7 +18,9 @@
 const { net } = require('electron');
 
 const jobs = {
-  async blocker({ urls, rules }) {
+  async blocker({ urls, rules, rust }) {
+    // Labs: network matching in Rust (rust-engine.js), Ghostery for the rest.
+    if (rust) return require('./rust-engine').compile({ urls, rules }, (url, init) => net.fetch(url, init));
     const { ElectronBlocker } = require('@ghostery/adblocker-electron');
     if (typeof rules === 'string') return ElectronBlocker.parse(rules, { loadCosmeticFilters: true }).serialize();
     // Chromium's network stack, as in the browser: it follows the system's proxy.

@@ -25,3 +25,6 @@ site/
 
 # Written for each build by build/linux/before-pack.js.
 build/linux/generated/
+
+# Rust build output (native/adblock); the module itself goes to vendor/.
+native/adblock/target/

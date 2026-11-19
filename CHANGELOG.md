@@ -38,6 +38,7 @@ Search suggestions now come from your search engine as you type, in the address 
 - **z.ai and other well-known sites are no longer called phishing.** One of the phishing lists Debrowser checks had picked up chat.z.ai by mistake, so the whole site was stopped with a phishing warning. A phishing list entry no longer stops a well-known site as a whole (z.ai, ChatGPT, Claude, Google, GitHub and about forty others). Look-alikes of those sites, and malware entries, are still stopped.
 - **Windows: no more "Bogus ed25519 key in microdesc" in a private window.** With "Remember Tor between sessions" on (the default), Debrowser kept a copy of a file Tor was still writing when it was closed, and the next private window read the half-written entry back and showed Tor's complaint about it as if Tor could not connect. That file is no longer kept, and a complaint about one bad relay description is no longer shown as a problem.
 - **The bookmarks bar shows with the sidebar tucked away.** With the tabs down the side and tucked away, the bookmarks bar left an empty strip under the address bar and only filled in when the sidebar came out.
+- **Chromium's spare background process stays off when Debrowser says so.** The setting that turns it off used a misspelled feature name, so Chromium ignored it. No difference was measured, because Electron did not start a spare in tests, but the setting now does what it says.
 
 ### Security
 
@@ -52,6 +53,10 @@ Search suggestions now come from your search engine as you type, in the address 
 - **An extension from a store can no longer pass as a different extension.** A store package carrying another extension's key, or a Firefox add-on carrying a Chrome key, could take that extension's ID and talk to its desktop program. Extensions from the Chrome and Edge stores now have their signatures checked too.
 - **More kinds of programs are asked about before they open.** Control Panel items, consoles, help files, internet shortcuts, disk images, PowerShell modules, Excel add-ins and Linux launchers now get the same "is a program" question as an .exe. A download's name can no longer use invisible characters that make it read backwards, so that a program ending ".cpl" looks like a ".pdf", and a file sent back by a form on a dangerous site is stopped like any other download from it.
 - **Installed copies ignore a test-only switch.** A shortcut edited to carry it could send private windows' traffic somewhere other than Tor while the window still said Tor was ready.
+
+### In Labs
+
+- **Faster ad blocking, in Rust.** A Labs setting checks each request with Brave's open-source ad-blocking engine (adblock-rust) instead of Ghostery's, about twice as fast per request and with less memory churn while pages load. It uses about 7 MB more memory at rest, because Ghostery still handles element hiding. Rules that would swap in a harmless stand-in script block the script instead.
 
 ## 2.5.0
 
