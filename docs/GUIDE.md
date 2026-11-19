@@ -371,7 +371,7 @@ invisible discard, which are on everywhere.
 | discard idle tab after | 5 min | 3 min | 15 min | 2 hrs |
 | simultaneous loads | 2 | 2 | 3 | 6 |
 | renderer sharing | per site | per site | per site | per tab |
-| V8 optimize-for-size | yes | yes | yes | yes |
+| V8 optimize-for-size | yes | yes | yes | no |
 
 > **`minimal` disables site isolation.** That is a security setting, not a
 > performance one: site isolation is what stops a malicious page — or a
