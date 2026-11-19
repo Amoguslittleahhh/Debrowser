@@ -224,6 +224,9 @@ function pageMergingStatus() {
 let unreportedPidCache = null;
 let unreportedScannedAt = 0;
 const RESCAN_MS = 30_000;
+/** The zygotes barely change, and each read walks a process's page tables. */
+const zygoteReads = new Map();
+const ZYGOTE_REREAD_MS = 15_000;
 
 function unreportedProcessesMB(knownPids) {
   const empty = { mb: 0, processes: [] };
@@ -237,6 +240,7 @@ function unreportedProcessesMB(knownPids) {
     || unreportedPidCache.some((pid) => !fs.existsSync(`/proc/${pid}`));
 
   if (stale) {
+    zygoteReads.clear();
     unreportedPidCache = scanTreeForUnreported(known);
     unreportedScannedAt = now;
   }
@@ -247,7 +251,9 @@ function unreportedProcessesMB(knownPids) {
     // A pid that has since been reported by getAppMetrics must not be counted
     // twice; the scan excluded the set known at scan time, not at read time.
     if (known.has(pid)) continue;
-    const detail = readProcessMemory(pid);
+    let hit = zygoteReads.get(pid);
+    if (!hit || now - hit.at > ZYGOTE_REREAD_MS) zygoteReads.set(pid, hit = { at: now, detail: readProcessMemory(pid) });
+    const detail = hit.detail;
     if (!detail) continue;
     mb += detail.pssMB;
     processes.push({ pid, type: processType(pid), pssMB: Math.round(detail.pssMB * 10) / 10 });

@@ -31,6 +31,29 @@ function graphicsStatus(app) {
   if (Date.now() - graphicsCache.at > 1000) graphicsCache = { at: Date.now(), value: graphicsStatusOf(app) };
   return graphicsCache.value;
 }
+
+/*
+ * The snapshot is taken on every tab event (main.js, publish), not once a tick,
+ * and these read /proc and /sys or ask the OS for every core's times. Their
+ * answers only move on the governor's own scale, so once a second at most.
+ */
+const CORES = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+const systemCache = { at: 0, pageMerging: null, compression: null };
+function systemStatus() {
+  if (Date.now() - systemCache.at > 1000) {
+    Object.assign(systemCache, { at: Date.now(), pageMerging: pageMergingStatus(), compression: compressionStatus() });
+  }
+  return systemCache;
+}
+
+/**
+ * How long a process's proportional figure is reused while its working set
+ * holds still (see `Metrics#memoryOf`), and how far that working set may move
+ * before it is read again. Under PROBE_STALE_MS, so a reused probe reading is
+ * never also a stale one.
+ */
+const REREAD_MS = 15_000;
+const unmoved = (rssMB, last) => Math.abs(rssMB - last.rssMB) < Math.max(1, last.rssMB * 0.02);
 /**
  * How old a native probe reading may be before the process counts as
  * unmeasured again.
@@ -78,6 +101,8 @@ class Metrics {
     this.probed = new Map();
     /** True while a round of probes is outstanding, so ticks do not stack. */
     this.probing = false;
+    /** Last smaps_rollup read per pid, with the working set it was taken at (Linux). */
+    this.pss = new Map();
     this.totalMB = 0;
     this.browserOverheadMB = 0;
     /**
@@ -116,7 +141,18 @@ class Metrics {
         .catch(() => { /* try again next tick */ })
         .finally(() => { this.askingMechanism = false; });
     }
-    const pids = raw.map((proc) => proc.pid);
+    // Only processes whose figure can have changed: the probe is a round trip
+    // per pid, every tick, for numbers that are mostly where they were.
+    const now = Date.now();
+    const rssOf = new Map(raw.map((proc) => [proc.pid, (proc.memory?.workingSetSize || 0) / 1024]));
+    const pids = [...rssOf.keys()].filter((pid) => {
+      const last = this.probed.get(pid);
+      return !last || last.rssMB == null || now - last.at > REREAD_MS || !unmoved(rssOf.get(pid), last);
+    });
+    if (!pids.length) {
+      this.probing = false;
+      return;
+    }
     Promise.all(pids.map(async (pid) => {
       const m = await platform.measureProcess(pid);
       // A miss keeps the last reading rather than dropping it, and `sample`
@@ -129,7 +165,8 @@ class Metrics {
       // drifted upward for as long as the misses continued.
       if (!m) return;
       this.probed.set(pid, {
-        pssMB: m.pssBytes / MB, privateMB: m.privateBytes == null ? null : m.privateBytes / MB, at: Date.now()
+        pssMB: m.pssBytes / MB, privateMB: m.privateBytes == null ? null : m.privateBytes / MB, at: Date.now(),
+        rssMB: rssOf.get(pid)
       });
     })).catch(() => { /* a failed probe simply leaves the fallback in place */ })
       .finally(() => { this.probing = false; });
@@ -172,7 +209,7 @@ class Metrics {
       // One read per process, not one per figure: smaps_rollup already carries
       // pss, rss and private together, and taking them from the same read also
       // means they describe the same instant.
-      const detail = readProcessMemory(pid);
+      const detail = this.memoryOf(pid, rssMB, now);
       // Off Linux, `detail` is null and the native probe fills the gap. Its
       // reading is from the previous tick, because the helper is a child
       // process and this sampler is synchronous - a tick may not wait on a
@@ -231,6 +268,7 @@ class Metrics {
       if (seen.has(pid)) continue;
       this.byPid.delete(pid);
       this.probed.delete(pid);
+      this.pss.delete(pid);
       platform.forgetProcess(pid);
     }
 
@@ -254,6 +292,24 @@ class Metrics {
     this.privateTotalMB = privateKnown ? privateTotal : null;
     this.lastSampleAt = Date.now();
     return this.totalMB;
+  }
+
+  /**
+   * One process's smaps_rollup, read again only when it can have changed.
+   *
+   * The read is not cheap: the kernel walks the process's page tables, measured
+   * at ~3.5ms per renderer - with a dozen tabs, ~2% of a core at idle, every
+   * tick, on this thread. Working set comes free with `getAppMetrics`; while it
+   * holds still the last figure stands, for at most REREAD_MS, since sharing
+   * shifts as other processes come and go.
+   */
+  memoryOf(pid, rssMB, now) {
+    const last = this.pss.get(pid);
+    if (last && now - last.at < REREAD_MS && unmoved(rssMB, last)) return last.detail;
+    const detail = readProcessMemory(pid);
+    if (detail) this.pss.set(pid, { detail, rssMB, at: now });
+    else this.pss.delete(pid);
+    return detail;
   }
 
   /**
@@ -446,8 +502,8 @@ class Metrics {
       rssTotalMB: Math.round(this.rssTotalMB),
       privateTotalMB: this.privateTotalMB == null ? null : Math.round(this.privateTotalMB),
       probeMechanism: this.probeMechanism || null,
-      pageMerging: pageMergingStatus(),
-      compression: compressionStatus(),
+      pageMerging: systemStatus().pageMerging,
+      compression: systemStatus().compression,
       totalMB: Math.round(this.totalMB),
       // As measured this tick, for display (see `memNowMB`).
       totalNowMB: Math.round(this.totalNowMB ?? this.totalMB),
@@ -458,7 +514,7 @@ class Metrics {
       // drawing pages with its processor (graphics.js), this is where a game
       // in a tab shows up.
       gpuCpuPercent: Math.round([...this.byPid.values()].filter((p) => p.type === 'GPU')
-        .reduce((sum, p) => sum + (p.cpu || 0), 0) / Math.max(1, os.cpus().length)),
+        .reduce((sum, p) => sum + (p.cpu || 0), 0) / Math.max(1, CORES)),
       graphics: graphicsStatus(this.app),
       // Renderers holding tabs; the browser's own interface is counted in the processes, not here.
       rendererCount: [...this.byPid.values()].filter((p) => p.hostsTab).length
