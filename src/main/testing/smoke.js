@@ -1206,6 +1206,22 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     sitePrefs.set(host, 'blocking', null);
     tabs.close(allowed.tab.id);
 
+    // Labs: the same page with Rust answering for requests (rust-engine.js),
+    // Ghostery still hiding the element. Only where this build has the module.
+    if (require('../protection/rust-engine').present()) {
+      prefs.set('labRustBlocker', true);
+      blocker.refresh();
+      await blocker.loading;
+      const rusty = await probe();
+      check('Labs: the Rust engine stops the listed script, Ghostery still hides the element',
+        Boolean(blocker.native) && blocker.compiledIn === 'helper' && rusty.seen && !rusty.seen.ran && !rusty.seen.shown && rusty.count >= 1,
+        JSON.stringify({ native: Boolean(blocker.native), compiledIn: blocker.compiledIn, ...rusty.seen, count: rusty.count }));
+      tabs.close(rusty.tab.id);
+      prefs.set('labRustBlocker', false);
+      blocker.refresh();
+      await blocker.loading;
+    }
+
     // The lists are compiled in a helper process that exits after, not in the
     // browser process, which parsing the real ones took 235MB higher. And off
     // means off: the engine goes, and comes back when blocking is turned on.

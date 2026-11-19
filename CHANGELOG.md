@@ -53,6 +53,10 @@ Search suggestions now come from your search engine as you type, in the address 
 - **More kinds of programs are asked about before they open.** Control Panel items, consoles, help files, internet shortcuts, disk images, PowerShell modules, Excel add-ins and Linux launchers now get the same "is a program" question as an .exe. A download's name can no longer use invisible characters that make it read backwards, so that a program ending ".cpl" looks like a ".pdf", and a file sent back by a form on a dangerous site is stopped like any other download from it.
 - **Installed copies ignore a test-only switch.** A shortcut edited to carry it could send private windows' traffic somewhere other than Tor while the window still said Tor was ready.
 
+### In Labs
+
+- **Faster ad blocking, in Rust.** A Labs setting checks each request with Brave's open-source ad-blocking engine (adblock-rust) instead of Ghostery's, about twice as fast per request and with less memory churn while pages load. It uses about 7 MB more memory at rest, because Ghostery still handles element hiding. Rules that would swap in a harmless stand-in script block the script instead.
+
 ## 2.5.0
 
 Debrowser 2.5.0 adds Calm, a quieter new design, and brings Chrome and Firefox extensions out of Labs. You can install any site as an app, sync bookmarks and settings between your computers, fill addresses and cards, and translate pages. Sites now ask before using your certificates or Bluetooth devices, and private windows are harder to fingerprint.

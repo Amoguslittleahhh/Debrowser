@@ -668,6 +668,13 @@ const SECTIONS = {
       label: 'A small window for links from other apps',
       hint: 'Links from other apps open in a small window. Keep one as a tab with Open in Debrowser.',
       type: 'checkbox'
+    },
+    {
+      key: 'labRustBlocker',
+      label: 'Faster ad blocking',
+      hint: 'Checks each request with Brave’s open-source engine, about twice as fast. Uses a few MB more memory.',
+      unavailable: (state) => (state.rustBlocker === false ? 'This copy of Debrowser was built without it.' : ''),
+      type: 'checkbox'
     }
   ],
 
