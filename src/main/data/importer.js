@@ -106,6 +106,74 @@ function readHistory(profile) {
   }
 }
 
+/** Most tabs brought over in one go: as many as a restored window keeps (session.js). */
+const MAX_OPEN_TABS = 500;
+
+/**
+ * Decompress a raw LZ4 block, the format inside Firefox's `.jsonlz4` files
+ * (after their "mozLz40\0" magic and a 4-byte little-endian size).
+ */
+function lz4Block(src, size) {
+  const out = Buffer.alloc(size);
+  let i = 0, o = 0;
+  while (i < src.length) {
+    const token = src[i++];
+    let len = token >> 4;
+    if (len === 15) { let b; do { b = src[i++]; len += b; } while (b === 255); }
+    src.copy(out, o, i, i + len); i += len; o += len;
+    if (i >= src.length) break;                              // the last sequence has literals only
+    const offset = src[i] | (src[i + 1] << 8); i += 2;
+    if (!offset || offset > o) throw new Error('corrupt lz4 data');
+    let match = (token & 15) + 4;
+    if ((token & 15) === 15) { let b; do { b = src[i++]; match += b; } while (b === 255); }
+    for (let k = 0; k < match; k++, o++) out[o] = out[o - offset]; // byte by byte: copies may overlap
+  }
+  if (o !== size) throw new Error('corrupt lz4 data');
+  return out;
+}
+
+/** A Firefox `.jsonlz4` file, parsed. */
+function readMozLz4(file) {
+  const buf = fs.readFileSync(file);
+  if (buf.length < 12 || buf.toString('latin1', 0, 8) !== 'mozLz40\0') throw new Error('not a mozlz4 file');
+  return JSON.parse(lz4Block(buf.subarray(12), buf.readUInt32LE(8)).toString('utf8'));
+}
+
+/**
+ * The tabs a Firefox-family profile (Zen, Firefox, Floorp) has open, from its
+ * session file: `sessionstore.jsonlz4` after a clean exit, or the recovery
+ * file it keeps while running - whichever is newer. Web pages only, each once.
+ * shortcut: Chromium-family sessions (SNSS files) are not read; add if asked.
+ * @returns {{ok: boolean, tabs?: Array<{url, title, pinned}>, reason?: string}}
+ */
+function readOpenTabs(profile) {
+  if (profile.kind !== 'firefox') return { ok: false, reason: `${profile.browser}'s open tabs can't be brought over yet` };
+  const dir = path.dirname(profile.path);
+  const files = [path.join(dir, 'sessionstore.jsonlz4'), path.join(dir, 'sessionstore-backups', 'recovery.jsonlz4')]
+    .filter((f) => fs.existsSync(f))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+  if (!files.length) return { ok: false, reason: `${profile.browser} has no open tabs saved` };
+  try {
+    const session = readMozLz4(files[0]);
+    const seen = new Set();
+    const tabs = [];
+    for (const win of session.windows || []) {
+      for (const tab of win.tabs || []) {
+        const entries = tab.entries || [];
+        const at = entries[Math.min(Math.max((tab.index || entries.length) - 1, 0), entries.length - 1)];
+        const url = at && at.url;
+        if (!/^https?:/i.test(url || '') || seen.has(url)) continue;
+        seen.add(url);
+        tabs.push({ url, title: at.title || '', pinned: tab.pinned === true });
+        if (tabs.length >= MAX_OPEN_TABS) return { ok: true, tabs };
+      }
+    }
+    return { ok: true, tabs };
+  } catch (err) {
+    return { ok: false, reason: `could not read ${profile.browser}'s open tabs (${err.message})` };
+  }
+}
+
 /** A Firefox-family profile's bookmarks, with the folder each is in. */
 function readFirefoxBookmarks(profile) {
   try {
@@ -324,4 +392,4 @@ function parseLoginCsv(text) {
   return { ok: true, logins };
 }
 
-module.exports = { readHistory, readFirefoxBookmarks, readSafariBookmarks, parseBinaryPlist, parseLoginCsv, parseCsv };
+module.exports = { readHistory, readOpenTabs, lz4Block, readFirefoxBookmarks, readSafariBookmarks, parseBinaryPlist, parseLoginCsv, parseCsv };

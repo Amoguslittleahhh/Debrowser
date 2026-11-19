@@ -190,10 +190,11 @@ async function findProfiles() {
     b.addEventListener('click', async () => {
       b.disabled = true;
       hint.textContent = 'Importing…';
-      const r = await api.request('import-from-profile', { path: profile.path, withHistory: true });
+      const r = await api.request('import-from-profile', { path: profile.path, withHistory: true, withTabs: true });
       if (r && r.ok) {
         hint.textContent = 'Imported';
-        const pages = r.pages ? ` and ${r.pages.toLocaleString()} page${r.pages === 1 ? '' : 's'} of history` : '';
+        const pages = (r.pages ? ` and ${r.pages.toLocaleString()} page${r.pages === 1 ? '' : 's'} of history` : '') +
+          (r.opened ? `, with ${r.opened} open tab${r.opened === 1 ? '' : 's'}` : '');
         note(`Imported ${r.added} bookmark${r.added === 1 ? '' : 's'}${pages} from ${r.browser}.`, 'ok');
         imported = `${r.added} bookmark${r.added === 1 ? '' : 's'}${pages} from ${r.browser}`;
       } else {

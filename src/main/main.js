@@ -6455,7 +6455,23 @@ function wireRequests({ tabs, shell, windowOps = null, credentials, vault = null
           if (past.ok) pages = history.merge(past.entries).added;
           log('history', past.ok ? `imported ${pages} page(s) from ${profile.browser}` : past.reason);
         }
-        return { ok: true, ...result, pages, browser: profile.browser };
+        // Its open tabs too, asleep: a hundred cost nothing until each is opened.
+        let opened = 0;
+        if (payload?.withTabs === true && !INCOGNITO) {
+          const open = require('./data/importer').readOpenTabs(profile);
+          if (open.ok) {
+            const already = new Set(everyTab().map((t) => t.url));
+            for (const entry of open.tabs) {
+              if (already.has(entry.url)) continue;
+              const tab = tabs.create({ url: entry.url, activate: false, realise: false });
+              tab.title = entry.title || tab.title;
+              if (entry.pinned) tabs.setPinned(tab.id, true);
+              opened++;
+            }
+          }
+          log('tabs', open.ok ? `opened ${opened} tab(s) from ${profile.browser}` : open.reason);
+        }
+        return { ok: true, ...result, pages, opened, browser: profile.browser };
       }
 
       // Extensions: the list, adding one from a file or a folder the

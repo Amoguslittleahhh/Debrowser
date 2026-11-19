@@ -1344,7 +1344,28 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
     const fb = readFirefoxBookmarks({ kind: 'firefox', browser: 'Firefox', path: path.join(dir, 'places.sqlite') });
     const dbOk = ch.ok && ch.entries[0]?.url === 'https://news.example/' && Math.abs(ch.entries[0].visitedAt - Date.now()) < 60_000 &&
       ff.ok && ff.entries[0]?.visits === 3 && fb.ok && fb.entries[0]?.folder === 'Work';
+    // Open tabs from a Zen/Firefox session file (mozlz4). Stored as one
+    // literal-only LZ4 sequence, which is valid LZ4; the decoder's match copy
+    // is checked on its own, with an overlapping run.
+    const { readOpenTabs, lz4Block } = require('../data/importer');
+    const json = Buffer.from(JSON.stringify({ windows: [{ tabs: [
+      { entries: [{ url: 'https://a.example/', title: 'A' }, { url: 'https://b.example/', title: 'B' }], index: 2, pinned: true },
+      { entries: [{ url: 'about:preferences' }], index: 1 },
+      { entries: [{ url: 'https://b.example/' }], index: 1 },
+      { entries: [{ url: 'https://c.example/', title: 'C' }], index: 1 }] }] }));
+    const ext = []; { let n = json.length - 15; while (n >= 255) { ext.push(255); n -= 255; } ext.push(n); }
+    const size = Buffer.alloc(4); size.writeUInt32LE(json.length);
+    fs.mkdirSync(path.join(dir, 'zen'));
+    fs.writeFileSync(path.join(dir, 'zen', 'sessionstore.jsonlz4'),
+      Buffer.concat([Buffer.from('mozLz40\0', 'latin1'), size, Buffer.from([0xf0, ...ext]), json]));
+    const zt = readOpenTabs({ kind: 'firefox', browser: 'Zen', path: path.join(dir, 'zen', 'places.sqlite') });
+    const overlap = lz4Block(Buffer.from([0x35, 0x61, 0x62, 0x63, 0x03, 0x00, 0x10, 0x78]), 13).toString();
+    const tabsOk = zt.ok && JSON.stringify(zt.tabs) === JSON.stringify([
+      { url: 'https://b.example/', title: 'B', pinned: true }, { url: 'https://c.example/', title: 'C', pinned: false }]) &&
+      overlap === 'abcabcabcabcx' && !readOpenTabs({ kind: 'chromium', browser: 'Chrome', path: dir }).ok;
     fs.rmSync(dir, { recursive: true, force: true });
+    check('a Zen/Firefox profile\'s open tabs are read from its session file, web pages only, each once',
+      tabsOk, JSON.stringify({ zt, overlap }).slice(0, 400));
     check('passwords import from any exporter\'s CSV; history and Firefox bookmarks from a profile',
       csvOk && dbOk, JSON.stringify({ csv: chrome.logins, ch: ch.entries || ch.reason, ff: ff.entries || ff.reason, fb: fb.entries || fb.reason }).slice(0, 400));
   }
