@@ -3701,6 +3701,10 @@ function wireCommands({ tabs, shell, windowOps = null, governor, prefs, publish,
         if (active?.isLive && active.wc.navigationHistory.canGoForward()) active.goInHistory(1);
         break;
 
+      // The notice over a toolbar that kept crashing (window.js, setChromeDown).
+      case 'revive-chrome':
+        shell.setChromeDown(false);
+        break;
       case 'reload':
         if (active?.isLive) active.wc.reload();
         else if (active && !active.crashed) active.realise();   // unloaded: reloading is building it

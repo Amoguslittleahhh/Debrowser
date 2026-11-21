@@ -107,6 +107,7 @@ const COMMANDS = new Set([
   'back',
   'forward',
   'reload',
+  'revive-chrome',
   'stop',
   'toggle-panel',
   'set-budget',
