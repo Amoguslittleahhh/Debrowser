@@ -189,9 +189,11 @@ let lastScanCount = 0;
 function countRunningAnimations() {
   if (typeof document.getAnimations !== 'function') return 0;
   let running = 0;
+  // The whole map, past the cap: an element removed mid-animation fires its
+  // cancel on a detached node, which never reaches window, so only this frees it.
   for (const element of live.keys()) {
-    if (!element.isConnected) { live.delete(element); continue; }
-    if (++running >= RUNNING_CAP) break;
+    if (!element.isConnected) live.delete(element);
+    else if (running < RUNNING_CAP) running++;
   }
   if (now() < scanAgainAt) return running || lastScanCount;
 

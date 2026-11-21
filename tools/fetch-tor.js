@@ -101,7 +101,8 @@ async function main() {
   // dist keeps only the newest releases; older ones move to the archive.
   // Either way the signature below is what makes the file trusted.
   let url = `${PIN.base}/${PIN.version}/${name}`;
-  if ((await fetch(url, { method: 'HEAD' })).status === 404) {
+  const head = await fetch(url, { method: 'HEAD' }).catch(() => null);
+  if (!head || !head.ok) {
     url = `${PIN.archive}/${PIN.version}/${name}`;
   }
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fetch-tor-'));

@@ -120,12 +120,15 @@ function lz4Block(src, size) {
     const token = src[i++];
     let len = token >> 4;
     if (len === 15) { let b; do { b = src[i++]; len += b; } while (b === 255); }
+    if (!Number.isFinite(len)) throw new Error('corrupt lz4 data');
+    if (o + len > size || i + len > src.length) throw new Error('corrupt lz4 data');
     src.copy(out, o, i, i + len); i += len; o += len;
     if (i >= src.length) break;                              // the last sequence has literals only
     const offset = src[i] | (src[i + 1] << 8); i += 2;
     if (!offset || offset > o) throw new Error('corrupt lz4 data');
     let match = (token & 15) + 4;
     if ((token & 15) === 15) { let b; do { b = src[i++]; match += b; } while (b === 255); }
+    if (!(o + match <= size)) throw new Error('corrupt lz4 data');   // NaN too: ran off the end
     for (let k = 0; k < match; k++, o++) out[o] = out[o - offset]; // byte by byte: copies may overlap
   }
   if (o !== size) throw new Error('corrupt lz4 data');
