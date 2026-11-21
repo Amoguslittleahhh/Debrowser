@@ -43,6 +43,9 @@ Search suggestions now come from your search engine as you type, in the address 
 - **The bookmarks bar shows with the sidebar tucked away.** With the tabs down the side and tucked away, the bookmarks bar left an empty strip under the address bar and only filled in when the sidebar came out.
 - **Chromium's spare background process stays off when Debrowser says so.** The setting that turns it off used a misspelled feature name, so Chromium ignored it. No difference was measured, because Electron did not start a spare in tests, but the setting now does what it says.
 
+- **Busy pages no longer slowly gain memory.** Debrowser keeps count of a page's running animations to decide how hard to rest it, and that count held on to parts of the page that had been removed while animating. On a page that always has something moving, such as a feed with a spinner, it grew for as long as the tab stayed open. Removed parts are now let go.
+- **A damaged Zen or Firefox session file is turned down at once.** Importing open tabs from a corrupt session file now stops at the first sign of damage instead of working through the whole file first.
+
 ### Security
 
 - **Security fixes from Chromium.** Debrowser now runs on Electron 44.10.1 (was 44.5.1), which brings five releases of Chromium security fixes and stops trusting the compromised eMudhra certificates, so a site using one is no longer shown as secure. The ad blocker, the updater and the tools that build Debrowser are updated too.
@@ -59,7 +62,7 @@ Search suggestions now come from your search engine as you type, in the address 
 
 ### In Labs
 
-- **Faster ad blocking, in Rust.** A Labs setting checks each request with Brave's open-source ad-blocking engine (adblock-rust) instead of Ghostery's, about twice as fast per request and with less memory churn while pages load. It uses about 7 MB more memory at rest, because Ghostery still handles element hiding. Rules that would swap in a harmless stand-in script block the script instead.
+- **Faster ad blocking, in Rust.** A Labs setting checks each request with Brave's open-source ad-blocking engine (adblock-rust) instead of Ghostery's, about twice as fast per request and with less memory churn while pages load. It uses about 7 MB more memory at rest, because Ghostery still handles element hiding. Rules that would swap in a harmless stand-in script block the script instead. It also leaves a site's own content security rules in force alongside the filters' rather than letting a filter override them, and judges a link you follow by the site it goes to.
 
 ## 2.5.0
 
