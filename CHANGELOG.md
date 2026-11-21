@@ -48,6 +48,7 @@ Search suggestions now come from your search engine as you type, in the address 
 
 ### Security
 
+- **Chromium 156 and Tor 16.** Debrowser now runs on Electron 45.2.1 (Chromium 156.0.8078.75), bringing the Chromium security fixes released since Chromium 152, and private windows with Tor use Tor 16.0.1. The weekly check for a newer Tor now ignores Android-only releases, which have no desktop download.
 - **Security fixes from Chromium.** Debrowser now runs on Electron 44.10.1 (was 44.5.1), which brings five releases of Chromium security fixes and stops trusting the compromised eMudhra certificates, so a site using one is no longer shown as secure. The ad blocker, the updater and the tools that build Debrowser are updated too.
 - **Sign-in windows keep to the browser's rules.** A sign-in pop-up could open further windows that showed no address at all, and could be sent to one of Debrowser's own pages. Every window a sign-in opens now shows where it is, and none can reach the browser's pages.
 - **The ad blocker no longer hands pages a click.** Its scripts ran as if the user had just clicked, which a page could spend on a pop-up, fullscreen or sound playing on its own.

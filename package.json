@@ -40,10 +40,10 @@
     "node": ">=22.13"
   },
   "devDependencies": {
-    "axe-core": "^4.14.0",
-    "electron": "github:castlabs/electron-releases#v44.10.1+wvcus",
+    "axe-core": "^4.14.1",
+    "electron": "github:castlabs/electron-releases#v45.2.1+wvcus",
     "electron-builder": "^26.18.0",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "js-yaml": "^5.5.0"
   },
   "author": {
@@ -61,6 +61,6 @@
     "@ghostery/adblocker-electron-preload": "^2.20.3",
     "@mozilla/readability": "^0.6.0",
     "electron-updater": "^6.8.11",
-    "tldts-experimental": "^7.4.19"
+    "tldts-experimental": "^7.5.5"
   }
 }
