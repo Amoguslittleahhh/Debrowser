@@ -657,10 +657,58 @@ class BrowserShell {
       const now = Date.now();
       while (deaths.length && now - deaths[0] > 60000) deaths.shift();
       deaths.push(now);
-      if (deaths.length > 3) return;
+      if (deaths.length > 3) { this.setChromeDown(true); return; }
       wc.once('did-finish-load', () => this.onCommand('chrome-ready'));
       wc.reload();
     });
+    // Reload from the notice below starts the count again.
+    wc.reviveDeaths = deaths;
+  }
+
+  /**
+   * The toolbar or tab list that kept crashing, said over the whole window:
+   * without it the window is a page under an empty band, with nothing to say
+   * why or way to try again. Its own renderer, since the chrome's is the one
+   * that is gone. Reload brings both back (`revive-chrome`).
+   */
+  setChromeDown(on) {
+    if (this.window.isDestroyed()) return;
+    if (!on) {
+      const view = this.chromeDownView;
+      this.chromeDownView = null;
+      if (view) {
+        try { this.window.contentView.removeChildView(view); view.webContents.close(); } catch { /* already gone */ }
+      }
+      for (const v of [this.chromeView, this.stripView]) {
+        const wc = v && v.webContents;
+        if (!wc || wc.isDestroyed()) continue;
+        if (wc.reviveDeaths) wc.reviveDeaths.length = 0;
+        wc.once('did-finish-load', () => this.onCommand('chrome-ready'));
+        wc.reload();
+      }
+      return;
+    }
+    if (this.chromeDownView) return;
+    this.log('chrome renderer kept crashing; showing the notice');
+    const view = new WebContentsView({
+      webPreferences: {
+        preload: CHROME_PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: true,
+        additionalArguments: preloadArgs(this.prefs)
+      }
+    });
+    view.setBackgroundColor(this.surface());
+    view.webContents.once('did-finish-load', () => send(view, 'debrowser:state', { prefs: this.prefs.all() }));
+    loadUi(view.webContents, 'crashed.html', { query: { for: 'chrome' } }).catch(() => {});
+    this.bindShortcuts(view.webContents);
+    this.window.contentView.addChildView(view);   // topmost: over the empty band and the page
+    this.chromeDownView = view;
+    this.placeChromeDown();
+  }
+
+  placeChromeDown() {
+    if (!this.chromeDownView) return;
+    const { width, height } = this.window.getContentBounds();
+    this.chromeDownView.setBounds({ x: 0, y: 0, width, height });
   }
 
   /* ---------------------------------------------------------------- */
@@ -2364,6 +2412,7 @@ class BrowserShell {
     const prefs = this.prefs.all();
     send(this.suggestView, 'debrowser:state', { prefs });
     send(this.crashView, 'debrowser:state', { prefs });
+    send(this.chromeDownView, 'debrowser:state', { prefs });
     send(this.toastView, 'debrowser:state', { prefs });
     send(this.hoverCardView, 'debrowser:state', { prefs });
     send(this.dividerView, 'debrowser:state', { prefs });
@@ -3371,6 +3420,7 @@ class BrowserShell {
     }
 
     if (this.crashView) this.crashView.setBounds(this.contentBounds());
+    this.placeChromeDown();
     if (this.toastView) this.placeToast();
   }
 
@@ -3385,7 +3435,7 @@ class BrowserShell {
    */
   isChromeSender(sender) {
     if (!sender) return false;
-    for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView,
+    for (const view of [this.chromeView, this.stripView, this.panelView, this.sheetView, this.suggestView, this.crashView, this.chromeDownView,
       this.toastView, this.hoverCardView, this.dividerView, this.devToolsDivider, this.passkeyView, this.peek && this.peek.backdrop,
       this.quick && this.quick.bar]) {
       const wc = view && view.webContents;
