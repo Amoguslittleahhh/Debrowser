@@ -41,7 +41,13 @@ async function main() {
   if (!res.ok) throw new Error(`${PIN.base}/: HTTP ${res.status}`);
   const versions = stableVersions(await res.text());
   if (!versions.length) throw new Error('no stable versions found in the listing');
-  const latest = versions[0];
+  // Some releases are Android-only (16.0.2 was): count only ones with a desktop bundle.
+  let latest;
+  for (const v of versions) {
+    const dir = await fetch(`${PIN.base}/${v}/`);
+    if (dir.ok && (await dir.text()).includes('tor-expert-bundle-linux-x86_64')) { latest = v; break; }
+  }
+  if (!latest) throw new Error('no stable version with a desktop bundle found');
   if (newer(latest, PIN.version)) {
     console.log(`Tor is behind: shipping ${PIN.version}, latest stable is ${latest}.`);
     console.log(`Update "version" in tools/tor.json to ${latest}, run \`node tools/fetch-tor.js\`, and check the signature step still passes.`);
