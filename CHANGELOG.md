@@ -46,6 +46,8 @@ Search suggestions now come from your search engine as you type, in the address 
 - **Busy pages no longer slowly gain memory.** Debrowser keeps count of a page's running animations to decide how hard to rest it, and that count held on to parts of the page that had been removed while animating. On a page that always has something moving, such as a feed with a spinner, it grew for as long as the tab stayed open. Removed parts are now let go.
 - **A damaged Zen or Firefox session file is turned down at once.** Importing open tabs from a corrupt session file now stops at the first sign of damage instead of working through the whole file first.
 
+- **The toolbar and tabs say so when they keep crashing.** If they crash several times within a minute, Debrowser stops reloading them on its own and shows a notice over the window, with a Reload button that brings them back, instead of leaving the page under an empty bar.
+
 ### Security
 
 - **Security fixes from Chromium.** Debrowser now runs on Electron 44.10.1 (was 44.5.1), which brings five releases of Chromium security fixes and stops trusting the compromised eMudhra certificates, so a site using one is no longer shown as secure. The ad blocker, the updater and the tools that build Debrowser are updated too.
