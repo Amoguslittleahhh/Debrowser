@@ -82,7 +82,7 @@ class ContentBlocker {
   get file() { return this.dir ? path.join(this.dir, FILE) : null; }
 
   /** The Labs setting, where this build has the module. */
-  wantsRust() { return this.rust() === true && require('./rust-engine').present(); }
+  wantsRust() { return this.rust() === true && (this.rustPresent ??= require('./rust-engine').present()); }
 
   /** Load the engine: the one on disk if it is fresh and built for these lists, else build one. */
   load() {
@@ -265,8 +265,7 @@ class ContentBlocker {
       let out;
       if (this.native) {
         // Labs: Rust answers. No redirect resources, so a $redirect rule blocks.
-        const source = safely(() => details.frame?.top?.url) || details.referrer || '';
-        if (this.native.check(details.url, source, details.resourceType, details.method || 'GET')) out = { cancel: true };
+        if (this.native.check(details.url, sourceOf(details), details.resourceType, details.method || 'GET')) out = { cancel: true };
       } else {
         this.engine.onBeforeRequest(details, (result) => { out = result; });
       }
@@ -362,18 +361,26 @@ class ContentBlocker {
   }
 }
 
-/** The page's $csp policies added to its own, as Ghostery's onHeadersReceived does. */
+/**
+ * The filters' $csp policy sent beside the page's own, as one more header
+ * rather than merged into one: within a policy the first copy of a directive
+ * wins, so merging let a filter's `script-src` override a stricter one of the
+ * page's. Separate policies are all enforced, so this can only tighten.
+ */
 function cspFrom(native, details) {
-  const source = safely(() => details.frame?.top?.url) || details.referrer || '';
-  const raw = native.csp(details.url, source, details.resourceType);
+  const raw = native.csp(details.url, sourceOf(details), details.resourceType);
   if (!raw) return undefined;
-  const policies = raw.split(';').map((p) => p.trim());
   const responseHeaders = { ...(details.responseHeaders || {}) };
-  for (const [name, values] of Object.entries(responseHeaders)) {
-    if (name.toLowerCase() === 'content-security-policy') { policies.push(...values); delete responseHeaders[name]; }
-  }
-  responseHeaders['content-security-policy'] = [policies.join(';')];
+  const name = Object.keys(responseHeaders).find((key) => key.toLowerCase() === 'content-security-policy')
+    || 'content-security-policy';
+  responseHeaders[name] = [...(responseHeaders[name] || []), raw];
   return { responseHeaders };
+}
+
+/** The page a request is judged against: a navigation's own address, else the frame that asked. */
+function sourceOf(details) {
+  if (details.resourceType === 'mainFrame') return details.url;
+  return safely(() => details.frame?.parent?.url) || safely(() => details.frame?.top?.url) || details.referrer || '';
 }
 
 function safely(read) {
