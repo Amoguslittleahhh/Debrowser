@@ -432,6 +432,25 @@ jobs:
             "{0}: {1} {2}" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
           }
 
+      # The smoke steps above run the unpackaged app, where the fuses and the
+      # archive do not apply: 2.6.0 shipped with no toolbar because of that.
+      # So the built app itself is started once, through the suite's window
+      # checks, which wait for each window's toolbar and tabs to draw.
+      # Advisory on macOS, as its smoke test is.
+      - name: Start the packaged app
+        continue-on-error: ${{ matrix.os == 'macos-latest' }}
+        timeout-minutes: 10
+        shell: bash
+        env:
+          DEBROWSER_SMOKE_ONLY: windows
+        run: |
+          case "${{ matrix.os }}" in
+            windows-latest) bin=dist/win-unpacked/Debrowser.exe; run="" ;;
+            macos-latest)   bin=$(ls -d dist/mac*/Debrowser.app | head -1)/Contents/MacOS/Debrowser; run="" ;;
+            *)              bin=dist/linux-unpacked/debrowser; run="xvfb-run -a" ;;
+          esac
+          $run "$bin" --smoke-test --no-sandbox --disable-gpu
+
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}
