@@ -3809,11 +3809,15 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
       for (let i = 0; i < 30 && !(await overlaid()); i++) await sleep(100);
       await sleep(800);
       const item = await shell.sheetView.webContents.executeJavaScript(`(() => {
-        const b = [...document.querySelectorAll('button.item')].find((e) => /Keyboard shortcuts/.test(e.textContent));
+        // Help, a row at the top since Keyboard shortcuts moved into it.
+        const b = [...document.querySelectorAll('button.item.submenu')].find((e) => e.dataset.label === 'Help');
         if (!b) return null;
         const r = b.getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       })()`).catch(() => null);
+      // The click opens Help in place, so its Keyboard shortcuts row shows.
+      const inHelp = () => shell.sheetView.webContents.executeJavaScript(
+        `[...document.querySelectorAll('button.item')].some((e) => /Keyboard shortcuts/.test(e.textContent))`).catch(() => false);
       let clicked = 'no item';
       if (item) {
         const win = shell.window.getContentBounds();
@@ -3828,14 +3832,14 @@ async function runSmoke({ tabs, governor, shell, cfg, prefs, menuModel, toggleDe
           '[W.U]::mouse_event(2,0,0,0,0); Start-Sleep -Milliseconds 60; [W.U]::mouse_event(4,0,0,0,0)'
         ].join(' ');
         let run = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 20_000 });
-        let opened = await waitFor(() => shell.sheetPage === 'shortcuts', { timeoutMs: 3000 });
+        let opened = await waitFor(inHelp, { timeoutMs: 3000 });
         // Once more: a first click on a window Windows has not yet let come to
         // the front can be spent on bringing it forward. That is not the bug
         // this is about - a click eaten by a drag region never arrives at all,
         // however many times it is made.
         if (!opened && shell.sheetPage === 'menu') {
           run = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', timeout: 20_000 });
-          opened = await waitFor(() => shell.sheetPage === 'shortcuts', { timeoutMs: 3000 });
+          opened = await waitFor(inHelp, { timeoutMs: 3000 });
         }
         clicked = `${opened ? 'opened' : `still ${shell.sheetPage}`} at ${at.x},${at.y}` +
           `${overStrip ? ' over the strip' : ' (not over the strip)'}${run.status ? `; powershell ${run.status} ${run.stderr}` : ''}`;
