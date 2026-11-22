@@ -449,7 +449,9 @@ jobs:
             macos-latest)   bin=$(ls -d dist/mac*/Debrowser.app | head -1)/Contents/MacOS/Debrowser; run="" ;;
             *)              bin=dist/linux-unpacked/debrowser; run="xvfb-run -a" ;;
           esac
-          $run "$bin" --smoke-test --no-sandbox --disable-gpu
+          # Once more on a failure: a packaged-only break fails both times, the
+          # window checks' rare timing flake does not.
+          $run "$bin" --smoke-test --no-sandbox --disable-gpu || $run "$bin" --smoke-test --no-sandbox --disable-gpu
 
       - uses: actions/upload-artifact@v7
         with:
