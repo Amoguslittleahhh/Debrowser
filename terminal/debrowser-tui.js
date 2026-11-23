@@ -392,7 +392,8 @@ handlers['Inspector.targetReloadedAfterCrash'] = async (_, s) => {
 // Tabs open blank and are navigated once set up, so block mode's text styling is in
 // place before the first page loads.
 let nextUrl = null;
-const newTab = (url = 'about:blank') => { nextUrl = url; return send('Target.createTarget', { url: 'about:blank', enableBeginFrameControl: frameControl }); };
+// New tabs open in the background and take the focus when shown (activate), not before.
+const newTab = (url = 'about:blank') => { nextUrl = url; return send('Target.createTarget', { url: 'about:blank', background: true, enableBeginFrameControl: frameControl }); };
 const closeTab = () => send('Target.closeTarget', { targetId: cur.id });
 const switchBy = (n) => tabs.length && pick(tabs[(tabs.indexOf(cur) + n + tabs.length) % tabs.length]);
 
