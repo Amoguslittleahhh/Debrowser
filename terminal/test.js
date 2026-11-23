@@ -152,9 +152,11 @@ const step = async (name, fn) => { const t0 = Date.now(); await fn(); console.lo
     });
     console.log('e2e: ok');
   } catch (e) {
-    kill(); console.error(e.message); process.exitCode = 1;
+    try { kill(); } catch { /* already gone */ }
+    console.error(e.message); process.exitCode = 1;
   } finally {
     if (process.env.DEBROWSER_TEST_OUT) fs.writeFileSync(process.env.DEBROWSER_TEST_OUT, out);
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* Chromium may still hold it on Windows */ }
+    setTimeout(() => process.exit(), 500).unref(); // a pty can keep the event loop alive after a failure
   }
 })();
