@@ -162,7 +162,7 @@ const QUAD = ' ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█';
 const dist = (a, b) => Math.abs((a >> 16) - (b >> 16)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) + Math.abs((a & 255) - (b & 255));
 function blocks(img, cols, rows, top, prev, text) {
   const { width: w, height: h, bpp, data } = img;
-  let s = '', at = -1, fg = -1, bg = -1;
+  let s = '', at = -1, fg = -1, bg = -1, wideAt = -1;
   const rgb = (v) => `${v >> 16};${(v >> 8) & 255};${v & 255}`;
   const q = new Float64Array(12); // 4 quadrants x r,g,b
   const avg = (x0, x1, y0, y1, o) => {
@@ -206,22 +206,50 @@ function blocks(img, cols, rows, top, prev, text) {
         t = b2; glyph = ' ';
       }
       const k = r * cols + c, ch = text && text.get(k);
+      if (wideAt === k) { prev[k * 3 + 2] = -1; continue; } // covered by the wide letter before it
       if (ch) { // the page's own character, on the cell's average colour (its pixel text is hidden)
         b2 = pack((q[0] + q[3] + q[6] + q[9]) / 4, (q[1] + q[4] + q[7] + q[10]) / 4, (q[2] + q[5] + q[8] + q[11]) / 4);
         t = ch[1]; glyph = ch[0];
       }
-      const key = glyph.codePointAt(0);
+      const key = glyph.codePointAt(0), wide = ch && c < cols - 1 && cellWidth(key) === 2;
+      if (wide) wideAt = k + 1;
+      else if (ch && cellWidth(key) === 2) glyph = ' '; // no room for it in the last column
       if (prev[k * 3] === t && prev[k * 3 + 1] === b2 && prev[k * 3 + 2] === key) continue;
       prev[k * 3] = t; prev[k * 3 + 1] = b2; prev[k * 3 + 2] = key;
       if (at !== k) s += `\x1b[${top + r};${c + 1}H`;
       if (glyph !== ' ' && t !== fg) { s += `\x1b[38;2;${rgb(t)}m`; fg = t; }
       if (b2 !== bg) { s += `\x1b[48;2;${rgb(b2)}m`; bg = b2; }
       s += glyph;
-      at = k + 1;
+      at = wide ? -1 : k + 1; // where a wide letter leaves the cursor differs between terminals
     }
     at = -1;
   }
   return s && s + '\x1b[0m';
+}
+
+// Cells a character takes in a terminal: 2 for East Asian wide letters and emoji, 0 for
+// combining marks and zero-width joiners, 1 otherwise (a short wcwidth).
+const WIDE = [[0x1100, 0x115f], [0x2e80, 0x303e], [0x3041, 0x33ff], [0x3400, 0x4dbf], [0x4e00, 0x9fff],
+  [0xa000, 0xa4cf], [0xac00, 0xd7a3], [0xf900, 0xfaff], [0xfe30, 0xfe4f], [0xff00, 0xff60], [0xffe0, 0xffe6],
+  [0x1f300, 0x1f64f], [0x1f900, 0x1f9ff], [0x20000, 0x3fffd]];
+function cellWidth(cp) {
+  if ((cp >= 0x300 && cp <= 0x36f) || (cp >= 0x200b && cp <= 0x200f) || (cp >= 0xfe00 && cp <= 0xfe0f)) return 0;
+  return WIDE.some(([a, b]) => cp >= a && cp <= b) ? 2 : 1;
+}
+// Page text (titles, URLs, dialog messages, file names) is the page's to choose. Control
+// characters in it would be terminal commands (set the clipboard, move the cursor, draw),
+// so every one is replaced before it reaches the screen.
+const safeText = (t) => String(t).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+// Cut to n cells (wide characters count two), with an ellipsis when cut, padded to n.
+function fit(t, n) {
+  const chars = [...safeText(t)], cw = chars.map((c) => cellWidth(c.codePointAt(0)));
+  let total = cw.reduce((a, b) => a + b, 0), s = chars.join('');
+  if (total > n) { // keep what fits in n-1 cells, then the ellipsis
+    s = ''; total = 0;
+    for (let i = 0; i < chars.length && total + cw[i] <= n - 1; i++) { s += chars[i]; total += cw[i]; }
+    if (n > 0) { s += '…'; total++; }
+  }
+  return s + ' '.repeat(Math.max(0, n - total));
 }
 
 // Text boxes from DOMSnapshot.captureSnapshot laid onto the cell grid, one character per
@@ -283,11 +311,17 @@ function textCells(snap, cols, rows, cssPerCol, cssPerRow) {
     if (row !== rowAt) { rowAt = row; rowEnd = -1; endX = -Infinity; }
     const natural = Math.round(x / cssPerCol), gap = x - endX >= 2 ? 1 : 0;
     const start = natural < rowEnd + gap && natural >= rowEnd - 12 ? rowEnd + gap : natural;
-    part.forEach((ch, j) => {
-      const col = start + j;
-      if (ch !== ' ' && ch >= ' ' && col >= left && col < right && col < cols) cells.set(row * cols + col, [ch, color]);
-    });
-    rowEnd = Math.max(rowEnd, start + part.length);
+    let col = start;
+    for (const ch of part) {
+      const cw = cellWidth(ch.codePointAt(0));
+      if (!cw) continue; // combining marks would draw over the letter before
+      if (ch !== ' ' && !/[\x00-\x1f\x7f-\x9f]/.test(ch) && col >= left && col + cw - 1 < right && col + cw - 1 < cols) {
+        cells.set(row * cols + col, [ch, color]);
+        if (cw === 2) cells.delete(row * cols + col + 1);
+      }
+      col += cw;
+    }
+    rowEnd = Math.max(rowEnd, col);
     endX = Math.max(endX, x + bw);
   }
   // Checkboxes, radio buttons and switches are a few pixels each, a smudge at this size, so
@@ -360,6 +394,7 @@ const modsOf = (n) => ({ shift: !!(n - 1 & 1), alt: !!(n - 1 & 2), ctrl: !!(n - 
 function parseInput(str, state = {}) {
   const ev = [];
   if (state.paste != null) str = state.paste + str, state.paste = null;
+  if (state.esc) str = state.esc + str, state.esc = null;
   let i = 0;
   while (i < str.length) {
     const ch = str[i];
@@ -370,6 +405,8 @@ function parseInput(str, state = {}) {
       i = end + 6;
       continue;
     }
+    // A sequence cut in two by the read (common over SSH) is kept for the next chunk.
+    if (ch === '\x1b' && /^\x1b[[O][<?]?[\d;]*$/.test(str.slice(i)) && str.length - i < 32) { state.esc = str.slice(i); break; }
     if (ch === '\x1b' && (str[i + 1] === '[' || str[i + 1] === 'O') && i + 2 < str.length) {
       const m = /^\x1b([[O])([<?]?)([\d;]*)([A-Za-z~])/.exec(str.slice(i, i + 32));
       if (m) {
@@ -452,6 +489,12 @@ function findChrome(env = process.env) {
   for (const name of ['chrome-headless-shell', 'chromium', 'chromium-browser', 'google-chrome-stable', 'google-chrome']) {
     try { return execFileSync(win ? 'where' : 'which', [name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/)[0].trim(); } catch { /* next */ }
   }
+  if (process.platform === 'darwin') { // an installed Chrome, Chromium or Edge works too
+    for (const app of ['Google Chrome', 'Chromium', 'Microsoft Edge']) {
+      const p = `/Applications/${app}.app/Contents/MacOS/${app}`;
+      if (fs.existsSync(p)) return p;
+    }
+  }
   if (win) { // an installed Chrome or Edge works too
     for (const p of [`${env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`, `${env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
       `${env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`]) if (fs.existsSync(p)) return p;
@@ -470,4 +513,4 @@ function toUrl(text) {
   return `https://duckduckgo.com/?q=${encodeURIComponent(t)}`;
 }
 
-module.exports = { decodePng, kittyImage, kittyDelete, sixel, blocks, textCells, TEXT_STYLES, keyInfo, parseInput, pickMode, findChrome, toUrl };
+module.exports = { cellWidth, safeText, fit, decodePng, kittyImage, kittyDelete, sixel, blocks, textCells, TEXT_STYLES, keyInfo, parseInput, pickMode, findChrome, toUrl };

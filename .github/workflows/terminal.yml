@@ -1,8 +1,8 @@
 # Debrowser for the terminal (terminal/): unit checks and an end-to-end run in a
 # real pseudo-terminal (ConPTY on Windows, through node-pty) - keys, mouse,
-# tabs, the address bar, a download, a real site - on Windows and Linux.
-# On Windows it also runs against the runner's Microsoft Edge, which has no
-# begin-frame control and takes the plain screencast path.
+# tabs, the address bar, a download, a real site - on Windows, Linux and macOS.
+# On Windows and macOS it also runs against the runner's own Edge or Chrome,
+# which have no begin-frame control and take the plain screencast path.
 
 name: Terminal browser
 
@@ -28,6 +28,8 @@ jobs:
           - { os: windows-latest, browser: chrome-headless-shell }
           - { os: windows-latest, browser: edge }
           - { os: ubuntu-latest, browser: chrome-headless-shell }
+          - { os: macos-latest, browser: chrome-headless-shell }
+          - { os: macos-latest, browser: chrome }
     name: ${{ matrix.os }} / ${{ matrix.browser }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -57,8 +59,12 @@ jobs:
         if: matrix.browser == 'edge'
         run: echo "DEBROWSER_CHROME=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> "$GITHUB_ENV"
 
-      - name: Install node-pty (ConPTY)
-        if: runner.os == 'Windows'
+      - name: Use Google Chrome
+        if: matrix.browser == 'chrome'
+        run: echo "DEBROWSER_CHROME=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> "$GITHUB_ENV"
+
+      - name: Install node-pty (ConPTY on Windows)
+        if: runner.os != 'Linux'
         run: npm i --no-save --prefix terminal node-pty@1
 
       - name: Test

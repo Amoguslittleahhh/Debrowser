@@ -94,6 +94,8 @@ function metrics() {
 async function applySize(t) {
   await send('Emulation.setDeviceMetricsOverride', metrics(), t.session).catch(() => {});
 }
+let switches = 0; // tabs picked by hand
+const pick = (t) => { switches++; return activate(t); };
 async function activate(t) {
   if (cur && cur !== t) send('Page.stopScreencast', {}, cur.session).catch(() => {});
   cur = t;
@@ -106,7 +108,7 @@ async function activate(t) {
 }
 handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
   if (ti.type !== 'page' || tabs.some((t) => t.id === ti.targetId) || startup.has(ti.targetId)) return;
-  const t = { id: ti.targetId, title: ti.title, url: ti.url, loading: true };
+  const t = { id: ti.targetId, title: ti.title, url: ti.url, loading: true }, picked = switches;
   tabs.push(t);
   t.session = (await send('Target.attachToTarget', { targetId: ti.targetId, flatten: true })).sessionId;
   await Promise.all(['Page.enable', 'Inspector.enable'].map((m) => send(m, {}, t.session).catch(() => {})));
@@ -117,7 +119,6 @@ handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
   if (mode === 'blocks') {
     // Characters are drawn from the layout, so pages are laid out in a monospace font one cell
     // wide per letter, and the pixel copy of the text is hidden instead of smudging the cells.
-    send('Page.setBypassCSP', { enabled: true }, t.session).catch(() => {});
     send('Page.addScriptToEvaluateOnNewDocument', { source: TEXT_MODE }, t.session).catch(() => {});
     send('Runtime.evaluate', { expression: TEXT_MODE }, t.session).catch(() => {});
   }
@@ -125,22 +126,23 @@ handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
     const url = nextUrl; nextUrl = null;
     if (url !== 'about:blank') send('Page.navigate', { url }, t.session).catch(() => {});
   }
-  await activate(t); // new tabs, including pages' own popups, come to the front
+  // New tabs, including pages' own popups, come to the front, unless another tab was picked meanwhile.
+  if (switches === picked) await activate(t); else drawUi();
 };
+// A constructed style sheet: no <style> element, so a page's Content Security Policy has
+// nothing to refuse and stays in force for everything else.
 const TEXT_MODE = `(() => {
-  const css = '*:not(svg):not(svg *){font-family:"DejaVu Sans Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace!important;'
+  let sheet = window.__debrowserText;
+  if (!sheet) {
+    sheet = new CSSStyleSheet();
+    Object.defineProperty(window, '__debrowserText', { value: sheet });
+  }
+  if (document.adoptedStyleSheets.includes(sheet)) return; // a page that replaced the list gets it back on load
+  sheet.replaceSync('*:not(svg):not(svg *){font-family:"DejaVu Sans Mono","Cascadia Mono",Consolas,Menlo,"Liberation Mono",monospace!important;'
     + 'letter-spacing:0!important;word-spacing:0!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important}'
     + '::placeholder{-webkit-text-fill-color:transparent!important}'
-    + 'input[type=checkbox],input[type=radio]{opacity:0!important}'; // drawn as characters instead
-  const add = () => {
-    if (document.getElementById('debrowser-tui-text')) return true;
-    const root = document.head || document.documentElement;
-    if (!root) return false;
-    const st = document.createElement('style');
-    st.id = 'debrowser-tui-text'; st.textContent = css; root.appendChild(st);
-    return true;
-  };
-  if (!add()) new MutationObserver((_, o) => { if (add()) o.disconnect(); }).observe(document, { childList: true, subtree: true });
+    + 'input[type=checkbox],input[type=radio]{opacity:0!important}'); // drawn as characters instead
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
 })()`;
 handlers['Target.targetDestroyed'] = ({ targetId }) => {
   const i = tabs.findIndex((t) => t.id === targetId);
@@ -176,12 +178,25 @@ handlers['Inspector.targetCrashed'] = (_, s) => {
   const t = bySession(s);
   if (t) { t.crashed = true; t.loading = false; drawUi(); }
 };
+// Alerts are shown in the status line and dismissed. Confirm, prompt and "leave this page?"
+// wait for Enter (OK, a prompt's suggested answer) or Esc (Cancel): never answered for you.
+let dialog = null;
 handlers['Page.javascriptDialogOpening'] = ({ type, message, defaultPrompt }, s) => {
-  // Headless has nowhere to show a dialog and the page would hang, so answer it and say what it was.
-  status = `${type}: ${message}`.replace(/\s+/g, ' ');
-  send('Page.handleJavaScriptDialog', { accept: true, promptText: defaultPrompt }, s).catch(() => {});
+  const text = `${type === 'beforeunload' ? 'Leave this page?' : message}`.replace(/\s+/g, ' ');
+  if (type === 'alert') {
+    status = `alert: ${text}`;
+    send('Page.handleJavaScriptDialog', { accept: true }, s).catch(() => {});
+  } else {
+    dialog = { session: s, promptText: defaultPrompt || '' };
+    status = `${type}: ${text}   Enter = OK, Esc = Cancel`;
+  }
   drawUi();
 };
+handlers['Page.javascriptDialogClosed'] = (_, s) => { if (dialog && dialog.session === s) { dialog = null; status = ''; drawUi(); } };
+function answerDialog(accept) {
+  send('Page.handleJavaScriptDialog', { accept, promptText: dialog.promptText }, dialog.session).catch(() => {});
+  dialog = null; status = ''; drawUi();
+}
 
 // ---------- downloads: saved to ~/Downloads (or --downloads=DIR), progress in the status line ----------
 const downloads = opt('downloads') || path.join(os.homedir(), 'Downloads');
@@ -190,7 +205,7 @@ handlers['Browser.downloadWillBegin'] = ({ guid, suggestedFilename }) => {
   saving.set(guid, suggestedFilename);
   status = `Downloading ${suggestedFilename}…`; drawUi();
 };
-handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes }) => {
+handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes, filePath }) => {
   const name = saving.get(guid) || 'file';
   if (state === 'inProgress') {
     const pct = totalBytes ? ` ${Math.floor((receivedBytes / totalBytes) * 100)}%` : ` ${(receivedBytes / 1e6).toFixed(1)} MB`;
@@ -199,7 +214,7 @@ handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes
     status = next;
   } else {
     saving.delete(guid);
-    status = state === 'completed' ? `Saved ${path.join(downloads, name)}` : `Download of ${name} cancelled`;
+    status = state === 'completed' ? `Saved ${filePath || path.join(downloads, name)}` : `Download of ${name} cancelled`;
   }
   drawUi();
 };
@@ -210,7 +225,7 @@ handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes
 // still; background tabs are not asked at all, so their animations cost nothing.
 // The screencast then hands over a picture only when one actually changed.
 const fps = Math.max(1, +(opt('fps') || process.env.DEBROWSER_FPS || 15)), frameGap = 1000 / fps;
-let rush = false, busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null;
+let needShot = false, rush = false, busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null;
 function wake() {
   fast = fps * 2;
   if (ticking) rush = true; // a frame is in flight: ask for the next one straight after
@@ -222,8 +237,12 @@ async function tick() {
   if (frameControl && t && !busy && !ticking && !t.crashed) {
     ticking = true;
     try {
-      const r = await send('HeadlessExperimental.beginFrame', { interval: frameGap }, t.session);
+      // The screencast only sends pictures that changed, so a page that looks the same after a
+      // resize or a tab switch would stay blank: those ask for one screenshot.
+      const shot = needShot && !(needShot = false);
+      const r = await send('HeadlessExperimental.beginFrame', { interval: frameGap, ...(shot && { screenshot: { format: 'png' } }) }, t.session);
       if (r.hasDamage) fast = fps * 2;
+      if (r.screenshotData && t === cur) frame(r.screenshotData);
     } catch { /* tab closing or crashed */ }
     ticking = false;
   }
@@ -233,10 +252,12 @@ async function tick() {
 }
 handlers['Page.screencastFrame'] = ({ data, sessionId: frameSession }, s) => {
   send('Page.screencastFrameAck', { sessionId: frameSession }, s).catch(() => {});
-  if (bySession(s) !== cur) return;
-  if (busy) waiting = data; else draw(Buffer.from(data, 'base64'));
+  if (bySession(s) === cur) frame(data);
 };
+const frame = (data) => { if (busy) waiting = data; else draw(Buffer.from(data, 'base64')); };
 async function startCast(t) {
+  needShot = true;
+  if (!frameControl) send('Page.captureScreenshot', { format: 'png' }, t.session).then((r) => { if (t === cur) frame(r.data); }, () => {});
   const m = mode === 'blocks' ? { maxWidth: cols * 4, maxHeight: pageRows() * 8 } // 2x2 per cell, each pixel averaged from 2x2
     : { maxWidth: Math.round(cols * cellW * HI), maxHeight: Math.round(pageRows() * cellH * HI) };
   await send('Page.startScreencast', { format: 'png', everyNthFrame: 1, ...m }, t.session).catch(() => {});
@@ -281,7 +302,7 @@ function draw(png, again) {
 }
 
 // ---------- drawing the bars ----------
-const clip = (s, n) => (s.length > n ? s.slice(0, Math.max(0, n - 1)) + '…' : s.padEnd(n));
+const clip = L.fit; // cuts by terminal cells and strips control characters a page may put in a title
 let tabSpans = [], navSpans = {};
 // Fixed 256-colour greys, so the bars look the same whatever the terminal's own colours are.
 const BAR = '\x1b[0;48;5;236;38;5;250m', ACTIVE = '\x1b[0;1;48;5;254;38;5;16m', FIELD = '\x1b[0;48;5;239;38;5;255m',
@@ -357,12 +378,20 @@ async function history(step) {
   if (e) await send('Page.navigateToHistoryEntry', { entryId: e.id }, cur.session);
 }
 const reload = () => { cur.crashed = false; send('Page.reload', {}, cur.session).catch(() => {}); };
+// A crashed tab gets a new renderer on reload, which starts with no size and no screencast.
+handlers['Inspector.targetReloadedAfterCrash'] = async (_, s) => {
+  const t = bySession(s);
+  if (!t) return;
+  t.crashed = false; drawUi();
+  await applySize(t);
+  if (t === cur) { prevCells = null; await startCast(t); wake(); }
+};
 // Tabs open blank and are navigated once set up, so block mode's text styling is in
-// place before the first page loads (a page's CSP would otherwise refuse it).
+// place before the first page loads.
 let nextUrl = null;
 const newTab = (url = 'about:blank') => { nextUrl = url; return send('Target.createTarget', { url: 'about:blank', enableBeginFrameControl: frameControl }); };
 const closeTab = () => send('Target.closeTarget', { targetId: cur.id });
-const switchBy = (n) => tabs.length && activate(tabs[(tabs.indexOf(cur) + n + tabs.length) % tabs.length]);
+const switchBy = (n) => tabs.length && pick(tabs[(tabs.indexOf(cur) + n + tabs.length) % tabs.length]);
 
 // ---------- input ----------
 const mods = (e) => (e.alt ? 1 : 0) | (e.ctrl ? 2 : 0) | (e.shift ? 8 : 0);
@@ -378,7 +407,7 @@ function mouse(e) {
     if (e.y === 1) {
       const hit = tabSpans.find(([a, b]) => e.x >= a && e.x <= b);
       if (hit && e.button === 'middle') send('Target.closeTarget', { targetId: hit[2].id });
-      else if (hit) activate(hit[2]);
+      else if (hit) pick(hit[2]);
       else if (e.x >= navSpans.plus && e.x <= navSpans.plus + 2) newTab();
     } else if (e.x <= 3) history(-1);
     else if (e.x <= 5) history(1);
@@ -406,6 +435,7 @@ function mouse(e) {
 }
 function key(k) {
   if (k.ctrl && k.key === 'q') return quit();
+  if (dialog && (k.key === 'Enter' || k.key === 'Escape')) return answerDialog(k.key === 'Enter');
   if (k.ctrl && k.key === 'l' || k.key === 'F6') return editUrl();
   if (k.ctrl && k.key === 't') return newTab();
   if (k.ctrl && k.key === 'w') return closeTab();
@@ -415,7 +445,7 @@ function key(k) {
   if (k.alt && k.key === 'ArrowRight') return history(1);
   if (k.key === 'F5' || (k.ctrl && k.key === 'r')) return reload();
   if (k.ctrl && (k.key === 'PageUp' || k.key === 'PageDown')) return switchBy(k.key === 'PageUp' ? -1 : 1);
-  if (k.alt && /^[1-9]$/.test(k.key)) return tabs[+k.key - 1] && activate(tabs[+k.key - 1]);
+  if (k.alt && /^[1-9]$/.test(k.key)) return tabs[+k.key - 1] && pick(tabs[+k.key - 1]);
   if (k.alt && (k.key === '=' || k.key === '-' || k.key === '0')) {
     zoom = k.key === '0' ? 1 : Math.max(0.25, Math.min(4, zoom * (k.key === '=' ? 1.25 : 0.8)));
     status = `Zoom ${Math.round(zoom * 100)}%`;
@@ -480,7 +510,7 @@ function quit(msg, code = 0) {
   try { process.stdin.setRawMode(false); } catch { /* already gone */ }
   if (msg) console.error(msg);
   try { proc.kill(); } catch { /* gone */ }
-  if (!opt('profile')) setTimeout(() => { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* in use */ } process.exit(code); }, 300);
+  if (!opt('profile')) setTimeout(() => { try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* in use */ } process.exit(code); }, 300);
   else process.exit(code);
 }
 process.on('SIGTERM', () => quit());
