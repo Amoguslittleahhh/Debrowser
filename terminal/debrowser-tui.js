@@ -39,7 +39,11 @@ const chromeArgs = ['--headless', '--remote-debugging-pipe', '--no-first-run', '
 // Begin-frame control (render only when asked) exists only in chrome-headless-shell; a full
 // Chrome or Edge renders on its own and is just screencast.
 const frameControl = /headless[-_]shell/i.test(path.basename(chrome));
-if (frameControl) chromeArgs.splice(-1, 0, '--enable-begin-frame-control', '--run-all-compositor-stages-before-draw');
+// The rest is Chromium's own recipe for begin-frame control. Without it, an animation that
+// runs on the compositor thread (a transition started after load) can stall beginFrame for
+// good and freeze the tab.
+if (frameControl) chromeArgs.splice(-1, 0, '--enable-begin-frame-control', '--run-all-compositor-stages-before-draw',
+  '--disable-threaded-animation', '--disable-threaded-scrolling', '--disable-checker-imaging', '--disable-new-content-rendering-timeout');
 chromeArgs.push(...(process.env.DEBROWSER_CHROME_ARGS || '').split(' ').filter(Boolean));
 if (process.getuid && process.getuid() === 0) chromeArgs.push('--no-sandbox'); // Chromium refuses root otherwise
 let msgId = 0, inbuf = '';
