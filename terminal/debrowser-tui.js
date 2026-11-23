@@ -401,8 +401,9 @@ const switchBy = (n) => tabs.length && pick(tabs[(tabs.indexOf(cur) + n + tabs.l
 const mods = (e) => (e.alt ? 1 : 0) | (e.ctrl ? 2 : 0) | (e.shift ? 8 : 0);
 function pageKey(k) {
   const base = { key: k.key, code: k.code, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, modifiers: mods(k) };
-  send('Input.dispatchKeyEvent', { type: k.text ? 'keyDown' : 'rawKeyDown', text: k.text, unmodifiedText: k.text, ...base }, cur.session);
-  send('Input.dispatchKeyEvent', { type: 'keyUp', ...base }, cur.session);
+  const lost = (e) => { status = `Key not delivered: ${e.message}`; drawUi(); };
+  send('Input.dispatchKeyEvent', { type: k.text ? 'keyDown' : 'rawKeyDown', text: k.text, unmodifiedText: k.text, ...base }, cur.session).catch(lost);
+  send('Input.dispatchKeyEvent', { type: 'keyUp', ...base }, cur.session).catch(lost);
 }
 let lastClick = { t: 0, x: 0, y: 0, n: 0 }, held = 'none';
 function mouse(e) {
