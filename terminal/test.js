@@ -69,6 +69,7 @@ assert.ok(withText.includes('38;2;10;20;30m') && /H.*i/.test(withText) && !/[▘
 const k = L.kittyImage(Buffer.alloc(5000), 7, 80, 20);
 assert.ok(k.startsWith('\x1b_Ga=T,f=100,i=7,q=2,C=1,c=80,r=20,m=1;') && k.includes('\x1b_Gm=0;'), 'kitty chunks');
 
+const ev2 = (es) => es.map((e) => `${e.alt ? 'A-' : ''}${e.key}/${e.code}`).join(' ');
 const ev = (s) => L.parseInput(s).map((e) => (e.type === 'key' ? `${e.ctrl ? 'C-' : ''}${e.alt ? 'A-' : ''}${e.shift ? 'S-' : ''}${e.key}/${e.code}/${e.keyCode}` : e.type));
 assert.deepStrictEqual(ev('aZ'), ['a/KeyA/65', 'S-Z/KeyZ/90']);
 assert.deepStrictEqual(ev('\x01\x7f\r\t'), ['C-a/KeyA/65', 'Backspace/Backspace/8', 'Enter/Enter/13', 'Tab/Tab/9']);
@@ -82,6 +83,9 @@ const st = {};
 assert.deepStrictEqual(L.parseInput('\x1b[200~hel', st), []);
 assert.deepStrictEqual(L.parseInput('lo\x1b[201~', st), [{ type: 'paste', text: 'hello' }]);
 assert.strictEqual(L.parseInput('\x1b[6;16;8t')[0].type, 'reply');
+{ const s2 = {}; assert.deepStrictEqual(L.parseInput('\x1b[', s2), []); // Alt+[ alone: held, then let go
+  assert.strictEqual(ev2(L.parseInput('', s2, true)), 'A-[/BracketLeft'); }
+assert.strictEqual(L.textWidth('a中😀'), 5);
 
 assert.strictEqual(L.toUrl('example.com'), 'https://example.com');
 assert.strictEqual(L.toUrl('localhost:3000/x'), 'http://localhost:3000/x');
@@ -201,12 +205,9 @@ async function full(r) {
   });
   await step('crashed tab shows it, F5 brings it back', async () => {
     write('\x0c'); write('chrome://crash\r');
-    // On Linux CI the renderer neither dies nor draws again after chrome://crash (no crash event,
-    // the pending frame never returns), so that tab is swapped for a fresh one.
-    try { await waitFor('This tab crashed', 8000); } catch {
-      console.log('    (no crash reported for chrome://crash: skipped, tab replaced)');
-      write('\x17'); await new Promise((res) => setTimeout(res, 300)); r.mark = r.out.length; write('\x14'); await waitFor(' 2 '); return;
-    }
+    // A renderer that is killed shows the crash at once; on Linux CI it instead hangs half-dead
+    // and stops drawing, which the browser reports as a crash after 10 seconds.
+    try { await waitFor('This tab crashed', 20000); } catch { console.log('    (this Chromium ignores chrome://crash: skipped)'); return; }
     r.mark = r.out.length; write('\x1b[15~'); await waitFor('48;2;', 30000);
   });
   await step('download', async () => {

@@ -100,7 +100,7 @@ let switches = 0; // tabs picked by hand
 const pick = (t) => { switches++; return activate(t); };
 async function activate(t) {
   if (cur && cur !== t) send('Page.stopScreencast', {}, cur.session).catch(() => {});
-  cur = t;
+  cur = t; t.drewAt = Date.now();
   stopWaiting();
   // Keys go to the focused page only: a tab opened since took the focus with it.
   send('Page.bringToFront', {}, t.session).catch(() => {});
@@ -114,7 +114,8 @@ async function activate(t) {
 handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
   if (ti.type !== 'page' || tabs.some((t) => t.id === ti.targetId) || startup.has(ti.targetId)) return;
   const t = { id: ti.targetId, title: ti.title, url: ti.url, loading: true }, picked = switches;
-  tabs.push(t);
+  const old = replacing; replacing = null;
+  if (old && tabs.includes(old)) tabs.splice(tabs.indexOf(old), 0, t); else tabs.push(t);
   t.session = (await send('Target.attachToTarget', { targetId: ti.targetId, flatten: true })).sessionId;
   await Promise.all(['Page.enable', 'Inspector.enable'].map((m) => send(m, {}, t.session).catch(() => {})));
   send('Emulation.setFocusEmulationEnabled', { enabled: true }, t.session).catch(() => {});
@@ -132,7 +133,8 @@ handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
     if (url !== 'about:blank') send('Page.navigate', { url }, t.session).catch(() => {});
   }
   // New tabs, including pages' own popups, come to the front, unless another tab was picked meanwhile.
-  if (switches === picked) await activate(t); else drawUi();
+  if (old) { await activate(t); send('Target.closeTarget', { targetId: old.id }).catch(() => {}); }
+  else if (switches === picked) await activate(t); else drawUi();
 };
 // A constructed style sheet: no <style> element, so a page's Content Security Policy has
 // nothing to refuse and stays in force for everything else.
@@ -231,6 +233,13 @@ handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes
 // The screencast then hands over a picture only when one actually changed.
 const fps = Math.max(1, +(opt('fps') || process.env.DEBROWSER_FPS || 15)), frameGap = 1000 / fps;
 let needShot = false, rush = false, busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null, stopWaiting = () => {};
+// Chromium can lose a tab's frame for good (seen after chrome://crash on Linux, when the
+// renderer neither dies nor draws): it then refuses every new one. After 10 seconds of that
+// the tab is shown as crashed, and F5 opens it afresh.
+function stuck(t) {
+  if (t !== cur || t.crashed || Date.now() - (t.drewAt || 0) < 10000) return;
+  t.crashed = t.stuck = true; t.loading = false; drawUi();
+}
 function wake() {
   fast = fps * 2;
   if (ticking) rush = true; // a frame is in flight: ask for the next one straight after
@@ -248,9 +257,11 @@ async function tick() {
       // A frame asked of a tab that is then hidden never comes back: a tab switch stops the wait.
       const r = await Promise.race([send('HeadlessExperimental.beginFrame', { interval: frameGap, ...(shot && { screenshot: { format: 'png' } }) }, t.session),
         new Promise((res) => { stopWaiting = () => res({}); setTimeout(stopWaiting, 3000); })]);
+      if ('hasDamage' in r) t.drewAt = Date.now();
+      else stuck(t); // no answer in 3 seconds
       if (r.hasDamage) fast = fps * 2;
       if (r.screenshotData && t === cur) frame(r.screenshotData);
-    } catch { /* tab closing or crashed */ }
+    } catch (err) { if (/frame is pending/.test(err.message)) stuck(t); /* else tab closing or crashed */ }
     ticking = false;
   }
   if (fast > 0) fast--;
@@ -339,7 +350,7 @@ function drawUi() {
   out.write(s);
 }
 function cursorAt() {
-  return `\x1b[2;${navSpans.field + 1 + urlEdit.pos - urlEdit.scroll}H\x1b[?25h`;
+  return `\x1b[2;${navSpans.field + 1 + L.textWidth(urlEdit.text.slice(urlEdit.scroll, urlEdit.pos))}H\x1b[?25h`;
 }
 function clearPage() {
   let s = mode === 'kitty' ? '\x1b_Ga=d,d=A,q=2\x1b\\' : '';
@@ -356,8 +367,11 @@ function editUrl() {
 function fitScroll() {
   const w = cols - 12;
   if (urlEdit.pos < urlEdit.scroll) urlEdit.scroll = urlEdit.pos;
-  if (urlEdit.pos > urlEdit.scroll + w) urlEdit.scroll = urlEdit.pos - w;
+  while (L.textWidth(urlEdit.text.slice(urlEdit.scroll, urlEdit.pos)) > w) urlEdit.scroll = next(urlEdit.text, urlEdit.scroll);
 }
+// Positions step by whole characters, so an emoji (two UTF-16 units) is never cut in half.
+const next = (t, i) => Math.min(t.length, i + (t.codePointAt(i) > 0xffff ? 2 : 1));
+const prev = (t, i) => Math.max(0, i - (i > 1 && t.codePointAt(i - 2) > 0xffff ? 2 : 1));
 function urlKey(k) {
   const e = urlEdit;
   const put = (str) => {
@@ -367,10 +381,10 @@ function urlKey(k) {
   if (k.type === 'paste') put(k.text.replace(/\s*\n\s*/g, ' '));
   else if (k.key === 'Enter') { urlEdit = null; if (cur && e.text.trim()) navigate(L.toUrl(e.text)); drawUi(); return; }
   else if (k.key === 'Escape') { urlEdit = null; drawUi(); return; }
-  else if (k.key === 'Backspace') { if (e.all) { e.text = ''; e.pos = 0; } else if (e.pos) { e.text = e.text.slice(0, e.pos - 1) + e.text.slice(e.pos); e.pos--; } }
-  else if (k.key === 'Delete') e.text = e.text.slice(0, e.pos) + e.text.slice(e.pos + 1);
-  else if (k.key === 'ArrowLeft') e.pos = Math.max(0, e.pos - 1);
-  else if (k.key === 'ArrowRight') e.pos = Math.min(e.text.length, e.pos + 1);
+  else if (k.key === 'Backspace') { if (e.all) { e.text = ''; e.pos = 0; } else if (e.pos) { const p = prev(e.text, e.pos); e.text = e.text.slice(0, p) + e.text.slice(e.pos); e.pos = p; } }
+  else if (k.key === 'Delete') e.text = e.text.slice(0, e.pos) + e.text.slice(next(e.text, e.pos));
+  else if (k.key === 'ArrowLeft') e.pos = prev(e.text, e.pos);
+  else if (k.key === 'ArrowRight') e.pos = next(e.text, e.pos);
   else if (k.key === 'Home' || (k.ctrl && k.key === 'a')) e.pos = 0;
   else if (k.key === 'End' || (k.ctrl && k.key === 'e')) e.pos = e.text.length;
   else if (k.ctrl && k.key === 'u') { e.text = ''; e.pos = 0; }
@@ -378,13 +392,17 @@ function urlKey(k) {
   e.all = false;
   fitScroll(); drawUi();
 }
-const navigate = (url) => send('Page.navigate', { url }, cur.session).catch((err) => { status = err.message; drawUi(); });
+const navigate = (url) => cur.stuck ? (replacing = cur, newTab(url)) : send('Page.navigate', { url }, cur.session).catch((err) => { status = err.message; drawUi(); });
 async function history(step) {
   const h = await send('Page.getNavigationHistory', {}, cur.session);
   const e = h.entries[h.currentIndex + step];
   if (e) await send('Page.navigateToHistoryEntry', { entryId: e.id }, cur.session);
 }
-const reload = () => { cur.crashed = false; send('Page.reload', {}, cur.session).catch(() => {}); };
+const reload = () => {
+  // A tab that stopped drawing is opened afresh in its place: reloading keeps the stuck frame.
+  if (cur.stuck) { replacing = cur; return newTab(cur.url || 'about:blank').catch(() => {}); }
+  cur.crashed = false; send('Page.reload', {}, cur.session).catch(() => {});
+};
 // A crashed tab gets a new renderer on reload, which starts with no size and no screencast.
 handlers['Inspector.targetReloadedAfterCrash'] = async (_, s) => {
   const t = bySession(s);
@@ -395,7 +413,7 @@ handlers['Inspector.targetReloadedAfterCrash'] = async (_, s) => {
 };
 // Tabs open blank and are navigated once set up, so block mode's text styling is in
 // place before the first page loads.
-let nextUrl = null;
+let nextUrl = null, replacing = null;
 // New tabs open in the background and take the focus when shown (activate), not before.
 const newTab = (url = 'about:blank') => { nextUrl = url; return send('Target.createTarget', { url: 'about:blank', background: true, enableBeginFrameControl: frameControl }); };
 const closeTab = () => send('Target.closeTarget', { targetId: cur.id });
@@ -465,8 +483,11 @@ function key(k) {
 }
 const inputState = {};
 let replyWait = null;
-process.stdin.on('data', (d) => {
-  for (const e of L.parseInput(d.toString('utf8'), inputState)) {
+let escTimer = null;
+process.stdin.on('data', (d) => onInput(d.toString('utf8')));
+function onInput(str, final) {
+  clearTimeout(escTimer);
+  for (const e of L.parseInput(str, inputState, final)) {
     if (e.type === 'reply') { if (replyWait) replyWait(e.seq); continue; }
     if (!booted) continue;
     if (cur) wake();
@@ -476,7 +497,9 @@ process.stdin.on('data', (d) => {
       else key(e);
     } catch (err) { status = err.message; drawUi(); }
   }
-});
+  // Alt+[ or Alt+O looks like the start of a sequence: if nothing follows soon, it was the key.
+  if (inputState.esc) escTimer = setTimeout(() => onInput('', true), 100);
+}
 
 // ---------- terminal setup, size and teardown ----------
 async function queryTerminal() {

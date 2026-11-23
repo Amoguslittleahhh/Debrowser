@@ -240,6 +240,8 @@ function cellWidth(cp) {
 // characters in it would be terminal commands (set the clipboard, move the cursor, draw),
 // so every one is replaced before it reaches the screen.
 const safeText = (t) => String(t).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+// Cells a string takes.
+const textWidth = (t) => [...String(t)].reduce((w, c) => w + cellWidth(c.codePointAt(0)), 0);
 // Cut to n cells (wide characters count two), with an ellipsis when cut, padded to n.
 function fit(t, n) {
   const chars = [...safeText(t)], cw = chars.map((c) => cellWidth(c.codePointAt(0)));
@@ -391,7 +393,7 @@ const modsOf = (n) => ({ shift: !!(n - 1 & 1), alt: !!(n - 1 & 2), ctrl: !!(n - 
 // Splits a chunk of terminal input into events:
 // {type:'key', ...keyInfo} | {type:'mouse', button, x, y, release, motion, wheel, mods}
 // | {type:'paste', text} | {type:'reply', seq} (answers to our queries).
-function parseInput(str, state = {}) {
+function parseInput(str, state = {}, final = false) {
   const ev = [];
   if (state.paste != null) str = state.paste + str, state.paste = null;
   if (state.esc) str = state.esc + str, state.esc = null;
@@ -406,7 +408,7 @@ function parseInput(str, state = {}) {
       continue;
     }
     // A sequence cut in two by the read (common over SSH) is kept for the next chunk.
-    if (ch === '\x1b' && /^\x1b[[O][<?]?[\d;]*$/.test(str.slice(i)) && str.length - i < 32) { state.esc = str.slice(i); break; }
+    if (!final && ch === '\x1b' && /^\x1b[[O][<?]?[\d;]*$/.test(str.slice(i)) && str.length - i < 32) { state.esc = str.slice(i); break; }
     if (ch === '\x1b' && (str[i + 1] === '[' || str[i + 1] === 'O') && i + 2 < str.length) {
       const m = /^\x1b([[O])([<?]?)([\d;]*)([A-Za-z~])/.exec(str.slice(i, i + 32));
       if (m) {
@@ -513,4 +515,4 @@ function toUrl(text) {
   return `https://duckduckgo.com/?q=${encodeURIComponent(t)}`;
 }
 
-module.exports = { cellWidth, safeText, fit, decodePng, kittyImage, kittyDelete, sixel, blocks, textCells, TEXT_STYLES, keyInfo, parseInput, pickMode, findChrome, toUrl };
+module.exports = { cellWidth, textWidth, safeText, fit, decodePng, kittyImage, kittyDelete, sixel, blocks, textCells, TEXT_STYLES, keyInfo, parseInput, pickMode, findChrome, toUrl };
