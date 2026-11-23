@@ -42,7 +42,6 @@ const frameControl = /headless[-_]shell/i.test(path.basename(chrome));
 if (frameControl) chromeArgs.splice(-1, 0, '--enable-begin-frame-control', '--run-all-compositor-stages-before-draw');
 chromeArgs.push(...(process.env.DEBROWSER_CHROME_ARGS || '').split(' ').filter(Boolean));
 if (process.getuid && process.getuid() === 0) chromeArgs.push('--no-sandbox'); // Chromium refuses root otherwise
-const proc = spawn(chrome, chromeArgs, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
 let msgId = 0, inbuf = '';
 const pending = new Map(), handlers = {};
 function send(method, params = {}, sessionId) {
@@ -50,21 +49,31 @@ function send(method, params = {}, sessionId) {
   proc.stdio[3].write(JSON.stringify({ id, method, params, sessionId }) + '\0');
   return new Promise((res, rej) => pending.set(id, { res, rej }));
 }
-proc.stdio[4].on('data', (d) => {
-  inbuf += d.toString();
-  let z;
-  while ((z = inbuf.indexOf('\0')) >= 0) {
-    const m = JSON.parse(inbuf.slice(0, z));
-    if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, inbuf.slice(0, Math.min(z, 300)) + '\n');
-    inbuf = inbuf.slice(z + 1);
-    if (m.id && pending.has(m.id)) {
-      const p = pending.get(m.id); pending.delete(m.id);
-      m.error ? p.rej(new Error(m.error.message)) : p.res(m.result);
-    } else if (handlers[m.method]) handlers[m.method](m.params, m.sessionId);
-  }
-});
-proc.stdio[3].on('error', () => {});
-proc.on('exit', (code) => quit(`Chromium exited (${code}).`, 1));
+// Started once the terminal has said its size: kitty scales the image into its cells, so
+// pages are drawn at 1920x1080 or more (sharp on HiDPI screens too) and the terminal shrinks
+// them. Sixel and blocks show pixels one for one, so more would only cost CPU. Screencast
+// ignores the emulated scale factor, hence the launch flag.
+let proc, HI = 1;
+function launch() {
+  if (mode === 'kitty') HI = Math.min(4, Math.max(1, 1920 / (cols * cellW), 1080 / (pageRows() * cellH)));
+  if (HI > 1) chromeArgs.push(`--force-device-scale-factor=${HI}`);
+  proc = spawn(chrome, chromeArgs, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+  proc.stdio[4].on('data', (d) => {
+    inbuf += d.toString();
+    let z;
+    while ((z = inbuf.indexOf('\0')) >= 0) {
+      const m = JSON.parse(inbuf.slice(0, z));
+      if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, inbuf.slice(0, Math.min(z, 300)) + '\n');
+      inbuf = inbuf.slice(z + 1);
+      if (m.id && pending.has(m.id)) {
+        const p = pending.get(m.id); pending.delete(m.id);
+        m.error ? p.rej(new Error(m.error.message)) : p.res(m.result);
+      } else if (handlers[m.method]) handlers[m.method](m.params, m.sessionId);
+    }
+  });
+  proc.stdio[3].on('error', () => {});
+  proc.on('exit', (code) => quit(`Chromium exited (${code}).`, 1));
+}
 
 // ---------- tabs ----------
 const tabs = []; // {id, session, title, url, loading, crashed}
@@ -220,7 +229,7 @@ handlers['Page.screencastFrame'] = ({ data, sessionId: frameSession }, s) => {
 };
 async function startCast(t) {
   const m = mode === 'blocks' ? { maxWidth: cols * 4, maxHeight: pageRows() * 8 } // 2x2 per cell, each pixel averaged from 2x2
-    : { maxWidth: cols * cellW, maxHeight: pageRows() * cellH };
+    : { maxWidth: Math.round(cols * cellW * HI), maxHeight: Math.round(pageRows() * cellH * HI) };
   await send('Page.startScreencast', { format: 'png', everyNthFrame: 1, ...m }, t.session).catch(() => {});
 }
 // Block mode also asks where the page's text is (at most ~6 times a second) and
@@ -477,6 +486,7 @@ const startup = new Set();
   process.stdin.resume();
   out.write('\x1b[?1049h\x1b[?25l\x1b[2J\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h');
   await queryTerminal();
+  launch();
   // Chromium's own startup about:blank is not a tab; it is closed once the first real one exists.
   for (const t of (await send('Target.getTargets')).targetInfos) startup.add(t.targetId);
   userAgent = (await send('Browser.getVersion')).userAgent.replace('HeadlessChrome', 'Chrome');

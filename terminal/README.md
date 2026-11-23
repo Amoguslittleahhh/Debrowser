@@ -6,7 +6,7 @@ so no port is opened) and draws each frame in the terminal:
 
 | Terminal | How it draws |
 |---|---|
-| kitty, WezTerm, Ghostty | kitty graphics protocol: real pixels |
+| kitty, WezTerm, Ghostty | kitty graphics protocol: real pixels, drawn at 1920x1080 or more |
 | Windows Terminal 1.22+, xterm (`-ti vt340`), foot, mlterm | sixel: real pixels, 252 colours |
 | anything else, and inside tmux | half blocks, with the page's text drawn as real characters |
 
@@ -79,6 +79,9 @@ newest frame is kept.
   pauses there until you switch back.
 - Sixel is encoded in JavaScript: a full-screen video costs about three
   quarters of a CPU core in sixel mode. kitty graphics are much cheaper.
+- In a kitty window smaller than 1920x1080, pages are rendered at up to 4x the
+  window's pixels so the picture is at least 1080p. Static pages cost nothing
+  extra; animation in a 960x540 window goes from about 65% to 120% of a core.
 - In block mode the page's text is redrawn as characters from Chromium's
   layout, one per cell; proportional text can crowd, and text hidden by
   clipping can show through.
