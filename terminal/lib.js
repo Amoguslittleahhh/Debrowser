@@ -190,39 +190,71 @@ function blocks(img, cols, rows, top, prev, text) {
   return s && s + '\x1b[0m';
 }
 
-// Text boxes from DOMSnapshot.captureSnapshot (computedStyles: ['color']) laid onto the
-// cell grid: one character per cell, at the centre of where Chromium drew it.
+// Text boxes from DOMSnapshot.captureSnapshot laid onto the cell grid, one character per
+// cell. TEXT_STYLES is the computedStyles list the snapshot must be taken with.
+const TEXT_STYLES = ['color', 'visibility', 'opacity', 'overflow-x', 'overflow-y', 'clip'];
 function textCells(snap, cols, rows, cssPerCol, cssPerRow) {
   const cells = new Map(), doc = snap.documents[0], str = snap.strings;
   if (!doc) return cells;
-  const { layout, textBoxes } = doc, sx = doc.scrollOffsetX || 0, sy = doc.scrollOffsetY || 0;
+  const { layout, textBoxes, nodes } = doc, sx = doc.scrollOffsetX || 0, sy = doc.scrollOffsetY || 0;
+  const layoutOf = new Map();
+  layout.nodeIndex.forEach((n, li) => layoutOf.set(n, li));
+  const style = (li, k) => str[layout.styles[li][k]] || '';
+  // The visible rectangle of a node: its ancestors' clipping (overflow, clip) intersected,
+  // or null when an ancestor is transparent. Text in a closed menu or a "skip to content"
+  // link has a layout but is never painted, and must not be drawn.
+  const clipCache = new Map();
+  const visibleRect = (n) => {
+    if (n < 0) return [-Infinity, -Infinity, Infinity, Infinity];
+    if (clipCache.has(n)) return clipCache.get(n);
+    let r = visibleRect(nodes.parentIndex[n]);
+    const li = layoutOf.get(n);
+    if (r && li !== undefined) {
+      if (style(li, 2) === '0') r = null;
+      else if (style(li, 3) !== 'visible' || style(li, 4) !== 'visible' || (style(li, 5) && style(li, 5) !== 'auto')) {
+        const [x, y, w, h] = layout.bounds[li];
+        r = [Math.max(r[0], x), Math.max(r[1], y), Math.min(r[2], x + w), Math.min(r[3], y + h)];
+        if (r[0] >= r[2] || r[1] >= r[3]) r = null;
+      }
+    }
+    clipCache.set(n, r);
+    return r;
+  };
   const boxes = [];
   for (let i = 0; i < textBoxes.layoutIndex.length; i++) {
     const li = textBoxes.layoutIndex[i], [x, y, bw, bh] = textBoxes.bounds[i];
     const full = str[layout.text[li]];
-    if (!full || bh < 4) continue; // tiny text has no room in a cell
+    if (!full || bh < 4 || style(li, 1) === 'hidden') continue; // tiny text has no room in a cell
+    const clip = visibleRect(nodes.parentIndex[layout.nodeIndex[li]]);
+    const cx = x + bw / 2, cy = y + bh / 2;
+    if (!clip || cx < clip[0] || cx > clip[2] || cy < clip[1] || cy > clip[3]) continue;
     const row = Math.floor((y - sy + bh / 2) / cssPerRow);
     if (row < 0 || row >= rows) continue;
-    const m = /(\d+), (\d+), (\d+)(?:, ([\d.]+))?/.exec(str[layout.styles[li][0]] || '');
+    const m = /(\d+), (\d+), (\d+)(?:, ([\d.]+))?/.exec(style(li, 0));
     if (m && m[4] === '0') continue; // transparent text
     boxes.push({ x: x - sx, bw, row, part: [...full.substr(textBoxes.start[i], textBoxes.length[i])],
+      // Clipped only where its box really cuts it (an ellipsis), not by rounding at the edge.
+      left: clip[0] > x + 1 ? Math.round((clip[0] - sx) / cssPerCol) : -Infinity,
+      right: clip[2] < x + bw - 1 ? Math.floor((clip[2] - sx) / cssPerCol) : Infinity,
       color: m ? (m[1] << 16) | (m[2] << 8) | +m[3] : 0 });
   }
-  // Left to right along each row. Each character goes where Chromium drew it, but never
-  // onto the one before: proportional text is often narrower than a cell, and a link
-  // that follows text on the same line is pushed along rather than written over it.
+  // Left to right along each row, letters side by side from where the run starts (pages are
+  // laid out in a monospace font one cell wide). A run that would start inside the one before
+  // it on the same line is moved along rather than written over it.
   boxes.sort((a, b) => a.row - b.row || a.x - b.x);
-  let rowAt = -1, rowEnd = -1;
-  for (const { x, bw, row, part, color } of boxes) {
-    if (row !== rowAt) { rowAt = row; rowEnd = -1; }
-    const natural = Math.floor(x / cssPerCol);
-    let last = natural >= rowEnd - 4 ? Math.max(natural - 1, rowEnd) : natural - 1;
+  // Separate items (menu entries, labels) that had a gap between them keep at least one cell
+  // of it. Text cut off by its box (an ellipsis) is cut at the box's edge.
+  let rowAt = -1, rowEnd = -1, endX = -Infinity;
+  for (const { x, bw, row, part, color, left, right } of boxes) {
+    if (row !== rowAt) { rowAt = row; rowEnd = -1; endX = -Infinity; }
+    const natural = Math.round(x / cssPerCol), gap = x - endX >= 2 ? 1 : 0;
+    const start = natural < rowEnd + gap && natural >= rowEnd - 12 ? rowEnd + gap : natural;
     part.forEach((ch, j) => {
-      const col = Math.max(last + 1, Math.floor((x + ((j + 0.5) * bw) / part.length) / cssPerCol));
-      last = col;
-      if (ch !== ' ' && ch >= ' ' && col >= 0 && col < cols) cells.set(row * cols + col, [ch, color]);
+      const col = start + j;
+      if (ch !== ' ' && ch >= ' ' && col >= left && col < right && col < cols) cells.set(row * cols + col, [ch, color]);
     });
-    rowEnd = Math.max(rowEnd, last);
+    rowEnd = Math.max(rowEnd, start + part.length);
+    endX = Math.max(endX, x + bw);
   }
   return cells;
 }
@@ -381,4 +413,4 @@ function toUrl(text) {
   return `https://duckduckgo.com/?q=${encodeURIComponent(t)}`;
 }
 
-module.exports = { decodePng, kittyImage, kittyDelete, sixel, blocks, textCells, keyInfo, parseInput, pickMode, findChrome, toUrl };
+module.exports = { decodePng, kittyImage, kittyDelete, sixel, blocks, textCells, TEXT_STYLES, keyInfo, parseInput, pickMode, findChrome, toUrl };

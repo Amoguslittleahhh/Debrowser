@@ -42,8 +42,12 @@ assert.ok(blk.includes('\x1b[3;1H') && blk.includes('▀'), 'half block drawn at
 assert.strictEqual(L.blocks(img, 1, 1, 3, prev), '', 'unchanged cells are not redrawn');
 
 // Text from a DOM snapshot lands in cells and is drawn as characters.
-const snap = { strings: ['Hi', 'rgb(10, 20, 30)'], documents: [{ scrollOffsetX: 0, scrollOffsetY: 0,
-  layout: { text: [0], styles: [[1]] }, textBoxes: { layoutIndex: [0], bounds: [[0, 0, 16, 16]], start: [0], length: [2] } }] };
+// Node 0 is a body; node 1 its text; node 2 a 1px clipped box (a skip link); node 3 its text.
+const snap = { strings: ['Hi', 'rgb(10, 20, 30)', 'visible', '1', 'hidden', 'Skip', 'auto'], documents: [{ scrollOffsetX: 0, scrollOffsetY: 0,
+  nodes: { parentIndex: [-1, 0, 0, 2] },
+  layout: { nodeIndex: [0, 1, 2, 3], text: [-1, 0, -1, 5], bounds: [[0, 0, 32, 32], [0, 0, 16, 16], [0, 16, 1, 1], [0, 16, 32, 16]],
+    styles: [[1, 2, 3, 2, 2, 6], [1, 2, 3, 2, 2, 6], [1, 2, 3, 4, 4, 6], [1, 2, 3, 2, 2, 6]] },
+  textBoxes: { layoutIndex: [1, 3], bounds: [[0, 0, 16, 16], [0, 16, 32, 16]], start: [0, 0], length: [2, 4] } }] };
 const cells = L.textCells(snap, 4, 2, 8, 16);
 assert.deepStrictEqual([...cells], [[0, ['H', 0x0a141e]], [1, ['i', 0x0a141e]]]);
 const withText = L.blocks(img, 2, 1, 3, new Int32Array(6).fill(-1), cells);

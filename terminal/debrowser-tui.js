@@ -98,8 +98,33 @@ handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
   // A person is reading this page, so it says Chrome rather than HeadlessChrome (same engine, same version);
   // some sites refuse to serve "headless" visitors at all.
   if (userAgent) send('Emulation.setUserAgentOverride', { userAgent }, t.session).catch(() => {});
+  if (mode === 'blocks') {
+    // Characters are drawn from the layout, so pages are laid out in a monospace font one cell
+    // wide per letter, and the pixel copy of the text is hidden instead of smudging the cells.
+    send('Page.setBypassCSP', { enabled: true }, t.session).catch(() => {});
+    send('Page.addScriptToEvaluateOnNewDocument', { source: TEXT_MODE }, t.session).catch(() => {});
+    send('Runtime.evaluate', { expression: TEXT_MODE }, t.session).catch(() => {});
+  }
+  if (nextUrl && !ti.openerId && (!ti.url || ti.url === 'about:blank')) {
+    const url = nextUrl; nextUrl = null;
+    if (url !== 'about:blank') send('Page.navigate', { url }, t.session).catch(() => {});
+  }
   await activate(t); // new tabs, including pages' own popups, come to the front
 };
+const TEXT_MODE = `(() => {
+  const css = '*:not(svg):not(svg *){font-family:"DejaVu Sans Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace!important;'
+    + 'letter-spacing:0!important;word-spacing:0!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important}'
+    + '::placeholder{-webkit-text-fill-color:transparent!important}';
+  const add = () => {
+    if (document.getElementById('debrowser-tui-text')) return true;
+    const root = document.head || document.documentElement;
+    if (!root) return false;
+    const st = document.createElement('style');
+    st.id = 'debrowser-tui-text'; st.textContent = css; root.appendChild(st);
+    return true;
+  };
+  if (!add()) new MutationObserver((_, o) => { if (add()) o.disconnect(); }).observe(document, { childList: true, subtree: true });
+})()`;
 handlers['Target.targetDestroyed'] = ({ targetId }) => {
   const i = tabs.findIndex((t) => t.id === targetId);
   if (i < 0) return;
@@ -121,6 +146,10 @@ setInterval(() => {
 handlers['Page.frameStartedLoading'] = ({ frameId }, s) => {
   const t = bySession(s);
   if (t && frameId === t.id) { t.loading = true; t.crashed = false; drawUi(); if (t === cur) wake(); }
+};
+// A tab's first page can commit before the script above is registered; this catches it.
+handlers['Page.domContentEventFired'] = (_, s) => {
+  if (mode === 'blocks') send('Runtime.evaluate', { expression: TEXT_MODE }, s).catch(() => {});
 };
 handlers['Page.frameStoppedLoading'] = ({ frameId }, s) => {
   const t = bySession(s);
@@ -200,7 +229,7 @@ function readText() {
   const t = cur;
   if (textBusy || !t || Date.now() - textAt < 150) return;
   textBusy = true; textAt = Date.now();
-  send('DOMSnapshot.captureSnapshot', { computedStyles: ['color'] }, t.session).then((snap) => {
+  send('DOMSnapshot.captureSnapshot', { computedStyles: L.TEXT_STYLES }, t.session).then((snap) => {
     textBusy = false;
     if (t !== cur) return;
     textMap = L.textCells(snap, cols, pageRows(), cellW / zoom, cellH / zoom);
@@ -309,7 +338,10 @@ async function history(step) {
   if (e) await send('Page.navigateToHistoryEntry', { entryId: e.id }, cur.session);
 }
 const reload = () => { cur.crashed = false; send('Page.reload', {}, cur.session).catch(() => {}); };
-const newTab = (url = 'about:blank') => send('Target.createTarget', { url, enableBeginFrameControl: frameControl });
+// Tabs open blank and are navigated once set up, so block mode's text styling is in
+// place before the first page loads (a page's CSP would otherwise refuse it).
+let nextUrl = null;
+const newTab = (url = 'about:blank') => { nextUrl = url; return send('Target.createTarget', { url: 'about:blank', enableBeginFrameControl: frameControl }); };
 const closeTab = () => send('Target.closeTarget', { targetId: cur.id });
 const switchBy = (n) => tabs.length && activate(tabs[(tabs.indexOf(cur) + n + tabs.length) % tabs.length]);
 
@@ -406,8 +438,8 @@ async function queryTerminal() {
   if (forced) { cellW = +forced[1]; cellH = +forced[2]; }
   if (!cellW || !cellH) { cellW = 8; cellH = 16; } // the usual cell when the terminal won't say
   mode ||= L.pickMode(process.env, replies.find((r) => /c$/.test(r)));
-  // Blocks draw one character per cell: a cell 9 CSS px wide fits most proportional text.
-  if (mode === 'blocks' && !opt('zoom')) zoom = cellW / 9;
+  // Blocks draw one character per cell, and 16px monospace is 9.6 CSS px per letter.
+  if (mode === 'blocks' && !opt('zoom')) zoom = cellW / 9.6;
   if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, `${mode} ${cols}x${rows} cell ${cellW}x${cellH} ${JSON.stringify(replies)}\n`);
 }
 async function resize() {
