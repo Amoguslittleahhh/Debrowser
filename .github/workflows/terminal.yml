@@ -1,0 +1,73 @@
+# Debrowser for the terminal (terminal/): unit checks and an end-to-end run in a
+# real pseudo-terminal (ConPTY on Windows, through node-pty) - keys, mouse,
+# tabs, the address bar, a download, a real site - on Windows and Linux.
+# On Windows it also runs against the runner's Microsoft Edge, which has no
+# begin-frame control and takes the plain screencast path.
+
+name: Terminal browser
+
+on:
+  push:
+    branches: [claude/headless-debrowser]
+    paths: [terminal/**, .github/workflows/terminal.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, browser: chrome-headless-shell }
+          - { os: windows-latest, browser: edge }
+          - { os: ubuntu-latest, browser: chrome-headless-shell }
+    name: ${{ matrix.os }} / ${{ matrix.browser }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBROWSER_TEST_SITE: https://en.wikipedia.org/wiki/Terminal_emulator | Terminal emulator
+      DEBROWSER_TEST_OUT: ${{ github.workspace }}/terminal-output.txt
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install chrome-headless-shell
+        if: matrix.browser == 'chrome-headless-shell'
+        run: npx -y @puppeteer/browsers install chrome-headless-shell@stable --path "$HOME/.cache/puppeteer"
+
+      # Ubuntu 24.04 blocks the user namespaces Chromium's sandbox needs, unless allowed.
+      - name: Allow Chromium's sandbox
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Use Microsoft Edge
+        if: matrix.browser == 'edge'
+        run: echo "DEBROWSER_CHROME=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> "$GITHUB_ENV"
+
+      - name: Install node-pty (ConPTY)
+        if: runner.os == 'Windows'
+        run: npm i --no-save --prefix terminal node-pty@1
+
+      - name: Test
+        run: node terminal/test.js
+
+      - name: Keep the terminal output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: terminal-output-${{ matrix.os }}-${{ matrix.browser }}
+          path: terminal-output.txt
+          if-no-files-found: ignore

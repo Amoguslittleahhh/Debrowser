@@ -28,22 +28,31 @@ function decodePng(buf) {
   }
   const bpp = type === 6 ? 4 : 3, stride = w * bpp;
   const raw = zlib.inflateSync(Buffer.concat(idat));
-  const out = new Uint8Array(h * stride);
+  if (!decodePng.out || decodePng.out.length !== h * stride) decodePng.out = new Uint8Array(h * stride);
+  const out = decodePng.out; // reused: callers use a frame before decoding the next
+  // One loop per filter type: a branch per byte is what made this slow.
   for (let y = 0; y < h; y++) {
-    const f = raw[y * (stride + 1)], src = y * (stride + 1) + 1, dst = y * stride;
-    for (let x = 0; x < stride; x++) {
-      const a = x >= bpp ? out[dst + x - bpp] : 0;
-      const b = y ? out[dst - stride + x] : 0;
-      const c = x >= bpp && y ? out[dst - stride + x - bpp] : 0;
-      let v = raw[src + x];
-      if (f === 1) v += a;
-      else if (f === 2) v += b;
-      else if (f === 3) v += (a + b) >> 1;
-      else if (f === 4) {
-        const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
-        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+    const f = raw[y * (stride + 1)], src = y * (stride + 1) + 1, dst = y * stride, up = dst - stride;
+    if (f === 0 || (f === 2 && !y)) out.set(raw.subarray(src, src + stride), dst);
+    else if (f === 1) {
+      for (let x = 0; x < bpp; x++) out[dst + x] = raw[src + x];
+      for (let x = bpp; x < stride; x++) out[dst + x] = raw[src + x] + out[dst + x - bpp];
+    } else if (f === 2) {
+      for (let x = 0; x < stride; x++) out[dst + x] = raw[src + x] + out[up + x];
+    } else if (f === 3) {
+      for (let x = 0; x < stride; x++) {
+        out[dst + x] = raw[src + x] + (((x >= bpp ? out[dst + x - bpp] : 0) + (y ? out[up + x] : 0)) >> 1);
       }
-      out[dst + x] = v;
+    } else if (f === 4) {
+      for (let x = 0; x < bpp; x++) out[dst + x] = raw[src + x] + (y ? out[up + x] : 0);
+      for (let x = bpp; x < stride; x++) {
+        const a = out[dst + x - bpp], b = y ? out[up + x] : 0, c = y ? out[up + x - bpp] : 0;
+        let pa = b - c, pb = a - c, pc = pa + pb;
+        if (pa < 0) pa = -pa;
+        if (pb < 0) pb = -pb;
+        if (pc < 0) pc = -pc;
+        out[dst + x] = raw[src + x] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+      }
     }
   }
   return { width: w, height: h, bpp, data: out };
@@ -70,56 +79,89 @@ for (let i = 0; i < 252; i++) {
   const pc = (v, n) => Math.round((v / n) * 100);
   palette += `#${i};2;${pc(Math.floor(i / 42), 5)};${pc(Math.floor(i / 6) % 7, 6)};${pc(i % 6, 5)}`;
 }
+// Dithered channel -> palette part, per Bayer threshold, so the pixel loop is three lookups.
+const QR = new Uint8Array(16 * 256), QG = new Uint8Array(16 * 256), QB = new Uint8Array(16 * 256);
+for (let t = 0; t < 16; t++) {
+  for (let v = 0; v < 256; v++) {
+    const q = (n) => Math.max(0, Math.min(n, Math.round((v / 255) * n + t / 16 - 0.5)));
+    QR[t * 256 + v] = q(5) * 42; QG[t * 256 + v] = q(6) * 6; QB[t * 256 + v] = q(5);
+  }
+}
+// Encoded straight into reused byte buffers: building it as JS strings made the garbage
+// collector the biggest cost during video.
+let six = { idx: null, bits: null, buf: Buffer.alloc(1 << 20) };
 function sixel(img, maxH) {
   const { width: w, bpp, data } = img;
   const h = Math.min(img.height, maxH);
-  const idx = new Uint8Array(w * h);
+  if (!six.idx || six.idx.length < w * h) six.idx = new Uint8Array(w * h);
+  if (!six.bits || six.bits.length < 256 * w) six.bits = new Uint8Array(256 * w);
+  const { idx, bits } = six;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const o = (y * w + x) * bpp, d = BAYER[(y & 3) * 4 + (x & 3)] / 16 - 0.5;
-      const q = (v, n) => Math.max(0, Math.min(n, Math.round((v / 255) * n + d)));
-      idx[y * w + x] = q(data[o], 5) * 42 + q(data[o + 1], 6) * 6 + q(data[o + 2], 5);
+      const o = (y * w + x) * bpp, d = (BAYER[(y & 3) * 4 + (x & 3)]) << 8;
+      idx[y * w + x] = QR[d + data[o]] + QG[d + data[o + 1]] + QB[d + data[o + 2]];
     }
   }
-  let s = `\x1bP0;1;0q"1;1;${w};${h}${palette}`;
-  const bits = new Uint8Array(256 * w), used = [], seen = new Uint8Array(256);
+  let buf = six.buf, n = 0;
+  const room = (k) => {
+    if (n + k <= buf.length) return;
+    const bigger = Buffer.alloc(Math.max(buf.length * 2, n + k));
+    buf.copy(bigger, 0, 0, n); buf = six.buf = bigger;
+  };
+  const str = (t) => { room(t.length); n += buf.write(t, n, 'latin1'); };
+  const num = (v) => { // a small decimal number, without making a string
+    room(4);
+    if (v >= 100) buf[n++] = 48 + ((v / 100) | 0);
+    if (v >= 10) buf[n++] = 48 + (((v / 10) | 0) % 10);
+    buf[n++] = 48 + (v % 10);
+  };
+  const run = (count, ch) => {
+    if (count > 3) { room(1); buf[n++] = 33; if (count >= 1000) str(String(count)); else num(count); room(1); buf[n++] = ch; }
+    else { room(count); for (let i = 0; i < count; i++) buf[n++] = ch; }
+  };
+  str(`\x1bP0;1;0q"1;1;${w};${h}${palette}`);
+  const used = [], seen = new Uint8Array(256), lo = new Int32Array(256), hi = new Int32Array(256);
   for (let y0 = 0; y0 < h; y0 += 6) {
     used.length = 0;
     for (let r = 0; r < 6 && y0 + r < h; r++) {
       for (let x = 0; x < w; x++) {
         const c = idx[(y0 + r) * w + x];
-        if (!seen[c]) { seen[c] = 1; used.push(c); }
+        if (!seen[c]) { seen[c] = 1; used.push(c); lo[c] = x; hi[c] = x; }
+        else if (x < lo[c]) lo[c] = x;
+        else if (x > hi[c]) hi[c] = x;
         bits[c * w + x] |= 1 << r;
       }
     }
     for (const c of used) {
-      s += `#${c}`;
-      let run = 0, prev = -1;
-      const flush = () => {
-        if (!run) return;
-        const ch = String.fromCharCode(63 + prev);
-        s += run > 3 ? `!${run}${ch}` : ch.repeat(run);
-      };
-      for (let x = 0; x < w; x++) {
+      // Only the span where this colour appears; the gap before it is one run of "empty".
+      room(1); buf[n++] = 35; num(c); // #c
+      if (lo[c]) run(lo[c], 63);
+      let count = 0, prev = -1;
+      for (let x = lo[c], end = hi[c]; x <= end; x++) {
         const v = bits[c * w + x];
         bits[c * w + x] = 0;
-        if (v === prev) run++;
-        else { flush(); prev = v; run = 1; }
+        if (v === prev) count++;
+        else { if (count) run(count, 63 + prev); prev = v; count = 1; }
       }
-      if (prev !== 0) flush(); // a trailing empty run needs no output
-      s += '$';
+      run(count, 63 + prev);
+      room(1); buf[n++] = 36; // $
       seen[c] = 0;
     }
-    s += '-';
+    room(1); buf[n++] = 45; // -
   }
-  return s + '\x1b\\';
+  str('\x1b\\');
+  return Buffer.from(buf.subarray(0, n)); // a copy: the work buffer is reused next frame
 }
 
 // ---------- half blocks: one cell = two stacked pixels, truecolor ----------
-// `prev` holds the last drawn colours so only changed cells are re-sent.
-function blocks(img, cols, rows, top, prev) {
+// `prev` (3 ints per cell) holds what was last drawn so only changed cells are re-sent.
+// `text` (cell index -> [char, rgb]) puts the page's own characters in cells, so text
+// stays readable at a resolution where its pixels would be a smudge.
+const dist = (a, b) => Math.abs((a >> 16) - (b >> 16)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) + Math.abs((a & 255) - (b & 255));
+function blocks(img, cols, rows, top, prev, text) {
   const { width: w, height: h, bpp, data } = img;
   let s = '', at = -1, fg = -1, bg = -1;
+  const rgb = (v) => `${v >> 16};${(v >> 8) & 255};${v & 255}`;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const x = Math.min(w - 1, Math.floor(((c + 0.5) * w) / cols));
@@ -128,18 +170,61 @@ function blocks(img, cols, rows, top, prev) {
         const o = (y * w + x) * bpp;
         return (data[o] << 16) | (data[o + 1] << 8) | data[o + 2];
       };
-      const t = px(r * 2), b = px(r * 2 + 1), k = r * cols + c;
-      if (prev[k * 2] === t && prev[k * 2 + 1] === b) continue;
-      prev[k * 2] = t; prev[k * 2 + 1] = b;
+      const k = r * cols + c, ch = text && text.get(k);
+      let t = px(r * 2), b = px(r * 2 + 1), glyph = '▀', key = -1;
+      if (ch) {
+        // The character in its own colour on whichever pixel looks most like the background.
+        const back = dist(t, ch[1]) >= dist(b, ch[1]) ? t : b;
+        t = ch[1]; b = back; glyph = ch[0]; key = ch[0].codePointAt(0);
+      }
+      if (prev[k * 3] === t && prev[k * 3 + 1] === b && prev[k * 3 + 2] === key) continue;
+      prev[k * 3] = t; prev[k * 3 + 1] = b; prev[k * 3 + 2] = key;
       if (at !== k) s += `\x1b[${top + r};${c + 1}H`;
-      if (t !== fg) { s += `\x1b[38;2;${t >> 16};${(t >> 8) & 255};${t & 255}m`; fg = t; }
-      if (b !== bg) { s += `\x1b[48;2;${b >> 16};${(b >> 8) & 255};${b & 255}m`; bg = b; }
-      s += '▀';
+      if (t !== fg) { s += `\x1b[38;2;${rgb(t)}m`; fg = t; }
+      if (b !== bg) { s += `\x1b[48;2;${rgb(b)}m`; bg = b; }
+      s += glyph;
       at = k + 1;
     }
     at = -1;
   }
   return s && s + '\x1b[0m';
+}
+
+// Text boxes from DOMSnapshot.captureSnapshot (computedStyles: ['color']) laid onto the
+// cell grid: one character per cell, at the centre of where Chromium drew it.
+function textCells(snap, cols, rows, cssPerCol, cssPerRow) {
+  const cells = new Map(), doc = snap.documents[0], str = snap.strings;
+  if (!doc) return cells;
+  const { layout, textBoxes } = doc, sx = doc.scrollOffsetX || 0, sy = doc.scrollOffsetY || 0;
+  const boxes = [];
+  for (let i = 0; i < textBoxes.layoutIndex.length; i++) {
+    const li = textBoxes.layoutIndex[i], [x, y, bw, bh] = textBoxes.bounds[i];
+    const full = str[layout.text[li]];
+    if (!full || bh < 4) continue; // tiny text has no room in a cell
+    const row = Math.floor((y - sy + bh / 2) / cssPerRow);
+    if (row < 0 || row >= rows) continue;
+    const m = /(\d+), (\d+), (\d+)(?:, ([\d.]+))?/.exec(str[layout.styles[li][0]] || '');
+    if (m && m[4] === '0') continue; // transparent text
+    boxes.push({ x: x - sx, bw, row, part: [...full.substr(textBoxes.start[i], textBoxes.length[i])],
+      color: m ? (m[1] << 16) | (m[2] << 8) | +m[3] : 0 });
+  }
+  // Left to right along each row. Each character goes where Chromium drew it, but never
+  // onto the one before: proportional text is often narrower than a cell, and a link
+  // that follows text on the same line is pushed along rather than written over it.
+  boxes.sort((a, b) => a.row - b.row || a.x - b.x);
+  let rowAt = -1, rowEnd = -1;
+  for (const { x, bw, row, part, color } of boxes) {
+    if (row !== rowAt) { rowAt = row; rowEnd = -1; }
+    const natural = Math.floor(x / cssPerCol);
+    let last = natural >= rowEnd - 4 ? Math.max(natural - 1, rowEnd) : natural - 1;
+    part.forEach((ch, j) => {
+      const col = Math.max(last + 1, Math.floor((x + ((j + 0.5) * bw) / part.length) / cssPerCol));
+      last = col;
+      if (ch !== ' ' && ch >= ' ' && col >= 0 && col < cols) cells.set(row * cols + col, [ch, color]);
+    });
+    rowEnd = Math.max(rowEnd, last);
+  }
+  return cells;
 }
 
 // ---------- keyboard: DOM key/code/keyCode for what the terminal sends ----------
@@ -254,14 +339,14 @@ function pickMode(env, da1) {
 // ---------- a Chromium to drive ----------
 function findChrome(env = process.env) {
   if (env.DEBROWSER_CHROME) return env.DEBROWSER_CHROME;
-  const home = os.homedir();
+  const home = os.homedir(), win = process.platform === 'win32', exe = (n) => (win ? `${n}.exe` : n);
   const globs = [
-    [path.join(home, '.cache/puppeteer/chrome-headless-shell'), 'chrome-headless-shell'],
-    [path.join(home, '.cache/ms-playwright'), 'chrome-headless-shell'],
+    [path.join(home, '.cache/puppeteer/chrome-headless-shell'), exe('chrome-headless-shell')],
+    [path.join(home, win ? 'AppData/Local/ms-playwright' : '.cache/ms-playwright'), exe('chrome-headless-shell')],
     ['/opt/pw-browsers', 'chrome-headless-shell'],
-    [path.join(home, '.cache/puppeteer/chrome'), 'chrome'],
+    [path.join(home, '.cache/puppeteer/chrome'), exe('chrome')],
   ];
-  for (const [dir, exe] of globs) {
+  for (const [dir, name] of globs) {
     const hits = [];
     const walk = (d, depth) => {
       let list = [];
@@ -269,14 +354,18 @@ function findChrome(env = process.env) {
       for (const e of list) {
         const p = path.join(d, e.name);
         if (e.isDirectory() && depth < 3) walk(p, depth + 1);
-        else if (e.name === exe) hits.push(p);
+        else if (e.name === name) hits.push(p);
       }
     };
     walk(dir, 0);
     if (hits.length) return hits.sort().pop(); // newest version sorts last
   }
   for (const name of ['chrome-headless-shell', 'chromium', 'chromium-browser', 'google-chrome-stable', 'google-chrome']) {
-    try { return execFileSync('which', [name], { encoding: 'utf8' }).trim(); } catch { /* next */ }
+    try { return execFileSync(win ? 'where' : 'which', [name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split(/\r?\n/)[0].trim(); } catch { /* next */ }
+  }
+  if (win) { // an installed Chrome or Edge works too
+    for (const p of [`${env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`, `${env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`]) if (fs.existsSync(p)) return p;
   }
   return null;
 }
@@ -284,6 +373,7 @@ function findChrome(env = process.env) {
 // What the address field turns into: a URL, or a search.
 function toUrl(text) {
   const t = text.trim();
+  if (/^[a-z]:[\\/]/i.test(t) || t.startsWith('\\\\')) return 'file:///' + t.replace(/\\/g, '/'); // a Windows path
   if (/^[a-z][\w+.-]*:/i.test(t) && !/^[\w.-]+:\d/.test(t)) return t;
   if (/^(localhost|[\w-]+(\.[\w-]+)+|\[[\d:a-f]+\])(:\d+)?(\/.*)?$/i.test(t)) {
     return (/^(localhost|127\.|\[)/.test(t) ? 'http://' : 'https://') + t;
@@ -291,4 +381,4 @@ function toUrl(text) {
   return `https://duckduckgo.com/?q=${encodeURIComponent(t)}`;
 }
 
-module.exports = { decodePng, kittyImage, kittyDelete, sixel, blocks, keyInfo, parseInput, pickMode, findChrome, toUrl };
+module.exports = { decodePng, kittyImage, kittyDelete, sixel, blocks, textCells, keyInfo, parseInput, pickMode, findChrome, toUrl };

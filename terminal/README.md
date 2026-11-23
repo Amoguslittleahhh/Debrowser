@@ -8,34 +8,37 @@ so no port is opened) and draws each frame in the terminal:
 |---|---|
 | kitty, WezTerm, Ghostty | kitty graphics protocol: real pixels |
 | Windows Terminal 1.22+, xterm (`-ti vt340`), foot, mlterm | sixel: real pixels, 252 colours |
-| anything else, and inside tmux | half blocks: two coloured pixels per cell |
+| anything else, and inside tmux | half blocks, with the page's text drawn as real characters |
 
 It has no dependencies beyond Node 22 and a Chromium.
 
 ## Run it
 
 ```sh
-npx @puppeteer/browsers install chrome-headless-shell@stable   # once
+npx @puppeteer/browsers install chrome-headless-shell@stable --path ~/.cache/puppeteer   # once
 node terminal/debrowser-tui.js wikipedia.org
 ```
 
 It finds `chrome-headless-shell` in the Puppeteer or Playwright caches, or a
-`chromium`/`google-chrome` on the PATH. `DEBROWSER_CHROME=/path/to/chrome`
+`chromium`/`google-chrome` on the PATH; on Windows an installed Chrome or Edge
+works too (a little more CPU on animated pages). `DEBROWSER_CHROME=path`
 picks one.
 
 ### On Windows
 
-Use WSL. In PowerShell: `wsl --install`, restart, then in Ubuntu:
+It runs natively, no WSL needed. Install Node 22, then in PowerShell:
 
-```sh
-sudo apt install -y nodejs npm libnss3 libasound2t64 libgbm1
+```powershell
 git clone -b claude/headless-debrowser https://github.com/Amoguslittleahhh/Debrowser
-cd Debrowser && npx @puppeteer/browsers install chrome-headless-shell@stable
-node terminal/debrowser-tui.js
+cd Debrowser
+npx @puppeteer/browsers install chrome-headless-shell@stable --path $HOME\.cache\puppeteer
+node terminal\debrowser-tui.js
 ```
 
 Run it in **WezTerm** for the sharpest picture (kitty graphics), or in
 **Windows Terminal 1.22 or newer** (sixel). Smaller fonts give more pixels.
+It is tested on GitHub's Windows runners through ConPTY, the layer Windows
+Terminal uses.
 
 ## Keys
 
@@ -55,7 +58,9 @@ Pasting (bracketed paste) types the text into the page.
 
 Options: `--mode=kitty|sixel|blocks`, `--zoom=1.25`, `--fps=15`,
 `--cell=8x16` (if the terminal won't report its cell size), `--profile=DIR`
-(keep cookies and logins; by default a throwaway profile is used).
+(keep cookies and logins; by default a throwaway profile is used),
+`--downloads=DIR` (default: your Downloads folder; progress shows in the
+status line).
 
 ## How it stays light
 
@@ -67,15 +72,19 @@ newest frame is kept.
 
 ## Limits
 
-- Downloads, file pickers, printing and permission prompts are not supported.
+- File pickers, printing and permission prompts are not supported.
   `alert`/`confirm`/`prompt` are answered automatically and shown in the
   status line.
 - Background tabs do not draw, so anything that waits for animation frames
   pauses there until you switch back.
-- Sixel is encoded in JavaScript, so a full-screen video costs about one CPU
-  core in sixel mode. kitty graphics are much cheaper.
+- Sixel is encoded in JavaScript: a full-screen video costs about three
+  quarters of a CPU core in sixel mode. kitty graphics are much cheaper.
+- In block mode the page's text is redrawn as characters from Chromium's
+  layout, one per cell; proportional text can crowd, and text hidden by
+  clipping can show through.
 - Pages report `Chrome` rather than `HeadlessChrome` in their user agent: it is
   the same engine and version, and some sites refuse "headless" visitors.
 
-`node terminal/test.js` runs the unit checks and, on Linux, an end-to-end run
-in a pseudo-terminal.
+`node terminal/test.js` runs the unit checks and an end-to-end run in a
+pseudo-terminal (script(1) on Linux, or node-pty where it is installed, as on
+the Windows CI runners: `.github/workflows/terminal.yml`).

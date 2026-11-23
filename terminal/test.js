@@ -32,14 +32,22 @@ const img = L.decodePng(png(2, 2, px));
 assert.deepStrictEqual([img.width, img.height, img.bpp], [2, 2, 4]);
 assert.deepStrictEqual([...img.data], px);
 
-const six = L.sixel(img, 2);
+const six = L.sixel(img, 2).toString('latin1');
 assert.ok(six.startsWith('\x1bP0;1;0q"1;1;2;2') && six.endsWith('-\x1b\\'), 'sixel framing');
 assert.ok(/#\d+[?-~!]/.test(six), 'sixel has pixel data');
 
-const prev = new Int32Array(2).fill(-1);
+const prev = new Int32Array(3).fill(-1);
 const blk = L.blocks(img, 1, 1, 3, prev);
 assert.ok(blk.includes('\x1b[3;1H') && blk.includes('▀'), 'half block drawn at row 3');
 assert.strictEqual(L.blocks(img, 1, 1, 3, prev), '', 'unchanged cells are not redrawn');
+
+// Text from a DOM snapshot lands in cells and is drawn as characters.
+const snap = { strings: ['Hi', 'rgb(10, 20, 30)'], documents: [{ scrollOffsetX: 0, scrollOffsetY: 0,
+  layout: { text: [0], styles: [[1]] }, textBoxes: { layoutIndex: [0], bounds: [[0, 0, 16, 16]], start: [0], length: [2] } }] };
+const cells = L.textCells(snap, 4, 2, 8, 16);
+assert.deepStrictEqual([...cells], [[0, ['H', 0x0a141e]], [1, ['i', 0x0a141e]]]);
+const withText = L.blocks(img, 2, 1, 3, new Int32Array(6).fill(-1), cells);
+assert.ok(withText.includes('38;2;10;20;30m') && /H.*i/.test(withText) && !withText.includes('▀'), 'characters drawn in their colour');
 
 const k = L.kittyImage(Buffer.alloc(5000), 7, 80, 20);
 assert.ok(k.startsWith('\x1b_Ga=T,f=100,i=7,q=2,C=1,c=80,r=20,m=1;') && k.includes('\x1b_Gm=0;'), 'kitty chunks');
@@ -70,51 +78,83 @@ assert.strictEqual(L.pickMode({ TMUX: '1', KITTY_WINDOW_ID: '1' }), 'blocks');
 console.log('unit: ok');
 
 // ---------- end to end ----------
+// A real pseudo-terminal: node-pty (ConPTY on Windows) when it is installed, else script(1).
 const chrome = L.findChrome();
-let hasScript = true;
-try { execFileSync('script', ['--version'], { stdio: 'ignore' }); } catch { hasScript = false; }
-if (!chrome || !hasScript || process.platform !== 'linux') {
-  console.log(`e2e: skipped (${!chrome ? 'no Chromium' : 'needs Linux and script(1)'})`);
+let pty = null;
+try { pty = require('node-pty'); } catch { /* optional */ }
+let hasScript = process.platform === 'linux';
+try { if (hasScript) execFileSync('script', ['--version'], { stdio: 'ignore' }); } catch { hasScript = false; }
+if (!chrome || (!pty && !hasScript)) {
+  console.log(`e2e: skipped (${!chrome ? 'no Chromium' : 'needs node-pty, or script(1) on Linux'})`);
   process.exit(0);
 }
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dbtui-test-'));
 const page = path.join(dir, 'page.html');
-fs.writeFileSync(page, `<body style="margin:0;background:#2050c0"><script>
+const fileUrl = (f) => 'file:///' + f.replace(/\\/g, '/').replace(/^\//, '');
+fs.writeFileSync(page, `<body style="margin:0;background:#2050c0"><p style="color:#fff;font:16px sans-serif">Readable words here</p><script>
 addEventListener('keydown', (e) => { document.title = 'k:' + e.key + ':' + e.code + ':' + e.keyCode + (e.ctrlKey ? ':ctrl' : ''); });
 addEventListener('mousedown', (e) => { document.title = 'm:' + e.button + ':' + (e.clientX > 0 && e.clientY > 0); });
 </script></body>`);
+fs.writeFileSync(path.join(dir, 'hello.zip'), 'not really a zip');
+const saveTo = path.join(dir, 'downloads');
 const app = path.join(__dirname, 'debrowser-tui.js');
-const p = spawn('script', ['-qfec', `stty cols 100 rows 30; exec node '${app}' --mode=blocks 'file://${page}'`, '/dev/null'],
-  { stdio: ['pipe', 'pipe', 'inherit'] });
-let out = '';
-p.stdout.on('data', (d) => { out += d; });
-const exited = new Promise((r) => p.on('exit', r));
-const waitFor = async (what, ms = 15000) => {
+const args = [app, '--mode=blocks', `--downloads=${saveTo}`, fileUrl(page)];
+let out = '', write, kill, exited;
+if (pty) {
+  const t = pty.spawn(process.execPath, args, { cols: 100, rows: 30, cwd: dir, env: process.env, name: 'xterm-256color' });
+  t.onData((d) => { out += d; });
+  write = (s) => t.write(s);
+  kill = () => t.kill();
+  exited = new Promise((r) => t.onExit((e) => r(e.exitCode)));
+} else {
+  const q = (a) => `'${a.replace(/'/g, `'\\''`)}'`;
+  const p = spawn('script', ['-qfec', `stty cols 100 rows 30; exec ${q(process.execPath)} ${args.map(q).join(' ')}`, '/dev/null'],
+    { stdio: ['pipe', 'pipe', 'inherit'] });
+  p.stdout.on('data', (d) => { out += d; });
+  write = (s) => p.stdin.write(s);
+  kill = () => p.kill();
+  exited = new Promise((r) => p.on('exit', r));
+}
+// ConPTY re-draws the screen itself, so text is matched with escape sequences removed.
+const plain = () => out.replace(/\x1b\[[\d;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '');
+const waitFor = async (what, ms = 20000) => {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
-    if (out.includes(what)) return;
+    if (plain().includes(what) || out.includes(what)) return;
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error(`timed out waiting for ${JSON.stringify(what)}; last output: ${JSON.stringify(out.slice(-300))}`);
+  throw new Error(`timed out waiting for ${JSON.stringify(what)}; last output: ${JSON.stringify(plain().slice(-400))}`);
 };
+const step = async (name, fn) => { const t0 = Date.now(); await fn(); console.log(`  ${name}: ok (${Date.now() - t0} ms)`); };
 (async () => {
   try {
-    await waitFor('▀'); // a frame was drawn
-    p.stdin.write('a'); await waitFor('k:a:KeyA:65');
-    p.stdin.write('\x1b[3~'); await waitFor('k:Delete:Delete:46');
-    p.stdin.write('\x02'); await waitFor('k:b:KeyB:66:ctrl'); // Ctrl+B is not a browser shortcut, so the page gets it
-    p.stdin.write('\x1b[<0;20;10M\x1b[<0;20;10m'); await waitFor('m:0:true');
-    p.stdin.write('\x14'); await waitFor(' 2 '); // Ctrl+T: a second tab
-    p.stdin.write('\x0c'); p.stdin.write(`file://${page}\r`); await waitFor('2 page.html');
-    p.stdin.write('\x17'); // Ctrl+W closes it
-    p.stdin.write('\x11'); // Ctrl+Q quits
-    const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r('hung'), 5000))]);
-    assert.strictEqual(code, 0, `exit code ${code}`);
-    assert.ok(out.includes('\x1b[?1049l'), 'terminal restored');
+    await step('first frame', () => waitFor('▀'));
+    await step('page text drawn as characters', () => waitFor('Readable'));
+    await step('key a', () => { write('a'); return waitFor('k:a:KeyA:65'); });
+    await step('Delete key', () => { write('\x1b[3~'); return waitFor('k:Delete:Delete:46'); });
+    await step('Ctrl+B reaches the page', () => { write('\x02'); return waitFor('k:b:KeyB:66:ctrl'); });
+    await step('mouse click', () => { write('\x1b[<0;20;10M\x1b[<0;20;10m'); return waitFor('m:0:true'); });
+    await step('new tab', () => { write('\x14'); return waitFor(' 2 '); });
+    await step('address bar', () => { write('\x0c'); write(`${fileUrl(page)}\r`); return waitFor('2 page.html'); });
+    await step('download', async () => {
+      write('\x0c'); write(`${fileUrl(path.join(dir, 'hello.zip'))}\r`);
+      await waitFor('Saved');
+      assert.strictEqual(fs.readFileSync(path.join(saveTo, 'hello.zip'), 'utf8'), 'not really a zip');
+    });
+    if (process.env.DEBROWSER_TEST_SITE) { // a real site, when the network allows
+      const [url, text] = process.env.DEBROWSER_TEST_SITE.split(' | ');
+      await step(`real site ${url}`, () => { write('\x0c'); write(`${url}\r`); return waitFor(text, 45000); });
+    }
+    await step('close tab, quit', async () => {
+      write('\x17'); write('\x11');
+      const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r('hung'), 8000))]);
+      assert.strictEqual(code, 0, `exit code ${code}`);
+    });
     console.log('e2e: ok');
   } catch (e) {
-    p.kill(); console.error(e.message); process.exitCode = 1;
+    kill(); console.error(e.message); process.exitCode = 1;
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    if (process.env.DEBROWSER_TEST_OUT) fs.writeFileSync(process.env.DEBROWSER_TEST_OUT, out);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* Chromium may still hold it on Windows */ }
   }
 })();

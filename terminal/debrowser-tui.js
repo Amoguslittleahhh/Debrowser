@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const L = require('./lib');
 
-const HELP = `Usage: debrowser-tui [url] [--mode=kitty|sixel|blocks] [--zoom=1.25] [--fps=15] [--cell=8x16] [--profile=DIR]
+const HELP = `Usage: debrowser-tui [url] [--mode=kitty|sixel|blocks] [--zoom=1.25] [--fps=15] [--cell=8x16] [--profile=DIR] [--downloads=DIR]
 
 Keys: Ctrl+L address bar, Ctrl+T new tab, Ctrl+W close tab, Alt+1..9 or
 Ctrl+PgUp/PgDn switch tabs, Alt+Left/Right back/forward, F5 or Ctrl+R reload,
@@ -35,7 +35,11 @@ const TOP = 3; // first page row
 const profile = opt('profile') || fs.mkdtempSync(path.join(os.tmpdir(), 'debrowser-tui-'));
 const chromeArgs = ['--headless', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check',
   `--user-data-dir=${profile}`, '--hide-scrollbars',
-  '--enable-begin-frame-control', '--run-all-compositor-stages-before-draw', '--autoplay-policy=no-user-gesture-required', 'about:blank'];
+  '--autoplay-policy=no-user-gesture-required', 'about:blank'];
+// Begin-frame control (render only when asked) exists only in chrome-headless-shell; a full
+// Chrome or Edge renders on its own and is just screencast.
+const frameControl = /headless[-_]shell/i.test(path.basename(chrome));
+if (frameControl) chromeArgs.splice(-1, 0, '--enable-begin-frame-control', '--run-all-compositor-stages-before-draw');
 chromeArgs.push(...(process.env.DEBROWSER_CHROME_ARGS || '').split(' ').filter(Boolean));
 if (process.getuid && process.getuid() === 0) chromeArgs.push('--no-sandbox'); // Chromium refuses root otherwise
 const proc = spawn(chrome, chromeArgs, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
@@ -77,7 +81,7 @@ async function applySize(t) {
 async function activate(t) {
   if (cur && cur !== t) send('Page.stopScreencast', {}, cur.session).catch(() => {});
   cur = t;
-  prevCells = null; waiting = null;
+  prevCells = null; waiting = null; textMap = null; lastPng = null;
   clearPage();
   drawUi();
   await applySize(t);
@@ -133,6 +137,27 @@ handlers['Page.javascriptDialogOpening'] = ({ type, message, defaultPrompt }, s)
   drawUi();
 };
 
+// ---------- downloads: saved to ~/Downloads (or --downloads=DIR), progress in the status line ----------
+const downloads = opt('downloads') || path.join(os.homedir(), 'Downloads');
+const saving = new Map();
+handlers['Browser.downloadWillBegin'] = ({ guid, suggestedFilename }) => {
+  saving.set(guid, suggestedFilename);
+  status = `Downloading ${suggestedFilename}…`; drawUi();
+};
+handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes }) => {
+  const name = saving.get(guid) || 'file';
+  if (state === 'inProgress') {
+    const pct = totalBytes ? ` ${Math.floor((receivedBytes / totalBytes) * 100)}%` : ` ${(receivedBytes / 1e6).toFixed(1)} MB`;
+    const next = `Downloading ${name}…${pct}`;
+    if (next === status) return;
+    status = next;
+  } else {
+    saving.delete(guid);
+    status = state === 'completed' ? `Saved ${path.join(downloads, name)}` : `Download of ${name} cancelled`;
+  }
+  drawUi();
+};
+
 // ---------- frames ----------
 // Chromium runs with begin-frame control: it renders only when asked. The front tab is
 // asked up to --fps times a second while something changes and 4 times a second when
@@ -147,7 +172,7 @@ function wake() {
 async function tick() {
   loopTimer = null;
   const t = cur, start = Date.now();
-  if (t && !busy && !ticking && !t.crashed) {
+  if (frameControl && t && !busy && !ticking && !t.crashed) {
     ticking = true;
     try {
       const r = await send('HeadlessExperimental.beginFrame', { interval: frameGap }, t.session);
@@ -168,20 +193,35 @@ async function startCast(t) {
     : { maxWidth: cols * cellW, maxHeight: pageRows() * cellH };
   await send('Page.startScreencast', { format: 'png', everyNthFrame: 1, ...m }, t.session).catch(() => {});
 }
-function draw(png) {
+// Block mode also asks where the page's text is (at most ~6 times a second) and
+// redraws with those characters, since text is unreadable at two pixels per cell.
+let textMap = null, lastPng = null, textBusy = false, textAt = 0;
+function readText() {
+  const t = cur;
+  if (textBusy || !t || Date.now() - textAt < 150) return;
+  textBusy = true; textAt = Date.now();
+  send('DOMSnapshot.captureSnapshot', { computedStyles: ['color'] }, t.session).then((snap) => {
+    textBusy = false;
+    if (t !== cur) return;
+    textMap = L.textCells(snap, cols, pageRows(), cellW / zoom, cellH / zoom);
+    if (lastPng && !busy) draw(lastPng, true);
+  }, () => { textBusy = false; });
+}
+function draw(png, again) {
   let seq = '';
   try {
     if (mode === 'kitty') {
       const old = imgId; imgId = imgId === 1 ? 2 : 1;
       seq = `\x1b[${TOP};1H` + L.kittyImage(png, imgId, cols, pageRows()) + L.kittyDelete(old);
     } else if (mode === 'sixel') {
-      seq = `\x1b[${TOP};1H` + L.sixel(L.decodePng(png), Math.floor((pageRows() * cellH) / 6) * 6);
+      seq = Buffer.concat([Buffer.from(`\x1b[${TOP};1H`), L.sixel(L.decodePng(png), Math.floor((pageRows() * cellH) / 6) * 6)]);
     } else {
-      prevCells ||= new Int32Array(cols * pageRows() * 2).fill(-1);
-      seq = L.blocks(L.decodePng(png), cols, pageRows(), TOP, prevCells);
+      prevCells ||= new Int32Array(cols * pageRows() * 3).fill(-1);
+      seq = L.blocks(L.decodePng(png), cols, pageRows(), TOP, prevCells, textMap);
+      lastPng = png; if (!again) readText();
     }
   } catch (e) { status = `Frame error: ${e.message}`; }
-  if (urlEdit) seq += cursorAt();
+  if (urlEdit) seq = Buffer.concat([Buffer.from(seq), Buffer.from(cursorAt())]);
   // Back-pressure: while the terminal is still drawing, only the newest frame is kept.
   busy = !out.write(seq);
   if (busy) {
@@ -269,7 +309,7 @@ async function history(step) {
   if (e) await send('Page.navigateToHistoryEntry', { entryId: e.id }, cur.session);
 }
 const reload = () => { cur.crashed = false; send('Page.reload', {}, cur.session).catch(() => {}); };
-const newTab = (url = 'about:blank') => send('Target.createTarget', { url, enableBeginFrameControl: true });
+const newTab = (url = 'about:blank') => send('Target.createTarget', { url, enableBeginFrameControl: frameControl });
 const closeTab = () => send('Target.closeTarget', { targetId: cur.id });
 const switchBy = (n) => tabs.length && activate(tabs[(tabs.indexOf(cur) + n + tabs.length) % tabs.length]);
 
@@ -366,12 +406,14 @@ async function queryTerminal() {
   if (forced) { cellW = +forced[1]; cellH = +forced[2]; }
   if (!cellW || !cellH) { cellW = 8; cellH = 16; } // the usual cell when the terminal won't say
   mode ||= L.pickMode(process.env, replies.find((r) => /c$/.test(r)));
+  // Blocks draw one character per cell: a cell 9 CSS px wide fits most proportional text.
+  if (mode === 'blocks' && !opt('zoom')) zoom = cellW / 9;
   if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, `${mode} ${cols}x${rows} cell ${cellW}x${cellH} ${JSON.stringify(replies)}\n`);
 }
 async function resize() {
   cols = out.columns; rows = out.rows;
   if (!cur) return;
-  clearPage(); prevCells = null; drawUi();
+  clearPage(); prevCells = null; textMap = null; drawUi();
   await Promise.all(tabs.map(applySize));
   await startCast(cur);
   wake();
@@ -405,6 +447,8 @@ const startup = new Set();
   // Chromium's own startup about:blank is not a tab; it is closed once the first real one exists.
   for (const t of (await send('Target.getTargets')).targetInfos) startup.add(t.targetId);
   userAgent = (await send('Browser.getVersion')).userAgent.replace('HeadlessChrome', 'Chrome');
+  fs.mkdirSync(downloads, { recursive: true });
+  await send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads, eventsEnabled: true }).catch(() => {});
   await send('Target.setDiscoverTargets', { discover: true });
   booted = true;
   await newTab(startUrl);
