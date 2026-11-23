@@ -153,35 +153,69 @@ function sixel(img, maxH) {
   return Buffer.from(buf.subarray(0, n)); // a copy: the work buffer is reused next frame
 }
 
-// ---------- half blocks: one cell = two stacked pixels, truecolor ----------
+// ---------- quarter blocks: each cell is 2x2 pixels in two colours, truecolor ----------
+// Each pixel is the average of its share of a larger frame, and the four are split into
+// the two colour groups that fit them best, drawn with one of the quadrant characters.
 // `prev` (3 ints per cell) holds what was last drawn so only changed cells are re-sent.
-// `text` (cell index -> [char, rgb]) puts the page's own characters in cells, so text
-// stays readable at a resolution where its pixels would be a smudge.
+// `text` (cell index -> [char, rgb]) puts the page's own characters in cells instead.
+const QUAD = ' ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█';
 const dist = (a, b) => Math.abs((a >> 16) - (b >> 16)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) + Math.abs((a & 255) - (b & 255));
 function blocks(img, cols, rows, top, prev, text) {
   const { width: w, height: h, bpp, data } = img;
   let s = '', at = -1, fg = -1, bg = -1;
   const rgb = (v) => `${v >> 16};${(v >> 8) & 255};${v & 255}`;
+  const q = new Float64Array(12); // 4 quadrants x r,g,b
+  const avg = (x0, x1, y0, y1, o) => {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) { const i = (y * w + x) * bpp; r += data[i]; g += data[i + 1]; b += data[i + 2]; n++; }
+    }
+    q[o] = r / n; q[o + 1] = g / n; q[o + 2] = b / n;
+  };
+  const pack = (r, g, b) => (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const x = Math.min(w - 1, Math.floor(((c + 0.5) * w) / cols));
-      const px = (yy) => {
-        const y = Math.min(h - 1, Math.floor(((yy + 0.5) * h) / (rows * 2)));
-        const o = (y * w + x) * bpp;
-        return (data[o] << 16) | (data[o + 1] << 8) | data[o + 2];
-      };
-      const k = r * cols + c, ch = text && text.get(k);
-      let t = px(r * 2), b = px(r * 2 + 1), glyph = '▀', key = -1;
-      if (ch) {
-        // The character in its own colour on whichever pixel looks most like the background.
-        const back = dist(t, ch[1]) >= dist(b, ch[1]) ? t : b;
-        t = ch[1]; b = back; glyph = ch[0]; key = ch[0].codePointAt(0);
+      // The cell's source rectangle, split in four (each part at least one pixel).
+      const xs = [0, 1, 2].map((k) => Math.min(w, Math.floor(((c * 2 + k) * w) / (cols * 2))));
+      const ys = [0, 1, 2].map((k) => Math.min(h, Math.floor(((r * 2 + k) * h) / (rows * 2))));
+      for (let k = 0; k < 2; k++) { if (xs[k + 1] <= xs[k]) xs[k + 1] = Math.min(w, xs[k] + 1); if (ys[k + 1] <= ys[k]) ys[k + 1] = Math.min(h, ys[k] + 1); }
+      const x0 = Math.min(xs[0], w - 1), y0 = Math.min(ys[0], h - 1);
+      avg(x0, Math.max(x0 + 1, xs[1]), y0, Math.max(y0 + 1, ys[1]), 0);
+      avg(Math.min(xs[1], w - 1), Math.max(Math.min(xs[1], w - 1) + 1, xs[2]), y0, Math.max(y0 + 1, ys[1]), 3);
+      avg(x0, Math.max(x0 + 1, xs[1]), Math.min(ys[1], h - 1), Math.max(Math.min(ys[1], h - 1) + 1, ys[2]), 6);
+      avg(Math.min(xs[1], w - 1), Math.max(Math.min(xs[1], w - 1) + 1, xs[2]), Math.min(ys[1], h - 1), Math.max(Math.min(ys[1], h - 1) + 1, ys[2]), 9);
+      // Best split of the four into two groups (7 ways), by squared error from group means.
+      let best = Infinity, mask = 0, F = 0, B = 0;
+      for (let m = 1; m < 15; m++) {
+        if (m & 8) continue; // a split and its complement are the same split
+        const sum = [0, 0, 0, 0, 0, 0], cnt = [0, 0];
+        for (let k = 0; k < 4; k++) { const g = (m >> k) & 1; sum[g * 3] += q[k * 3]; sum[g * 3 + 1] += q[k * 3 + 1]; sum[g * 3 + 2] += q[k * 3 + 2]; cnt[g]++; }
+        let err = 0;
+        for (let k = 0; k < 4; k++) {
+          const g = (m >> k) & 1;
+          for (let ch = 0; ch < 3; ch++) { const d = q[k * 3 + ch] - sum[g * 3 + ch] / cnt[g]; err += d * d; }
+        }
+        if (err < best) {
+          best = err; mask = m;
+          F = pack(sum[3] / cnt[1], sum[4] / cnt[1], sum[5] / cnt[1]); B = pack(sum[0] / cnt[0], sum[1] / cnt[0], sum[2] / cnt[0]);
+        }
       }
-      if (prev[k * 3] === t && prev[k * 3 + 1] === b && prev[k * 3 + 2] === key) continue;
-      prev[k * 3] = t; prev[k * 3 + 1] = b; prev[k * 3 + 2] = key;
+      let t = F, b2 = B, glyph = QUAD[mask];
+      if (dist(F, B) < 24) { // the two groups look alike: a plain background cell
+        b2 = pack((q[0] + q[3] + q[6] + q[9]) / 4, (q[1] + q[4] + q[7] + q[10]) / 4, (q[2] + q[5] + q[8] + q[11]) / 4);
+        t = b2; glyph = ' ';
+      }
+      const k = r * cols + c, ch = text && text.get(k);
+      if (ch) { // the page's own character, on the cell's average colour (its pixel text is hidden)
+        b2 = pack((q[0] + q[3] + q[6] + q[9]) / 4, (q[1] + q[4] + q[7] + q[10]) / 4, (q[2] + q[5] + q[8] + q[11]) / 4);
+        t = ch[1]; glyph = ch[0];
+      }
+      const key = glyph.codePointAt(0);
+      if (prev[k * 3] === t && prev[k * 3 + 1] === b2 && prev[k * 3 + 2] === key) continue;
+      prev[k * 3] = t; prev[k * 3 + 1] = b2; prev[k * 3 + 2] = key;
       if (at !== k) s += `\x1b[${top + r};${c + 1}H`;
-      if (t !== fg) { s += `\x1b[38;2;${rgb(t)}m`; fg = t; }
-      if (b !== bg) { s += `\x1b[48;2;${rgb(b)}m`; bg = b; }
+      if (glyph !== ' ' && t !== fg) { s += `\x1b[38;2;${rgb(t)}m`; fg = t; }
+      if (b2 !== bg) { s += `\x1b[48;2;${rgb(b2)}m`; bg = b2; }
       s += glyph;
       at = k + 1;
     }
@@ -256,6 +290,29 @@ function textCells(snap, cols, rows, cssPerCol, cssPerRow) {
     rowEnd = Math.max(rowEnd, start + part.length);
     endX = Math.max(endX, x + bw);
   }
+  // Checkboxes, radio buttons and switches are a few pixels each, a smudge at this size, so
+  // they become one character that shows their state. Styled ones often hide the real input
+  // (opacity 0) right over the box they draw, so only its ancestors' visibility counts.
+  const checked = new Set((nodes.inputChecked && nodes.inputChecked.index) || []);
+  layout.nodeIndex.forEach((n, li) => {
+    const name = str[(nodes.nodeName || [])[n]];
+    const attrs = (nodes.attributes && nodes.attributes[n]) || [];
+    const attr = (k) => { for (let i = 0; i < attrs.length; i += 2) if (str[attrs[i]] === k) return str[attrs[i + 1]]; return null; };
+    const type = name === 'INPUT' ? (attr('type') || '').toLowerCase() : null;
+    const role = attr('role');
+    let kind = null, on = false;
+    if (type === 'checkbox' || type === 'radio') { kind = type; on = checked.has(n); }
+    else if (role === 'checkbox' || role === 'switch' || role === 'radio') { kind = role === 'radio' ? 'radio' : 'checkbox'; on = attr('aria-checked') === 'true'; }
+    if (!kind) return;
+    const [x, y, bw, bh] = layout.bounds[li];
+    if (bw < 4 || bh < 4) return;
+    const clip = visibleRect(nodes.parentIndex[n]), cx = x + bw / 2, cy = y + bh / 2;
+    if (!clip || cx < clip[0] || cx > clip[2] || cy < clip[1] || cy > clip[3]) return;
+    const row = Math.floor((cy - sy) / cssPerRow), col = Math.floor((cx - sx) / cssPerCol);
+    if (row < 0 || row >= rows || col < 0 || col >= cols) return;
+    const m = /(\d+), (\d+), (\d+)/.exec(style(li, 0));
+    cells.set(row * cols + col, [kind === 'radio' ? (on ? '◉' : '○') : (on ? '☒' : '☐'), m ? (m[1] << 16) | (m[2] << 8) | +m[3] : 0]);
+  });
   return cells;
 }
 

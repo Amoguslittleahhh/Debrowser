@@ -114,7 +114,8 @@ handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
 const TEXT_MODE = `(() => {
   const css = '*:not(svg):not(svg *){font-family:"DejaVu Sans Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace!important;'
     + 'letter-spacing:0!important;word-spacing:0!important;-webkit-text-fill-color:transparent!important;text-shadow:none!important}'
-    + '::placeholder{-webkit-text-fill-color:transparent!important}';
+    + '::placeholder{-webkit-text-fill-color:transparent!important}'
+    + 'input[type=checkbox],input[type=radio]{opacity:0!important}'; // drawn as characters instead
   const add = () => {
     if (document.getElementById('debrowser-tui-text')) return true;
     const root = document.head || document.documentElement;
@@ -218,7 +219,7 @@ handlers['Page.screencastFrame'] = ({ data, sessionId: frameSession }, s) => {
   if (busy) waiting = data; else draw(Buffer.from(data, 'base64'));
 };
 async function startCast(t) {
-  const m = mode === 'blocks' ? { maxWidth: cols, maxHeight: pageRows() * 2 }
+  const m = mode === 'blocks' ? { maxWidth: cols * 4, maxHeight: pageRows() * 8 } // 2x2 per cell, each pixel averaged from 2x2
     : { maxWidth: cols * cellW, maxHeight: pageRows() * cellH };
   await send('Page.startScreencast', { format: 'png', everyNthFrame: 1, ...m }, t.session).catch(() => {});
 }

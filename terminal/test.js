@@ -38,8 +38,12 @@ assert.ok(/#\d+[?-~!]/.test(six), 'sixel has pixel data');
 
 const prev = new Int32Array(3).fill(-1);
 const blk = L.blocks(img, 1, 1, 3, prev);
-assert.ok(blk.includes('\x1b[3;1H') && blk.includes('▀'), 'half block drawn at row 3');
+assert.ok(blk.includes('\x1b[3;1H') && /[▘▝▀▖▌▞▛▗▚▐▜▄▙▟]/.test(blk), 'quarter block drawn at row 3');
 assert.strictEqual(L.blocks(img, 1, 1, 3, prev), '', 'unchanged cells are not redrawn');
+// Red top-left, rest white: one quadrant in red.
+const one = L.decodePng(png(2, 2, [255, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]));
+const q1 = L.blocks(one, 1, 1, 1, new Int32Array(3).fill(-1));
+assert.ok(q1.includes('▘') && q1.includes('38;2;255;0;0m') && q1.includes('48;2;255;255;255m'), 'quadrant split');
 
 // Text from a DOM snapshot lands in cells and is drawn as characters.
 // Node 0 is a body; node 1 its text; node 2 a 1px clipped box (a skip link); node 3 its text.
@@ -50,8 +54,17 @@ const snap = { strings: ['Hi', 'rgb(10, 20, 30)', 'visible', '1', 'hidden', 'Ski
   textBoxes: { layoutIndex: [1, 3], bounds: [[0, 0, 16, 16], [0, 16, 32, 16]], start: [0, 0], length: [2, 4] } }] };
 const cells = L.textCells(snap, 4, 2, 8, 16);
 assert.deepStrictEqual([...cells], [[0, ['H', 0x0a141e]], [1, ['i', 0x0a141e]]]);
+// node 2 as a checked checkbox, node 3 as an off switch: one state glyph each, at their centres
+const form = JSON.parse(JSON.stringify(snap));
+form.strings.push('INPUT', 'type', 'checkbox', 'DIV', 'role', 'switch', 'aria-checked', 'false');
+Object.assign(form.documents[0].nodes, { nodeName: [10, 10, 7, 10], attributes: [[], [], [8, 9], [11, 12, 13, 14]], inputChecked: { index: [2] } });
+form.documents[0].layout.bounds[2] = [0, 16, 8, 16];
+form.documents[0].layout.styles[2] = [1, 2, 3, 2, 2, 6];
+form.documents[0].layout.text[3] = -1;
+form.documents[0].textBoxes = { layoutIndex: [], bounds: [], start: [], length: [] };
+assert.deepStrictEqual([...L.textCells(form, 4, 2, 8, 16)], [[4, ['☒', 0x0a141e]], [6, ['☐', 0x0a141e]]]);
 const withText = L.blocks(img, 2, 1, 3, new Int32Array(6).fill(-1), cells);
-assert.ok(withText.includes('38;2;10;20;30m') && /H.*i/.test(withText) && !withText.includes('▀'), 'characters drawn in their colour');
+assert.ok(withText.includes('38;2;10;20;30m') && /H.*i/.test(withText) && !/[▘▝▀▖▌▞▛▗▚▐▜▄▙▟]/.test(withText), 'characters drawn in their colour');
 
 const k = L.kittyImage(Buffer.alloc(5000), 7, 80, 20);
 assert.ok(k.startsWith('\x1b_Ga=T,f=100,i=7,q=2,C=1,c=80,r=20,m=1;') && k.includes('\x1b_Gm=0;'), 'kitty chunks');
@@ -132,7 +145,7 @@ const waitFor = async (what, ms = 20000) => {
 const step = async (name, fn) => { const t0 = Date.now(); await fn(); console.log(`  ${name}: ok (${Date.now() - t0} ms)`); };
 (async () => {
   try {
-    await step('first frame', () => waitFor('▀'));
+    await step('first frame', () => waitFor('48;2;32;80;192m')); // the page's blue
     await step('page text drawn as characters', () => waitFor('Readable'));
     await step('key a', () => { write('a'); return waitFor('k:a:KeyA:65'); });
     await step('Delete key', () => { write('\x1b[3~'); return waitFor('k:Delete:Delete:46'); });
