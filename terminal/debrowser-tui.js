@@ -101,6 +101,8 @@ const pick = (t) => { switches++; return activate(t); };
 async function activate(t) {
   if (cur && cur !== t) send('Page.stopScreencast', {}, cur.session).catch(() => {});
   cur = t;
+  // A frame asked of the tab now hidden never comes back, so stop waiting for it.
+  tickGen++; ticking = false;
   // Keys go to the focused page only: a tab opened since took the focus with it.
   send('Page.bringToFront', {}, t.session).catch(() => {});
   prevCells = null; waiting = null; textMap = null; lastPng = null;
@@ -229,7 +231,7 @@ handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes
 // still; background tabs are not asked at all, so their animations cost nothing.
 // The screencast then hands over a picture only when one actually changed.
 const fps = Math.max(1, +(opt('fps') || process.env.DEBROWSER_FPS || 15)), frameGap = 1000 / fps;
-let needShot = false, rush = false, busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null;
+let needShot = false, rush = false, busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null, tickGen = 0;
 function wake() {
   fast = fps * 2;
   if (ticking) rush = true; // a frame is in flight: ask for the next one straight after
@@ -240,6 +242,7 @@ async function tick() {
   const t = cur, start = Date.now();
   if (frameControl && t && !busy && !ticking && !t.crashed) {
     ticking = true;
+    const g = ++tickGen;
     try {
       // The screencast only sends pictures that changed, so a page that looks the same after a
       // resize or a tab switch would stay blank: those ask for one screenshot.
@@ -248,7 +251,7 @@ async function tick() {
       if (r.hasDamage) fast = fps * 2;
       if (r.screenshotData && t === cur) frame(r.screenshotData);
     } catch { /* tab closing or crashed */ }
-    ticking = false;
+    if (g === tickGen) ticking = false;
   }
   if (fast > 0) fast--;
   if (!quitting) loopTimer = setTimeout(tick, rush ? 0 : Math.max(0, (fast > 0 ? frameGap : 250) - (Date.now() - start)));
