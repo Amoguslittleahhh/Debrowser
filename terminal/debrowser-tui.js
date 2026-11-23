@@ -100,6 +100,8 @@ const pick = (t) => { switches++; return activate(t); };
 async function activate(t) {
   if (cur && cur !== t) send('Page.stopScreencast', {}, cur.session).catch(() => {});
   cur = t;
+  // Keys go to the focused page only: a tab opened since took the focus with it.
+  send('Page.bringToFront', {}, t.session).catch(() => {});
   prevCells = null; waiting = null; textMap = null; lastPng = null;
   clearPage();
   drawUi();
