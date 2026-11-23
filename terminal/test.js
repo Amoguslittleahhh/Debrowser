@@ -201,8 +201,12 @@ async function full(r) {
   });
   await step('crashed tab shows it, F5 brings it back', async () => {
     write('\x0c'); write('chrome://crash\r');
-    // Some Chromium builds ignore chrome://crash; then there is nothing to recover from.
-    try { await waitFor('This tab crashed', 8000); } catch { console.log('    (this Chromium ignores chrome://crash: skipped)'); write('\x1b[15~'); return; }
+    // On Linux CI the renderer neither dies nor draws again after chrome://crash (no crash event,
+    // the pending frame never returns), so that tab is swapped for a fresh one.
+    try { await waitFor('This tab crashed', 8000); } catch {
+      console.log('    (no crash reported for chrome://crash: skipped, tab replaced)');
+      write('\x17'); await new Promise((res) => setTimeout(res, 300)); r.mark = r.out.length; write('\x14'); await waitFor(' 2 '); return;
+    }
     r.mark = r.out.length; write('\x1b[15~'); await waitFor('48;2;', 30000);
   });
   await step('download', async () => {
