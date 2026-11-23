@@ -1,0 +1,10 @@
+{
+  "name": "debrowser-tui",
+  "version": "0.1.0",
+  "description": "Debrowser for the terminal: a current headless Chromium drawn with kitty graphics, sixel or half blocks.",
+  "license": "MIT",
+  "private": true,
+  "bin": { "debrowser-tui": "debrowser-tui.js" },
+  "scripts": { "start": "node debrowser-tui.js", "test": "node test.js" },
+  "engines": { "node": ">=22" }
+}

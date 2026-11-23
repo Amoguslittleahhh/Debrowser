@@ -1,0 +1,414 @@
+#!/usr/bin/env node
+'use strict';
+// Debrowser for the terminal: drives a current headless Chromium over the
+// DevTools protocol and draws its frames with kitty graphics, sixel or
+// half blocks. Row 1 is tabs, row 2 the address bar, the last row status.
+const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const L = require('./lib');
+
+const HELP = `Usage: debrowser-tui [url] [--mode=kitty|sixel|blocks] [--zoom=1.25] [--fps=15] [--cell=8x16] [--profile=DIR]
+
+Keys: Ctrl+L address bar, Ctrl+T new tab, Ctrl+W close tab, Alt+1..9 or
+Ctrl+PgUp/PgDn switch tabs, Alt+Left/Right back/forward, F5 or Ctrl+R reload,
+Alt+= / Alt+- zoom, Ctrl+Q quit. Every other key goes to the page.`;
+
+const args = process.argv.slice(2);
+const opt = (n) => (args.find((a) => a.startsWith(`--${n}=`)) || '').split('=').slice(1).join('=') || null;
+if (args.includes('--help') || args.includes('-h')) { console.log(HELP); process.exit(0); }
+if (!process.stdin.isTTY || !process.stdout.isTTY) { console.error('debrowser-tui needs a terminal.'); process.exit(2); }
+const startUrl = L.toUrl(args.find((a) => !a.startsWith('--')) || 'https://duckduckgo.com');
+const chrome = opt('chrome') || L.findChrome();
+if (!chrome) {
+  console.error('No Chromium found. Install one with:\n  npx @puppeteer/browsers install chrome-headless-shell@stable\nor set DEBROWSER_CHROME to its path.');
+  process.exit(2);
+}
+
+const out = process.stdout;
+let mode = opt('mode'), zoom = +(opt('zoom') || 1);
+let cols = out.columns, rows = out.rows, cellW = 0, cellH = 0;
+const TOP = 3; // first page row
+
+// ---------- Chromium over a pipe (no port, nothing listening) ----------
+const profile = opt('profile') || fs.mkdtempSync(path.join(os.tmpdir(), 'debrowser-tui-'));
+const chromeArgs = ['--headless', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check',
+  `--user-data-dir=${profile}`, '--hide-scrollbars',
+  '--enable-begin-frame-control', '--run-all-compositor-stages-before-draw', '--autoplay-policy=no-user-gesture-required', 'about:blank'];
+chromeArgs.push(...(process.env.DEBROWSER_CHROME_ARGS || '').split(' ').filter(Boolean));
+if (process.getuid && process.getuid() === 0) chromeArgs.push('--no-sandbox'); // Chromium refuses root otherwise
+const proc = spawn(chrome, chromeArgs, { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+let msgId = 0, inbuf = '';
+const pending = new Map(), handlers = {};
+function send(method, params = {}, sessionId) {
+  const id = ++msgId;
+  proc.stdio[3].write(JSON.stringify({ id, method, params, sessionId }) + '\0');
+  return new Promise((res, rej) => pending.set(id, { res, rej }));
+}
+proc.stdio[4].on('data', (d) => {
+  inbuf += d.toString();
+  let z;
+  while ((z = inbuf.indexOf('\0')) >= 0) {
+    const m = JSON.parse(inbuf.slice(0, z));
+    if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, inbuf.slice(0, Math.min(z, 300)) + '\n');
+    inbuf = inbuf.slice(z + 1);
+    if (m.id && pending.has(m.id)) {
+      const p = pending.get(m.id); pending.delete(m.id);
+      m.error ? p.rej(new Error(m.error.message)) : p.res(m.result);
+    } else if (handlers[m.method]) handlers[m.method](m.params, m.sessionId);
+  }
+});
+proc.stdio[3].on('error', () => {});
+proc.on('exit', (code) => quit(`Chromium exited (${code}).`, 1));
+
+// ---------- tabs ----------
+const tabs = []; // {id, session, title, url, loading, crashed}
+let cur = null, urlEdit = null, status = '', imgId = 1, prevCells = null;
+const bySession = (s) => tabs.find((t) => t.session === s);
+const pageRows = () => Math.max(1, rows - TOP); // rows TOP..rows-1; last row is status
+function metrics() {
+  return { width: Math.round((cols * cellW) / zoom), height: Math.round((pageRows() * cellH) / zoom),
+    deviceScaleFactor: zoom, mobile: false };
+}
+async function applySize(t) {
+  await send('Emulation.setDeviceMetricsOverride', metrics(), t.session).catch(() => {});
+}
+async function activate(t) {
+  if (cur && cur !== t) send('Page.stopScreencast', {}, cur.session).catch(() => {});
+  cur = t;
+  prevCells = null; waiting = null;
+  clearPage();
+  drawUi();
+  await applySize(t);
+  await startCast(t);
+  wake();
+}
+handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
+  if (ti.type !== 'page' || tabs.some((t) => t.id === ti.targetId) || startup.has(ti.targetId)) return;
+  const t = { id: ti.targetId, title: ti.title, url: ti.url, loading: true };
+  tabs.push(t);
+  t.session = (await send('Target.attachToTarget', { targetId: ti.targetId, flatten: true })).sessionId;
+  await Promise.all(['Page.enable', 'Inspector.enable'].map((m) => send(m, {}, t.session).catch(() => {})));
+  send('Emulation.setFocusEmulationEnabled', { enabled: true }, t.session).catch(() => {});
+  // A person is reading this page, so it says Chrome rather than HeadlessChrome (same engine, same version);
+  // some sites refuse to serve "headless" visitors at all.
+  if (userAgent) send('Emulation.setUserAgentOverride', { userAgent }, t.session).catch(() => {});
+  await activate(t); // new tabs, including pages' own popups, come to the front
+};
+handlers['Target.targetDestroyed'] = ({ targetId }) => {
+  const i = tabs.findIndex((t) => t.id === targetId);
+  if (i < 0) return;
+  const [t] = tabs.splice(i, 1);
+  if (!tabs.length) return quit();
+  if (t === cur) activate(tabs[Math.min(i, tabs.length - 1)]); else drawUi();
+};
+handlers['Target.targetInfoChanged'] = ({ targetInfo: ti }) => {
+  const t = tabs.find((x) => x.id === ti.targetId);
+  if (t) { t.title = ti.title; t.url = ti.url; drawUi(); }
+};
+// Chromium reports title changes made by scripts only lazily, so the front tab is asked once a second.
+setInterval(() => {
+  const t = cur;
+  if (t) send('Target.getTargetInfo', { targetId: t.id }).then(({ targetInfo: ti }) => {
+    if (ti.title !== t.title || ti.url !== t.url) { t.title = ti.title; t.url = ti.url; drawUi(); }
+  }, () => {});
+}, 1000).unref();
+handlers['Page.frameStartedLoading'] = ({ frameId }, s) => {
+  const t = bySession(s);
+  if (t && frameId === t.id) { t.loading = true; t.crashed = false; drawUi(); if (t === cur) wake(); }
+};
+handlers['Page.frameStoppedLoading'] = ({ frameId }, s) => {
+  const t = bySession(s);
+  if (t && frameId === t.id) { t.loading = false; drawUi(); }
+};
+handlers['Inspector.targetCrashed'] = (_, s) => {
+  const t = bySession(s);
+  if (t) { t.crashed = true; t.loading = false; drawUi(); }
+};
+handlers['Page.javascriptDialogOpening'] = ({ type, message, defaultPrompt }, s) => {
+  // Headless has nowhere to show a dialog and the page would hang, so answer it and say what it was.
+  status = `${type}: ${message}`.replace(/\s+/g, ' ');
+  send('Page.handleJavaScriptDialog', { accept: true, promptText: defaultPrompt }, s).catch(() => {});
+  drawUi();
+};
+
+// ---------- frames ----------
+// Chromium runs with begin-frame control: it renders only when asked. The front tab is
+// asked up to --fps times a second while something changes and 4 times a second when
+// still; background tabs are not asked at all, so their animations cost nothing.
+// The screencast then hands over a picture only when one actually changed.
+const fps = Math.max(1, +(opt('fps') || process.env.DEBROWSER_FPS || 15)), frameGap = 1000 / fps;
+let busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null;
+function wake() {
+  fast = fps * 2;
+  if (loopTimer) { clearTimeout(loopTimer); loopTimer = setTimeout(tick, 0); }
+}
+async function tick() {
+  loopTimer = null;
+  const t = cur, start = Date.now();
+  if (t && !busy && !ticking && !t.crashed) {
+    ticking = true;
+    try {
+      const r = await send('HeadlessExperimental.beginFrame', { interval: frameGap }, t.session);
+      if (r.hasDamage) fast = fps * 2;
+    } catch { /* tab closing or crashed */ }
+    ticking = false;
+  }
+  if (fast > 0) fast--;
+  if (!quitting) loopTimer = setTimeout(tick, Math.max(0, (fast > 0 ? frameGap : 250) - (Date.now() - start)));
+}
+handlers['Page.screencastFrame'] = ({ data, sessionId: frameSession }, s) => {
+  send('Page.screencastFrameAck', { sessionId: frameSession }, s).catch(() => {});
+  if (bySession(s) !== cur) return;
+  if (busy) waiting = data; else draw(Buffer.from(data, 'base64'));
+};
+async function startCast(t) {
+  const m = mode === 'blocks' ? { maxWidth: cols, maxHeight: pageRows() * 2 }
+    : { maxWidth: cols * cellW, maxHeight: pageRows() * cellH };
+  await send('Page.startScreencast', { format: 'png', everyNthFrame: 1, ...m }, t.session).catch(() => {});
+}
+function draw(png) {
+  let seq = '';
+  try {
+    if (mode === 'kitty') {
+      const old = imgId; imgId = imgId === 1 ? 2 : 1;
+      seq = `\x1b[${TOP};1H` + L.kittyImage(png, imgId, cols, pageRows()) + L.kittyDelete(old);
+    } else if (mode === 'sixel') {
+      seq = `\x1b[${TOP};1H` + L.sixel(L.decodePng(png), Math.floor((pageRows() * cellH) / 6) * 6);
+    } else {
+      prevCells ||= new Int32Array(cols * pageRows() * 2).fill(-1);
+      seq = L.blocks(L.decodePng(png), cols, pageRows(), TOP, prevCells);
+    }
+  } catch (e) { status = `Frame error: ${e.message}`; }
+  if (urlEdit) seq += cursorAt();
+  // Back-pressure: while the terminal is still drawing, only the newest frame is kept.
+  busy = !out.write(seq);
+  if (busy) {
+    out.once('drain', () => {
+      busy = false;
+      if (waiting) { const d = waiting; waiting = null; draw(Buffer.from(d, 'base64')); }
+    });
+  }
+}
+
+// ---------- drawing the bars ----------
+const clip = (s, n) => (s.length > n ? s.slice(0, Math.max(0, n - 1)) + '…' : s.padEnd(n));
+let tabSpans = [], navSpans = {};
+// Fixed 256-colour greys, so the bars look the same whatever the terminal's own colours are.
+const BAR = '\x1b[0;48;5;236;38;5;250m', ACTIVE = '\x1b[0;1;48;5;254;38;5;16m', FIELD = '\x1b[0;48;5;239;38;5;255m',
+  EDIT = '\x1b[0;48;5;255;38;5;16m', DIM = '\x1b[0;48;5;235;38;5;246m';
+function drawUi() {
+  if (!cols) return;
+  let s = `\x1b[?25l\x1b[1;1H${BAR}`, x = 1;
+  tabSpans = [];
+  const w = Math.max(8, Math.min(28, Math.floor((cols - 4) / Math.max(1, tabs.length))));
+  for (const [i, t] of tabs.entries()) {
+    if (x + w > cols - 3) break;
+    const label = clip(` ${i + 1} ${t.crashed ? '✕ ' : t.loading ? '◌ ' : ''}${t.title || t.url || 'New tab'}`, w - 1);
+    s += t === cur ? `${ACTIVE}${label}${BAR}│` : `${label}│`;
+    tabSpans.push([x, x + w - 1, t]);
+    x += w;
+  }
+  navSpans.plus = x;
+  s += ' + ' + ' '.repeat(Math.max(0, cols - x - 2));
+  // Address bar: ← → ⟳ then the URL (or what's being typed).
+  const field = urlEdit ? urlEdit.text : cur ? cur.url : '';
+  navSpans.field = 9;
+  s += `\x1b[2;1H${BAR} ← → ${cur && cur.loading ? '✕' : '⟳'}  ${urlEdit ? EDIT : FIELD} ${clip(field.slice(urlEdit ? urlEdit.scroll : 0), cols - 10)}`;
+  const hint = cur && cur.crashed ? 'This tab crashed. Press F5 to reload it.'
+    : status || '^L address  ^T tab  ^W close  Alt+←/→ back/fwd  ^Q quit';
+  s += `\x1b[${rows};1H${DIM}${clip(' ' + hint, cols - 1)}\x1b[0m`;
+  if (urlEdit) s += cursorAt();
+  out.write(s);
+}
+function cursorAt() {
+  return `\x1b[2;${navSpans.field + 1 + urlEdit.pos - urlEdit.scroll}H\x1b[?25h`;
+}
+function clearPage() {
+  let s = mode === 'kitty' ? '\x1b_Ga=d,d=A,q=2\x1b\\' : '';
+  for (let r = TOP; r <= rows; r++) s += `\x1b[${r};1H\x1b[2K`;
+  out.write(s);
+}
+
+// ---------- address bar editing ----------
+function editUrl() {
+  const text = cur ? cur.url.replace(/^about:blank$/, '') : '';
+  urlEdit = { text, pos: text.length, scroll: 0, all: true }; // starts selected: typing replaces it
+  fitScroll(); drawUi();
+}
+function fitScroll() {
+  const w = cols - 12;
+  if (urlEdit.pos < urlEdit.scroll) urlEdit.scroll = urlEdit.pos;
+  if (urlEdit.pos > urlEdit.scroll + w) urlEdit.scroll = urlEdit.pos - w;
+}
+function urlKey(k) {
+  const e = urlEdit;
+  const put = (str) => {
+    if (e.all) { e.text = ''; e.pos = 0; }
+    e.text = e.text.slice(0, e.pos) + str + e.text.slice(e.pos); e.pos += str.length;
+  };
+  if (k.type === 'paste') put(k.text.replace(/\s*\n\s*/g, ' '));
+  else if (k.key === 'Enter') { urlEdit = null; if (cur && e.text.trim()) navigate(L.toUrl(e.text)); drawUi(); return; }
+  else if (k.key === 'Escape') { urlEdit = null; drawUi(); return; }
+  else if (k.key === 'Backspace') { if (e.all) { e.text = ''; e.pos = 0; } else if (e.pos) { e.text = e.text.slice(0, e.pos - 1) + e.text.slice(e.pos); e.pos--; } }
+  else if (k.key === 'Delete') e.text = e.text.slice(0, e.pos) + e.text.slice(e.pos + 1);
+  else if (k.key === 'ArrowLeft') e.pos = Math.max(0, e.pos - 1);
+  else if (k.key === 'ArrowRight') e.pos = Math.min(e.text.length, e.pos + 1);
+  else if (k.key === 'Home' || (k.ctrl && k.key === 'a')) e.pos = 0;
+  else if (k.key === 'End' || (k.ctrl && k.key === 'e')) e.pos = e.text.length;
+  else if (k.ctrl && k.key === 'u') { e.text = ''; e.pos = 0; }
+  else if (k.text && !k.ctrl && !k.alt) put(k.text);
+  e.all = false;
+  fitScroll(); drawUi();
+}
+const navigate = (url) => send('Page.navigate', { url }, cur.session).catch((err) => { status = err.message; drawUi(); });
+async function history(step) {
+  const h = await send('Page.getNavigationHistory', {}, cur.session);
+  const e = h.entries[h.currentIndex + step];
+  if (e) await send('Page.navigateToHistoryEntry', { entryId: e.id }, cur.session);
+}
+const reload = () => { cur.crashed = false; send('Page.reload', {}, cur.session).catch(() => {}); };
+const newTab = (url = 'about:blank') => send('Target.createTarget', { url, enableBeginFrameControl: true });
+const closeTab = () => send('Target.closeTarget', { targetId: cur.id });
+const switchBy = (n) => tabs.length && activate(tabs[(tabs.indexOf(cur) + n + tabs.length) % tabs.length]);
+
+// ---------- input ----------
+const mods = (e) => (e.alt ? 1 : 0) | (e.ctrl ? 2 : 0) | (e.shift ? 8 : 0);
+function pageKey(k) {
+  const base = { key: k.key, code: k.code, windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, modifiers: mods(k) };
+  send('Input.dispatchKeyEvent', { type: k.text ? 'keyDown' : 'rawKeyDown', text: k.text, unmodifiedText: k.text, ...base }, cur.session);
+  send('Input.dispatchKeyEvent', { type: 'keyUp', ...base }, cur.session);
+}
+let lastClick = { t: 0, x: 0, y: 0, n: 0 }, held = 'none';
+function mouse(e) {
+  if (e.y < TOP) {
+    if (e.release || e.motion || e.wheel) return;
+    if (e.y === 1) {
+      const hit = tabSpans.find(([a, b]) => e.x >= a && e.x <= b);
+      if (hit && e.button === 'middle') send('Target.closeTarget', { targetId: hit[2].id });
+      else if (hit) activate(hit[2]);
+      else if (e.x >= navSpans.plus && e.x <= navSpans.plus + 2) newTab();
+    } else if (e.x <= 3) history(-1);
+    else if (e.x <= 5) history(1);
+    else if (e.x <= 7) cur.loading ? send('Page.stopLoading', {}, cur.session) : reload();
+    else editUrl();
+    return;
+  }
+  if (urlEdit) { urlEdit = null; drawUi(); }
+  if (e.y >= rows) return;
+  const x = ((e.x - 0.5) * cellW) / zoom, y = ((e.y - TOP + 0.5) * cellH) / zoom, modifiers = mods(e);
+  if (e.wheel) {
+    const d = (3 * cellH) / zoom, v = e.wheel === 'up' || e.wheel === 'left' ? -d : d;
+    const horiz = e.wheel === 'left' || e.wheel === 'right' || e.shift;
+    return send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: horiz ? v : 0, deltaY: horiz ? 0 : v, modifiers }, cur.session);
+  }
+  let type = 'mouseMoved', button = held;
+  if (!e.motion && !e.release) {
+    type = 'mousePressed'; button = held = e.button;
+    const now = Date.now();
+    lastClick.n = now - lastClick.t < 400 && lastClick.x === e.x && lastClick.y === e.y ? lastClick.n + 1 : 1;
+    Object.assign(lastClick, { t: now, x: e.x, y: e.y });
+  } else if (e.release) { type = 'mouseReleased'; held = 'none'; }
+  send('Input.dispatchMouseEvent', { type, x, y, button, clickCount: type === 'mouseMoved' ? 0 : lastClick.n,
+    buttons: held === 'left' ? 1 : held === 'right' ? 2 : held === 'middle' ? 4 : 0, modifiers }, cur.session);
+}
+function key(k) {
+  if (k.ctrl && k.key === 'q') return quit();
+  if (k.ctrl && k.key === 'l' || k.key === 'F6') return editUrl();
+  if (k.ctrl && k.key === 't') return newTab();
+  if (k.ctrl && k.key === 'w') return closeTab();
+  if (!cur) return;
+  if (urlEdit) return urlKey(k);
+  if (k.alt && k.key === 'ArrowLeft') return history(-1);
+  if (k.alt && k.key === 'ArrowRight') return history(1);
+  if (k.key === 'F5' || (k.ctrl && k.key === 'r')) return reload();
+  if (k.ctrl && (k.key === 'PageUp' || k.key === 'PageDown')) return switchBy(k.key === 'PageUp' ? -1 : 1);
+  if (k.alt && /^[1-9]$/.test(k.key)) return tabs[+k.key - 1] && activate(tabs[+k.key - 1]);
+  if (k.alt && (k.key === '=' || k.key === '-' || k.key === '0')) {
+    zoom = k.key === '0' ? 1 : Math.max(0.25, Math.min(4, zoom * (k.key === '=' ? 1.25 : 0.8)));
+    status = `Zoom ${Math.round(zoom * 100)}%`;
+    return resize();
+  }
+  if (status) { status = ''; drawUi(); }
+  pageKey(k);
+}
+const inputState = {};
+let replyWait = null;
+process.stdin.on('data', (d) => {
+  for (const e of L.parseInput(d.toString('utf8'), inputState)) {
+    if (e.type === 'reply') { if (replyWait) replyWait(e.seq); continue; }
+    if (!booted) continue;
+    if (cur) wake();
+    try {
+      if (e.type === 'mouse') { if (cur) mouse(e); }
+      else if (e.type === 'paste') { if (urlEdit) urlKey(e); else if (cur) send('Input.insertText', { text: e.text }, cur.session); }
+      else key(e);
+    } catch (err) { status = err.message; drawUi(); }
+  }
+});
+
+// ---------- terminal setup, size and teardown ----------
+async function queryTerminal() {
+  const replies = [];
+  await new Promise((done) => {
+    const timer = setTimeout(done, 800);
+    replyWait = (seq) => { replies.push(seq); if (/c$/.test(seq)) { clearTimeout(timer); done(); } };
+    out.write('\x1b[16t\x1b[14t\x1b[c'); // cell size, window size, then DA1 (everyone answers DA1)
+  });
+  replyWait = null;
+  for (const r of replies) {
+    let m;
+    if ((m = /^\x1b\[6;(\d+);(\d+)t/.exec(r))) { cellH = +m[1]; cellW = +m[2]; }
+    else if ((m = /^\x1b\[4;(\d+);(\d+)t/.exec(r)) && !cellW) { cellH = Math.floor(m[1] / rows); cellW = Math.floor(m[2] / cols); }
+  }
+  const forced = /^(\d+)x(\d+)$/.exec(opt('cell') || '');
+  if (forced) { cellW = +forced[1]; cellH = +forced[2]; }
+  if (!cellW || !cellH) { cellW = 8; cellH = 16; } // the usual cell when the terminal won't say
+  mode ||= L.pickMode(process.env, replies.find((r) => /c$/.test(r)));
+  if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, `${mode} ${cols}x${rows} cell ${cellW}x${cellH} ${JSON.stringify(replies)}\n`);
+}
+async function resize() {
+  cols = out.columns; rows = out.rows;
+  if (!cur) return;
+  clearPage(); prevCells = null; drawUi();
+  await Promise.all(tabs.map(applySize));
+  await startCast(cur);
+  wake();
+}
+let resizeTimer;
+out.on('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 80); });
+
+let quitting = false;
+function quit(msg, code = 0) {
+  if (quitting) return;
+  quitting = true;
+  out.write((mode === 'kitty' ? '\x1b_Ga=d,d=A,q=2\x1b\\' : '') + '\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l');
+  try { process.stdin.setRawMode(false); } catch { /* already gone */ }
+  if (msg) console.error(msg);
+  try { proc.kill(); } catch { /* gone */ }
+  if (!opt('profile')) setTimeout(() => { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* in use */ } process.exit(code); }, 300);
+  else process.exit(code);
+}
+process.on('SIGTERM', () => quit());
+process.on('SIGHUP', () => quit());
+process.on('uncaughtException', (e) => quit(`debrowser-tui: ${e.stack || e}`, 1));
+process.on('unhandledRejection', () => {}); // a closed tab's late replies
+
+let booted = false, userAgent = '';
+const startup = new Set();
+(async () => {
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  out.write('\x1b[?1049h\x1b[?25l\x1b[2J\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h');
+  await queryTerminal();
+  // Chromium's own startup about:blank is not a tab; it is closed once the first real one exists.
+  for (const t of (await send('Target.getTargets')).targetInfos) startup.add(t.targetId);
+  userAgent = (await send('Browser.getVersion')).userAgent.replace('HeadlessChrome', 'Chrome');
+  await send('Target.setDiscoverTargets', { discover: true });
+  booted = true;
+  await newTab(startUrl);
+  tick();
+  for (const id of startup) send('Target.closeTarget', { targetId: id }).catch(() => {});
+  if (process.env.DEBROWSER_TUI_DEBUG) status = `${mode} ${cols}x${rows} cell ${cellW}x${cellH}`;
+})().catch((e) => quit(`debrowser-tui: ${e.message}`, 1));
