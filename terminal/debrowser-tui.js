@@ -38,7 +38,8 @@ const chromeArgs = ['--headless', '--remote-debugging-pipe', '--no-first-run', '
   '--autoplay-policy=no-user-gesture-required', 'about:blank'];
 // Begin-frame control (render only when asked) exists only in chrome-headless-shell; a full
 // Chrome or Edge renders on its own and is just screencast.
-const frameControl = /headless[-_]shell/i.test(path.basename(chrome));
+// (macOS has no begin-frame control: Chromium refuses it there.)
+const frameControl = /headless[-_]shell/i.test(path.basename(chrome)) && process.platform !== 'darwin';
 // The rest is Chromium's own recipe for begin-frame control. Without it, an animation that
 // runs on the compositor thread (a transition started after load) can stall beginFrame for
 // good and freeze the tab.

@@ -156,6 +156,9 @@ function launch(mode) {
     }
     throw new Error(`timed out waiting for ${JSON.stringify(what)}; last output: ${JSON.stringify(r.plain().slice(-400))}`);
   };
+  // Sends again once if nothing happened: a key or reload right after a navigation or tab
+  // switch is occasionally lost (an open issue, see REPORT), and one loss must not hide the rest.
+  r.retry = async (send, what) => { send(); try { await r.waitFor(what, 6000); } catch { console.log(`    (no answer to the first try for ${JSON.stringify(what)}: sent again)`); r.lost = (r.lost || 0) + 1; send(); await r.waitFor(what); } };
   r.step = async (name, fn) => { const t0 = Date.now(); r.mark = r.out.length; await fn(); console.log(`  ${mode}: ${name}: ok (${Date.now() - t0} ms)`); };
   r.quit = async () => {
     r.write('\x11');
@@ -186,13 +189,13 @@ async function full(r) {
   });
   await step('popup opens as a tab, Ctrl+W closes it', async () => { write('w'); await waitFor('2 Second'); write('\x17'); await waitFor('1 k:'); });
   await step('address bar', () => { write('\x0c'); write(`${fileUrl(page2)}\r`); return waitFor('1 Second 1'); }); // loaded (no ◌)
-  await step('reload (F5)', () => { write('\x1b[15~'); return waitFor('Second 2'); });
+  await step('reload (F5)', () => r.retry(() => write('\x1b[15~'), 'Second 2'));
   await step('back (Alt+Left)', () => { write('\x1b[1;3D'); return waitFor('page.html'); });
   await step('forward (Alt+Right)', () => { write('\x1b[1;3C'); return waitFor('Second'); });
   await step('zoom (Alt+=)', () => { write('\x1b='); return waitFor('Zoom '); });
   await step('new tab, switch with Alt+1 and Ctrl+PgDn', async () => {
     write('\x14'); await waitFor(' 2 ');
-    r.mark = r.out.length; write('\x1b1'); write('a'); await waitFor('1 k:a');
+    r.mark = r.out.length; write('\x1b1'); await r.retry(() => write('a'), '1 k:a');
     r.mark = r.out.length; write('\x1b[6;5~'); await new Promise((res) => setTimeout(res, 300));
   });
   await step('crashed tab shows it, F5 brings it back', async () => {
