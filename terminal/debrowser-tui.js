@@ -400,7 +400,12 @@ async function history(step) {
 }
 const reload = () => {
   // A tab that stopped drawing is opened afresh in its place: reloading keeps the stuck frame.
-  if (cur.stuck) { replacing = cur; return newTab(cur.url || 'about:blank').catch(() => {}); }
+  // The last page it actually showed, not the address that broke it.
+  if (cur.stuck) {
+    const t = cur;
+    return send('Page.getNavigationHistory', {}, t.session).then((h) => h.entries[h.currentIndex].url, () => 'about:blank')
+      .then((url) => { replacing = t; return newTab(url); }).catch(() => {});
+  }
   cur.crashed = false; send('Page.reload', {}, cur.session).catch(() => {});
 };
 // A crashed tab gets a new renderer on reload, which starts with no size and no screencast.
