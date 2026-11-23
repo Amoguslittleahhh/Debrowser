@@ -78,5 +78,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: terminal-output-${{ matrix.os }}-${{ matrix.browser }}
-          path: terminal-output.txt
+          path: terminal-output.txt*
           if-no-files-found: ignore

@@ -130,6 +130,7 @@ const app = path.join(__dirname, 'debrowser-tui.js');
 function launch(mode) {
   const args = [app, `--mode=${mode}`, `--downloads=${saveTo}`, '--cell=8x16', fileUrl(page)];
   const r = { out: '' };
+  if (process.env.DEBROWSER_TEST_OUT) process.env.DEBROWSER_TUI_LOG = `${process.env.DEBROWSER_TEST_OUT}.${mode}.cdp.txt`; // what was said to Chromium, for a failed run
   if (pty) {
     const t = pty.spawn(process.execPath, args, { cols: 100, rows: 30, cwd: dir, env: process.env, name: 'xterm-256color' });
     t.onData((d) => { r.out += d; });

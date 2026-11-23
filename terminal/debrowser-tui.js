@@ -51,6 +51,7 @@ let msgId = 0, inbuf = '';
 const pending = new Map(), handlers = {};
 function send(method, params = {}, sessionId) {
   const id = ++msgId;
+  if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, `> ${id} ${method} ${sessionId ? sessionId.slice(0, 6) : ''} ${JSON.stringify(params).slice(0, 200)}\n`);
   proc.stdio[3].write(JSON.stringify({ id, method, params, sessionId }) + '\0');
   const p = new Promise((res, rej) => pending.set(id, { res, rej }));
   // Draw as soon as the page has handled the input, not on the next scheduled frame.
@@ -71,7 +72,7 @@ function launch() {
     let z;
     while ((z = inbuf.indexOf('\0')) >= 0) {
       const m = JSON.parse(inbuf.slice(0, z));
-      if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, inbuf.slice(0, Math.min(z, 300)) + '\n');
+      if (process.env.DEBROWSER_TUI_LOG && !/screencastFrame|"data":"/.test(inbuf.slice(0, 200))) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, '< ' + inbuf.slice(0, Math.min(z, 300)) + '\n');
       inbuf = inbuf.slice(z + 1);
       if (m.id && pending.has(m.id)) {
         const p = pending.get(m.id); pending.delete(m.id);
