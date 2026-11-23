@@ -47,7 +47,10 @@ const pending = new Map(), handlers = {};
 function send(method, params = {}, sessionId) {
   const id = ++msgId;
   proc.stdio[3].write(JSON.stringify({ id, method, params, sessionId }) + '\0');
-  return new Promise((res, rej) => pending.set(id, { res, rej }));
+  const p = new Promise((res, rej) => pending.set(id, { res, rej }));
+  // Draw as soon as the page has handled the input, not on the next scheduled frame.
+  if (method.startsWith('Input.')) p.then(wake, () => {});
+  return p;
 }
 // Started once the terminal has said its size: kitty scales the image into its cells, so
 // pages are drawn at 1920x1080 or more (sharp on HiDPI screens too) and the terminal shrinks
@@ -203,9 +206,10 @@ handlers['Browser.downloadProgress'] = ({ guid, state, receivedBytes, totalBytes
 // still; background tabs are not asked at all, so their animations cost nothing.
 // The screencast then hands over a picture only when one actually changed.
 const fps = Math.max(1, +(opt('fps') || process.env.DEBROWSER_FPS || 15)), frameGap = 1000 / fps;
-let busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null;
+let rush = false, busy = false, fast = 0, loopTimer = null, ticking = false, waiting = null;
 function wake() {
   fast = fps * 2;
+  if (ticking) rush = true; // a frame is in flight: ask for the next one straight after
   if (loopTimer) { clearTimeout(loopTimer); loopTimer = setTimeout(tick, 0); }
 }
 async function tick() {
@@ -220,7 +224,8 @@ async function tick() {
     ticking = false;
   }
   if (fast > 0) fast--;
-  if (!quitting) loopTimer = setTimeout(tick, Math.max(0, (fast > 0 ? frameGap : 250) - (Date.now() - start)));
+  if (!quitting) loopTimer = setTimeout(tick, rush ? 0 : Math.max(0, (fast > 0 ? frameGap : 250) - (Date.now() - start)));
+  rush = false;
 }
 handlers['Page.screencastFrame'] = ({ data, sessionId: frameSession }, s) => {
   send('Page.screencastFrameAck', { sessionId: frameSession }, s).catch(() => {});
