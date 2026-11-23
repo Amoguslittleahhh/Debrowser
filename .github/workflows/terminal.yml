@@ -65,7 +65,10 @@ jobs:
 
       - name: Install node-pty (ConPTY on Windows)
         if: runner.os != 'Linux'
-        run: npm i --no-save --prefix terminal node-pty@1
+        run: |
+          npm i --no-save --prefix terminal node-pty@1
+          # The macOS prebuild ships its spawn helper without the execute bit.
+          chmod +x terminal/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
 
       - name: Test
         run: node terminal/test.js
