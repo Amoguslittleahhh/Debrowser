@@ -33,7 +33,7 @@ jobs:
           # Office and server systems: Windows Server 2022, Ubuntu 22.04 LTS, and RHEL's twin Rocky Linux 9.
           - { os: windows-2022, browser: chrome-headless-shell }
           - { os: ubuntu-22.04, browser: chrome-headless-shell }
-          - { os: ubuntu-latest, browser: chrome-headless-shell, container: 'rockylinux:9' }
+          - { os: ubuntu-latest, browser: chrome-headless-shell, container: 'rockylinux/rockylinux:9' }
     name: ${{ matrix.container || matrix.os }} / ${{ matrix.browser }}
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
@@ -47,7 +47,7 @@ jobs:
     steps:
       # A bare server image: what Chromium and the test need (script(1) is in util-linux).
       - name: Install system libraries (Rocky Linux)
-        if: matrix.container == 'rockylinux:9'
+        if: matrix.container == 'rockylinux/rockylinux:9'
         run: dnf install -y --setopt=install_weak_deps=False util-linux nss atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr libXfixes mesa-libgbm pango cairo alsa-lib libxshmfence unzip
 
       - uses: actions/checkout@v7

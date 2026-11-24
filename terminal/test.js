@@ -183,7 +183,8 @@ function launch(mode, extraArgs = '', label = mode) {
     r.write('\x11');
     const code = await Promise.race([r.exited, new Promise((res) => setTimeout(() => res('hung'), 8000))]);
     assert.strictEqual(code, 0, `exit code ${code}`);
-    assert.ok(r.out.endsWith('\x1b[?25h\x1b[?1049l') || r.out.includes('\x1b[?1049l'), 'terminal restored');
+    // Older ConPTY (Windows Server 2022) acts on the alternate screen itself and passes nothing on.
+    if (!(process.platform === 'win32' && /^10\.0\.(1|20)/.test(os.release()))) assert.ok(r.out.includes('\x1b[?1049l'), 'terminal restored');
   };
   return r;
 }
