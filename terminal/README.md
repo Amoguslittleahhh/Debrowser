@@ -73,8 +73,13 @@ newest frame is kept.
 ## Limits
 
 - File pickers, printing and permission prompts are not supported.
-  `alert`/`confirm`/`prompt` are answered automatically and shown in the
-  status line.
+  `alert` is shown in the status line; `confirm`, `prompt` and "leave this
+  page?" wait for Enter (OK) or Esc (Cancel).
+- Sites and proxies that ask for a user name and password are asked in the
+  address bar (password drawn as dots). The proxy comes from `HTTPS_PROXY` /
+  `HTTP_PROXY`, or pass Chromium's own flags in `DEBROWSER_CHROME_ARGS`
+  (`--proxy-server=...`, `--proxy-pac-url=...`). Behind TLS inspection, the
+  company's root certificate must be trusted the way Chrome trusts it.
 - Background tabs do not draw, so anything that waits for animation frames
   pauses there until you switch back.
 - Sixel is encoded in JavaScript: a full-screen video costs about three
