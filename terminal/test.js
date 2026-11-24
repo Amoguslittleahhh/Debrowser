@@ -125,7 +125,7 @@ addEventListener('mousedown', (e) => say('m:' + e.button + ':' + (e.clientX > 0 
 addEventListener('wheel', (e) => say('w:' + (e.deltaY > 0)));
 addEventListener('beforeinput', (e) => { if (e.data && e.data.length > 1) say('p:' + e.data); });
 </script></body>`);
-fs.writeFileSync(page2, '<body style="background:#c02050"><script>sessionStorage.n = (+sessionStorage.n || 0) + 1; document.title = "Second " + sessionStorage.n;'
+fs.writeFileSync(page2, '<body style="background:#c02050"><script>sessionStorage.n = (+sessionStorage.n || 0) + 1; document.title = "Second " + sessionStorage.n + (performance.getEntriesByType(\"navigation\")[0].type === \"reload\" ? " reloaded" : "");'
   + 'addEventListener("keydown", (e) => { document.title = "k:" + e.key; });</script></body>');
 fs.writeFileSync(path.join(dir, 'hello.zip'), 'not really a zip');
 const saveTo = path.join(dir, 'downloads');
@@ -194,7 +194,8 @@ async function full(r) {
   });
   await step('popup opens as a tab, Ctrl+W closes it', async () => { write('w'); await waitFor('2 Second'); write('\x17'); await waitFor('1 k:'); });
   await step('address bar', () => { write('\x0c'); write(`${fileUrl(page2)}\r`); return waitFor('1 Second 1'); }); // loaded (no ◌)
-  await step('reload (F5)', () => r.retry(() => write('\x1b[15~'), 'Second 2'));
+  // The title says so itself: a count in sessionStorage can lag a quick reload on a slow machine.
+  await step('reload (F5)', () => { write('\x1b[15~'); return waitFor('reloaded'); });
   await step('back (Alt+Left)', () => { write('\x1b[1;3D'); return waitFor('page.html'); });
   await step('forward (Alt+Right)', () => { write('\x1b[1;3C'); return waitFor('Second'); });
   await step('zoom (Alt+=)', () => { write('\x1b='); return waitFor('Zoom '); });
