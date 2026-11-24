@@ -30,8 +30,13 @@ jobs:
           - { os: ubuntu-latest, browser: chrome-headless-shell }
           - { os: macos-latest, browser: chrome-headless-shell }
           - { os: macos-latest, browser: chrome }
-    name: ${{ matrix.os }} / ${{ matrix.browser }}
+          # Office and server systems: Windows Server 2022, Ubuntu 22.04 LTS, and RHEL's twin Rocky Linux 9.
+          - { os: windows-2022, browser: chrome-headless-shell }
+          - { os: ubuntu-22.04, browser: chrome-headless-shell }
+          - { os: ubuntu-latest, browser: chrome-headless-shell, container: 'rockylinux:9' }
+    name: ${{ matrix.container || matrix.os }} / ${{ matrix.browser }}
     runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
     timeout-minutes: 20
     defaults:
       run:
@@ -40,6 +45,11 @@ jobs:
       DEBROWSER_TEST_SITE: https://en.wikipedia.org/wiki/Terminal_emulator | Terminal emulator
       DEBROWSER_TEST_OUT: ${{ github.workspace }}/terminal-output.txt
     steps:
+      # A bare server image: what Chromium and the test need (script(1) is in util-linux).
+      - name: Install system libraries (Rocky Linux)
+        if: matrix.container == 'rockylinux:9'
+        run: dnf install -y --setopt=install_weak_deps=False util-linux nss atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr libXfixes mesa-libgbm pango cairo alsa-lib libxshmfence unzip
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
@@ -52,8 +62,8 @@ jobs:
 
       # Ubuntu 24.04 blocks the user namespaces Chromium's sandbox needs, unless allowed.
       - name: Allow Chromium's sandbox
-        if: runner.os == 'Linux'
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        if: runner.os == 'Linux' && !matrix.container
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true # not on 22.04
 
       - name: Use Microsoft Edge
         if: matrix.browser == 'edge'
@@ -77,6 +87,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: terminal-output-${{ matrix.os }}-${{ matrix.browser }}
+          name: terminal-output-${{ matrix.os }}-${{ matrix.browser }}${{ matrix.container && '-rocky' || '' }}
           path: terminal-output.txt*
           if-no-files-found: ignore

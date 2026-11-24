@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
+const http = require('http');
 const { spawn, execFileSync } = require('child_process');
 const L = require('./lib');
 
@@ -131,12 +132,25 @@ fs.writeFileSync(path.join(dir, 'hello.zip'), 'not really a zip');
 const saveTo = path.join(dir, 'downloads');
 const app = path.join(__dirname, 'debrowser-tui.js');
 
-function launch(mode) {
+// A local server for sign-ins: a site page behind Basic auth, and a proxy that wants its own.
+const basic = (h, user, pass) => h === 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+const server = http.createServer((req, res) => {
+  if (/^http:\/\//.test(req.url)) { // asked as a proxy
+    if (!basic(req.headers['proxy-authorization'], 'proxyuser', 'proxypass')) { res.writeHead(407, { 'Proxy-Authenticate': 'Basic realm="Corp proxy"' }); return res.end(); }
+    res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end('<title>Via proxy</title><body style="background:#205020">');
+  }
+  if (!basic(req.headers.authorization, 'corp', 'hunter2')) { res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Intranet"' }); return res.end('no'); }
+  res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<title>Inside intranet</title><body style="background:#502020">');
+}).listen(0, '127.0.0.1');
+const port = () => server.address().port;
+
+function launch(mode, extraArgs = '', label = mode) {
+  process.env.DEBROWSER_CHROME_ARGS = extraArgs;
   const args = [app, `--mode=${mode}`, `--downloads=${saveTo}`, '--cell=8x16', fileUrl(page)];
   const r = { out: '' };
-  if (process.env.DEBROWSER_TEST_OUT) process.env.DEBROWSER_TUI_LOG = `${process.env.DEBROWSER_TEST_OUT}.${mode}.cdp.txt`; // what was said to Chromium, for a failed run
+  if (process.env.DEBROWSER_TEST_OUT) process.env.DEBROWSER_TUI_LOG = `${process.env.DEBROWSER_TEST_OUT}.${label}.cdp.txt`; // what was said to Chromium, for a failed run
   if (pty) {
-    const t = pty.spawn(process.execPath, args, { cols: 100, rows: 30, cwd: dir, env: process.env, name: 'xterm-256color' });
+    const t = pty.spawn(process.execPath, args, { cols: 100, rows: 30, cwd: dir, env: process.env, name: process.env.DEBROWSER_TEST_TERM || 'xterm-256color' });
     t.onData((d) => { r.out += d; });
     r.write = (s) => t.write(s); r.kill = () => t.kill(); r.resize = (c, h) => t.resize(c, h);
     r.exited = new Promise((res) => t.onExit((e) => res(e.exitCode)));
@@ -211,6 +225,14 @@ async function full(r) {
     try { await waitFor('This tab crashed', 20000); } catch { console.log('    (this Chromium ignores chrome://crash: skipped)'); return; }
     r.mark = r.out.length; write('\x1b[15~'); await waitFor('48;2;', 30000);
   });
+  await step('site sign-in (Basic auth), password drawn as dots', async () => {
+    write('\x0c'); write(`http://127.0.0.1:${port()}/secret\r`);
+    await waitFor('Sign in to http://127.0.0.1');
+    write('corp\r'); await waitFor('password for corp');
+    r.mark = r.out.length; write('hunter2'); await waitFor('•••••••');
+    assert.ok(!r.since().includes('hunter2'), 'password shown on screen');
+    write('\r'); await waitFor('Inside intranet');
+  });
   await step('download', async () => {
     write('\x0c'); write(`${fileUrl(path.join(dir, 'hello.zip'))}\r`);
     await waitFor('Saved');
@@ -230,6 +252,21 @@ async function pictures(r, mode) {
   await r.step('quit, terminal restored', () => r.quit());
 }
 
+async function proxied(r) {
+  await r.step('proxy: first frame', () => r.waitFor('48;2;'));
+  await r.step('proxy: sign-in cancelled with Esc', async () => {
+    r.write('\x0c'); r.write('http://intranet.example/\r');
+    await r.waitFor('Sign in to proxy');
+    r.mark = r.out.length; r.write('\x1b'); await new Promise((res) => setTimeout(res, 300)); // Esc alone, not a sequence
+    await r.waitFor('intranet.example');
+  });
+  await r.step('proxy: sign-in, page comes through', async () => {
+    r.write('\x1b[15~'); await r.waitFor('Sign in to proxy');
+    r.write('proxyuser\r'); await r.waitFor('password for proxyuser');
+    r.write('proxypass\r'); await r.waitFor('Via proxy');
+  });
+  await r.step('proxy: quit, terminal restored', () => r.quit());
+}
 let current = null;
 (async () => {
   try {
@@ -240,12 +277,16 @@ let current = null;
       current = launch(mode);
       await (mode === 'blocks' ? full(current) : pictures(current, mode));
     }
+    // An office network: everything through a proxy that wants a sign-in (Esc first, then the real one).
+    current = launch('blocks', `--proxy-server=http://127.0.0.1:${port()} --proxy-bypass-list=<-loopback>`, 'proxy');
+    await proxied(current);
     console.log('e2e: ok');
   } catch (e) {
     try { current.kill(); } catch { /* already gone */ }
     console.error(e.stack || e.message); process.exitCode = 1;
   } finally {
     if (process.env.DEBROWSER_TEST_OUT && current) fs.writeFileSync(process.env.DEBROWSER_TEST_OUT, current.out);
+    server.close();
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* Chromium may still hold it on Windows */ }
     setTimeout(() => process.exit(), 500).unref(); // a pty can keep the event loop alive after a failure
   }

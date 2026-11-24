@@ -32,7 +32,14 @@ let cols = out.columns, rows = out.rows, cellW = 0, cellH = 0;
 const TOP = 3; // first page row
 
 // ---------- Chromium over a pipe (no port, nothing listening) ----------
-const profile = opt('profile') || fs.mkdtempSync(path.join(os.tmpdir(), 'debrowser-tui-'));
+// A locked-down machine may have no usable temp folder: then the user's cache folder, then a clear message.
+const profile = opt('profile') || (() => {
+  for (const d of [os.tmpdir(), path.join(os.homedir(), '.cache')]) {
+    try { fs.mkdirSync(d, { recursive: true }); return fs.mkdtempSync(path.join(d, 'debrowser-tui-')); } catch { /* next */ }
+  }
+  console.error(`debrowser-tui: no folder to keep a profile in (tried ${os.tmpdir()} and ~/.cache). Set TMPDIR or pass --profile=DIR.`);
+  process.exit(2);
+})();
 const chromeArgs = ['--headless', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check',
   `--user-data-dir=${profile}`, '--hide-scrollbars',
   '--autoplay-policy=no-user-gesture-required', 'about:blank'];
@@ -51,7 +58,7 @@ let msgId = 0, inbuf = '';
 const pending = new Map(), handlers = {};
 function send(method, params = {}, sessionId) {
   const id = ++msgId;
-  if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, `> ${id} ${method} ${sessionId ? sessionId.slice(0, 6) : ''} ${JSON.stringify(params).slice(0, 200)}\n`);
+  if (process.env.DEBROWSER_TUI_LOG) fs.appendFileSync(process.env.DEBROWSER_TUI_LOG, `> ${id} ${method} ${sessionId ? sessionId.slice(0, 6) : ''} ${method === 'Fetch.continueWithAuth' ? '(sign-in, not logged)' : JSON.stringify(params).slice(0, 200)}\n`);
   proc.stdio[3].write(JSON.stringify({ id, method, params, sessionId }) + '\0');
   const p = new Promise((res, rej) => pending.set(id, { res, rej }));
   // Draw as soon as the page has handled the input, not on the next scheduled frame.
@@ -119,6 +126,9 @@ handlers['Target.targetCreated'] = async ({ targetInfo: ti }) => {
   t.session = (await send('Target.attachToTarget', { targetId: ti.targetId, flatten: true })).sessionId;
   await Promise.all(['Page.enable', 'Inspector.enable'].map((m) => send(m, {}, t.session).catch(() => {})));
   send('Emulation.setFocusEmulationEnabled', { enabled: true }, t.session).catch(() => {});
+  // Sign-in requests (a site's or a proxy's) come only through Fetch, and only for paused
+  // requests: pages alone are paused, so images and scripts never wait on this program.
+  send('Fetch.enable', { handleAuthRequests: true, patterns: [{ urlPattern: '*', resourceType: 'Document' }] }, t.session).catch(() => {});
   // A person is reading this page, so it says Chrome rather than HeadlessChrome (same engine, same version);
   // some sites refuse to serve "headless" visitors at all.
   if (userAgent) send('Emulation.setUserAgentOverride', { userAgent }, t.session).catch(() => {});
@@ -188,6 +198,27 @@ handlers['Inspector.targetCrashed'] = (_, s) => {
 // Alerts are shown in the status line and dismissed. Confirm, prompt and "leave this page?"
 // wait for Enter (OK, a prompt's suggested answer) or Esc (Cancel): never answered for you.
 let dialog = null;
+handlers['Fetch.requestPaused'] = ({ requestId }, s) => send('Fetch.continueRequest', { requestId }, s).catch(() => {});
+// A site or proxy asks for a user name and password: asked in the address bar, one at a time.
+const signIns = [];
+handlers['Fetch.authRequired'] = ({ requestId, authChallenge: c }, s) => {
+  signIns.push({ requestId, s, who: `${c.source === 'Proxy' ? 'proxy ' : ''}${c.origin}${c.realm ? ` (${c.realm})` : ''}` });
+  if (signIns.length === 1) askSignIn();
+};
+function askSignIn() {
+  const a = signIns[0];
+  if (!a) return;
+  const answer = (authChallengeResponse) => {
+    send('Fetch.continueWithAuth', { requestId: a.requestId, authChallengeResponse }, a.s).catch(() => {});
+    signIns.shift(); status = ''; askSignIn(); drawUi();
+  };
+  status = `Sign in to ${a.who}: user name, then Enter. Esc = Cancel`;
+  ask('', false, (username) => {
+    if (username == null) return answer({ response: 'CancelAuth' });
+    status = `Sign in to ${a.who}: password for ${username}, then Enter. Esc = Cancel`;
+    ask('', true, (password) => answer(password == null ? { response: 'CancelAuth' } : { response: 'ProvideCredentials', username, password }));
+  });
+}
 handlers['Page.javascriptDialogOpening'] = ({ type, message, defaultPrompt }, s) => {
   const text = `${type === 'beforeunload' ? 'Leave this page?' : message}`.replace(/\s+/g, ' ');
   if (type === 'alert') {
@@ -340,17 +371,18 @@ function drawUi() {
   navSpans.plus = x;
   s += ' + ' + ' '.repeat(Math.max(0, cols - x - 2));
   // Address bar: ← → ⟳ then the URL (or what's being typed).
-  const field = urlEdit ? urlEdit.text : cur ? cur.url : '';
+  const field = urlEdit ? shown(urlEdit, urlEdit.text) : cur ? cur.url : '';
   navSpans.field = 9;
-  s += `\x1b[2;1H${BAR} ← → ${cur && cur.loading ? '✕' : '⟳'}  ${urlEdit ? EDIT : FIELD} ${clip(field.slice(urlEdit ? urlEdit.scroll : 0), cols - 10)}`;
+  s += `\x1b[2;1H${BAR} ← → ${cur && cur.loading ? '✕' : '⟳'}  ${urlEdit ? EDIT : FIELD} ${clip(urlEdit ? shown(urlEdit, urlEdit.text.slice(urlEdit.scroll)) : field, cols - 10)}`;
   const hint = cur && cur.crashed ? 'This tab crashed. Press F5 to reload it.'
     : status || '^L address  ^T tab  ^W close  Alt+←/→ back/fwd  ^Q quit';
   s += `\x1b[${rows};1H${DIM}${clip(' ' + hint, cols - 1)}\x1b[0m`;
   if (urlEdit) s += cursorAt();
   out.write(s);
 }
+const shown = (e, t) => (e.secret ? '•'.repeat([...t].length) : t);
 function cursorAt() {
-  return `\x1b[2;${navSpans.field + 1 + L.textWidth(urlEdit.text.slice(urlEdit.scroll, urlEdit.pos))}H\x1b[?25h`;
+  return `\x1b[2;${navSpans.field + 1 + L.textWidth(shown(urlEdit, urlEdit.text.slice(urlEdit.scroll, urlEdit.pos)))}H\x1b[?25h`;
 }
 function clearPage() {
   let s = mode === 'kitty' ? '\x1b_Ga=d,d=A,q=2\x1b\\' : '';
@@ -364,10 +396,15 @@ function editUrl() {
   urlEdit = { text, pos: text.length, scroll: 0, all: true }; // starts selected: typing replaces it
   fitScroll(); drawUi();
 }
+// The address bar as a question's answer field; secret answers are drawn as dots.
+function ask(text, secret, done) {
+  urlEdit = { text, pos: 0, scroll: 0, all: false, secret, done };
+  drawUi();
+}
 function fitScroll() {
   const w = cols - 12;
   if (urlEdit.pos < urlEdit.scroll) urlEdit.scroll = urlEdit.pos;
-  while (L.textWidth(urlEdit.text.slice(urlEdit.scroll, urlEdit.pos)) > w) urlEdit.scroll = next(urlEdit.text, urlEdit.scroll);
+  while (L.textWidth(shown(urlEdit, urlEdit.text.slice(urlEdit.scroll, urlEdit.pos))) > w) urlEdit.scroll = next(urlEdit.text, urlEdit.scroll);
 }
 // Positions step by whole characters, so an emoji (two UTF-16 units) is never cut in half.
 const next = (t, i) => Math.min(t.length, i + (t.codePointAt(i) > 0xffff ? 2 : 1));
@@ -379,8 +416,8 @@ function urlKey(k) {
     e.text = e.text.slice(0, e.pos) + str + e.text.slice(e.pos); e.pos += str.length;
   };
   if (k.type === 'paste') put(k.text.replace(/\s*\n\s*/g, ' '));
-  else if (k.key === 'Enter') { urlEdit = null; if (cur && e.text.trim()) navigate(L.toUrl(e.text)); drawUi(); return; }
-  else if (k.key === 'Escape') { urlEdit = null; drawUi(); return; }
+  else if (k.key === 'Enter') { urlEdit = null; if (e.done) e.done(e.text); else if (cur && e.text.trim()) navigate(L.toUrl(e.text)); drawUi(); return; }
+  else if (k.key === 'Escape') { urlEdit = null; if (e.done) e.done(null); drawUi(); return; }
   else if (k.key === 'Backspace') { if (e.all) { e.text = ''; e.pos = 0; } else if (e.pos) { const p = prev(e.text, e.pos); e.text = e.text.slice(0, p) + e.text.slice(e.pos); e.pos = p; } }
   else if (k.key === 'Delete') e.text = e.text.slice(0, e.pos) + e.text.slice(next(e.text, e.pos));
   else if (k.key === 'ArrowLeft') e.pos = prev(e.text, e.pos);
@@ -434,6 +471,7 @@ function pageKey(k) {
 }
 let lastClick = { t: 0, x: 0, y: 0, n: 0 }, held = 'none';
 function mouse(e) {
+  if (urlEdit && urlEdit.done) return; // a sign-in question waits for its answer
   if (e.y < TOP) {
     if (e.release || e.motion || e.wheel) return;
     if (e.y === 1) {
@@ -467,6 +505,7 @@ function mouse(e) {
 }
 function key(k) {
   if (k.ctrl && k.key === 'q') return quit();
+  if (urlEdit && urlEdit.done) return urlKey(k);
   if (dialog && (k.key === 'Enter' || k.key === 'Escape')) return answerDialog(k.key === 'Enter');
   if (k.ctrl && k.key === 'l' || k.key === 'F6') return editUrl();
   if (k.ctrl && k.key === 't') return newTab();
