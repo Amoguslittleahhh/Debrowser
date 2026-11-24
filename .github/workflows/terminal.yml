@@ -48,7 +48,8 @@ jobs:
       # A bare server image: what Chromium and the test need (script(1) is in util-linux).
       - name: Install system libraries (Rocky Linux)
         if: matrix.container == 'rockylinux/rockylinux:9'
-        run: dnf install -y --setopt=install_weak_deps=False util-linux nss atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr libXfixes mesa-libgbm pango cairo alsa-lib libxshmfence unzip
+        shell: sh # the image has no bash until this installs it
+        run: dnf install -y --setopt=install_weak_deps=False bash util-linux nss atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr libXfixes mesa-libgbm pango cairo alsa-lib libxshmfence unzip
 
       - uses: actions/checkout@v7
 
