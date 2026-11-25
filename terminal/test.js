@@ -144,19 +144,31 @@ const server = http.createServer((req, res) => {
 }).listen(0, '127.0.0.1');
 const port = () => server.address().port;
 
-function launch(mode, extraArgs = '', label = mode) {
+// Shells to start the browser from, as a person would type it: each quotes its own way.
+const posix = (a) => `'${a.replace(/'/g, `'\\''`)}'`;
+const SHELLS = process.platform === 'win32' ? [
+  { name: 'cmd', exe: 'cmd.exe', line: (c) => `/d /s /c "${c.map((a) => `"${a}"`).join(' ')}"` },
+  { name: 'Windows PowerShell', exe: 'powershell.exe', line: (c) => ['-NoProfile', '-Command', `& ${c.map((a) => `'${a.replace(/'/g, "''")}'`).join(' ')}; exit $LASTEXITCODE`] },
+  { name: 'PowerShell 7', exe: 'pwsh.exe', line: (c) => ['-NoProfile', '-Command', `& ${c.map((a) => `'${a.replace(/'/g, "''")}'`).join(' ')}; exit $LASTEXITCODE`] },
+] : ['sh', 'bash', 'dash', 'zsh', 'ksh', 'fish'].map((name) => ({ name, exe: name,
+  line: (c) => ['-c', c.map(name === 'fish' ? (a) => `'${a.replace(/[\\']/g, '\\$&')}'` : posix).join(' ')] }));
+const onPath = (exe) => (process.env.PATH || '').split(path.delimiter).some((d) => { try { return fs.statSync(path.join(d, exe)).isFile(); } catch { return false; } });
+
+function launch(mode, extraArgs = '', label = mode, shell = null) {
   process.env.DEBROWSER_CHROME_ARGS = extraArgs;
   const args = [app, `--mode=${mode}`, `--downloads=${saveTo}`, '--cell=8x16', fileUrl(page)];
   const r = { out: '' };
   if (process.env.DEBROWSER_TEST_OUT) process.env.DEBROWSER_TUI_LOG = `${process.env.DEBROWSER_TEST_OUT}.${label}.cdp.txt`; // what was said to Chromium, for a failed run
   if (pty) {
-    const t = pty.spawn(process.execPath, args, { cols: 100, rows: 30, cwd: dir, env: process.env, name: process.env.DEBROWSER_TEST_TERM || 'xterm-256color' });
+    const t = pty.spawn(shell ? shell.exe : process.execPath, shell ? shell.line([process.execPath, ...args]) : args, { cols: 100, rows: 30, cwd: dir, env: process.env, name: process.env.DEBROWSER_TEST_TERM || 'xterm-256color' });
     t.onData((d) => { r.out += d; });
     r.write = (s) => t.write(s); r.kill = () => t.kill(); r.resize = (c, h) => t.resize(c, h);
     r.exited = new Promise((res) => t.onExit((e) => res(e.exitCode)));
   } else {
     const q = (a) => `'${a.replace(/'/g, `'\\''`)}'`;
-    const p = spawn('script', ['-qfec', `stty cols 100 rows 30; exec ${q(process.execPath)} ${args.map(q).join(' ')}`, '/dev/null'],
+    // script(1) runs its command with $SHELL, so that is how a shell is chosen here.
+    const cmd = shell ? `${shell.exe} ${shell.line([process.execPath, ...args]).map(q).join(' ')}` : `exec ${q(process.execPath)} ${args.map(q).join(' ')}`;
+    const p = spawn('script', ['-qfec', `stty cols 100 rows 30; ${cmd}`, '/dev/null'],
       { stdio: ['pipe', 'pipe', 'inherit'] });
     p.stdout.on('data', (d) => { r.out += d; });
     r.write = (s) => p.stdin.write(s); r.kill = () => p.kill();
@@ -178,7 +190,7 @@ function launch(mode, extraArgs = '', label = mode) {
   // Sends again once if nothing happened: a key or reload right after a navigation or tab
   // switch is occasionally lost (an open issue, see REPORT), and one loss must not hide the rest.
   r.retry = async (send, what) => { send(); try { await r.waitFor(what, 6000); } catch { console.log(`    (no answer to the first try for ${JSON.stringify(what)}: sent again)`); r.lost = (r.lost || 0) + 1; send(); await r.waitFor(what); } };
-  r.step = async (name, fn) => { const t0 = Date.now(); r.mark = r.out.length; await fn(); console.log(`  ${mode}: ${name}: ok (${Date.now() - t0} ms)`); };
+  r.step = async (name, fn) => { const t0 = Date.now(); r.mark = r.out.length; await fn(); console.log(`  ${r.tag || mode}: ${name}: ok (${Date.now() - t0} ms)`); };
   r.quit = async () => {
     r.write('\x11');
     const code = await Promise.race([r.exited, new Promise((res) => setTimeout(() => res('hung'), 8000))]);
@@ -268,6 +280,16 @@ async function proxied(r) {
   });
   await r.step('proxy: quit, terminal restored', () => r.quit());
 }
+// Started from each shell: the picture arrives, keys arrive, Ctrl+C and Ctrl+Z go to the page
+// (raw mode: they must not stop the browser), the exit code comes back through the shell.
+async function viaShell(r) {
+  await r.step('first frame', () => r.waitFor('48;2;'));
+  await r.step('key a', () => r.retry(() => r.write('a'), 'k:a:KeyA:65'));
+  await r.step('Ctrl+C goes to the page', async () => { r.write('\x03'); await r.waitFor('k:c:KeyC:67:ctrl'); r.write('\x1b'); await r.waitFor('c:false'); });
+  if (process.platform !== 'win32') await r.step('Ctrl+Z goes to the page', () => { r.write('\x1a'); return r.waitFor('k:z:KeyZ:90:ctrl'); });
+  await r.step('address bar', () => { r.write('\x0c'); r.write(`${fileUrl(page2)}\r`); return r.waitFor('Second'); });
+  await r.step('quit, exit code and terminal restored', () => r.quit());
+}
 let current = null;
 (async () => {
   try {
@@ -279,6 +301,12 @@ let current = null;
       await (mode === 'blocks' ? full(current) : pictures(current, mode));
     }
     // An office network: everything through a proxy that wants a sign-in (Esc first, then the real one).
+    for (const sh of SHELLS) {
+      if (!onPath(sh.exe)) { console.log(`  shell ${sh.name}: not installed, skipped`); continue; }
+      current = launch('blocks', '', `shell-${sh.name.replace(/\W+/g, '-')}`, sh);
+      current.tag = `shell ${sh.name}`;
+      await viaShell(current);
+    }
     current = launch('blocks', `--proxy-server=http://127.0.0.1:${port()} --proxy-bypass-list=<-loopback>`, 'proxy');
     await proxied(current);
     console.log('e2e: ok');

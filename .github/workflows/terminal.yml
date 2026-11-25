@@ -52,7 +52,7 @@ jobs:
         # The image sets no PATH, so once setup-node adds to it the system folders must be named too.
         run: |
           echo /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin >> "$GITHUB_PATH"
-          dnf install -y --setopt=install_weak_deps=False util-linux nss atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr libXfixes mesa-libgbm pango cairo alsa-lib libxshmfence unzip
+          dnf install -y --setopt=install_weak_deps=False util-linux zsh ksh nss atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr libXfixes mesa-libgbm pango cairo alsa-lib libxshmfence unzip
 
       - uses: actions/checkout@v7
 
@@ -65,6 +65,12 @@ jobs:
         run: npx -y @puppeteer/browsers install chrome-headless-shell@stable --path "$HOME/.cache/puppeteer"
 
       # Ubuntu 24.04 blocks the user namespaces Chromium's sandbox needs, unless allowed.
+      # The test also starts the browser from each shell found (sh, bash, dash, zsh, ksh, fish;
+      # cmd and both PowerShells on Windows).
+      - name: Install more shells
+        if: runner.os == 'Linux' && !matrix.container
+        run: sudo apt-get install -y -q zsh ksh fish
+
       - name: Allow Chromium's sandbox
         if: runner.os == 'Linux' && !matrix.container
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true # not on 22.04
